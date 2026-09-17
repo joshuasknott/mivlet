@@ -176,3 +176,43 @@ describe("completed work promotion", () => {
     ).toThrow(/Memory is disabled/);
   });
 });
+
+describe("promotion — secret-shaped outcomes", () => {
+  it("scrubs secret-shaped side-chat outcomes before they become approved memory", () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const records = promoteSideChatOutcome({
+      explicit: true,
+      threadId: "thread-1",
+      outcomes: [
+        {
+          messageId: "message-secret",
+          role: "user",
+          sequence: 1,
+          text: `We decided to keep the launch key ${leaked} in the vault.`
+        }
+      ],
+      now: "2026-09-10T00:00:00.000Z"
+    });
+    expect(records).toHaveLength(1);
+    expect(records[0].value).toContain("We decided to keep the launch key");
+    expect(records[0].value).not.toContain(leaked);
+    expect(records[0].value).toContain("[REDACTED]");
+  });
+
+  it("does not promote omit-only outcomes", () => {
+    const records = promoteSideChatOutcome({
+      explicit: true,
+      threadId: "thread-1",
+      outcomes: [
+        {
+          messageId: "message-omit",
+          role: "user",
+          sequence: 1,
+          text: "[content omitted: secret-shaped content]"
+        }
+      ],
+      now: "2026-09-10T00:00:00.000Z"
+    });
+    expect(records).toEqual([]);
+  });
+});

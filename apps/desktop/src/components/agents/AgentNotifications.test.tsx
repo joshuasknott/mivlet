@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { CollaborationWorkItem, FableAgentProfile } from "@fable/protocol";
+import type { CollaborationWorkItem, MivletAgentProfile } from "@mivlet/protocol";
 import { AgentNotifications } from "./AgentNotifications";
 
-const agent = { id: "ava", name: "Ava" } as FableAgentProfile;
+const agent = { id: "ava", name: "Ava" } as MivletAgentProfile;
 const work = (status: CollaborationWorkItem["status"]): CollaborationWorkItem => ({ id: "work", agentId: "ava", conversationId: "chat", status } as CollaborationWorkItem);
 describe("agent notifications", () => {
   it("does not replay historical work, announces new transitions once and opens the exact conversation", () => {

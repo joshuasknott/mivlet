@@ -1,4 +1,6 @@
-import type { Spine } from "@fable/protocol";
+import { redactSecretsFromObject, redactSecretsFromString } from "@mivlet/connectors/agent-runtime";
+import { SECRET_CONTENT_OMITTED, secretMarkerSurvives } from "@mivlet/protocol";
+import type { Spine } from "@mivlet/protocol";
 
 export type ConversationThread = Spine.Conversations.Thread;
 type ConversationMessage = Spine.Conversations.Message;
@@ -184,7 +186,7 @@ export function createDurableRunWriter(
 
   const checkpoint = async (transcript: string, terminal = false) => {
       latestTranscript = transcript;
-      const content = transcript.slice(transcriptOffset);
+      const content = redactPersistedContent(transcript.slice(transcriptOffset));
       if (!assistant) {
         if (!content) return;
         await append({ kind: "assistant", content, state: terminal ? "terminal" : "streaming" });
@@ -217,8 +219,31 @@ export function createDurableRunWriter(
         assistant = null;
         transcriptOffset = latestTranscript.length;
       }
-      await append(record);
+      await append(redactDurableRecord(record));
     }),
     checkpointAssistant: (content, terminal = false) => enqueue(() => checkpoint(content, terminal)),
   };
+}
+
+function redactDurableRecord(record: DurableRunRecord): DurableRunRecord {
+  return { ...record, content: redactPersistedContent(record.content) };
+}
+
+function redactPersistedContent(content: string): string {
+  const trimmed = content.trim();
+  if (
+    (trimmed.startsWith("{") && trimmed.endsWith("}"))
+    || (trimmed.startsWith("[") && trimmed.endsWith("]"))
+  ) {
+    try {
+      return omitIfSecretSurvives(JSON.stringify(redactSecretsFromObject(JSON.parse(trimmed) as unknown)));
+    } catch {
+      // Marker-free JSON that failed to parse is still scrubbed as text.
+    }
+  }
+  return omitIfSecretSurvives(redactSecretsFromString(content));
+}
+
+function omitIfSecretSurvives(redacted: string): string {
+  return secretMarkerSurvives(redacted) ? SECRET_CONTENT_OMITTED : redacted;
 }

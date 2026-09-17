@@ -5,7 +5,7 @@ export interface VoiceProviderDescriptor {
   id: string;
   kind: VoiceProviderKind;
   label: string;
-  /** Whether Fable retains raw audio. This does not describe a provider's policy. */
+  /** Whether Mivlet retains raw audio. This does not describe a provider's policy. */
   retainsAudio: boolean;
   setupHint?: string;
 }

@@ -5,7 +5,7 @@ import type {
   ConnectorSearchItem,
   KnowledgeSource,
   NativeCompletionRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   importConnectorSearchItem,
   prepareConnectorAction,
@@ -58,15 +58,15 @@ describe("performance baseline guardrails", () => {
 
   it("shapes bounded connector requests without network or credentials", () => {
     const shaped = timed("connector search request", () =>
-      shapeConnectorSearchRequest("github", "  fable  ", 10)
+      shapeConnectorSearchRequest("github", "  mivlet  ", 10)
     ).value;
-    expect(shaped).toMatchObject({ connectorId: "github", query: "fable", limit: 10 });
+    expect(shaped).toMatchObject({ connectorId: "github", query: "mivlet", limit: 10 });
 
     const item: ConnectorSearchItem = {
-      id: "repo-fable",
+      id: "repo-mivlet",
       connectorId: "github",
       connectionId: "connection-test",
-      title: "fable",
+      title: "mivlet",
       kind: "repository",
       summary: "Repository metadata",
       provenance: "GitHub",
@@ -85,10 +85,10 @@ describe("performance baseline guardrails", () => {
 
     const action = timed("connector action shaping", () =>
       prepareConnectorAction(
-        "github",
-        "GitHub",
-        "github.comment",
-        { repository: "acme/fable", targetId: "42", body: "Prepared comment." },
+        "linear",
+        "Linear",
+        "linear.comment",
+        { targetId: "ISS-1", body: "Prepared comment." },
         "high",
         "Posts the exact reviewed comment."
       )

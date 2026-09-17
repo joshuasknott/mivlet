@@ -1,7 +1,8 @@
 //! Local text-file import and lexical knowledge search.
 //!
 //! Public Tauri commands (names must stay stable): `import_local_text_file`,
-//! `search_knowledge_sources`.
+//! `search_knowledge_sources`. Previews and search snippets are scrubbed with
+//! the shared secret-redaction vocabulary before they are stored or returned.
 
 use crate::authorized_scope::{command_scope, ScopeAccess};
 use crate::models::{
@@ -9,6 +10,7 @@ use crate::models::{
     LocalTextFileCandidate, DEFAULT_RESULT_LIMIT, MAX_LOCAL_FILE_BYTES,
     MAX_LOCAL_FILE_PREVIEW_CHARACTERS, MAX_SNIPPET_CHARACTERS, SUPPORTED_LOCAL_FILE_EXTENSIONS,
 };
+use crate::secret_redaction;
 
 fn extension_for(file_name: &str) -> String {
     file_name
@@ -67,10 +69,11 @@ fn local_file_fingerprint(content: &str) -> String {
 }
 
 fn preview_text(content: &str) -> String {
-    content
+    let preview: String = content
         .chars()
         .take(MAX_LOCAL_FILE_PREVIEW_CHARACTERS)
-        .collect()
+        .collect();
+    secret_redaction::redact_secret_text_or_omit(&preview)
 }
 
 #[tauri::command]
@@ -177,10 +180,10 @@ fn source_score(source: &KnowledgeSource, tokens: &[String]) -> f64 {
     }
 
     let title_score = count_matches(&source.title, tokens) * 4.0;
-    let content_score = count_matches(
+    let preview = secret_redaction::redact_secret_text_or_omit(
         source.content_preview.as_deref().unwrap_or_default(),
-        tokens,
     );
+    let content_score = count_matches(&preview, tokens);
     let provenance_score = count_matches(&source.provenance, tokens) * 0.75;
     let match_score = title_score + content_score + provenance_score;
 
@@ -210,6 +213,7 @@ fn source_snippet(source: &KnowledgeSource) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join(" ");
+    let content = secret_redaction::redact_secret_text_or_omit(&content);
 
     if content.chars().count() <= MAX_SNIPPET_CHARACTERS {
         return content;
@@ -317,5 +321,91 @@ pub(crate) fn search_knowledge_sources_inner(
         query: normalized_query,
         mode: "lexical-fallback",
         citations,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::models::KnowledgeSource;
+
+    fn import(name: &str, content: &str) -> LocalFileImport {
+        import_local_text_file(LocalTextFileCandidate {
+            name: name.into(),
+            content: content.into(),
+            size_bytes: content.len(),
+            imported_at: Some("2026-09-15T00:00:00.000Z".into()),
+        })
+        .unwrap()
+    }
+
+    fn searchable(preview: &str) -> KnowledgeSource {
+        KnowledgeSource {
+            workspace_id: None,
+            authority_scope: None,
+            scope: None,
+            id: "notes".into(),
+            title: "notes.md".into(),
+            provenance: "Local file - 1.0 KB".into(),
+            freshness: "Imported now".into(),
+            pinned: true,
+            trust: Some("untrusted".into()),
+            content_preview: Some(preview.into()),
+            disabled: false,
+            deleted_at: None,
+            account: None,
+        }
+    }
+
+    #[test]
+    fn import_redacts_secret_shaped_preview_and_keeps_prose() {
+        let leaked = "ghp_abcdefghijklmnopqrstuvwx1234567890";
+        let content = format!("Ship Friday. export GITHUB_TOKEN={leaked} then deploy.");
+        let imported = import("notes.md", &content);
+        assert!(imported.content_preview.contains("Ship Friday"));
+        assert!(imported.content_preview.contains("then deploy"));
+        assert!(!imported.content_preview.contains(leaked));
+        assert!(imported.content_preview.contains("[REDACTED]"));
+        assert_eq!(
+            imported.content_fingerprint,
+            local_file_fingerprint(&content)
+        );
+    }
+
+    #[test]
+    fn import_leaves_ordinary_prose_intact() {
+        let content = "read-file src/index.ts and github-read repo issues.";
+        let imported = import("notes.txt", content);
+        assert_eq!(imported.content_preview, content);
+    }
+
+    #[test]
+    fn search_snippets_do_not_replay_stored_secrets() {
+        let leaked = "sk-12345678901234567890abc123";
+        let response = search_knowledge_sources_inner(
+            "launch".into(),
+            vec![searchable(&format!(
+                "Launch plan milestone. my key is {leaked}"
+            ))],
+            Some(8),
+        );
+        assert_eq!(response.citations.len(), 1);
+        assert!(response.citations[0].snippet.contains("Launch plan"));
+        assert!(!response.citations[0].snippet.contains(leaked));
+        assert!(response.citations[0].snippet.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn search_does_not_match_a_query_that_is_only_the_secret() {
+        let leaked = "ghp_abcdefghijklmnopqrstuvwx1234567890";
+        let response = search_knowledge_sources_inner(
+            leaked.into(),
+            vec![searchable(&format!("export GITHUB_TOKEN={leaked}"))],
+            Some(8),
+        );
+        assert!(response
+            .citations
+            .iter()
+            .all(|citation| !citation.snippet.contains(leaked)));
     }
 }

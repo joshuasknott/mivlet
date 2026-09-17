@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
-import type { FableAgentProfile, SearchResult } from "@fable/protocol";
+import type { MivletAgentProfile, SearchResult } from "@mivlet/protocol";
 import { AgentAvatar, ProfileAgentAvatar } from "../agents/agent-icons";
 import { describeSearchContext, highlightSegments, searchResultKey } from "../../lib/search/results";
 import "./search.css";
@@ -16,7 +16,7 @@ export function SearchResults({
 }: {
   query: string;
   results: SearchResult[];
-  agents?: readonly FableAgentProfile[];
+  agents?: readonly MivletAgentProfile[];
   activeIndex: number;
   onActiveIndexChange: (index: number) => void;
   onOpenResult: (result: SearchResult) => void;

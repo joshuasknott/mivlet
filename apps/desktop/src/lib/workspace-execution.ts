@@ -3,10 +3,10 @@ import type {
   CollaborationCommand,
   CollaborationSnapshot,
   CollaborationWorkItem,
-  FableAgentProfile,
+  MivletAgentProfile,
   PermissionMode,
   WorkAttachment,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
 import type { ComposerAttachment } from "./types";
 import {
@@ -122,7 +122,7 @@ export function stagedAttachmentRefs(
 export interface ExecutionSession {
   key: string;
   work: CollaborationWorkItem;
-  profile: FableAgentProfile;
+  profile: MivletAgentProfile;
   model: ProviderModelOption;
   permissionMode: PermissionMode;
   attachments: ComposerAttachment[];
@@ -167,6 +167,7 @@ export class WorkspaceExecution {
   private stopping = new Set<string>();
   private external = new Map<string, () => Promise<void>>();
   private disposed = false;
+  private closing: Promise<void> | null = null;
   constructor(
     readonly workspaceId: string,
     private transport = {
@@ -229,6 +230,11 @@ export class WorkspaceExecution {
       });
     this.tail = next;
     return next;
+  }
+  private executingWork() {
+    return this.state.data.work.filter(
+      (work) => work.status === "running" || work.status === "awaiting-approval",
+    );
   }
   private accept(data: CollaborationSnapshot) {
     if (this.disposed) return;
@@ -304,7 +310,7 @@ export class WorkspaceExecution {
   }
   /** Conservative app limits; native providers and the computer lease still arbitrate resources. */
   admit(
-    profiles: FableAgentProfile[],
+    profiles: MivletAgentProfile[],
     models: ProviderModelOption[],
     providers: BackendProvider[],
     permissionMode: PermissionMode,
@@ -502,17 +508,62 @@ export class WorkspaceExecution {
     const failure = cancelled.find((result) => result.status === "rejected");
     if (failure?.status === "rejected") this.report(failure.reason);
   }
+  /** Freeze like Stop, then native generation-fenced `stop-work` immediately. */
   dispose() {
+    if (this.closing) return this.closing;
     this.disposed = true;
-    for (const cancel of this.external.values())
-      void cancel().catch(() => undefined);
+    this.closing = this.closeOwnedExecution();
+    return this.closing;
+  }
+  private async closeOwnedExecution() {
+    const targets = this.executingWork().map((work) => ({
+      id: work.id,
+      expectedGeneration: work.generation,
+    }));
+    for (const { id } of targets) this.stopping.add(id);
+    for (const session of this.state.sessions) session.cancelled = true;
+    const nativeStop = (async () => {
+      for (const target of targets) {
+        try {
+          await this.transport.command(this.workspaceId, {
+            action: "stop-work",
+            id: target.id,
+            expectedGeneration: target.expectedGeneration,
+          });
+        } catch {
+          /* remount recovery fences leftover executing Work */
+        }
+      }
+    })();
+    await Promise.allSettled([
+      ...this.state.sessions.map((session) => session.cancel?.()),
+      ...[...this.external.values()].map((cancel) => cancel()),
+      nativeStop,
+    ]);
+    await this.tail.catch(() => undefined);
+    await nativeStop;
     this.external.clear();
-    for (const session of this.state.sessions) {
-      session.cancelled = true;
-      void session.cancel?.().catch(() => undefined);
-    }
     this.approvals.cancelPending();
     this.listeners.clear();
     this.attachments.clear();
+    for (const { id } of targets) this.stopping.delete(id);
   }
+}
+
+/** Serialize dispose across a pending unmount so remount recovery waits. */
+export function enqueueWorkspaceDispose(
+  previous: Promise<unknown>,
+  service: { dispose(): Promise<void> | void } | null | undefined,
+): Promise<void> {
+  const settled = Promise.resolve(previous).then(
+    () => undefined,
+    () => undefined,
+  );
+  if (!service) return settled;
+  return settled
+    .then(() => Promise.resolve(service.dispose()))
+    .then(
+      () => undefined,
+      () => undefined,
+    );
 }

@@ -1,5 +1,5 @@
 import { useId, useRef, useState } from "react";
-import type { BackendProvider, FableAgentProfile } from "@fable/protocol";
+import type { BackendProvider, MivletAgentProfile } from "@mivlet/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import type { ProviderModelOption } from "../../lib/provider-models";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
@@ -25,7 +25,7 @@ export function ConversationDialog({
   onSave,
   onClose,
 }: {
-  agents: FableAgentProfile[];
+  agents: MivletAgentProfile[];
   models?: ProviderModelOption[];
   providers?: BackendProvider[];
   initial?: Partial<ConversationDraft>;
@@ -442,7 +442,7 @@ export function MigrateGroupDialog({
   onClose,
 }: {
   title: string;
-  agents: FableAgentProfile[];
+  agents: MivletAgentProfile[];
   initialParticipantIds: string[];
   models?: ProviderModelOption[];
   providers?: BackendProvider[];

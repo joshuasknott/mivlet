@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
-import type { CollaborationAgentCommand, LocalProject } from "@fable/protocol";
+import type { CollaborationAgentCommand, LocalProject } from "@mivlet/protocol";
 import {
   collaborationToolSpecs,
   isCollaborationTool,
-} from "@fable/connectors/native-api/tools";
-import { supportsSharedComputerTools } from "@fable/connectors/native-api/computer-vision";
+} from "@mivlet/connectors/native-api/tools";
+import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
+import type { NativeAgentRunControl } from "../hooks/useNativeAgent";
 import { useExecutionController } from "./useExecutionController";
 import type {
   ExecutionSession,
@@ -336,7 +337,7 @@ export function ExecutionWorker({
               attempt.current = attemptId;
               adopted = true;
             },
-          },
+          } satisfies NativeAgentRunControl,
         );
         if (!service.current(session)) return;
         if (attempt.current && outcome) {

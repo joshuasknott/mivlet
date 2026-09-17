@@ -10,7 +10,7 @@ import {
   createSerialPendingStoresForTest,
   createSerialHandoffStoresForTest
 } from "./durable-stores.js";
-import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
+import { BROKER_HANDOFF_TTL_SECONDS } from "@mivlet/connectors";
 
 const clock = fixedClock(100_000);
 const TTL = BROKER_HANDOFF_TTL_SECONDS * 1000;
@@ -19,10 +19,10 @@ describe("durable consume-once under concurrent races (serial stub)", () => {
   it("pending_consume_single_winner: exactly 1 of N concurrent consumes wins", async () => {
     const { storeA, storeB, stub } = createSerialPendingStoresForTest(clock);
     // put via one
-    storeA.create({ provider: "github", redirectUri: "r", providerRedirectUri: "pr", state: "race-state-1234567890" });
+    storeA.create({ provider: "github", redirectUri: "r", providerRedirectUri: "pr", state: "race-state-1234567890x" });
 
     // Simulate cross-isolate: 10 concurrent consumes against shared serial impl
-    const attempts = Array.from({ length: 10 }, (_, i) => stub.invoke("consume", "race-state-1234567890"));
+    const attempts = Array.from({ length: 10 }, (_, i) => stub.invoke("consume", "race-state-1234567890x"));
     const results = await Promise.all(attempts);
     const wins = results.filter(r => r != null);
     expect(wins.length).toBe(1);

@@ -1,5 +1,5 @@
 /**
- * Provider-neutral records for Fable-managed execution computers.
+ * Provider-neutral records for Mivlet-managed execution computers.
  *
  * These records deliberately exclude credentials, environment variables,
  * filesystem contents, command output, approval permits, and lease tokens.
@@ -233,7 +233,15 @@ export interface HostedBrowserSnapshot {
   navigation: HostedBrowserNavigationSnapshot;
   controls: readonly HostedBrowserControl[];
   previewDataUrl: string;
-  /** Short-lived Cloudflare Live View URL; present only after an approved navigation. */
+  /**
+   * Present when native can open Cloudflare Live View. The wss secret stays
+   * behind the native opener and must never be copied into React state.
+   */
+  takeoverAvailable?: boolean;
+  /**
+   * Short-lived Cloudflare Live View URL. Runner-to-native wire only; native
+   * strips this before any WebView snapshot.
+   */
   liveViewUrl?: string;
   /** Present after an approved link/control download was saved into `/workspace/downloads`. */
   lastDownload?: HostedBrowserDownloadSnapshot;

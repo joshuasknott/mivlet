@@ -7,15 +7,22 @@
 import { describe, expect, it } from "vitest";
 import type { IncomingMessage, ServerResponse } from "node:http";
 
-import { BROKER_CONTRACT_VERSION } from "@fable/connectors";
+import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE } from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { createBrokerHandler } from "./http.js";
 import { providerProfile, type BrokerEnv } from "./provider-profiles.js";
+import { BROKER_AUTHORIZE_STATE_MIN_LENGTH } from "./stores.js";
+
+function oauthState(tag: string): string {
+  return tag.length >= BROKER_AUTHORIZE_STATE_MIN_LENGTH
+    ? tag
+    : `${tag}${"x".repeat(BROKER_AUTHORIZE_STATE_MIN_LENGTH - tag.length)}`;
+}
 
 const ENV: BrokerEnv = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "gh-id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "gh-secret"
 };
 
 function providerFetch(): (input: string, init?: RequestInit) => Promise<Response> {
@@ -37,7 +44,7 @@ function providerFetch(): (input: string, init?: RequestInit) => Promise<Respons
 }
 
 function broker() {
-  return new FableBroker({ env: ENV, fetch: providerFetch() });
+  return new MivletBroker({ env: ENV, fetch: providerFetch() });
 }
 
 interface DriveResult { status: number; body: string; headers: Record<string, string | string[] | undefined>; location?: string }
@@ -102,10 +109,11 @@ describe("broker http routing + security", () => {
   });
 
   it("authorize route redirects the browser to the provider", async () => {
-    const result = await drive(handler(), "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=ch");
+    const state = oauthState("s");
+    const result = await drive(handler(), "GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${state}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`);
     expect(result.status).toBe(302);
     expect(result.location).toContain("client_id=gh-id");
-    expect(result.location).toContain("state=s");
+    expect(result.location).toContain(`state=${state}`);
   });
 
   it("handoff redeem maps to the broker and returns tokens", async () => {
@@ -113,11 +121,11 @@ describe("broker http routing + security", () => {
     const h = createBrokerHandler({ broker: b, port: 0 });
     await b.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
-      redirectUri: "http://127.0.0.1:1/callback", state: "hs", codeChallenge: "ch", codeChallengeMethod: "S256"
+      redirectUri: "http://127.0.0.1:1/callback", state: oauthState("hs"), codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256"
     });
-    const cb = await b.callback("github", new URLSearchParams({ code: "c", state: "hs" }));
+    const cb = await b.callback("github", new URLSearchParams({ code: "c", state: oauthState("hs") }));
     const handoff = cb.redirect.searchParams.get("handoff")!;
-    const result = await drive(h, "POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state: "hs" });
+    const result = await drive(h, "POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state: oauthState("hs"), codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     expect(result.status).toBe(200);
     expect(JSON.parse(result.body).tokens.accessToken).toBe("access-token");
   });
@@ -127,13 +135,14 @@ describe("broker http routing + security", () => {
     const h = createBrokerHandler({ broker: b, port: 0 });
     await b.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
-      redirectUri: "http://127.0.0.1:1/callback", state: "cb1", codeChallenge: "ch", codeChallengeMethod: "S256"
+      redirectUri: "http://127.0.0.1:1/callback", state: oauthState("cb1"), codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256"
     });
-    const result = await drive(h, "GET", "/oauth/github/callback?code=c&state=cb1");
+    const result = await drive(h, "GET", `/oauth/github/callback?code=c&state=${oauthState("cb1")}`);
     expect(result.status).toBe(302);
     expect(result.location).toContain("http://127.0.0.1:1/callback");
     expect(result.location).toContain("handoff=");
     expect(result.location).not.toContain("access-token");
+    expect(String(result.headers["referrer-policy"] ?? "")).toBe("no-referrer");
   });
 
   it("rejects an unsupported contract version with a structured redacted error", async () => {
@@ -151,16 +160,16 @@ describe("broker http routing + security", () => {
   });
 
   it("unknown provider returns unknown-provider", async () => {
-    const result = await drive(handler(), "GET", "/oauth/google/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=ch");
+    const result = await drive(handler(), "GET", "/oauth/google/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256");
     expect(result.status).toBe(400);
     expect(JSON.parse(result.body).error).toBe("unknown-provider");
   });
 
   it("rate-limits a route after the per-minute budget is exceeded", async () => {
     const h = handler(2); // budget of 2/min
-    const r1 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s1&code_challenge=ch");
-    const r2 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s2&code_challenge=ch");
-    const r3 = await drive(h, "GET", "/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s3&code_challenge=ch");
+    const r1 = await drive(h, "GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("s1")}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`);
+    const r2 = await drive(h, "GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("s2")}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`);
+    const r3 = await drive(h, "GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("s3")}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`);
     expect(r1.status).toBe(302);
     expect(r2.status).toBe(302);
     expect(r3.status).toBe(429);
@@ -181,7 +190,7 @@ describe("broker http routing + security", () => {
 
   it("every response carries a correlation id header", async () => {
     const result = await drive(handler(), "GET", "/healthz");
-    expect(result.headers["x-fable-request-id"]).toBeTruthy();
+    expect(result.headers["x-mivlet-request-id"]).toBeTruthy();
   });
 
   it("revoke route maps to the broker revoke operation", async () => {

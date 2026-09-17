@@ -4,14 +4,28 @@ export * from "./domains/approvals.js";
 export * from "./domains/account-cloud.js";
 export * from "./domains/agent-runtime.js";
 export * from "./domains/connectors.js";
+export * from "./domains/connected-source-search.js";
 export * from "./domains/provider-routing.js";
 export * from "./domains/hosted-computer.js";
 export * from "./domains/hosted-execution-capability.js";
+export * from "./env-compat.js";
 export * from "./domains/local-computer.js";
 export * from "./domains/local-projects.js";
 export * from "./domains/collaboration.js";
 export * from "./domains/search.js";
 export * from "./domains/voice.js";
+export {
+  isSensitiveSecretKey,
+  isUsableRedactedText,
+  looksLikeSecret,
+  redactSecretText,
+  redactSecretTextOrOmit,
+  secretMarkerSurvives,
+  SECRET_CONTENT_OMITTED,
+  SECRET_REDACTED,
+  SECRET_REDACTION_CASES
+} from "./secret-redaction.js";
+export type { SecretRedactionCase } from "./secret-redaction.js";
 
 import type {
   ApprovalAuditEntry,
@@ -57,7 +71,7 @@ export type MemoryApprovalState = "approved" | "suggested" | "rejected";
 export interface MemoryProvenance {
   origin: "chat" | "source" | "run" | "manual";
   sourceId?: string;
-  /** Exact Fable Connection inherited from a connector-backed source. */
+  /** Exact Mivlet Connection inherited from a connector-backed source. */
   connectionId?: string;
   runId?: string;
   note: string;
@@ -250,7 +264,7 @@ export interface ConnectorSyncRequest {
 }
 
 export interface ConnectorAccountSummary {
-  /** Opaque Fable Connection reference; never a raw provider account id. */
+  /** Opaque Mivlet Connection reference; never a raw provider account id. */
   id: string;
   displayName: string;
   handle?: string;
@@ -260,7 +274,7 @@ export interface ConnectorAccountSummary {
 }
 
 export interface ConnectorAccountOption {
-  /** Stable workspace-bound Fable Connection id; provider ids never authorize selection. */
+  /** Stable workspace-bound Mivlet Connection id; provider ids never authorize selection. */
   connectionId: string;
   account: ConnectorAccountSummary;
   active: boolean;
@@ -324,7 +338,7 @@ export interface ConnectorSearchItem {
   id: string;
   connectorId: SupportedConnectorId;
   /**
-   * Exact Fable Connection that produced this result. Native search stamps this
+   * Exact Mivlet Connection that produced this result. Native search stamps this
    * value from authenticated selection evidence; imports reject a changed or
    * missing selection rather than guessing from the provider family.
    */
@@ -361,16 +375,8 @@ export interface ConnectorImportResult {
 }
 
 export type ConnectorActionKind =
-  | "github.draft-pull-request"
-  | "github.comment"
   | "vercel.promote"
   | "vercel.rollback"
-  | "github.create-issue"
-  | "github.update-issue"
-  | "github.create-review"
-  | "github.update-file"
-  | "github.create-branch"
-  | "github.dispatch-workflow"
   | "vercel.create-deployment"
   | "vercel.cancel-deployment"
   | "vercel.update-project"
@@ -388,7 +394,6 @@ export type ConnectorActionKind =
   | "google-drive.delete-file"
   | "gmail.create-draft"
   | "gmail.send"
-  | "slack.create-draft"
   | "slack.post"
   | "slack.reply"
   | "slack.edit"
@@ -724,7 +729,7 @@ export interface KnowledgeSource {
   scope?: KnowledgeScope;
   /** Connector account provenance, when the source came from a connected account. */
   account?: string;
-  /** Exact Fable Connection that authorized this source, when applicable. */
+  /** Exact Mivlet Connection that authorized this source, when applicable. */
   connectionId?: string;
   /** True once chunks have been produced (and, when configured, embedded). */
   embeddingReady?: boolean;
@@ -784,7 +789,7 @@ export interface KnowledgeCitation {
   chunkId?: string;
   /** Connector account the source came from, when applicable. */
   account?: string;
-  /** Exact Fable Connection that authorized the cited source. */
+  /** Exact Mivlet Connection that authorized the cited source. */
   connectionId?: string;
   /** The basis for the citation's score — never hidden from the user. */
   ranking?: CitationRanking;
@@ -947,7 +952,7 @@ export interface ConnectorSourceCandidate {
   sizeBytes: number;
   fetchedAt: string;
   account?: string;
-  /** Exact Fable Connection that authorized the candidate. */
+  /** Exact Mivlet Connection that authorized the candidate. */
   connectionId?: string;
   providerMetadata?: Record<string, string>;
   /**
@@ -1062,7 +1067,7 @@ export interface RuntimeSnapshot {
   dismissedApprovalIds: string[];
   approvalRules: ApprovalGrant[];
   /** User-defined agent identities and their non-secret execution preferences. */
-  agents?: FableAgentProfile[];
+  agents?: MivletAgentProfile[];
   /** The agent currently owning the conversation surface. */
   activeAgentId?: string;
   pinnedSourceIds: string[];
@@ -1082,7 +1087,7 @@ export interface RuntimeSnapshot {
   /**
    * The model id last chosen in the composer's model picker, so the same model
    * drives the next agent run. Re-validated against the connected backend's
-   * available models before use (empty string = let Fable pick).
+   * available models before use (empty string = let Mivlet pick).
    */
   selectedModelId: string;
   /** Provider-qualified model keys hidden from conversation pickers. */
@@ -1107,10 +1112,10 @@ export interface RuntimeSnapshot {
   savedAt: string;
 }
 
-export type FableAgentIcon = "agent";
+export type MivletAgentIcon = "agent";
 
 /** A repeatable responsibility explicitly taught to a teammate by the user. */
-export interface FableLearnedTask {
+export interface MivletLearnedTask {
   id: string;
   title: string;
   instruction: string;
@@ -1122,13 +1127,13 @@ export interface FableLearnedTask {
  * A user-owned agent. Instructions and selections are non-secret; provider
  * credentials remain in the native credential boundary.
  */
-export interface FableAgentProfile {
+export interface MivletAgentProfile {
   id: string;
   name: string;
   instructions: string;
   modelId: string;
   reasoningEffort?: string;
-  icon: FableAgentIcon;
+  icon: MivletAgentIcon;
   /** In-app completion and attention notices; never controls approval prompts. */
   notificationsEnabled?: boolean;
   /** Legacy appearance metadata retained for saved-profile compatibility. */
@@ -1140,7 +1145,7 @@ export interface FableAgentProfile {
   connectorIds: string[];
   knowledgeSourceIds: string[];
   /** Structured, reviewable work learned from conversation. */
-  learnedTasks?: FableLearnedTask[];
+  learnedTasks?: MivletLearnedTask[];
   permissionLabel: ApprovalPresetLabel;
   threadId?: string;
   /** Local conversation references for this teammate, including earlier chats. */

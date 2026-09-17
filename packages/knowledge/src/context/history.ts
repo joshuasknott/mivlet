@@ -15,7 +15,7 @@
  * the bounded message list produced here.
  */
 
-import type { ContextSummaryRecord, NativeMessage } from "@fable/protocol";
+import type { ContextSummaryRecord, NativeMessage } from "@mivlet/protocol";
 
 export interface HistoryEntry {
   message: NativeMessage;

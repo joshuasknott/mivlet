@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { chunk, fixtureInput, withHost, sendChunks } from "./support/host-process.mjs";
+import { test } from "./support/windows-host.mjs";
 
 // DeepSeek speaks the OpenAI-compatible Chat Completions wire format, so the
 // pinned SDK serves it through the same openai-compatible provider shim as

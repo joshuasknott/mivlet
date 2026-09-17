@@ -12,7 +12,7 @@ pub(crate) use schedules::{bind_schedule, finish_schedule, validate_schedule_pro
 mod tests;
 
 use crate::authorized_scope::{self, AuthorizedCommandScope, ScopeAccess};
-use crate::models::FableAgentProfile;
+use crate::models::MivletAgentProfile;
 use crate::store::repos::{collaboration as repo, collaboration::Kind, local_project, thread};
 use crate::store::{Store, StoreError};
 use chrono::{SecondsFormat, Utc};
@@ -104,14 +104,17 @@ fn id(value: &str) -> Result<()> {
     }
     Ok(())
 }
-fn profile<'a>(profiles: &'a [FableAgentProfile], agent_id: &str) -> Result<&'a FableAgentProfile> {
+fn profile<'a>(
+    profiles: &'a [MivletAgentProfile],
+    agent_id: &str,
+) -> Result<&'a MivletAgentProfile> {
     profiles
         .iter()
         .find(|p| p.id == agent_id)
         .ok_or_else(|| invalid("This agent profile is unavailable. Choose an existing teammate."))
 }
 fn participants(
-    profiles: &[FableAgentProfile],
+    profiles: &[MivletAgentProfile],
     ids: &[String],
     facilitator: Option<&str>,
 ) -> Result<Vec<Participant>> {
@@ -142,7 +145,7 @@ struct Context<'a> {
     conn: &'a Connection,
     store: &'a Store,
     scope: &'a AuthorizedCommandScope,
-    profiles: &'a [FableAgentProfile],
+    profiles: &'a [MivletAgentProfile],
     time: &'a str,
 }
 impl Context<'_> {
@@ -323,7 +326,7 @@ impl Context<'_> {
 pub(crate) fn native_profiles(
     app: tauri::AppHandle,
     workspace: &str,
-) -> std::result::Result<Vec<FableAgentProfile>, String> {
+) -> std::result::Result<Vec<MivletAgentProfile>, String> {
     Ok(
         crate::snapshot::load_runtime_snapshot(app, Some(workspace.into()), None)?
             .map(|s| s.agents)
@@ -611,6 +614,37 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
         }
         Ok(())
     })
+}
+
+/// Remount recovery for executing Work that lost its renderer owner.
+/// Does not grant execution authority or replay an attempt.
+pub(crate) fn fence_orphaned_executing_work(
+    conn: &Connection,
+    store: &Store,
+    time: &str,
+) -> Result<()> {
+    let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
+    let ctx = Context {
+        conn,
+        store,
+        scope: &scope,
+        profiles: &[],
+        time,
+    };
+    for mut item in ctx.all_work()? {
+        if item.status.executing() {
+            item.status = WorkStatus::AwaitingUser;
+            item.generation += 1;
+            item.current_run_id = None;
+            item.reason = Some(
+                "This assignment lost its execution owner. Inspect saved results and reconcile any external actions before continuing. Nothing was replayed."
+                    .into(),
+            );
+            item.updated_at = time.into();
+            ctx.work(&item)?;
+        }
+    }
+    work::wake_waiters(&ctx)
 }
 
 pub(crate) fn suspend_account(

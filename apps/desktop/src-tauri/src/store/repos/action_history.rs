@@ -316,39 +316,23 @@ fn truncate_chars(value: &str, max: usize) -> String {
 }
 
 /// Markers whose presence in *any* value indicate secret/sensitive material
-/// that must never be persisted to audit. Mirrors the connector redaction list
-/// and adds tokens/keys/env values explicitly required by the threat model.
-const SECRET_MARKERS: &[&str] = &[
-    "authorization:",
-    "bearer ",
-    "cookie:",
-    "access_token",
-    "refresh_token",
-    "client_secret",
-    "api_key",
-    "apikey",
-    "x-api-key",
-    "private key",
-    "-----begin",
-    "xoxb-",
-    "xoxp-",
-    "ghp_",
-    "github_pat_",
+/// that must never be persisted to audit. Shared credential-shape markers come
+/// from `packages/protocol/src/secret-redaction.json`; the extras below cover
+/// body/env persistence the threat model forbids even without a token prefix.
+const AUDIT_SECRET_EXTRAS: &[&str] = &[
     "email body",
     "message body",
     "raw payload",
     "password",
     "passwd",
     "secret",
+    "private key",
 ];
 
 /// Whether a string value looks like it carries secret material. Case-insensitive
-/// substring match against [`SECRET_MARKERS`].
+/// substring match against the shared vocabulary plus [`AUDIT_SECRET_EXTRAS`].
 pub(crate) fn looks_secret(value: &str) -> bool {
-    let lowercase = value.to_ascii_lowercase();
-    SECRET_MARKERS
-        .iter()
-        .any(|marker| lowercase.contains(marker))
+    crate::secret_redaction::looks_secret_with(value, AUDIT_SECRET_EXTRAS)
 }
 
 /// Redact a single text value: if it looks secret, replace it entirely;
@@ -390,6 +374,9 @@ pub fn redact_safe_detail(value: &Value) -> Value {
 /// Keys whose values are always treated as secret (even if the value does not
 /// match a secret marker), covering auth handoff codes and env values.
 fn is_secret_key(key: &str) -> bool {
+    if crate::secret_redaction::is_sensitive_key(key) {
+        return true;
+    }
     let lower = key.to_ascii_lowercase();
     const SECRET_KEYS: &[&str] = &[
         "token",
@@ -448,6 +435,9 @@ mod tests {
         assert!(looks_secret("authorization: Basic xyz"));
         assert!(looks_secret("ghp_supersecrettoken"));
         assert!(looks_secret("my api_key is here"));
+        assert!(looks_secret(
+            "Gemini key is AIzaSy123456789012345678901234567890abc"
+        ));
         assert!(!looks_secret("read-file src/index.ts"));
         assert!(!looks_secret("github-read repo issues"));
     }

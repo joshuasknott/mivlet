@@ -1,4 +1,4 @@
-import type { ConnectorCapability, ConnectorSearchItem } from "@fable/protocol";
+import type { ConnectorCapability, ConnectorSearchItem } from "@mivlet/protocol";
 import type { ConnectorAdapter, ConnectorRequest, ConnectorWriteRequest } from "../sdk";
 import { ProviderHttpClient, asObjects, isObject, oauthClient, page, type FetchLike, type JsonObject, type OAuthClientOptions, type ProviderRequest } from "./http";
 import {
@@ -85,6 +85,19 @@ export interface VercelAdapterOptions extends Omit<OAuthClientOptions, "connecto
   fetch?: FetchLike;
 }
 
+/**
+ * Vercel OAuth scopes Mivlet requests. `deployment:write` is kept because native
+ * Vercel actions promote, roll back, create, and cancel deployments, and change
+ * projects and domains, after exact approval. It is labeled write, not read.
+ */
+export const VERCEL_OAUTH_SCOPES = [
+  "user:read",
+  "team:read",
+  "project:read",
+  "deployment:read",
+  "deployment:write"
+] as const;
+
 export function createVercelAdapter(options: VercelAdapterOptions): ConnectorAdapter<JsonObject, JsonObject> {
   const broker = new URL(options.authBaseUrl);
   const auth = oauthClient({
@@ -93,7 +106,7 @@ export function createVercelAdapter(options: VercelAdapterOptions): ConnectorAda
     handoffEndpoint: new URL("oauth/vercel/handoff", broker).toString(),
     refreshEndpoint: new URL("oauth/vercel/refresh", broker).toString(),
     revocationEndpoint: new URL("oauth/vercel/revoke", broker).toString(),
-    scopes: ["user", "team", "project", "deployment"]
+    scopes: [...VERCEL_OAUTH_SCOPES]
   });
   const http = new ProviderHttpClient("vercel", options.apiBaseUrl ?? "https://api.vercel.com/", options.fetch);
   return {

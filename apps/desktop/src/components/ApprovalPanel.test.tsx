@@ -5,7 +5,7 @@ import type {
   ApprovalGrant,
   ApprovalRequest,
   ApprovalAuditEntry
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { describe, expect, it, vi } from "vitest";
 import { ApprovalPanel } from "./ApprovalPanel";
 import type {

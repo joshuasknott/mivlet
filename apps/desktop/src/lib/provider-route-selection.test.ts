@@ -97,11 +97,11 @@ describe("native provider route selection", () => {
     mocks.listRoutes.mockResolvedValue([
       {
         ...route,
-        id: "provider-route-custom-fable-smoke",
+        id: "provider-route-custom-mivlet-smoke",
         connectionId: "connection-custom",
-        displayName: "Custom provider fable-smoke",
+        displayName: "Custom provider mivlet-smoke",
         providerFamily: "custom",
-        modelOrRuntimeReference: "fable-smoke",
+        modelOrRuntimeReference: "mivlet-smoke",
         pricingSummary: undefined,
         boundaries: {
           ...route.boundaries,
@@ -114,7 +114,7 @@ describe("native provider route selection", () => {
     await expect(
       selectNativeProviderRoute({
         providerId: "custom",
-        model: "fable-smoke",
+        model: "mivlet-smoke",
         requiredInputTokens: 100,
         requiredOutputTokens: 2048,
         requiresTools: false,
@@ -122,8 +122,8 @@ describe("native provider route selection", () => {
     ).resolves.toMatchObject({
       workspaceId: "workspace-1",
       selection: {
-        providerRouteId: "provider-route-custom-fable-smoke",
-        reason: expect.stringContaining("Custom provider fable-smoke"),
+        providerRouteId: "provider-route-custom-mivlet-smoke",
+        reason: expect.stringContaining("Custom provider mivlet-smoke"),
         boundaryPolicyRef:
           "boundary:installation-private:user-owned-provider:custom:local-credential-egress",
       },
@@ -132,7 +132,7 @@ describe("native provider route selection", () => {
     await expect(
       selectNativeProviderRoute({
         providerId: "custom",
-        model: "fable-smoke",
+        model: "mivlet-smoke",
         requiredInputTokens: 100,
         requiredOutputTokens: 2048,
         requiresTools: true,

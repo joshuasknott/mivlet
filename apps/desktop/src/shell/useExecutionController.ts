@@ -1,20 +1,24 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { LocalComputerSnapshot } from "@fable/protocol";
+import type { LocalComputerSnapshot } from "@mivlet/protocol";
 import { useHostedBrowserController } from "../hooks/useHostedBrowserController";
 import { useHostedComputer } from "../hooks/useHostedComputer";
 import { useLocalComputer } from "../hooks/useLocalComputer";
-import { useNativeAgent } from "../hooks/useNativeAgent";
+import {
+  useNativeAgent,
+  type UseNativeAgentOptions,
+} from "../hooks/useNativeAgent";
 import {
   createDesktopDurableRunWriter,
   loadDesktopConversation,
 } from "../hooks/useDurableConversation";
-import { isCollaborationTool } from "@fable/connectors/native-api/tools";
+import { isCollaborationTool } from "@mivlet/connectors/native-api/tools";
 import {
   createDesktopToolExecutor,
   type DesktopToolExecutorOptions,
 } from "../lib/desktop-tool-runtime";
 import { chatConnectorIds, chatConnectorTools } from "../lib/connector-chat";
 import { isLocalComputerTool } from "../lib/computer-tools";
+import { resolveHostedComputerScope } from "../lib/hosted-computer-scope";
 import { modelsForProvider } from "../lib/provider-models";
 import { cancelRuntimeLocalComputer } from "../runtime/domains/local-computer";
 
@@ -29,14 +33,12 @@ export function useExecutionController({
   executionProviderId,
 }: {
   runtime: import("../hooks/useShellRuntime").ShellRuntime;
-  approvalGate: import("@fable/connectors/native-api/tool-executor").ToolApprovalGate;
+  approvalGate: import("@mivlet/connectors/native-api/tool-executor").ToolApprovalGate;
   wrapExecutor: (
-    executor: import("@fable/connectors").ToolExecutor,
-  ) => import("@fable/connectors").ToolExecutor;
+    executor: import("@mivlet/connectors").ToolExecutor,
+  ) => import("@mivlet/connectors").ToolExecutor;
   onApproval: (id: string) => void;
-  attributeHistory: NonNullable<
-    import("../hooks/useNativeAgent").UseNativeAgentOptions["attributeHistory"]
-  >;
+  attributeHistory: NonNullable<UseNativeAgentOptions["attributeHistory"]>;
   threadId?: string;
   executionAgentId?: string;
   executionProviderId?: string;
@@ -63,6 +65,7 @@ export function useExecutionController({
     workspaceId: activeWorkspaceId,
     agentId: activeAgentId,
     ids: [] as string[],
+    accounts: {} as Record<string, string>,
   });
   const turnConnectorsRef = useRef({
     workspaceId: activeWorkspaceId,
@@ -85,17 +88,15 @@ export function useExecutionController({
                 )?.connectionRoute ?? "native"),
           )
         : [],
+    accounts: Object.fromEntries(
+      runtime.connectorManifests.flatMap((manifest) =>
+        manifest.account?.id ? [[manifest.id, manifest.account.id]] : [],
+      ),
+    ),
   };
-  const hostedWorkspaceId =
-    runtime.accountWorkspaceStatus.workspaces.find(
-      (workspace) =>
-        workspace.workspaceStatus === "active" &&
-        workspace.membershipStatus === "active",
-    )?.fableWorkspaceId ?? null;
-  const activeHostedDeviceId =
-    runtime.accountWorkspaceStatus.devices.find(
-      (device) => device.status === "active",
-    )?.deviceId ?? null;
+  const hostedScope = resolveHostedComputerScope(runtime.accountWorkspaceStatus);
+  const hostedWorkspaceId = hostedScope?.workspaceId ?? null;
+  const activeHostedDeviceId = hostedScope?.deviceId ?? null;
 
   const localComputer = useLocalComputer({
     workspaceId: activeWorkspaceId,
@@ -125,6 +126,7 @@ export function useExecutionController({
   });
 
   useEffect(() => {
+    // Display-only: session/rule grants never auto-satisfy the execution gate.
     approvalGate.replaceStandingGrants([
       ...runtime.sessionApprovalGrants,
       ...runtime.approvalRules,
@@ -167,6 +169,11 @@ export function useExecutionController({
           connectorAccessRef.current.workspaceId === activeWorkspaceId &&
           connectorAccessRef.current.agentId === activeAgentId &&
           connectorAccessRef.current.ids.includes(connectorId),
+        connectorAccountCurrent: (connectorId) =>
+          connectorAccessRef.current.workspaceId === activeWorkspaceId &&
+          connectorAccessRef.current.agentId === activeAgentId
+            ? connectorAccessRef.current.accounts[connectorId]
+            : undefined,
         workspaceId: activeWorkspaceId,
         localComputerCurrent: () => localComputerRef.current,
         prepareLocalComputer: async (tool) => {
@@ -376,6 +383,11 @@ export function useExecutionController({
         workspaceId: activeWorkspaceId,
         agentId: activeAgentId,
         ids,
+        accounts: Object.fromEntries(
+          manifests.flatMap((manifest) =>
+            manifest.account?.id ? [[manifest.id, manifest.account.id]] : [],
+          ),
+        ),
       };
       return { ids, tools: chatConnectorTools(ids, manifests) };
     },
@@ -391,6 +403,7 @@ export function useExecutionController({
         connectorAccessRef.current.agentId === activeAgentId
       ) {
         connectorAccessRef.current.ids = [];
+        connectorAccessRef.current.accounts = {};
       }
     },
   };

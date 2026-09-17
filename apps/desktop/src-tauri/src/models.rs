@@ -130,7 +130,7 @@ pub const MAX_BACKEND_MODELS: usize = 32;
 pub const MAX_BACKEND_CAPABILITIES: usize = 16;
 
 // Supported connector vocabularies.
-pub const SUPPORTED_CONNECTOR_IDS: [&str; 21] = [
+pub const SUPPORTED_CONNECTOR_IDS: [&str; 8] = [
     "github",
     "vercel",
     "google-drive",
@@ -139,19 +139,6 @@ pub const SUPPORTED_CONNECTOR_IDS: [&str; 21] = [
     "slack",
     "google-calendar",
     "linear",
-    "outlook",
-    "microsoft-teams",
-    "zoom",
-    "linkedin",
-    "instagram",
-    "youtube",
-    "google-ads",
-    "meta-ads",
-    "shopify",
-    "docusign",
-    "greenhouse",
-    "lever",
-    "workday",
 ];
 pub const CONNECTOR_AUTH_STATES: [&str; 9] = [
     "needs-auth",
@@ -164,17 +151,9 @@ pub const CONNECTOR_AUTH_STATES: [&str; 9] = [
     "error",
     "unavailable",
 ];
-pub const CONNECTOR_ACTIONS: [&str; 45] = [
-    "github.draft-pull-request",
-    "github.comment",
+pub const CONNECTOR_ACTIONS: [&str; 36] = [
     "vercel.promote",
     "vercel.rollback",
-    "github.create-issue",
-    "github.update-issue",
-    "github.create-review",
-    "github.update-file",
-    "github.create-branch",
-    "github.dispatch-workflow",
     "vercel.create-deployment",
     "vercel.cancel-deployment",
     "vercel.update-project",
@@ -192,7 +171,6 @@ pub const CONNECTOR_ACTIONS: [&str; 45] = [
     "google-drive.delete-file",
     "gmail.create-draft",
     "gmail.send",
-    "slack.create-draft",
     "slack.post",
     "slack.reply",
     "slack.edit",
@@ -1006,7 +984,7 @@ pub struct ApprovalGrant {
     pub created_at: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ApprovalResolutionRequest {
     pub request: ApprovalRequest,
@@ -1108,7 +1086,7 @@ pub struct CustomApprovalSettings {
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FableAgentProfile {
+pub struct MivletAgentProfile {
     pub id: String,
     pub name: String,
     pub instructions: String,
@@ -1134,12 +1112,12 @@ pub struct FableAgentProfile {
     #[serde(default)]
     pub thread_ids: Vec<String>,
     #[serde(default)]
-    pub learned_tasks: Vec<FableLearnedTask>,
+    pub learned_tasks: Vec<MivletLearnedTask>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct FableLearnedTask {
+pub struct MivletLearnedTask {
     pub id: String,
     pub title: String,
     pub instruction: String,
@@ -1161,7 +1139,7 @@ pub struct RuntimeSnapshot {
     pub approval_rules: Vec<ApprovalGrant>,
     /// User-owned agent identities and their non-secret execution preferences.
     #[serde(default)]
-    pub agents: Vec<FableAgentProfile>,
+    pub agents: Vec<MivletAgentProfile>,
     #[serde(default)]
     pub active_agent_id: Option<String>,
     pub pinned_source_ids: Vec<String>,

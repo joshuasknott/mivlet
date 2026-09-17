@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { BackendAgentEvent, NativeCompletionRequest } from "@fable/protocol";
+import type { BackendAgentEvent, NativeCompletionRequest } from "@mivlet/protocol";
 import { FixtureTransport, SequencedFixtureTransport, type HttpTransport } from "./transport";
 import { readFixture } from "./fixtures-loader";
 import { runAgentLoop, type ToolExecutor } from "./agent-loop";
@@ -191,6 +191,34 @@ describe("runAgentLoop", () => {
     const result = events.find((event) => event.type === "tool-result");
     expect(result?.output.startsWith("x".repeat(16))).toBe(true);
     expect(result?.output).toMatch(/truncated/i);
+  });
+
+  it("redacts secret-shaped tool output before the next model turn", async () => {
+    const leaked = "ghp_abcdefghijklmnopqrstuvwx1234567890";
+    const turn = 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c1","function":{"name":"read-file","arguments":"{\\"path\\":\\".env\\"}"}}]}}]}\ndata: {"choices":[{"finish_reason":"tool_calls"}]}';
+    const captured: NativeCompletionRequest[] = [];
+    const transport: HttpTransport = {
+      async *stream(request) {
+        captured.push(request);
+        const fixture = captured.length === 1
+          ? turn
+          : 'data: {"choices":[{"finish_reason":"stop"}]}';
+        for (const line of fixture.split(/\r?\n/)) {
+          const trimmed = line.trim();
+          if (trimmed) yield trimmed;
+        }
+      }
+    };
+    const events = await collect(
+      runAgentLoop(transport, baseRequest, { execute: async () => `token=${leaked}` })
+    );
+    const result = events.find((event) => event.type === "tool-result");
+    expect(result?.output).not.toContain(leaked);
+    expect(result?.output).toContain("[REDACTED]");
+    const replayed = captured[1]?.messages.some((message) =>
+      typeof message.content === "string" && message.content.includes(leaked)
+    );
+    expect(replayed).toBe(false);
   });
 
   it("prepends a system context prefix when provided", async () => {

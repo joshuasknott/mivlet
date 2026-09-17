@@ -4,7 +4,7 @@ import type {
   ApprovalRequest,
   ApprovalRiskLevel,
   PermissionMode
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   permissionDescriptionFor,
   permissionLabelFor
@@ -191,7 +191,8 @@ export function highRiskExplanation(
   const whatItUnlocks = `Confirming runs the action as "${label}" after Mivlet's final check.`;
   const note =
     "This action is high-risk, so type the exact phrase below. " +
-    "Mivlet still runs its final check before the action runs.";
+    "Mivlet then confirms in a system dialog before minting the one-time permit. " +
+    "Repeating the phrase from this window cannot authorize it.";
   return {
     requiredPhrase: phrase,
     whatItUnlocks,

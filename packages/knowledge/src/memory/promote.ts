@@ -15,8 +15,9 @@ import type {
   MemoryProvenance,
   MemoryRecord,
   MemorySuggestion
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
+import { redactKnowledgeText } from "../redact";
 
 /** Input for explicit, user-initiated promotion. */
 export interface PromoteMemoryInput {
@@ -58,14 +59,16 @@ export function promoteToMemory(input: PromoteMemoryInput): MemoryRecord {
   const now = input.now ?? new Date().toISOString();
   const scope = input.scope ?? GLOBAL_SCOPE;
   const confidence = input.confidence ?? 1;
-  const slug = slugify(input.title);
+  const title = redactKnowledgeText(input.title);
+  const value = redactKnowledgeText(input.value);
+  const slug = slugify(title);
   const id = `mem-${slug}-${randish(now)}`;
 
   return {
     id,
     kind: input.kind,
-    title: input.title,
-    value: input.value,
+    title,
+    value,
     source: input.provenance.origin,
     freshness: "Just now",
     approved: true,

@@ -1,17 +1,17 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AccountWorkspaceStatus, RuntimeSnapshot } from "@fable/protocol";
-import { createApprovalGate } from "@fable/connectors/native-api/tool-executor";
-import { buildToolApproval } from "@fable/connectors/native-api/approvals";
-import { FableQueryProvider } from "../lib/query-client";
+import type { AccountWorkspaceStatus, RuntimeSnapshot } from "@mivlet/protocol";
+import { createApprovalGate } from "@mivlet/connectors/native-api/tool-executor";
+import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
+import { MivletQueryProvider } from "../lib/query-client";
 import { clearActiveRuntimeDataScope } from "../runtime-scope";
 import { PREVIEW_ACCOUNT_WORKSPACE_STATUS } from "./shell-runtime/defaults";
 import { useShellRuntime } from "./useShellRuntime";
 import { defaultShellState } from "./shell-runtime/defaults";
 import { shellStateToRuntimeSnapshot } from "../lib/persistence";
 import { resolveApprovalFallback } from "../lib/approval-fallbacks";
-import type { ApprovalResolutionRequest, ApprovalResolutionResponse } from "@fable/protocol";
+import type { ApprovalResolutionRequest, ApprovalResolutionResponse } from "@mivlet/protocol";
 
 const mocks = vi.hoisted(() => ({ status: null as AccountWorkspaceStatus | null,
   resolveApproval: vi.fn<(request: ApprovalResolutionRequest) => Promise<ApprovalResolutionResponse>>(),
@@ -37,7 +37,7 @@ vi.mock("../lib/persistence", async (original) => ({
   hasTauriRuntime: () => true,
 }));
 
-function wrapper({ children }: PropsWithChildren) { return <FableQueryProvider>{children}</FableQueryProvider>; }
+function wrapper({ children }: PropsWithChildren) { return <MivletQueryProvider>{children}</MivletQueryProvider>; }
 
 describe("approval queue workspace hydration", () => {
   it("confirms an exact pending connector action with one Approve click", async () => {
@@ -52,7 +52,8 @@ describe("approval queue workspace hydration", () => {
     act(() => result.current.recordBackendToolCall({ callId: approval.id, tool: "connector-action", arguments: "{}", approval }));
     await act(async () => result.current.requestApprovalDecision(approval, "once"));
     await expect(outcome).resolves.toBe("granted");
-    expect(mocks.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ request: approval, decision: "once", confirmationText: "Confirm exact action" }));
+    expect(mocks.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ request: approval, decision: "once" }));
+    expect(mocks.resolveApproval.mock.calls[0]?.[0]?.confirmationText).toBeUndefined();
     expect(result.current.pendingApprovalConfirmation).toBeNull();
   });
   beforeEach(() => {
@@ -79,6 +80,7 @@ describe("approval queue workspace hydration", () => {
     await act(async () => result.current.recordBackendToolCall({ callId: approval.id, tool: "local-app-select", arguments: "{}", approval }));
     expect(result.current.openApprovals).toEqual([]);
     expect(mocks.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ request: approval, decision: "once" }));
+    expect(mocks.resolveApproval.mock.calls[0]?.[0]?.confirmationText).toBeUndefined();
     if (scenario === "downgrade") {
       act(() => result.current.selectPermissionLabel("Ask Me"));
       await act(async () => finish(resolveApprovalFallback(mocks.resolveApproval.mock.calls[0][0])));
@@ -89,6 +91,22 @@ describe("approval queue workspace hydration", () => {
       await act(async () => finish(resolveApprovalFallback(mocks.resolveApproval.mock.calls[0][0])));
     }
     await expect(outcome).resolves.toBe(scenario === "success" ? "granted" : scenario === "workspace" ? "cancelled" : "denied");
+  });
+
+  it("full access does not mint a high-risk permit by echoing the confirmation phrase", async () => {
+    const gate = createApprovalGate();
+    const { result } = renderHook(() => useShellRuntime({ approvalGate: gate }), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.activeWorkspace.localWorkspaceId).toBe("local-default"));
+    await act(async () => {});
+    act(() => result.current.selectPermissionLabel("Work Freely"));
+    const approval = buildToolApproval("Codex", "write-file", '{"path":"a.txt","content":"x"}');
+    expect(approval.confirmationPhrase).toBe("approve write-file");
+    gate.register(approval);
+    const outcome = gate.waitForDecision(approval);
+    await act(async () => result.current.recordBackendToolCall({ callId: approval.id, tool: "write-file", arguments: '{"path":"a.txt","content":"x"}', approval }));
+    await expect(outcome).resolves.toBe("granted");
+    expect(mocks.resolveApproval).toHaveBeenCalledWith(expect.objectContaining({ request: approval, decision: "once" }));
+    expect(mocks.resolveApproval.mock.calls[0]?.[0]?.confirmationText).toBeUndefined();
   });
 
   it("keeps a pending approval and its waiter through a same-owner workspace refresh", async () => {

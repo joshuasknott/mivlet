@@ -14,11 +14,14 @@ use reqwest::{header, Method};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 use url::Url;
 
 use crate::clerk_identity::{self, ConvexFunctionType, ConvexIdentityCallRequest};
 use crate::models::{ApprovalRequest, ApprovalResolutionRequest};
+use crate::store::repos::workspace_directory as directory;
 
 const ACCOUNT_CHANGED_ERROR: &str = "Mivlet account changed during the request. Please try again.";
 const MAX_RUNNER_RESPONSE_BYTES: usize = 600 * 1024;
@@ -30,6 +33,75 @@ const HOSTED_COMPUTER_SERVICE: &str = "Mivlet cloud computer";
 const HOSTED_PROCESS_CONFIRMATION: &str = "run on cloud computer";
 const HOSTED_BROWSER_CONFIRMATION: &str = "open cloud browser";
 const HOSTED_BROWSER_ACTION_CONFIRMATION: &str = "act in cloud browser";
+const LIVE_VIEW_TTL: Duration = Duration::from_secs(5 * 60);
+
+struct LiveViewHandle {
+    url: String,
+    expires_at: chrono::DateTime<Utc>,
+}
+
+fn live_view_handles() -> &'static Mutex<HashMap<String, LiveViewHandle>> {
+    static HANDLES: OnceLock<Mutex<HashMap<String, LiveViewHandle>>> = OnceLock::new();
+    HANDLES.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn live_view_key(workspace_id: &str, agent_id: &str, device_id: &str) -> String {
+    format!("{workspace_id}\0{agent_id}\0{device_id}")
+}
+
+fn store_live_view(
+    workspace_id: &str,
+    agent_id: &str,
+    device_id: &str,
+    url: String,
+) -> Result<(), String> {
+    validate_live_view_url(&url)?;
+    let mut handles = live_view_handles()
+        .lock()
+        .map_err(|_| "The cloud browser Live View session is unavailable.".to_string())?;
+    // One native secret at a time. A later snapshot for another hosted
+    // workspace must not leave the previous takeover URL reachable.
+    handles.clear();
+    handles.insert(
+        live_view_key(workspace_id, agent_id, device_id),
+        LiveViewHandle {
+            url,
+            expires_at: Utc::now()
+                + chrono::Duration::from_std(LIVE_VIEW_TTL).unwrap_or(chrono::Duration::minutes(5)),
+        },
+    );
+    Ok(())
+}
+
+fn live_view_handle(workspace_id: &str, agent_id: &str, device_id: &str) -> Option<String> {
+    let Ok(mut handles) = live_view_handles().lock() else {
+        return None;
+    };
+    let key = live_view_key(workspace_id, agent_id, device_id);
+    let now = Utc::now();
+    match handles.get(&key) {
+        Some(handle) if handle.expires_at > now => Some(handle.url.clone()),
+        Some(_) => {
+            handles.remove(&key);
+            None
+        }
+        None => None,
+    }
+}
+
+fn retain_live_view_for_frontend(
+    mut snapshot: HostedBrowserSnapshot,
+    workspace_id: &str,
+    agent_id: &str,
+    device_id: &str,
+) -> HostedBrowserSnapshot {
+    if let Some(url) = snapshot.live_view_url.take() {
+        let _ = store_live_view(workspace_id, agent_id, device_id, url);
+    }
+    snapshot.takeover_available = live_view_handle(workspace_id, agent_id, device_id).is_some();
+    snapshot.live_view_url = None;
+    snapshot
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -254,6 +326,8 @@ pub struct HostedBrowserSnapshot {
     preview_data_url: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     live_view_url: Option<String>,
+    #[serde(default)]
+    takeover_available: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     last_download: Option<HostedBrowserDownloadSnapshot>,
     updated_at: String,
@@ -343,6 +417,24 @@ async fn call_convex(
     }
     let _identity_guard = clerk_identity::lock_native_identity_generation(&before)?;
     unwrap_success(envelope)
+}
+
+fn require_matching_hosted_scope(
+    workspace_id: &str,
+    device_id: Option<&str>,
+) -> Result<directory::HostedComputerScope, String> {
+    let store =
+        crate::store::try_global().ok_or_else(|| "Account storage unavailable.".to_string())?;
+    let scope = store
+        .with_conn(directory::resolve_hosted_computer_scope_for_current_user)
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "Select an available hosted workspace before using its computer.".to_string()
+        })?;
+    if !directory::hosted_scope_matches(&scope, workspace_id, device_id) {
+        return Err("The hosted computer request does not match the selected workspace.".into());
+    }
+    Ok(scope)
 }
 
 fn validate_process_id(value: &str) -> bool {
@@ -823,9 +915,10 @@ async fn request_execution_capability(
     device_id: &str,
     scope: &str,
 ) -> Result<(HostedExecutionCapabilityReceipt, Url), String> {
-    let value = call_convex(
-        ConvexFunctionType::Action,
-        "hostedExecution:requestExecutionCapability",
+    require_matching_hosted_scope(workspace_id, Some(device_id))?;
+    let before = clerk_identity::native_identity_generation_snapshot()?;
+    let envelope = clerk_identity::call_convex_http_route(
+        "/native/execution-capability",
         json!({
             "workspaceId": workspace_id,
             "agentId": agent_id,
@@ -834,6 +927,13 @@ async fn request_execution_capability(
         }),
     )
     .await?;
+    let after = clerk_identity::native_identity_generation_snapshot()
+        .map_err(|_| ACCOUNT_CHANGED_ERROR.to_string())?;
+    if after != before {
+        return Err(ACCOUNT_CHANGED_ERROR.into());
+    }
+    let _identity_guard = clerk_identity::lock_native_identity_generation(&before)?;
+    let value = unwrap_success(envelope)?;
     let receipt: HostedExecutionCapabilityReceipt = serde_json::from_value(value)
         .map_err(|_| "The hosted execution capability failed validation.".to_string())?;
     validate_capability(receipt)
@@ -866,7 +966,7 @@ async fn runner_json(
         .map_err(|_| "Mivlet could not initialize the hosted runner connection.".to_string())?;
     let mut request = client
         .request(method, url)
-        .header(header::AUTHORIZATION, format!("FableCapability {token}"))
+        .header(header::AUTHORIZATION, format!("MivletCapability {token}"))
         .header(header::ACCEPT, "application/json");
     if let Some(body) = body {
         request = request.json(&body);
@@ -1119,6 +1219,7 @@ pub async fn hosted_computer_status(
     if !valid_id(&workspace_id) || !valid_id(&agent_id) {
         return Err("The hosted computer scope is invalid.".into());
     }
+    require_matching_hosted_scope(&workspace_id, None)?;
     let value = call_convex(
         ConvexFunctionType::Query,
         "hostedExecution:getComputer",
@@ -1143,6 +1244,7 @@ pub async fn hosted_computer_provision(
     if !valid_id(&workspace_id) || !valid_id(&agent_id) || !valid_id(&device_id) {
         return Err("The hosted computer scope is invalid.".into());
     }
+    require_matching_hosted_scope(&workspace_id, Some(&device_id))?;
     let request_key = opaque_key("provision")?;
     let value = call_convex(
         ConvexFunctionType::Mutation,
@@ -1172,6 +1274,7 @@ pub fn hosted_process_prepare(
     draft: HostedProcessDraft,
 ) -> Result<PreparedHostedProcessLaunch, String> {
     let draft = normalize_draft(draft)?;
+    require_matching_hosted_scope(&draft.workspace_id, Some(&draft.device_id))?;
     let proposal = HostedProcessLaunchProposal {
         request_key: opaque_key("process")?,
         workspace_id: draft.workspace_id,
@@ -1232,15 +1335,16 @@ pub async fn hosted_process_launch(
     if resolution.audit_entry.decision != "once" {
         return Err("Hosted process launches require a fresh one-time approval.".into());
     }
+    let consumed_at = crate::execution_approvals::wall_clock_consumed_at();
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &source_resolution.effective_request,
-        &source_resolution.audit_entry.decided_at,
+        &consumed_at,
     )?;
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &consumed_at,
     )?;
 
     let account_generation = clerk_identity::native_identity_generation_snapshot()?;
@@ -1309,6 +1413,7 @@ pub fn hosted_browser_prepare(
     draft: HostedBrowserNavigateDraft,
 ) -> Result<PreparedHostedBrowserNavigation, String> {
     let draft = normalize_browser_draft(draft)?;
+    require_matching_hosted_scope(&draft.workspace_id, Some(&draft.device_id))?;
     let proposal = HostedBrowserNavigateProposal {
         request_key: opaque_key("browser")?,
         workspace_id: draft.workspace_id,
@@ -1362,7 +1467,7 @@ pub async fn hosted_browser_navigate(
         crate::execution_approvals::verify_and_consume_execution_approval(
             &crate::paths::execution_approvals_path(&app)?,
             &source_resolution.effective_request,
-            &source_resolution.audit_entry.decided_at,
+            &crate::execution_approvals::wall_clock_consumed_at(),
         )?;
     }
     let resolution = crate::approvals::resolve_approval(request.resolution)?;
@@ -1372,7 +1477,7 @@ pub async fn hosted_browser_navigate(
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &crate::execution_approvals::wall_clock_consumed_at(),
     )?;
 
     let account_generation = clerk_identity::native_identity_generation_snapshot()?;
@@ -1397,7 +1502,12 @@ pub async fn hosted_browser_navigate(
         return Err(ACCOUNT_CHANGED_ERROR.into());
     }
     let _identity_guard = clerk_identity::lock_native_identity_generation(&account_generation)?;
-    Ok(snapshot)
+    Ok(retain_live_view_for_frontend(
+        snapshot,
+        &proposal.workspace_id,
+        &proposal.agent_id,
+        &proposal.device_id,
+    ))
 }
 
 #[tauri::command]
@@ -1405,6 +1515,7 @@ pub fn hosted_browser_action_prepare(
     draft: HostedBrowserActionDraft,
 ) -> Result<PreparedHostedBrowserAction, String> {
     let draft = normalize_browser_action_draft(draft)?;
+    require_matching_hosted_scope(&draft.workspace_id, Some(&draft.device_id))?;
     let proposal = HostedBrowserActionProposal {
         request_key: opaque_key("browser-action")?,
         workspace_id: draft.workspace_id,
@@ -1485,10 +1596,11 @@ pub async fn hosted_browser_action(
         &source_arguments,
         &source_resolution.effective_request,
     )?;
+    let consumed_at = crate::execution_approvals::wall_clock_consumed_at();
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &source_resolution.effective_request,
-        &source_resolution.audit_entry.decided_at,
+        &consumed_at,
     )?;
     let resolution = crate::approvals::resolve_approval(request.resolution)?;
     if resolution.audit_entry.decision != "once" {
@@ -1497,7 +1609,7 @@ pub async fn hosted_browser_action(
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &consumed_at,
     )?;
 
     let account_generation = clerk_identity::native_identity_generation_snapshot()?;
@@ -1536,7 +1648,12 @@ pub async fn hosted_browser_action(
         return Err(ACCOUNT_CHANGED_ERROR.into());
     }
     let _identity_guard = clerk_identity::lock_native_identity_generation(&account_generation)?;
-    Ok(snapshot)
+    Ok(retain_live_view_for_frontend(
+        snapshot,
+        &proposal.workspace_id,
+        &proposal.agent_id,
+        &proposal.device_id,
+    ))
 }
 
 #[tauri::command]
@@ -1566,7 +1683,45 @@ pub async fn hosted_browser_snapshot(
         return Err(ACCOUNT_CHANGED_ERROR.into());
     }
     let _identity_guard = clerk_identity::lock_native_identity_generation(&account_generation)?;
-    Ok(snapshot)
+    Ok(retain_live_view_for_frontend(
+        snapshot,
+        &target.workspace_id,
+        &target.agent_id,
+        &target.device_id,
+    ))
+}
+
+#[tauri::command]
+pub fn hosted_browser_open_live_view(target: HostedBrowserTarget) -> Result<(), String> {
+    let url = live_view_url_for_open(target)?;
+    crate::oauth_loopback::open_browser(&url);
+    Ok(())
+}
+
+fn live_view_url_for_open(target: HostedBrowserTarget) -> Result<String, String> {
+    let target = normalize_browser_target(target)?;
+    require_matching_hosted_scope(&target.workspace_id, Some(&target.device_id))?;
+    let url = live_view_handle(&target.workspace_id, &target.agent_id, &target.device_id)
+        .ok_or_else(|| "The cloud browser Live View session is no longer available.".to_string())?;
+    validate_live_view_url(&url)?;
+    Ok(url)
+}
+
+fn validate_live_view_url(value: &str) -> Result<(), String> {
+    let url = Url::parse(value)
+        .map_err(|_| "The cloud browser Live View link failed validation.".to_string())?;
+    if url.scheme() != "https"
+        || url.host_str() != Some("live.browser.run")
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || !url.path().starts_with("/ui/")
+        || !url
+            .query_pairs()
+            .any(|(key, value)| key == "wss" && !value.is_empty())
+    {
+        return Err("The cloud browser Live View link failed validation.".into());
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1834,5 +1989,195 @@ mod tests {
         assert!(normalize_browser_action_draft(download.clone()).is_ok());
         download.value = Some("report.pdf".into());
         assert!(normalize_browser_action_draft(download).is_err());
+    }
+
+    #[test]
+    fn mismatched_hosted_drafts_are_rejected() {
+        let scope = directory::HostedComputerScope {
+            workspace_id: "workspace:alpha".into(),
+            device_id: "device-desktop".into(),
+        };
+        let draft = normalize_draft(draft()).unwrap();
+        assert!(directory::hosted_scope_matches(
+            &scope,
+            &draft.workspace_id,
+            Some(&draft.device_id)
+        ));
+        let mut mismatched = draft;
+        mismatched.workspace_id = "workspace:beta".into();
+        assert!(!directory::hosted_scope_matches(
+            &scope,
+            &mismatched.workspace_id,
+            Some(&mismatched.device_id)
+        ));
+        mismatched.workspace_id = "workspace:alpha".into();
+        mismatched.device_id = "device-other".into();
+        assert!(!directory::hosted_scope_matches(
+            &scope,
+            &mismatched.workspace_id,
+            Some(&mismatched.device_id)
+        ));
+    }
+
+    fn clear_live_view_handles() {
+        live_view_handles()
+            .lock()
+            .expect("live view handle lock")
+            .clear();
+    }
+
+    fn live_view_target(workspace_id: &str) -> HostedBrowserTarget {
+        HostedBrowserTarget {
+            workspace_id: workspace_id.into(),
+            agent_id: "agent-research".into(),
+            device_id: "device-desktop".into(),
+        }
+    }
+
+    #[test]
+    fn live_view_secrets_stay_native_and_are_omitted_from_frontend_snapshots() {
+        clear_live_view_handles();
+        let snapshot = HostedBrowserSnapshot {
+            current_url: "https://example.com/".into(),
+            title: "Example".into(),
+            observation_id: "observation-1234567890abcdef".into(),
+            viewport: HostedBrowserViewportSnapshot {
+                scroll_x: 0,
+                scroll_y: 0,
+                width: 1280,
+                height: 800,
+                document_width: 1280,
+                document_height: 1600,
+                can_scroll_up: false,
+                can_scroll_down: true,
+            },
+            navigation: HostedBrowserNavigationSnapshot {
+                can_go_back: false,
+                can_go_forward: false,
+            },
+            controls: vec![],
+            preview_data_url: "data:image/jpeg;base64,cHJldmlldw==".into(),
+            live_view_url: Some("https://live.browser.run/ui/token?wss=secret".into()),
+            takeover_available: false,
+            last_download: None,
+            updated_at: "2026-08-25T12:00:02.000Z".into(),
+        };
+        let public = retain_live_view_for_frontend(
+            snapshot,
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+        );
+        assert!(public.live_view_url.is_none());
+        assert!(public.takeover_available);
+        let encoded = serde_json::to_string(&public).unwrap();
+        assert!(!encoded.contains("wss"));
+        assert!(!encoded.contains("liveViewUrl"));
+        assert_eq!(
+            live_view_handle("workspace:alpha", "agent-research", "device-desktop").as_deref(),
+            Some("https://live.browser.run/ui/token?wss=secret")
+        );
+        assert!(validate_live_view_url("https://live.browser.run/ui/token?wss=secret").is_ok());
+        assert!(validate_live_view_url("https://evil.example/?wss=secret").is_err());
+    }
+
+    #[test]
+    fn storing_a_live_view_drops_other_workspace_secrets() {
+        clear_live_view_handles();
+        store_live_view(
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+            "https://live.browser.run/ui/alpha?wss=secret-a".into(),
+        )
+        .expect("store alpha");
+        store_live_view(
+            "workspace:beta",
+            "agent-research",
+            "device-desktop",
+            "https://live.browser.run/ui/beta?wss=secret-b".into(),
+        )
+        .expect("store beta");
+        assert!(
+            live_view_handle("workspace:alpha", "agent-research", "device-desktop").is_none(),
+            "previous hosted workspace takeover URL must not survive a later snapshot"
+        );
+        assert_eq!(
+            live_view_handle("workspace:beta", "agent-research", "device-desktop").as_deref(),
+            Some("https://live.browser.run/ui/beta?wss=secret-b")
+        );
+        clear_live_view_handles();
+    }
+
+    #[test]
+    fn invalid_live_view_urls_are_not_stored() {
+        clear_live_view_handles();
+        assert!(store_live_view(
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+            "https://evil.example/ui/token?wss=secret".into(),
+        )
+        .is_err());
+        assert!(live_view_handle("workspace:alpha", "agent-research", "device-desktop").is_none());
+        let public = retain_live_view_for_frontend(
+            HostedBrowserSnapshot {
+                current_url: "https://example.com/".into(),
+                title: "Example".into(),
+                observation_id: "observation-1234567890abcdef".into(),
+                viewport: HostedBrowserViewportSnapshot {
+                    scroll_x: 0,
+                    scroll_y: 0,
+                    width: 1280,
+                    height: 800,
+                    document_width: 1280,
+                    document_height: 1600,
+                    can_scroll_up: false,
+                    can_scroll_down: true,
+                },
+                navigation: HostedBrowserNavigationSnapshot {
+                    can_go_back: false,
+                    can_go_forward: false,
+                },
+                controls: vec![],
+                preview_data_url: "data:image/jpeg;base64,cHJldmlldw==".into(),
+                live_view_url: Some("https://evil.example/ui/token?wss=secret".into()),
+                takeover_available: true,
+                last_download: None,
+                updated_at: "2026-08-25T12:00:02.000Z".into(),
+            },
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+        );
+        assert!(public.live_view_url.is_none());
+        assert!(!public.takeover_available);
+        assert!(live_view_handle("workspace:alpha", "agent-research", "device-desktop").is_none());
+        clear_live_view_handles();
+    }
+
+    #[test]
+    fn live_view_open_requires_selected_hosted_scope_even_when_a_handle_exists() {
+        clear_live_view_handles();
+        store_live_view(
+            "workspace:alpha",
+            "agent-research",
+            "device-desktop",
+            "https://live.browser.run/ui/token?wss=secret".into(),
+        )
+        .expect("store");
+        let error = live_view_url_for_open(live_view_target("workspace:alpha"))
+            .expect_err("open must not skip the selected hosted workspace fence");
+        assert!(
+            error.contains("Account storage unavailable")
+                || error.contains("Select an available hosted workspace")
+                || error.contains("does not match the selected workspace"),
+            "{error}"
+        );
+        assert!(
+            live_view_handle("workspace:alpha", "agent-research", "device-desktop").is_some(),
+            "scope refusal must not be confused with a missing handle"
+        );
+        clear_live_view_handles();
     }
 }

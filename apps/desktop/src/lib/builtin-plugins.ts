@@ -1,4 +1,4 @@
-import type { BuiltinPlugins } from "@fable/protocol";
+import type { BuiltinPlugins } from "@mivlet/protocol";
 import computerIcon from "../assets/plugins/computer.png?no-inline";
 
 export interface BuiltinPluginEntry {

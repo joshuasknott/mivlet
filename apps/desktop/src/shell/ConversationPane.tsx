@@ -3,10 +3,10 @@ import { promoteWorkOutputToMemory } from "../lib/work-memory";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ConversationRoom,
-  FableAgentProfile,
+  MivletAgentProfile,
   LocalProject,
   WorkspaceView,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
 import { useScopedComposer } from "../hooks/useScopedComposer";
@@ -131,7 +131,7 @@ export function ConversationPane({
   const recipientId =
     recipient === "discussion" ? (room.facilitatorId ?? "") : recipient;
   const profile = runtime.agents.find((agent) => agent.id === recipientId);
-  const displayAgent: FableAgentProfile = profile ?? {
+  const displayAgent: MivletAgentProfile = profile ?? {
     ...(runtime.agents[0] ?? {
       instructions: "",
       modelId: "",
@@ -288,7 +288,7 @@ export function ConversationPane({
         sessions.some((session) => session.approvalIds.has(approval.id)),
       )
     : [];
-  const authors: Record<string, FableAgentProfile> = Object.fromEntries(
+  const authors: Record<string, MivletAgentProfile> = Object.fromEntries(
     state.data.authors
       .filter((author) => author.conversationId === room.id)
       .map((author) => [

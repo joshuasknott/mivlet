@@ -1,7 +1,7 @@
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { SpinnerGap } from "@phosphor-icons/react/dist/csr/SpinnerGap";
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import type { FableAgentProfile, SearchResult } from "@fable/protocol";
+import type { MivletAgentProfile, SearchResult } from "@mivlet/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { useWorkspaceSearch } from "../../lib/search/useWorkspaceSearch";
 import { SearchResults } from "./SearchResults";
@@ -10,7 +10,7 @@ import "./search.css";
 export interface SearchOverlayProps {
   workspaceId: string;
   /** Profiles from the active, hydrated workspace only. */
-  agents?: readonly FableAgentProfile[];
+  agents?: readonly MivletAgentProfile[];
   open: boolean;
   onClose: () => void;
   onOpenResult: (result: SearchResult) => void;
@@ -19,7 +19,7 @@ export interface SearchOverlayProps {
   debounceMs?: number;
 }
 
-const NO_AGENTS: readonly FableAgentProfile[] = [];
+const NO_AGENTS: readonly MivletAgentProfile[] = [];
 
 export function SearchOverlay({
   workspaceId, agents = NO_AGENTS, open, onClose, onOpenResult,

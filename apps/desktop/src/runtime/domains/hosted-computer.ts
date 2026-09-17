@@ -15,7 +15,7 @@ import type {
   PreparedHostedBrowserAction,
   PreparedHostedBrowserNavigation,
   PreparedHostedProcessLaunch,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 import type { RuntimeAdapter } from "../ports";
@@ -63,6 +63,7 @@ interface HostedComputerRuntimePort {
   snapshotBrowser(
     target: HostedBrowserTarget,
   ): Promise<HostedBrowserSnapshot | null>;
+  openLiveView(target: HostedBrowserTarget): Promise<boolean>;
 }
 
 function createPort(adapter: RuntimeAdapter): HostedComputerRuntimePort {
@@ -108,13 +109,13 @@ function createPort(adapter: RuntimeAdapter): HostedComputerRuntimePort {
         : Promise.resolve(null),
     navigateBrowser: (proposal, resolution, sourceResolution) =>
       native
-        ? invoke("hosted_browser_navigate", {
+        ? invoke<HostedBrowserSnapshot>("hosted_browser_navigate", {
             request: {
               proposal,
               resolution,
               ...(sourceResolution ? { sourceResolution } : {}),
             },
-          })
+          }).then(toPublicHostedBrowserSnapshot)
         : Promise.resolve(null),
     prepareBrowserAction: (draft) =>
       native
@@ -122,14 +123,20 @@ function createPort(adapter: RuntimeAdapter): HostedComputerRuntimePort {
         : Promise.resolve(null),
     actBrowser: (proposal, resolution, sourceResolution) =>
       native
-        ? invoke("hosted_browser_action", {
+        ? invoke<HostedBrowserSnapshot>("hosted_browser_action", {
             request: { proposal, resolution, sourceResolution },
-          })
+          }).then(toPublicHostedBrowserSnapshot)
         : Promise.resolve(null),
     snapshotBrowser: (target) =>
       native
-        ? invoke("hosted_browser_snapshot", { target })
+        ? invoke<HostedBrowserSnapshot>("hosted_browser_snapshot", {
+            target,
+          }).then(toPublicHostedBrowserSnapshot)
         : Promise.resolve(null),
+    openLiveView: (target) =>
+      native
+        ? invoke("hosted_browser_open_live_view", { target }).then(() => true)
+        : Promise.resolve(false),
   };
 }
 
@@ -182,3 +189,15 @@ export const actRuntimeHostedBrowser = (
   resolution: ApprovalResolutionRequest,
   sourceResolution: ApprovalResolutionRequest,
 ) => port().actBrowser(proposal, resolution, sourceResolution);
+export const openRuntimeHostedLiveView = (target: HostedBrowserTarget) =>
+  port().openLiveView(target);
+
+export function toPublicHostedBrowserSnapshot(
+  snapshot: HostedBrowserSnapshot,
+): HostedBrowserSnapshot {
+  const { liveViewUrl, ...rest } = snapshot;
+  return {
+    ...rest,
+    takeoverAvailable: rest.takeoverAvailable === true || Boolean(liveViewUrl),
+  };
+}

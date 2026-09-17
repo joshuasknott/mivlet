@@ -6,7 +6,7 @@
  * LIVE existing memories are considered (forgotten/disabled are excluded).
  */
 
-import type { MemoryRecord } from "@fable/protocol";
+import type { MemoryRecord } from "@mivlet/protocol";
 import { isLiveMemory } from "../store";
 
 interface Candidate {

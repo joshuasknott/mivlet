@@ -22,7 +22,7 @@ import type {
   BackendModel,
   NativeCompletionRequest,
   NativeMessage
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { runAgentLoop, type ToolExecutor } from "./agent-loop";
 import { BackendRuntimeError } from "../agent-runtime/utils/errors";
 import {

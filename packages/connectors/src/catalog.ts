@@ -1,9 +1,8 @@
-import { tokenPluginDefinitions } from "./providers/token-plugins";
 import type {
   ConnectorManifest,
   ConnectorPermission,
   SupportedConnectorId
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 export const SUPPORTED_CONNECTOR_IDS = [
   "github",
@@ -14,19 +13,6 @@ export const SUPPORTED_CONNECTOR_IDS = [
   "slack",
   "google-calendar",
   "linear",
-  "outlook",
-  "microsoft-teams",
-  "zoom",
-  "linkedin",
-  "instagram",
-  "youtube",
-  "google-ads",
-  "meta-ads",
-  "shopify",
-  "docusign",
-  "greenhouse",
-  "lever",
-  "workday"
 ] as const satisfies readonly SupportedConnectorId[];
 
 const NOT_CHECKED = "Not checked";
@@ -85,26 +71,33 @@ export const connectorCatalog: ConnectorManifest[] = [
   disconnectedConnector({
     id: "github",
     name: "GitHub",
-    permissions: ["read repositories, issues, and pull requests"],
+    permissions: [
+      "read authenticated account identity and organization membership",
+      "read public repositories, issues, and pull requests; private repositories are not granted"
+    ],
     authMode: "oauth-broker",
     scopes: [
       permission("read:user", "Account identity", "read", true),
-      permission("repo", "Repositories, issues, and pull requests", "read", true),
-      permission("read:org", "Organization membership", "read", false)
+      permission("read:org", "Organization membership", "read", true)
     ],
-    setupMessage: "Register a GitHub OAuth App and configure the Mivlet auth broker."
+    setupMessage:
+      "Register a classic GitHub OAuth App (not a GitHub App) and configure the Mivlet auth broker. The broker requests `read:user` and `read:org` only. Classic `repo` is not requested. Public-repository REST may work; private-repository reads are not granted."
   }),
   disconnectedConnector({
     id: "vercel",
     name: "Vercel",
-    permissions: ["read projects and deployments", "prepare approved deployment changes"],
+    permissions: [
+      "read projects and deployments",
+      "change deployments, projects, and domains only after approval"
+    ],
     authMode: "provider-installation",
     scopes: [
       permission("project:read", "Projects", "read", true),
       permission("deployment:read", "Deployments", "read", true),
-      permission("deployment:write", "Deployment changes", "write", false)
+      permission("deployment:write", "Approved deployment, project, and domain changes", "write", true)
     ],
-    setupMessage: "Create a Vercel integration and configure its External Flow redirect."
+    setupMessage:
+      "Create a Vercel integration with read and write access and configure its External Flow redirect. Mivlet requests `deployment:write` because native promote, rollback, create, cancel, project, and domain actions exist."
   }),
   disconnectedConnector({
     id: "google-drive",
@@ -114,8 +107,8 @@ export const connectorCatalog: ConnectorManifest[] = [
     scopes: [
       permission(
         "https://www.googleapis.com/auth/drive.file",
-        "Selected Drive files",
-        "read",
+        "Selected Drive files you create or change",
+        "write",
         true
       )
     ],
@@ -125,14 +118,14 @@ export const connectorCatalog: ConnectorManifest[] = [
   disconnectedConnector({
     id: "notion",
     name: "Notion",
-    permissions: ["read selected pages and databases", "prepare approved content changes"],
-    authMode: "oauth-broker",
-    scopes: [
-      permission("read_content", "Read selected content", "read", true),
-      permission("insert_content", "Create content", "write", false),
-      permission("update_content", "Update content", "write", false)
+    permissions: [
+      "read pages and databases shared with the integration",
+      "prepare approved content changes using Notion console capabilities"
     ],
-    setupMessage: "Create a Notion public integration and configure the Mivlet auth broker."
+    authMode: "oauth-broker",
+    scopes: [],
+    setupMessage:
+      "Create a Notion public integration and configure the Mivlet auth broker. Notion does not take OAuth scope query parameters; capabilities are set in the Notion console, and sharing is Notion's page-sharing model."
   }),
   disconnectedConnector({
     id: "gmail",
@@ -155,10 +148,16 @@ export const connectorCatalog: ConnectorManifest[] = [
     scopes: [
       permission("channels:read", "Channel list", "read", true),
       permission("channels:history", "Selected channel history", "read", true),
+      permission("groups:read", "Private channel list", "read", false),
+      permission("groups:history", "Selected private channel history", "read", false),
+      permission("im:read", "Direct message list", "read", false),
+      permission("mpim:read", "Group direct message list", "read", false),
       permission("users:read", "Workspace users", "read", true),
-      permission("chat:write", "Post approved messages", "write", false)
+      permission("chat:write", "Post, reply, edit, or delete after approval", "write", true),
+      permission("reactions:write", "Add or remove reactions after approval", "write", true)
     ],
-    setupMessage: "Create a Slack app and configure the Mivlet auth broker."
+    setupMessage:
+      "Create a Slack app with bot scopes for channel reads plus `chat:write` and `reactions:write`, and configure the Mivlet auth broker. Those write scopes match native post, reply, edit, delete, and reaction actions."
   }),
   disconnectedConnector({
     id: "google-calendar",
@@ -195,16 +194,11 @@ export const connectorCatalog: ConnectorManifest[] = [
     authMode: "oauth-broker",
     scopes: [
       permission("read", "Workspace data", "read", true),
-      permission("write", "Issue changes", "write", false),
-      permission("comments:create", "Create comments", "write", false)
+      permission("write", "Create or change issues and comments after approval", "write", true)
     ],
-    setupMessage: "Create a Linear OAuth application and configure the Mivlet auth broker."
+    setupMessage:
+      "Create a Linear OAuth application with `read` and `write` and configure the Mivlet auth broker. `write` is requested because native issue create, issue update, and comment actions exist; create-only Linear scopes are not requested separately."
   }),
-  ...tokenPluginDefinitions.map((plugin) => disconnectedConnector({
-    id: plugin.id, name: plugin.name, authMode: "api-token", permissions: [plugin.description],
-    scopes: [permission("token-read", "Read operations permitted by this token", "read", true)],
-    setupMessage: plugin.setup,
-  })),
 ];
 
 export function listSupportedConnectors(): ConnectorManifest[] {

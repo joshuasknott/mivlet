@@ -63,7 +63,8 @@ Plaintext query columns must remain non-secret.
 Rust owns credential injection, endpoint allowlists, HTTPS policy, timeouts, and
 bounded responses. Remote custom-provider HTTP is rejected; loopback is the
 only plaintext exception. Connector OAuth uses system-browser authorization,
-PKCE where applicable, exact callback state, and isolated credential custody.
+PKCE (public Google and desktop↔broker S256, plus broker-owned PKCE where the
+provider documents it), exact callback state, and isolated credential custody.
 The broker handles only confidential connector authorization and stores no
 conversation or provider secrets.
 
@@ -71,14 +72,18 @@ conversation or provider secrets.
 
 Retrieved files, connector results, websites, and model output cannot grant
 authority. Tools use strict schemas and bounds. The approval record binds the
-exact proposed effect and is rechecked immediately before dispatch. Replayed or
-stale permits, changed browser controls, unknown tools, and scope changes fail.
+exact proposed effect and is rechecked immediately before dispatch. TypeScript
+and native permission-policy evaluators share one effect and allow-set
+vocabulary, including connector publish and delete effects; unknown tools fail
+closed. Replayed or stale permits, changed browser controls, and scope changes
+fail.
 
 ### Native application control
 
 The bundled driver operates one exactly selected Windows window. The existing
-global policy authorizes each tool; Full Access resolves approvals automatically
-without a separate app grant. Native authority binds workspace, agent, request,
+global policy authorizes each tool; Full Access still uses the same exact
+single-use permit. High-risk minting requires a native OS confirm; WebView
+cannot mint by echoing a confirmation phrase. There is no separate app grant. Native authority binds workspace, agent, request,
 generation, process identity and a native window
 marker. The driver receives a bounded manifest and a cleared environment, and
 runs in an owned kill-on-close job. No shell, registry, arbitrary driver method,
@@ -122,8 +127,17 @@ profiles, container state, raw connector caches, and host paths.
 
 Hosted capabilities are short-lived, scoped, generation-fenced, and single-use.
 The runner independently validates the capability and public-network policy.
-Undeployed or incomplete configuration must remain unavailable rather than
-falling back to a fixture.
+Service Bearer credentials cannot launch process or browser effects. HMAC
+signing uses a distinct secret from the lifecycle Bearer. Undeployed or
+incomplete configuration must remain unavailable rather than falling back to a
+fixture.
+
+Convex auth refuses the test mock Clerk issuer unless
+`MIVLET_CLERK_ALLOW_MOCK=1` (legacy `FABLE_CLERK_ALLOW_MOCK`). That pair is
+local/dev only: `anonymous:` and `dev:` Convex backends and in-memory tests may
+use it. Production, preview, and staging deployments fail closed at config
+load. CI runs `node scripts/ci/refuse-mock-clerk.mjs`, which rejects the same
+pair in GitHub Actions env and in tracked env/workflow/wrangler files.
 
 ### Supply chain and release
 

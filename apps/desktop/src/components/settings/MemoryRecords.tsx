@@ -1,5 +1,5 @@
 import { useState } from "react";
-import type { MemoryRecord } from "@fable/protocol";
+import type { MemoryRecord } from "@mivlet/protocol";
 import type { SettingsRuntime } from "./settings-runtime";
 
 /** Human label for a memory's owning scope. Never widens the stored scope. */

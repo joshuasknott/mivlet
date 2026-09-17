@@ -20,7 +20,6 @@ export async function openConnectorTools(workspaceId: string, serverId: string) 
       if (prepared.requiresApproval !== false) throw new Error("Could not verify Vercel account access. Reconnect Vercel.");
       const permit = await transport.authorizeToolCall(proposal, {
         request: prepared.approval, decision: "once", decidedAt: new Date().toISOString(),
-        confirmationText: prepared.approval.confirmationPhrase,
       });
       assertConnectorToolSucceeded(await transport.executeAuthorizedToolCall(proposal, permit.permitId));
     }

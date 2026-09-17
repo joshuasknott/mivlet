@@ -1,16 +1,16 @@
 [package]
-name = "fable-desktop"
+name = "mivlet-desktop"
 version = "0.1.0"
 description = "Mivlet desktop runtime"
 authors = ["Mivlet"]
 edition = "2021"
 
 [lib]
-name = "fable_desktop_lib"
+name = "mivlet_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [[bin]]
-name = "fable-desktop"
+name = "mivlet-desktop"
 path = "src/main.rs"
 
 [build-dependencies]
@@ -19,6 +19,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Compiles the shared TypeScript/Rust secret-redaction patterns from
+# packages/protocol/src/secret-redaction.json (already in the lockfile).
+regex = "1.12.4"
 tauri = { version = "2", features = [] }
 # Native OS notifications for completion, failure, and approval-needed states.
 # Pinned to the Tauri 2 plugin line; bodies are shaped (privacy-safe) in TS.
@@ -44,7 +47,7 @@ base64 = "0.22"
 getrandom = "0.3"
 url = "2"
 # Extract the main readable text and source metadata from fetched HTML. This is
-# local parsing only; Fable still owns outbound policy, size limits and citations.
+# local parsing only; Mivlet still owns outbound policy, size limits and citations.
 dom_smoothie = "0.18"
 jsonwebtoken = { version = "9", default-features = false }
 # OS-secure credential storage for agent-runtime API keys. The keyring crate
@@ -66,11 +69,11 @@ aes-gcm = "0.10"
 hex = "0.4"
 tempfile = "3"
 # Managed Google Antigravity runtime archives are ZIP files. Only DEFLATE
-# decoding is enabled; Fable never creates archives or enables legacy codecs.
+# decoding is enabled; Mivlet never creates archives or enables legacy codecs.
 zip = { version = "6", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 # Parser-backed validation for untrusted PDF artifacts. Defaults are disabled to
 # avoid unrelated date, image and parallel-processing dependencies; strict load
-# options and Fable-owned bounds are applied before a PDF can reach a host app.
+# options and Mivlet-owned bounds are applied before a PDF can reach a host app.
 lopdf = { version = "0.44.0", default-features = false }
 png = "=0.17.16"
 crc32fast = "=1.5.0"
@@ -82,7 +85,7 @@ rfd = "=0.17.2"
 [target.'cfg(windows)'.dependencies]
 windows = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Com", "Win32_System_Variant", "Win32_UI_Accessibility"] }
 # The managed Antigravity binary launches a child ACP process. A Windows job
-# keeps that full process tree tied to Fable so failed checks cannot leave a
+# keeps that full process tree tied to Mivlet so failed checks cannot leave a
 # profile-locking ACP process behind.
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",

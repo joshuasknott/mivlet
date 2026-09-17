@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { CollaborationWorkItem } from "@fable/protocol";
+import type { CollaborationWorkItem } from "@mivlet/protocol";
 import { latestAgentReply } from "./agent-preview";
 const work = (text: string, createdAt: string) => ({ outputs: [{ text, createdAt }] }) as CollaborationWorkItem;
 describe("agent sidebar reply", () => {

@@ -8,7 +8,7 @@ import {
 import userEvent from "@testing-library/user-event";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { ConnectorManifest } from "@fable/protocol";
+import type { ConnectorManifest } from "@mivlet/protocol";
 import { PluginPanel, resolveDetailedStatus, connectorAccessSummary } from "./PluginPanel";
 import { mergeConnectorConnections } from "../lib/connector-connections";
 
@@ -238,29 +238,10 @@ describe("Connector Connection selection", () => {
     ).toBeVisible();
   });
 
-  it("offers explicit token setup for formerly planned plugins", async () => {
-    const user = userEvent.setup();
-    render(
-      <PluginPanel
-        manifests={[github]}
-        onUseConnector={vi.fn()}
-        onConnect={vi.fn()}
-        onDisconnect={vi.fn()}
-        onRefresh={vi.fn()}
-        onSelect={vi.fn()}
-        accounts={{}}
-        onSwitchAccount={vi.fn()}
-      />,
-    );
-
-    await user.click(
-      screen.getAllByRole("button", { name: "Connect Outlook" })[0],
-    );
-
-    expect(screen.getByRole("dialog", { name: "Outlook" })).toBeVisible();
-    expect(screen.getByRole("dialog", { name: "Outlook" })).toHaveTextContent("Microsoft Graph delegated access token");
-    expect(
-      screen.getByRole("button", { name: "Verify and connect" }),
-    ).toBeDisabled();
+  it("excludes removed integrations from the directory", () => {
+    render(<PluginPanel manifests={[github]} onUseConnector={vi.fn()} onConnect={vi.fn()} onDisconnect={vi.fn()} onRefresh={vi.fn()} onSelect={vi.fn()} accounts={{}} onSwitchAccount={vi.fn()} />);
+    for (const name of ["Outlook", "Microsoft Teams", "Zoom", "LinkedIn", "Instagram", "YouTube", "Google Ads", "Meta Ads", "Shopify", "DocuSign", "Greenhouse", "Lever", "Workday"]) {
+      expect(screen.queryByRole("button", { name: `Connect ${name}` })).not.toBeInTheDocument();
+    }
   });
 });

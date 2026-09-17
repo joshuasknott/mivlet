@@ -14,13 +14,15 @@
  * in-flight cancellation of the HTTP request happens at the Rust boundary.
  */
 
-import type {
-  ApprovalRequest,
-  BackendAgentEvent,
-  NativeCompletionRequest,
-  NativeMessage,
-  PermissionMode
-} from "@fable/protocol";
+import {
+  SECRET_CONTENT_OMITTED,
+  secretMarkerSurvives,
+  type ApprovalRequest,
+  type BackendAgentEvent,
+  type NativeCompletionRequest,
+  type NativeMessage,
+  type PermissionMode
+} from "@mivlet/protocol";
 import { catalogueCapabilities } from "./model-catalogue";
 import { streamAnthropicEvents } from "./anthropic";
 import { streamGeminiEvents } from "./gemini";
@@ -33,6 +35,7 @@ import {
 } from "./tools";
 import type { HttpTransport } from "./transport";
 import { classifyBackendError } from "../agent-runtime/utils/errors";
+import { redactSecretsFromString } from "../agent-runtime/utils/redact";
 import { effectForTool, evaluatePermissionPolicy } from "../permission-policy";
 
 type FinishReason = "stop" | "tool-calls" | "length" | "error";
@@ -176,9 +179,11 @@ export async function* runAgentLoop(
 
   const boundedToolOutput = (output: string): string => {
     const limit = options.maxToolOutputCharacters ?? MAX_TOOL_OUTPUT_CHARACTERS;
-    return output.length <= limit
+    const truncated = output.length <= limit
       ? output
       : `${output.slice(0, limit)}\n[Tool output truncated by Mivlet at ${limit} characters.]`;
+    const redacted = redactSecretsFromString(truncated);
+    return secretMarkerSurvives(redacted) ? SECRET_CONTENT_OMITTED : redacted;
   };
 
   for (let turn = 0; turn < maxTurns; turn += 1) {

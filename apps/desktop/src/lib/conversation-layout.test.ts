@@ -1,4 +1,4 @@
-import type { ConversationLayout } from "@fable/protocol";
+import type { ConversationLayout } from "@mivlet/protocol";
 import { describe, expect, it } from "vitest";
 import {
   emptyLayout,

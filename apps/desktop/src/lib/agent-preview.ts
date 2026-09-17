@@ -1,4 +1,4 @@
-import type { CollaborationWorkItem } from "@fable/protocol";
+import type { CollaborationWorkItem } from "@mivlet/protocol";
 import { parseComputerArtifact } from "./computer-artifacts";
 import { redactSecrets } from "./safe-output";
 

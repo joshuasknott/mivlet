@@ -1,4 +1,4 @@
-import type { FableAgentProfile, FableLearnedTask } from "@fable/protocol";
+import type { MivletAgentProfile, MivletLearnedTask } from "@mivlet/protocol";
 
 const MAX_LEARNED_TASKS = 24;
 
@@ -7,9 +7,9 @@ function compact(value: string, limit: number) {
 }
 
 export function upsertLearnedTask(
-  current: readonly FableLearnedTask[],
-  task: FableLearnedTask
-): FableLearnedTask[] {
+  current: readonly MivletLearnedTask[],
+  task: MivletLearnedTask
+): MivletLearnedTask[] {
   const normalized = {
     ...task,
     title: compact(task.title, 120),
@@ -23,7 +23,7 @@ export function upsertLearnedTask(
   return [...current.slice(-(MAX_LEARNED_TASKS - 1)), normalized];
 }
 
-export function agentExecutionInstructions(agent: FableAgentProfile): string {
+export function agentExecutionInstructions(agent: MivletAgentProfile): string {
   const base = agent.instructions.trim();
   const learned = (agent.learnedTasks ?? [])
     .filter((task) => task.title.trim() && task.instruction.trim())

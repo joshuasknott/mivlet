@@ -822,7 +822,7 @@ fn initialize_request(id: u64) -> Value {
         "params":{
             "protocolVersion":1,
             "clientCapabilities":{"fs":{"readTextFile":false,"writeTextFile":false},"terminal":false},
-            "clientInfo":{"name":"Fable","title":"Mivlet","version":env!("CARGO_PKG_VERSION")}
+            "clientInfo":{"name":"Mivlet","title":"Mivlet","version":env!("CARGO_PKG_VERSION")}
         }
     })
 }
@@ -989,7 +989,7 @@ fn managed_approval_payload(
     let title = crate::paths::truncate_characters(&crate::paths::normalize_spaces(title), 120);
     let arguments = crate::store::repos::action_history::redact_safe_detail(arguments);
     let arguments_text = crate::paths::truncate_characters(&arguments.to_string(), 2_000);
-    let fable_mode = normalized_permission_mode(mode);
+    let permission_mode = normalized_permission_mode(mode);
     let label = provider_label(provider_id);
     json!({
         "type":"approval-request",
@@ -1001,13 +1001,13 @@ fn managed_approval_payload(
             "id":crate::paths::truncate_characters(&format!("{provider_id}-{run_id}-{request_id}"),120),
             "service":provider_id,
             "action":title.clone(),
-            "mode":fable_mode,
-            "riskLevel":if fable_mode == "full-access" { "high" } else { "medium" },
+            "mode":permission_mode,
+            "riskLevel":if permission_mode == "full-access" { "high" } else { "medium" },
             "dataUsed":[arguments_text],
             "consequence":format!("Allow {label} to {title}."),
             "requestedAt":chrono::Utc::now().to_rfc3339(),
             "decisions":["once","deny"],
-            "confirmationPhrase":if fable_mode == "full-access" { Value::String(format!("approve {} action", provider_id)) } else { Value::Null }
+            "confirmationPhrase":if permission_mode == "full-access" { Value::String(format!("approve {} action", provider_id)) } else { Value::Null }
         }
     })
 }
@@ -1203,7 +1203,7 @@ fn start_acp_turn(
             },
         );
     let request_id = request.request_id.clone();
-    let channel = format!("fable://managed-runtime/{provider_id}/{request_id}");
+    let channel = format!("mivlet://managed-runtime/{provider_id}/{request_id}");
     thread::spawn(move || {
         let outcome = (|| -> Result<(), String> {
             write_json(&stdin, &provider_id, &initialize_request(1))?;
@@ -1549,10 +1549,10 @@ fn start_claude_turn(
             },
         );
     let request_id = request.request_id.clone();
-    let channel = format!("fable://managed-runtime/{provider_id}/{request_id}");
+    let channel = format!("mivlet://managed-runtime/{provider_id}/{request_id}");
     thread::spawn(move || {
         let stderr_thread = thread::spawn(move || read_limited(stderr, MAX_COMMAND_OUTPUT));
-        let initialize_id = format!("fable-init-{request_id}");
+        let initialize_id = format!("mivlet-init-{request_id}");
         let mut prompt_sent = false;
         let mut completed = false;
         let mut emitted_text = false;
@@ -2016,7 +2016,7 @@ fn start_opencode_turn(
             },
         );
     let request_id = request.request_id.clone();
-    let channel = format!("fable://managed-runtime/opencode/{request_id}");
+    let channel = format!("mivlet://managed-runtime/opencode/{request_id}");
     tauri::async_runtime::spawn(async move {
         let stdout_thread =
             stdout.map(|stdout| thread::spawn(move || read_limited(stdout, MAX_COMMAND_OUTPUT)));
@@ -2300,7 +2300,7 @@ pub async fn interrupt_managed_runtime_turn(request_id: String) -> Result<(), St
             write_json(
                 stdin,
                 "claude",
-                &json!({"type":"control_request","request_id":format!("fable-interrupt-{request_id}"),"request":{"subtype":"interrupt","cancel_queued":true}}),
+                &json!({"type":"control_request","request_id":format!("mivlet-interrupt-{request_id}"),"request":{"subtype":"interrupt","cancel_queued":true}}),
             )?;
         }
     } else if let (Some(stdin), Some(session_id)) = (stdin.as_ref(), session_id) {

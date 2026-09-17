@@ -51,14 +51,14 @@ pub(crate) struct NativeIdentityGenerationGuard {
 }
 
 const CLERK_CONFIG_KEYS: [&str; 8] = [
-    "FABLE_CLERK_ISSUER",
-    "FABLE_CLERK_OAUTH_CLIENT_ID",
-    "FABLE_CLERK_AUDIENCE",
-    "FABLE_CLERK_AUTHORIZED_PARTY",
-    "FABLE_CLERK_SCOPES",
-    "FABLE_CLERK_REQUEST_ORG",
-    "FABLE_CLERK_REQUIRE_ORG",
-    "FABLE_CLERK_ALLOWED_ORG_IDS",
+    "MIVLET_CLERK_ISSUER",
+    "MIVLET_CLERK_OAUTH_CLIENT_ID",
+    "MIVLET_CLERK_AUDIENCE",
+    "MIVLET_CLERK_AUTHORIZED_PARTY",
+    "MIVLET_CLERK_SCOPES",
+    "MIVLET_CLERK_REQUEST_ORG",
+    "MIVLET_CLERK_REQUIRE_ORG",
+    "MIVLET_CLERK_ALLOWED_ORG_IDS",
 ];
 
 #[derive(Debug, Clone)]
@@ -552,9 +552,9 @@ fn load_config_from(
         return Ok(None);
     }
     for legacy_key in [
-        "FABLE_CLERK_REQUEST_ORG",
-        "FABLE_CLERK_REQUIRE_ORG",
-        "FABLE_CLERK_ALLOWED_ORG_IDS",
+        "MIVLET_CLERK_REQUEST_ORG",
+        "MIVLET_CLERK_REQUIRE_ORG",
+        "MIVLET_CLERK_ALLOWED_ORG_IDS",
     ] {
         if values
             .get(legacy_key)
@@ -571,7 +571,7 @@ fn load_config_from(
         }
     }
     let issuer = values
-        .get("FABLE_CLERK_ISSUER")
+        .get("MIVLET_CLERK_ISSUER")
         .and_then(|value| value.clone())
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
@@ -582,7 +582,7 @@ fn load_config_from(
             )
         })?;
     let client_id = values
-        .get("FABLE_CLERK_OAUTH_CLIENT_ID")
+        .get("MIVLET_CLERK_OAUTH_CLIENT_ID")
         .and_then(|value| value.clone())
         .filter(|value| !value.trim().is_empty())
         .ok_or_else(|| {
@@ -602,7 +602,7 @@ fn load_config_from(
     }
     let issuer = normalize_issuer(&issuer)?;
     let audience = values
-        .get("FABLE_CLERK_AUDIENCE")
+        .get("MIVLET_CLERK_AUDIENCE")
         .and_then(|value| value.clone())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
@@ -616,7 +616,7 @@ fn load_config_from(
         })?;
     let mut scopes = split_env_list(
         values
-            .get("FABLE_CLERK_SCOPES")
+            .get("MIVLET_CLERK_SCOPES")
             .and_then(|value| value.clone()),
     );
     if scopes.is_empty() {
@@ -628,7 +628,7 @@ fn load_config_from(
         }
     }
     let authorized_party = values
-        .get("FABLE_CLERK_AUTHORIZED_PARTY")
+        .get("MIVLET_CLERK_AUTHORIZED_PARTY")
         .and_then(|value| value.clone())
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty());
@@ -642,22 +642,26 @@ fn load_config_from(
 }
 
 fn load_config() -> Result<Option<ClerkIdentityConfig>, IdentityError> {
-    load_config_with_packaged(
-        !cfg!(debug_assertions),
-        |key| std::env::var(key).ok(),
-        |key| {
-            // Public OAuth client settings only. Never embed credentials or tokens.
-            match key {
-                "FABLE_CLERK_ISSUER" => option_env!("FABLE_CLERK_ISSUER"),
-                "FABLE_CLERK_OAUTH_CLIENT_ID" => option_env!("FABLE_CLERK_OAUTH_CLIENT_ID"),
-                "FABLE_CLERK_AUDIENCE" => option_env!("FABLE_CLERK_AUDIENCE"),
-                "FABLE_CLERK_AUTHORIZED_PARTY" => option_env!("FABLE_CLERK_AUTHORIZED_PARTY"),
-                "FABLE_CLERK_SCOPES" => option_env!("FABLE_CLERK_SCOPES"),
-                _ => None,
+    load_config_with_packaged(!cfg!(debug_assertions), crate::env_compat::var_opt, |key| {
+        // Public OAuth client settings only. Never embed credentials or tokens.
+        match key {
+            "MIVLET_CLERK_ISSUER" => {
+                option_env!("MIVLET_CLERK_ISSUER").or(option_env!("FABLE_CLERK_ISSUER"))
             }
-            .map(str::to_owned)
-        },
-    )
+            "MIVLET_CLERK_OAUTH_CLIENT_ID" => option_env!("MIVLET_CLERK_OAUTH_CLIENT_ID")
+                .or(option_env!("FABLE_CLERK_OAUTH_CLIENT_ID")),
+            "MIVLET_CLERK_AUDIENCE" => {
+                option_env!("MIVLET_CLERK_AUDIENCE").or(option_env!("FABLE_CLERK_AUDIENCE"))
+            }
+            "MIVLET_CLERK_AUTHORIZED_PARTY" => option_env!("MIVLET_CLERK_AUTHORIZED_PARTY")
+                .or(option_env!("FABLE_CLERK_AUTHORIZED_PARTY")),
+            "MIVLET_CLERK_SCOPES" => {
+                option_env!("MIVLET_CLERK_SCOPES").or(option_env!("FABLE_CLERK_SCOPES"))
+            }
+            _ => None,
+        }
+        .map(str::to_owned)
+    })
 }
 
 fn load_config_with_packaged(
@@ -714,9 +718,53 @@ fn load_convex_url_from(raw: Option<String>) -> Result<Url, IdentityError> {
     Ok(url)
 }
 
+fn load_convex_site_url_from(raw: Option<String>) -> Result<Url, IdentityError> {
+    let mut url = load_convex_url_from(raw)?;
+    let host = url.host_str().unwrap_or_default().to_string();
+    if let Some(deployment) = host.strip_suffix(".convex.cloud") {
+        url.set_host(Some(&format!("{deployment}.convex.site")))
+            .map_err(|_| {
+                identity_error(
+                    "configuration-required",
+                    "Mivlet Convex HTTP origin is invalid.",
+                    false,
+                )
+            })?;
+    } else if !host.ends_with(".convex.site") {
+        return Err(identity_error(
+            "configuration-required",
+            "Mivlet Convex HTTP origin is required for native hosted calls.",
+            false,
+        ));
+    }
+    Ok(url)
+}
+
+fn load_convex_site_url() -> Result<Url, IdentityError> {
+    load_convex_site_url_from(crate::env_compat::var_opt("MIVLET_CONVEX_URL"))
+}
+
+fn validate_convex_http_path(path: &str) -> Result<(), IdentityError> {
+    if !path.starts_with("/native/")
+        || path.len() > 160
+        || path.ends_with('/')
+        || path.contains("//")
+        || !path[1..]
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'/' | b'-' | b'_'))
+    {
+        return Err(identity_error(
+            "invalid-request",
+            "Convex HTTP path is invalid.",
+            false,
+        ));
+    }
+    Ok(())
+}
+
 #[allow(dead_code)]
 fn load_convex_url() -> Result<Url, IdentityError> {
-    load_convex_url_from(std::env::var("FABLE_CONVEX_URL").ok())
+    load_convex_url_from(crate::env_compat::var_opt("MIVLET_CONVEX_URL"))
 }
 
 fn disabled_status() -> IdentityStatus {
@@ -1025,14 +1073,14 @@ fn validate_claims_for_use(
                 "invalid-token",
                 "Clerk token audience did not match configuration.",
                 false,
-            ))
+            ));
         }
         None if audience_required => {
             return Err(identity_error(
                 "invalid-token",
                 "Clerk identity token audience was missing.",
                 false,
-            ))
+            ));
         }
         None => {}
     }
@@ -1129,7 +1177,7 @@ fn token_claim_shape_error(claims: &Value, audience_required: bool) -> Option<St
         Some(Value::Array(values)) if values.iter().all(Value::is_string) => {}
         Some(_) => return Some("the `aud` claim was not a string or string array".to_string()),
         None if audience_required => {
-            return Some("the required `aud` claim was missing".to_string())
+            return Some("the required `aud` claim was missing".to_string());
         }
         None => {}
     }
@@ -1818,7 +1866,7 @@ async fn status_with_store(
                 "offline",
                 "Mivlet could not refresh the account session while offline.",
                 &session,
-            ))
+            ));
         }
         Err(error) => return Err(error),
     };
@@ -1830,7 +1878,7 @@ async fn status_with_store(
                     "offline",
                     "Mivlet could not verify the account session while offline.",
                     &session,
-                ))
+                ));
             }
             Err(error) => return Err(error),
         };
@@ -1901,7 +1949,7 @@ async fn status_with_store(
                 "offline",
                 "Mivlet could not refresh the account session while offline.",
                 &session,
-            ))
+            ));
         }
         Err(error) if error.code == "revoked" => {
             clear_session_if_current(store, Some(expected_generation))?;
@@ -1947,7 +1995,7 @@ async fn begin_sign_in_with_store(
                 audience: Some(config.audience),
                 scopes: config.scopes,
                 authentication: None,
-            })
+            });
         }
         Err(error) => return Err(error),
     };
@@ -2374,6 +2422,88 @@ pub(crate) async fn call_convex(request: ConvexIdentityCallRequest) -> Result<Va
         .map_err(command_message)
 }
 
+async fn call_convex_http_route_with_store(
+    store: &dyn IdentitySecretStore,
+    path: &str,
+    args: Value,
+) -> Result<Value, IdentityError> {
+    validate_convex_http_path(path)?;
+    if !args.is_object() {
+        return Err(identity_error(
+            "invalid-request",
+            "Convex function arguments must be an object.",
+            false,
+        ));
+    }
+    let mut endpoint = load_convex_site_url()?;
+    let (session, expected_generation) = authenticated_session_with_store(store).await?;
+    endpoint.set_path(path);
+    crate::ensure_rustls_provider();
+    let response = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(15))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| {
+            identity_error(
+                "unknown",
+                "Mivlet could not initialize the authenticated Convex request.",
+                false,
+            )
+        })?
+        .post(endpoint)
+        .bearer_auth(&session.access_token)
+        .header(reqwest::header::ACCEPT, "application/json")
+        .json(&args)
+        .send()
+        .await
+        .map_err(|_| {
+            identity_error(
+                "offline",
+                "Mivlet could not reach the hosted workspace service.",
+                true,
+            )
+        })?;
+    if response.status() == reqwest::StatusCode::UNAUTHORIZED {
+        clear_session_if_current(store, Some(expected_generation))?;
+        return Err(identity_error(
+            "revoked",
+            "The hosted service rejected the Mivlet account session; sign in again.",
+            false,
+        ));
+    }
+    if !response.status().is_success() {
+        return Err(identity_error(
+            "hosted-request-failed",
+            format!(
+                "The hosted workspace service rejected the request (HTTP {}).",
+                response.status().as_u16()
+            ),
+            response.status().is_server_error(),
+        ));
+    }
+    let result = read_limited_json(response).await?;
+    let generation = IDENTITY_GENERATION
+        .lock()
+        .map_err(|_| identity_error("unknown", "Identity state unavailable.", false))?;
+    if *generation != expected_generation {
+        return Err(identity_error(
+            "expired",
+            "Account changed during the hosted request.",
+            false,
+        ));
+    }
+    Ok(result)
+}
+
+/// Native-only Convex HTTP route. Renderer code must never choose hosted
+/// functions under the user's account session.
+#[allow(dead_code)]
+pub(crate) async fn call_convex_http_route(path: &str, args: Value) -> Result<Value, String> {
+    call_convex_http_route_with_store(&NativeIdentitySecretStore, path, args)
+        .await
+        .map_err(command_message)
+}
+
 #[tauri::command]
 pub async fn identity_status(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
     native_identity_status().await
@@ -2548,7 +2678,7 @@ mod tests {
         ClerkIdentityConfig {
             issuer: "https://issuer.example".to_string(),
             client_id: "client_123".to_string(),
-            audience: "fable-desktop".to_string(),
+            audience: "mivlet-desktop".to_string(),
             authorized_party: Some("client_123".to_string()),
             scopes: vec!["openid".into(), "profile".into(), "email".into()],
         }
@@ -2558,7 +2688,7 @@ mod tests {
         TokenClaims {
             iss: "https://issuer.example".to_string(),
             sub: "user_123".to_string(),
-            aud: Some(AudienceClaim::One("fable-desktop".to_string())),
+            aud: Some(AudienceClaim::One("mivlet-desktop".to_string())),
             exp: now_epoch() + 3600,
             nbf: Some(now_epoch() - 5),
             iat: Some(now_epoch() - 5),
@@ -2611,17 +2741,17 @@ mod tests {
     #[test]
     fn packaged_identity_works_without_launch_environment_and_rejects_partial_overrides() {
         let packaged = config_values(&[
-            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
-            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
-            ("FABLE_CLERK_AUDIENCE", "fable-desktop"),
+            ("MIVLET_CLERK_ISSUER", "https://issuer.example"),
+            ("MIVLET_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("MIVLET_CLERK_AUDIENCE", "mivlet-desktop"),
         ]);
         let config = load_config_with_packaged(true, |_| None, |key| packaged.get(key).cloned())
             .unwrap()
             .unwrap();
-        assert_eq!(config.audience, "fable-desktop");
+        assert_eq!(config.audience, "mivlet-desktop");
         let error = load_config_with_packaged(
             true,
-            |key| (key == "FABLE_CLERK_ISSUER").then(|| "https://override.example".to_string()),
+            |key| (key == "MIVLET_CLERK_ISSUER").then(|| "https://override.example".to_string()),
             |key| packaged.get(key).cloned(),
         )
         .unwrap_err();
@@ -2634,8 +2764,8 @@ mod tests {
     #[test]
     fn enabled_production_config_requires_explicit_security_fields() {
         let incomplete = config_values(&[
-            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
-            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("MIVLET_CLERK_ISSUER", "https://issuer.example"),
+            ("MIVLET_CLERK_OAUTH_CLIENT_ID", "client_123"),
         ]);
         let error = load_config_from(true, |key| incomplete.get(key).cloned()).unwrap_err();
         assert_eq!(error.code, "configuration-required");
@@ -2645,20 +2775,20 @@ mod tests {
         );
 
         let complete = config_values(&[
-            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
-            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
-            ("FABLE_CLERK_AUDIENCE", "fable-desktop"),
+            ("MIVLET_CLERK_ISSUER", "https://issuer.example"),
+            ("MIVLET_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("MIVLET_CLERK_AUDIENCE", "mivlet-desktop"),
         ]);
         let config = load_config_from(true, |key| complete.get(key).cloned())
             .unwrap()
             .unwrap();
-        assert_eq!(config.audience, "fable-desktop");
+        assert_eq!(config.audience, "mivlet-desktop");
         assert_eq!(config.authorized_party, None);
     }
 
     #[test]
     fn partial_or_obsolete_clerk_configuration_fails_closed() {
-        let partial = config_values(&[("FABLE_CLERK_AUDIENCE", "fable-desktop")]);
+        let partial = config_values(&[("MIVLET_CLERK_AUDIENCE", "mivlet-desktop")]);
         assert_eq!(
             load_config_from(false, |key| partial.get(key).cloned())
                 .unwrap_err()
@@ -2667,9 +2797,9 @@ mod tests {
         );
 
         let obsolete = config_values(&[
-            ("FABLE_CLERK_ISSUER", "https://issuer.example"),
-            ("FABLE_CLERK_OAUTH_CLIENT_ID", "client_123"),
-            ("FABLE_CLERK_REQUIRE_ORG", "true"),
+            ("MIVLET_CLERK_ISSUER", "https://issuer.example"),
+            ("MIVLET_CLERK_OAUTH_CLIENT_ID", "client_123"),
+            ("MIVLET_CLERK_REQUIRE_ORG", "true"),
         ]);
         assert!(load_config_from(false, |key| obsolete.get(key).cloned())
             .unwrap_err()
@@ -2795,7 +2925,7 @@ mod tests {
         let claims_with_organization: TokenClaims = serde_json::from_value(serde_json::json!({
             "iss": "https://issuer.example",
             "sub": "user_123",
-            "aud": "fable-desktop",
+            "aud": "mivlet-desktop",
             "exp": now + 3600,
             "iat": now - 5,
             "azp": "client_123",
@@ -2908,7 +3038,7 @@ mod tests {
             expires_at: now_epoch() + 3600,
             scopes: vec!["openid".to_string()],
             issuer: "https://issuer.example".to_string(),
-            audience: "fable-desktop".to_string(),
+            audience: "mivlet-desktop".to_string(),
             client_id: "client_123".to_string(),
             authorized_party: Some("client_123".to_string()),
             authentication: Some(authentication),
@@ -2946,6 +3076,25 @@ mod tests {
     #[test]
     fn convex_boundary_rejects_untrusted_destinations_paths_and_token_fields() {
         assert!(load_convex_url_from(Some("https://example.convex.cloud".into())).is_ok());
+        assert_eq!(
+            load_convex_site_url_from(Some("https://example.convex.cloud".into()))
+                .unwrap()
+                .as_str(),
+            "https://example.convex.site/"
+        );
+        assert!(validate_convex_http_path("/native/execution-capability").is_ok());
+        for invalid in [
+            "/api/action",
+            "/native",
+            "/native/",
+            "/native/../execution-capability",
+            "hostedExecution:requestExecutionCapability",
+        ] {
+            assert!(
+                validate_convex_http_path(invalid).is_err(),
+                "accepted {invalid}"
+            );
+        }
         for invalid in [
             "http://example.convex.cloud",
             "https://user:secret@example.convex.cloud",
@@ -2986,7 +3135,7 @@ mod tests {
             "expires_at": now_epoch() + 3600,
             "scopes": ["openid", "profile", "email"],
             "issuer": "https://issuer.example",
-            "audience": "fable-desktop",
+            "audience": "mivlet-desktop",
             "client_id": "client_123",
             "authorized_party": "client_123",
             "identity": {

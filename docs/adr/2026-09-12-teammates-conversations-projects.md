@@ -1,7 +1,11 @@
 # Teammates, conversations, and coordinated local projects
 
-Status: Integrated locally. PR #49 remains draft pending the compressed bundle
-budget and remaining live artifact acceptance. No deployment or merge is included.
+Status: Accepted. Merged via [#49](https://github.com/joshuasknott/mivlet/pull/49) and
+[#50](https://github.com/joshuasknott/mivlet/pull/50) (12 September 2026) and integrated
+with the September 14 roadmap ([#59](https://github.com/joshuasknott/mivlet/pull/59)).
+Live artifact publication and signed-installer acceptance remain separate. Current
+performance gates use `scripts/perf/budget.json` (post-#50 ceilings), not the
+pre-allowance measurements recorded in the historical tables below.
 
 ## Decision
 
@@ -136,11 +140,14 @@ checkout were preserved. These checks are not signed-installer acceptance.
 | Artifact preview and schedules | Scoped artifact preview and project schedule binding have deterministic coverage. Live artifact publication was unavailable because the QA computer did not reach readiness: its inspector reported that the native Stop button/shortcut was unavailable and computer control remained off. The installed app was preserved. No always-on or hosted execution was tested. |
 
 After the navigation revision, the production build is 1,086,221 raw JS/CSS bytes
-and 313,003 gzip bytes. Raw total, initial entry (399,777 bytes), CSS and named route
-ceilings pass. The compressed total exceeds the unchanged 300,382-byte ceiling by
-12,621 bytes (12.3 KiB), so full performance readiness is not claimed. Superseded global
+and 313,003 gzip bytes. **These figures are historical** from the isolated #49
+checkout. Raw total, initial entry (399,777 bytes), CSS and named route
+ceilings passed against the then-current budget. The compressed total exceeded the
+unchanged 300,382-byte ceiling by 12,621 bytes (12.3 KiB). That ceiling was later
+raised in #50 (`scripts/perf/budget.json`); do not treat the pre-allowance failure
+as the current `pnpm perf:check` result. Superseded global
 composer, sequential project and computer-rail conversation code was removed;
-no dependency, licence exception or budget increase was added to pass the gate.
+no dependency, licence exception or budget increase was added in that isolated PR.
 
 ## Audit follow-up (38 items)
 
@@ -195,25 +202,25 @@ scope rejection, attachment retention, failure recovery, tab search/resize, part
 defaults, model accessibility, connection errors, message/file/decision presentation,
 and the saved schedule effort at both the editor and dispatcher boundary.
 
-Final local validation for this follow-up:
+Final local validation for this follow-up (historical; pre-#50 allowance):
 
 | Check | Result |
 | --- | --- |
 | Focused desktop Vitest runs | 154 tests passed across 20 affected files. |
-| `pnpm --filter @fable/desktop typecheck` | Passed. |
+| `pnpm --filter @mivlet/desktop typecheck` | Passed. |
 | `pnpm quality` | Passed: lint, required formatting, dead-code and cycle checks. |
 | `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml -j 1` | 548 passed, 0 failed, 5 ignored. The ignored tests require live credentials or explicitly prepared fixtures. |
 | `cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -j 1 -- -D warnings` | Passed. |
 | `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check` | Passed. |
-| `pnpm --filter @fable/desktop build` | Passed, including application and build-tool typechecks. |
+| `pnpm --filter @mivlet/desktop build` | Passed, including application and build-tool typechecks. |
 | `pnpm perf:check` | Failed on total raw and gzip JS/CSS; entry, CSS and named route ceilings pass. |
 
 The follow-up build contains 1,105,677 raw JS/CSS bytes and 317,995 gzip bytes.
-It exceeds the unchanged raw ceiling by 19,416 bytes and the gzip ceiling by
+It exceeded the then-unchanged raw ceiling by 19,416 bytes and the gzip ceiling by
 17,613 bytes. Compared with the preceding navigation build recorded above, this
-adds 19,456 raw bytes and 4,992 gzip bytes. The gzip overrun predates this follow-up;
-the raw overrun is new. Initial entry JS is 411,314 bytes and CSS is 177,467 bytes.
-No performance ceiling was changed, and full performance readiness is not claimed.
+adds 19,456 raw bytes and 4,992 gzip bytes. Those measurements describe this ADR
+in isolation; operators should run `pnpm perf:check` against current
+`scripts/perf/budget.json`. Initial entry JS is 411,314 bytes and CSS is 177,467 bytes.
 
 Interactive post-change inspection is currently blocked: Computer Use automatic
 approval review could not establish the current browser URL and disabled UI actions
@@ -221,11 +228,12 @@ for this turn. No alternate UI automation was used to bypass that restriction.
 Live OAuth completion, file publication, real scheduled execution, and signed
 installer acceptance are therefore still unverified for this follow-up.
 
-These local changes are layered over the existing teammates/projects/tabs worktree
-and its pre-existing uncommitted revision. Integrating the other active provider,
-plugin, voice and avatar tasks requires selective reconciliation of shared renderer
-files, styles and native command registration. Do not replace whole files across
-those checkouts; the existing conversation authority and Stop paths must be retained.
+## Historical integration notes (September 2026)
+
+These local changes were originally layered over the teammates/projects/tabs
+worktree and its pre-existing uncommitted revision. That parallel-worktree
+constraint no longer applies: #49/#50/#59/#60 merged the work onto `main`. Do not
+treat the following as current merge instructions.
 
 ## September 12 integration
 

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { AgentTurnRequest, ContextSummaryRecord } from "@fable/protocol";
+import type { AgentTurnRequest, ContextSummaryRecord } from "@mivlet/protocol";
 import type { ConversationMessageView } from "./conversation-runtime";
 import { buildContinuationMessages, continuationMessagesForModel } from "./agent-run";
 import {

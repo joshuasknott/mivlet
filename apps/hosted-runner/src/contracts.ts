@@ -2,7 +2,7 @@ import type {
   HostedBrowserActionRequest,
   HostedBrowserNavigateRequest,
   HostedProcessLaunchRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 const COMPUTER_ID = /^[a-z0-9](?:[a-z0-9-]{1,78}[a-z0-9])?$/;
 const REQUEST_KEY = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,159}$/;
@@ -149,14 +149,98 @@ export function validatePublicHttpsUrl(value: unknown): string {
     url.protocol !== "https:"
     || url.username
     || url.password
-    || !hostname.includes(".")
-    || isPrivateHostname(hostname)
+    || !hostname
+    || isForbiddenHostname(hostname)
+    || isForbiddenAddress(hostnameIp(hostname))
   ) {
     throw new HostedRunnerRequestError("Only public HTTPS browser URLs are allowed.", "browser-url-not-public");
   }
   url.hostname = hostname;
   url.hash = "";
   return url.toString();
+}
+
+export type PublicAddressLookup = (hostname: string) => Promise<readonly string[]>;
+
+export type PublicHttpsTarget = {
+  href: string;
+  hostname: string;
+  /** Validated public A/AAAA answers (or the IP literal). Pin with createPinnedDnsLookup. */
+  addresses: readonly string[];
+};
+
+type PinnedAddress = {
+  address: string;
+  family: 4 | 6;
+};
+
+let lookupPublicAddresses: PublicAddressLookup = lookupAddressesWithNodeDns;
+
+/** Test-only DNS injection so encoded-IP and rebinding cases stay hermetic. */
+export function setPublicAddressLookupForTests(lookup?: PublicAddressLookup): void {
+  lookupPublicAddresses = lookup ?? lookupAddressesWithNodeDns;
+}
+
+/**
+ * Resolve the hostname and refuse the URL when any answer is a private,
+ * loopback, link-local, multicast, unspecified, or cloud-metadata address.
+ * Returns the validated public address set. Callers that open a socket must
+ * pin that set with `createPinnedDnsLookup` (desktop web-fetch uses
+ * `resolve_to_addrs`). Playwright `route.continue()` re-resolves and is not a pin.
+ */
+export async function assertPublicHttpsUrl(value: unknown): Promise<PublicHttpsTarget> {
+  const href = validatePublicHttpsUrl(value);
+  const hostname = new URL(href).hostname;
+  const literal = hostnameIp(hostname);
+  if (literal) {
+    return { href, hostname, addresses: pinPublicAddresses([literal]).map((entry) => entry.address) };
+  }
+  let addresses: readonly string[];
+  try {
+    addresses = await lookupPublicAddresses(hostname);
+  } catch {
+    throw new HostedRunnerRequestError("The browser URL could not be resolved.", "browser-url-not-public");
+  }
+  return { href, hostname, addresses: pinPublicAddresses(addresses).map((entry) => entry.address) };
+}
+
+/**
+ * Node `http`/`https`/`tls` lookup that returns only the already-validated
+ * public addresses. The hostname argument is ignored so a later DNS answer
+ * cannot steer the TCP peer toward a private or metadata address.
+ */
+export function createPinnedDnsLookup(
+  addresses: readonly string[]
+): (hostname: string, options: unknown, callback?: unknown) => void {
+  const pinned = pinPublicAddresses(addresses);
+  return (_hostname, options, callback) => {
+    const cb = typeof options === "function" ? options : callback;
+    const opts = typeof options === "function" || options === undefined || options === null
+      ? {}
+      : options as { all?: boolean };
+    if (typeof cb !== "function") return;
+    if (opts.all) {
+      cb(null, pinned);
+      return;
+    }
+    cb(null, pinned[0].address, pinned[0].family);
+  };
+}
+
+function pinPublicAddresses(addresses: readonly string[]): [PinnedAddress, ...PinnedAddress[]] {
+  if (!addresses.length || addresses.some((address) => isForbiddenAddress(address))) {
+    throw new HostedRunnerRequestError("Only public HTTPS browser URLs are allowed.", "browser-url-not-public");
+  }
+  return addresses.map((address) => ({
+    address,
+    family: address.includes(":") ? 6 as const : 4 as const
+  })) as [PinnedAddress, ...PinnedAddress[]];
+}
+
+async function lookupAddressesWithNodeDns(hostname: string): Promise<string[]> {
+  const dns = await import("node:dns/promises");
+  const results = await dns.lookup(hostname, { all: true, verbatim: true });
+  return results.map((result) => result.address);
 }
 
 export function validateLaunchRequest(value: unknown): HostedProcessLaunchRequest {
@@ -214,20 +298,100 @@ function hasUnsafeTextControl(value: string): boolean {
   });
 }
 
-function isPrivateHostname(hostname: string): boolean {
-  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) return true;
-  if (/^\d+\.\d+\.\d+\.\d+$/u.test(hostname)) {
-    const octets = hostname.split(".").map(Number);
-    if (octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) return true;
-    return octets[0] === 10
-      || octets[0] === 127
-      || octets[0] === 0
-      || (octets[0] === 169 && octets[1] === 254)
-      || (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31)
-      || (octets[0] === 192 && octets[1] === 168)
-      || octets[0] >= 224;
+function isForbiddenHostname(hostname: string): boolean {
+  if (hostname === "localhost" || hostname.endsWith(".localhost") || hostname.endsWith(".local")) {
+    return true;
   }
-  return hostname.includes(":");
+  // Public hostnames must contain a dot. IP literals are checked separately.
+  return !hostname.includes(".") && hostnameIp(hostname) === null;
+}
+
+function hostnameIp(hostname: string): string | null {
+  const host = hostname.replace(/^\[|\]$/g, "");
+  if (isIPv4(host) || isIPv6(host)) return host;
+  return null;
+}
+
+function isForbiddenAddress(address: string | null): boolean {
+  if (!address) return false;
+  const mapped = ipv4MappedAddress(address);
+  if (mapped) return isForbiddenIPv4(mapped);
+  if (isIPv4(address)) return isForbiddenIPv4(address);
+  if (isIPv6(address)) return isForbiddenIPv6(address);
+  return true;
+}
+
+function isIPv4(value: string): boolean {
+  return /^\d{1,3}(?:\.\d{1,3}){3}$/u.test(value)
+    && value.split(".").every((octet) => {
+      const n = Number(octet);
+      return Number.isInteger(n) && n >= 0 && n <= 255 && String(n) === octet;
+    });
+}
+
+function isIPv6(value: string): boolean {
+  return value.includes(":") && !value.includes("%");
+}
+
+function ipv4MappedAddress(address: string): string | null {
+  const match = address.toLowerCase().match(/^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/u);
+  if (match) return isIPv4(match[1]) ? match[1] : null;
+  const hex = address.toLowerCase().match(/^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/u);
+  if (!hex) return null;
+  const high = Number.parseInt(hex[1], 16);
+  const low = Number.parseInt(hex[2], 16);
+  return `${(high >> 8) & 255}.${high & 255}.${(low >> 8) & 255}.${low & 255}`;
+}
+
+function isForbiddenIPv4(address: string): boolean {
+  const octets = address.split(".").map(Number);
+  if (octets.length !== 4 || octets.some((octet) => !Number.isInteger(octet) || octet < 0 || octet > 255)) {
+    return true;
+  }
+  const [a, b] = octets;
+  return a === 0
+    || a === 10
+    || a === 127
+    || (a === 169 && b === 254)
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || a >= 224
+    || (a === 192 && b === 0 && octets[2] === 2)
+    || (a === 198 && b === 51 && octets[2] === 100)
+    || (a === 203 && b === 0 && octets[2] === 113)
+    || (a === 198 && (b === 18 || b === 19))
+    || (a === 192 && b === 0 && octets[2] === 0)
+    || (a === 100 && b === 100 && octets[2] === 100 && octets[3] === 200);
+}
+
+function isForbiddenIPv6(address: string): boolean {
+  const compact = address.toLowerCase();
+  if (compact === "::" || compact === "::1") return true;
+  const segments = expandIPv6(compact);
+  if (!segments) return true;
+  const first = segments[0];
+  const loopback = segments.every((segment, index) => (index === 7 ? segment === 1 : segment === 0));
+  const unspecified = segments.every((segment) => segment === 0);
+  return loopback
+    || unspecified
+    || (first & 0xffc0) === 0xfe80
+    || (first & 0xfe00) === 0xfc00
+    || (first & 0xff00) === 0xff00;
+}
+
+function expandIPv6(address: string): number[] | null {
+  const halves = address.split("::");
+  if (halves.length > 2) return null;
+  const parse = (part: string) => (part ? part.split(":").map((segment) => Number.parseInt(segment, 16)) : []);
+  const head = parse(halves[0] ?? "");
+  const tail = halves.length === 2 ? parse(halves[1] ?? "") : [];
+  if (head.some((segment) => !Number.isInteger(segment) || segment < 0 || segment > 0xffff)
+    || tail.some((segment) => !Number.isInteger(segment) || segment < 0 || segment > 0xffff)) {
+    return null;
+  }
+  const missing = 8 - head.length - tail.length;
+  if (missing < 0 || (halves.length === 1 && missing !== 0)) return null;
+  return [...head, ...Array.from({ length: missing }, () => 0), ...tail];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

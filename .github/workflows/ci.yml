@@ -23,6 +23,8 @@ jobs:
         with:
           fetch-depth: 0
           persist-credentials: false
+      - name: Refuse mock Clerk in production configs
+        run: node --test scripts/ci/refuse-mock-clerk.test.mjs && node scripts/ci/refuse-mock-clerk.mjs
       - id: paths
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -48,8 +50,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
       - run: pnpm quality
-      - run: pnpm --filter '!@fable/agent-host' -r --if-present test
-      - run: node --test scripts/ci/affected.test.mjs
+      - run: pnpm test:pr
 
   windows:
     needs: changes
@@ -73,10 +74,10 @@ jobs:
           workspaces: apps/desktop/src-tauri
           shared-key: mivlet-windows
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @fable/protocol build
-      - run: pnpm --filter @fable/connectors build
-      - run: pnpm --filter @fable/agent-host build
-      - run: pnpm --filter @fable/agent-host test
+      - run: pnpm --filter @mivlet/protocol build
+      - run: pnpm --filter @mivlet/connectors build
+      - run: pnpm --filter @mivlet/agent-host build
+      - run: pnpm test:host
       - run: pnpm release:test
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml

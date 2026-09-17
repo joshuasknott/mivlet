@@ -1,8 +1,7 @@
-import { tokenPluginFor } from "@fable/connectors/providers/token-plugins";
 import type {
   ConnectorAccountOption,
   ConnectorManifest,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { Check } from "@phosphor-icons/react/dist/csr/Check";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
@@ -20,7 +19,6 @@ import { MarketplaceIcon } from "./marketplace/MarketplaceIcon";
 import { PluginDetailHeader } from "./marketplace/PluginDetailHeader";
 import { PluginOverview } from "./marketplace/PluginOverview";
 import { RemoteConnectorDetails } from "./marketplace/RemoteConnectorDetails";
-import { TokenPluginDetails } from "./marketplace/TokenPluginDetails";
 import {
   findMarketplaceConnector,
   marketplaceConnectorSections,
@@ -125,7 +123,7 @@ export function PluginPanel({
   const visibleCustomServers = customServers.filter(server => server.displayName.toLocaleLowerCase().includes(normalizedQuery));
   const isConnectable = (entry: MarketplaceConnectorEntry) => {
     const connector = manifestById.get(entry.id);
-    const usable = Boolean(connector || remoteConnectorFor(entry.id) || tokenPluginFor(entry.id));
+    const usable = Boolean(connector || remoteConnectorFor(entry.id));
     return usable;
   };
   const visibleBuiltins = builtinPluginEntries.filter((entry) => `${entry.name} ${entry.description}`.toLowerCase().includes(normalizedQuery));
@@ -195,7 +193,7 @@ export function PluginPanel({
   ) => {
     const connector = manifestById.get(entry.id);
     const remote = remoteConnectorFor(entry.id);
-    const connectable = Boolean(connector || remote || tokenPluginFor(entry.id));
+    const connectable = Boolean(connector || remote);
     const cardDetail = connector ? resolveDetailedStatus(connector) : null;
     const connected = connector?.status === "connected" && !!cardDetail && ["connected", "syncing"].includes(cardDetail.className);
     const needsReconnect =
@@ -420,8 +418,6 @@ export function PluginPanel({
                 onToggle={(enabled) => { void builtin.setEnabled(selectedBuiltinEntry.id, enabled); }}
                 onUse={onUseBuiltinPlugin}
               />
-            ) : selectedEntry && tokenPluginFor(selectedEntry.id) ? (
-              <TokenPluginDetails key={`${workspaceId}-${selectedEntry.id}`} plugin={tokenPluginFor(selectedEntry.id)!} connector={selectedConnector} workspaceId={workspaceId} onUseConnector={onUseConnector} onDisconnect={onDisconnect} accounts={accounts[selectedEntry.id]} onSwitchAccount={onSwitchAccount} titleId={`connector-detail-${selectedEntry.id}`} />
             ) : selectedEntry && (useRemote || !selectedConnector) && remoteConnectorFor(selectedEntry.id) ? (
               <RemoteConnectorDetails key={`${workspaceId}-${selectedEntry.id}`} entry={selectedEntry} preset={remoteConnectorFor(selectedEntry.id)!} workspaceId={workspaceId}
                 titleId={`connector-detail-${selectedEntry.id}`} onUseConnector={onUseConnector} />

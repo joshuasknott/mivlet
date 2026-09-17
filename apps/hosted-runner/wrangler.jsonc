@@ -1,9 +1,12 @@
 {
   "$schema": "./node_modules/wrangler/config-schema.json",
-  "name": "fable-hosted-runner",
+  "name": "mivlet-hosted-runner",
   "main": "src/index.ts",
   "compatibility_date": "2026-08-28",
   "compatibility_flags": ["nodejs_compat"],
+  // Secrets (distinct): MIVLET_HOSTED_RUNNER_API_KEY (lifecycle Bearer),
+  // MIVLET_HOSTED_RUNNER_SIGNING_KEY (MivletCapability HMAC).
+  // Missing MIVLET_* values fall back once to legacy FABLE_* aliases.
   "browser": {
     "binding": "MYBROWSER"
   },

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import type { BackendProvider, FableAgentProfile } from "@fable/protocol";
+import type { BackendProvider, MivletAgentProfile } from "@mivlet/protocol";
 import {
   abandonLocalScheduleDispatch,
   bindLocalScheduleDispatch,
@@ -25,7 +25,7 @@ export interface LocalScheduleDispatchStatus {
 
 export interface UseLocalScheduleDispatcherOptions {
   workspaceId?: string;
-  agents: FableAgentProfile[];
+  agents: MivletAgentProfile[];
   providers: BackendProvider[];
   runtimeReady: boolean;
   onThreadCreated?: (agentId: string, threadId: string) => void;

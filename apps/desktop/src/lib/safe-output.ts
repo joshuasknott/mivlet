@@ -1,3 +1,5 @@
+import { isSensitiveSecretKey, redactSecretText, SECRET_REDACTED } from "@mivlet/protocol";
+
 /**
  * Safe output boundary for untrusted content.
  *
@@ -14,9 +16,9 @@
  *      native opener: only http(s)/mailto, no credentials, no control
  *      characters. The decoded target — not a string prefix — decides.
  *
- * It is deliberately pure and dependency-free (aside from the platform
- * `URL` and `DOMParser` globals) so it can be unit-tested in isolation and
- * reused by any future rendering or inspection surface.
+ * It is a pure helper over the shared protocol redaction vocabulary and the
+ * platform `URL` and `DOMParser` globals so it can be unit-tested in isolation
+ * and reused by any future rendering or inspection surface.
  */
 
 /** Maximum characters of formatted output before truncation kicks in. */
@@ -27,20 +29,6 @@ export const MAX_CONVERSATION_MARKDOWN_CHARS = 200_000;
 export const MAX_SAFE_LINK_CHARS = 8_192;
 /** Truncation marker appended when a value exceeds the bound. */
 export const TRUNCATION_MARKER = "…[truncated]";
-
-/**
- * Key names whose values are always redacted, regardless of content. Matches
- * common credential field names across connector payloads.
- */
-const SENSITIVE_KEY = /^(api[-_]?key|token|password|passwd|secret|credential|authorization|cookie|session[-_]?token|access[-_]?token|refresh[-_]?token|secret[-_]?token|client[-_]?secret|private[-_]?key)$/i;
-
-/** Substring patterns that look like inline credentials inside larger strings. */
-const SENSITIVE_STRING_PATTERNS: RegExp[] = [
-  /\bsk-ant-[a-zA-Z0-9_\-]{20,}\b/g, // Anthropic
-  /\bsk-[a-zA-Z0-9_\-]{20,}\b/g, // OpenAI
-  /\bAIzaSy[a-zA-Z0-9_\-]{33}\b/g, // Google/Gemini
-  /\bBearer\s+[a-zA-Z0-9\-._~+/]{10,}(?:=*)?\b/gi // bearer tokens
-];
 
 /**
  * Recursively clone a value, replacing sensitive keys with `[REDACTED]` and
@@ -61,7 +49,7 @@ export function redactSecrets<T>(value: T): unknown {
   if (typeof value === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-      out[key] = SENSITIVE_KEY.test(key) ? "[REDACTED]" : redactSecrets(entry);
+      out[key] = isSensitiveSecretKey(key) ? SECRET_REDACTED : redactSecrets(entry);
     }
     return out;
   }
@@ -69,11 +57,7 @@ export function redactSecrets<T>(value: T): unknown {
 }
 
 function redactString(input: string): string {
-  let result = input;
-  for (const pattern of SENSITIVE_STRING_PATTERNS) {
-    result = result.replace(pattern, "[REDACTED]");
-  }
-  return result;
+  return redactSecretText(input);
 }
 
 /** Isolated HTML character references; never a tag or comment. */

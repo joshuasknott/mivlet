@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
 import { ExecutionApprovalRouter } from "./execution-approvals";
 
 describe("execution approval ownership", () => {
@@ -37,5 +37,38 @@ describe("execution approval ownership", () => {
       true,
     );
     router.cancelPending();
+  });
+
+  it("standing session/rule grants do not skip native permit minting", async () => {
+    const router = new ExecutionApprovalRouter();
+    const gate = router.acquire("conversation-a:task-a:1");
+    const approval = {
+      ...buildToolApproval("Codex", "web-fetch", '{"url":"https://example.com"}'),
+      id: "fetch-once",
+    };
+    router.replaceStandingGrants([
+      {
+        id: "session-web-fetch",
+        requestId: approval.id,
+        scope: "session",
+        service: approval.service,
+        action: approval.action,
+        mode: approval.mode,
+        dataUsed: approval.dataUsed,
+        createdAt: new Date(0).toISOString(),
+      },
+    ]);
+    expect(gate.register(approval)).toBe(true);
+    let resolved = false;
+    const pending = gate.waitForDecision(approval).then(() => {
+      resolved = true;
+    });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    expect(router.hasPending(approval.id)).toBe(true);
+    router.resolveGrant(approval.id);
+    await pending;
+    expect(resolved).toBe(true);
+    router.release("conversation-a:task-a:1");
   });
 });

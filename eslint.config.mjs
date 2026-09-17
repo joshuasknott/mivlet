@@ -17,7 +17,7 @@ export default tseslint.config(
   },
   {
     linterOptions: {
-      reportUnusedDisableDirectives: false,
+      reportUnusedDisableDirectives: "error",
     },
   },
   {

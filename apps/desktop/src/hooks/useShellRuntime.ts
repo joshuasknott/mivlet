@@ -3,7 +3,7 @@ import {
   normalizeCustomApprovalSettings,
   resolvePermissionModeFromCustom,
   type LocalTextFileCandidate,
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 import {
   assembleContext,
   chunkSourceText,
@@ -11,19 +11,19 @@ import {
   isLiveMemory,
   isLiveSource,
   retrieve,
-} from "@fable/knowledge";
+} from "@mivlet/knowledge";
 import type {
   ConnectorAccountOption,
   ConnectorManifest,
   CustomApprovalSettings,
-  FableAgentProfile,
+  MivletAgentProfile,
   KnowledgeSource,
   LocalFileImport,
   MemoryControlState,
   MemoryRecord,
   PermissionMode,
   PreparedExecutionContext,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isApprovalPresetLabel,
@@ -71,7 +71,7 @@ import {
   saveRuntimeMemoryState,
 } from "../runtime/domains/memory";
 
-import { isFableProviderEnabled } from "../lib/provider-availability";
+import { isMivletProviderEnabled } from "../lib/provider-availability";
 import { isSupportedConnectorId } from "./shell-runtime/backend-normalization";
 import { defaultShellState } from "./shell-runtime/defaults";
 import type {
@@ -151,7 +151,7 @@ export function useShellRuntime(
   });
   const { dismissedApprovalIds } = approvals;
   const { approvalAudit, approvalRules } = approvals.runtime;
-  const [agents, setAgents] = useState<FableAgentProfile[]>(
+  const [agents, setAgents] = useState<MivletAgentProfile[]>(
     initialState.agents?.length
       ? initialState.agents
       : (defaultShellState.agents ?? []),
@@ -376,7 +376,7 @@ export function useShellRuntime(
       // restored only by the live provider probes above.
       if (!hasTauriRuntime()) {
         setConnectedBackendIds(
-          recovered.connectedBackendIds.filter(isFableProviderEnabled),
+          recovered.connectedBackendIds.filter(isMivletProviderEnabled),
         );
       }
       setOnboardingDismissed(recovered.onboardingComplete ?? false);
@@ -895,7 +895,9 @@ export function useShellRuntime(
         // exchange through the configured broker and fail closed if it is absent.
         const result = await beginRuntimeConnectorOAuth({
           connectorId: connector.id,
-          requestedScopes: connector.scopes?.map((scope) => scope.id),
+          requestedScopes: connector.scopes?.length
+            ? connector.scopes.map((scope) => scope.id)
+            : undefined,
         });
         if (!result) {
           const message = `${connector.name} connections require the installed desktop app.`;
@@ -1110,9 +1112,9 @@ export function useShellRuntime(
     setLastAction("Custom approvals updated");
   };
 
-  const createAgent = (input: Omit<FableAgentProfile, "id" | "threadId">) => {
+  const createAgent = (input: Omit<MivletAgentProfile, "id" | "threadId">) => {
     const id = `agent-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
-    const created: FableAgentProfile = {
+    const created: MivletAgentProfile = {
       ...input,
       id,
       icon: "agent",
@@ -1130,7 +1132,7 @@ export function useShellRuntime(
 
   const updateAgent = (
     agentId: string,
-    patch: Partial<Omit<FableAgentProfile, "id">>,
+    patch: Partial<Omit<MivletAgentProfile, "id">>,
   ) => {
     setAgents((current) =>
       current.map((agent) =>

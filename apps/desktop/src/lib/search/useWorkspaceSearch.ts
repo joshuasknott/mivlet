@@ -3,7 +3,7 @@ import type {
   SearchObjectKind,
   SearchResult,
   SearchScanSummary,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { searchWorkspace } from "../../runtime/domains/search";
 import { searchResultKey } from "./results";
 

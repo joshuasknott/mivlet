@@ -27,8 +27,14 @@ import type {
   ExecutionContextAudience,
   SourceChunk,
   SourceStatus
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
+import {
+  isUsableKnowledgeText,
+  redactKnowledgeChunk,
+  redactKnowledgeSourcePreview,
+  redactKnowledgeText
+} from "../redact";
 import { authorityScopeAllowsAudience, isLiveSource, scopeSatisfies } from "../store";
 import { buildLexicalCorpus, scoreChunkLexical, tokenize, tokenSet } from "./lexical";
 import { cosineSimilarity, hasEmbedding, type EmbeddingProvider } from "./semantic";
@@ -81,7 +87,7 @@ export interface RetrieveOptions {
   connectorId?: string;
   /** Restrict to sources from this account. Undefined = no restriction. */
   account?: string;
-  /** Restrict to one exact authorized Fable Connection before scoring. */
+  /** Restrict to one exact authorized Mivlet Connection before scoring. */
   connectionId?: string;
   /** Restrict to these source ids. Undefined = no restriction. */
   sourceIds?: string[];
@@ -222,7 +228,12 @@ export async function retrieve(
     userSelectedSourceIds: options.userSelectedSourceIds,
     isAuthorized: options.isAuthorized,
     audience: options.audience
-  });
+  })
+    .map(({ source, chunks }) => ({
+      source: redactKnowledgeSourcePreview(source),
+      chunks: chunks.map(redactKnowledgeChunk).filter((chunk) => isUsableKnowledgeText(chunk.text))
+    }))
+    .filter(({ chunks }) => chunks.length > 0);
   const queryTokens = tokenize(query);
 
   // Gather all chunks for corpus statistics (lexical IDF).
@@ -360,8 +371,10 @@ export async function retrieve(
   for (const scored0 of limited) {
     const remaining = budgetChars - used;
     if (remaining <= 0) break;
-    const snippet = makeSnippet(scored0.chunk.text, queryTokens, Math.min(snippetChars, remaining));
-    if (!snippet) continue;
+    const snippet = redactKnowledgeText(
+      makeSnippet(scored0.chunk.text, queryTokens, Math.min(snippetChars, remaining))
+    );
+    if (!isUsableKnowledgeText(snippet)) continue;
     citations.push(toCitation(scored0, snippet));
     used += snippet.length;
   }

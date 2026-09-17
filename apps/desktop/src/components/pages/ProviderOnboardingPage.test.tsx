@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import { listBackendProviders } from "@fable/connectors";
+import { listBackendProviders } from "@mivlet/connectors";
 import { ProviderOnboardingGate } from "./ProviderOnboardingPage";
 import type { ComponentProps } from "react";
 

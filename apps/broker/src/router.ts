@@ -9,9 +9,10 @@
  * same handler backs both transports.
  *
  * Security invariants (unchanged from the Node-only version):
- *   - Secrets and provider tokens never cross this layer into logs or responses.
- *     The token set appears only in the handoff-redeem response body (the one
- *     allowed crossing) and is never logged.
+ *   - Secrets, provider tokens, and handoff tickets never cross this layer into
+ *     logs or error responses. The token set appears only in the handoff-redeem
+ *     response body (the one allowed crossing) and is never logged. Request
+ *     lines including query and fragment go through {@link redactForLog}.
  *   - Every error response is a redacted {@link BrokerErrorResponse}.
  *   - `state` is single-use and consumed before any token exchange (enforced in
  *     the broker service, not here).
@@ -20,12 +21,13 @@
 import {
   BrokerContractError,
   BROKER_CONTRACT_VERSION,
+  BROKER_PKCE_CHALLENGE_METHOD,
   type BrokerErrorResponse,
   type BrokerProviderId,
   isBrokerProvider
-} from "@fable/connectors";
+} from "@mivlet/connectors";
 
-import type { FableBroker } from "./broker.js";
+import type { MivletBroker } from "./broker.js";
 import {
   createRateLimiter,
   newCorrelationId,
@@ -36,10 +38,10 @@ import {
 
 export type { RateLimiter };
 
-export const CORRELATION_HEADER = "x-fable-request-id";
+export const CORRELATION_HEADER = "x-mivlet-request-id";
 
 export interface BrokerRouterOptions {
-  broker: FableBroker;
+  broker: MivletBroker;
   /** Requests per minute per route. Default 60. */
   requestsPerMinute?: number;
   /** Allowed CORS origins. Default: loopback only. */
@@ -122,7 +124,7 @@ export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
       try {
         const limit = await limiter.check(rateLimitKey(url.pathname, peer));
         if (!limit.allowed) {
-          log(redactLog("rate-limited", request.method, url.pathname, correlation));
+          log(redactLog("rate-limited", request.method, url, correlation));
           return jsonResponse(
             429,
             new BrokerContractError("rate-limited", "Too many broker requests.", true).toResponse(),
@@ -137,7 +139,7 @@ export function createBrokerRouter(options: BrokerRouterOptions): BrokerRouter {
         return await route(request, url, segments, options.broker, corsHeaders, correlation);
       } catch (error) {
         const { status, response } = toBrokerErrorPayload(error);
-        log(redactLog(response.error, request.method, url.pathname, correlation));
+        log(redactLog(response.error, request.method, url, correlation));
         return jsonResponse(
           status,
           response,
@@ -153,7 +155,7 @@ async function route(
   request: Request,
   url: URL,
   segments: string[],
-  broker: FableBroker,
+  broker: MivletBroker,
   corsHeaders: Record<string, string>,
   correlation: string
 ): Promise<Response> {
@@ -162,13 +164,24 @@ async function route(
   // /oauth/{provider}/authorize
   if (request.method === "GET" && segments.length === 3 && segments[0] === "oauth" && segments[2] === "authorize") {
     const provider = parseProvider(segments[1]);
+    rejectDuplicateQueryParams(url.searchParams, [
+      "redirect_uri",
+      "state",
+      "code_challenge",
+      "code_challenge_method"
+    ]);
+    const codeChallenge = requireQuery(url, "code_challenge");
+    const codeChallengeMethod = requireQuery(url, "code_challenge_method");
+    if (codeChallengeMethod !== BROKER_PKCE_CHALLENGE_METHOD) {
+      throw new BrokerContractError("invalid-request", "PKCE challenge method must be S256.", false);
+    }
     const { response } = await broker.authorize({
       contractVersion: BROKER_CONTRACT_VERSION,
       provider,
       redirectUri: requireQuery(url, "redirect_uri"),
       state: requireQuery(url, "state"),
-      codeChallenge: requireQuery(url, "code_challenge"),
-      codeChallengeMethod: "S256" as const
+      codeChallenge,
+      codeChallengeMethod: BROKER_PKCE_CHALLENGE_METHOD
     });
     return new Response(null, {
       status: 302,
@@ -182,7 +195,16 @@ async function route(
     const { redirect } = await broker.callback(provider, url.searchParams);
     return new Response(null, {
       status: 302,
-      headers: { ...headers, ...corsHeaders, location: redirect.toString(), "cache-control": "no-store" }
+      headers: {
+        ...headers,
+        ...corsHeaders,
+        location: redirect.toString(),
+        "cache-control": "no-store",
+        // The landing URL carries the single-use handoff ticket in the query
+        // (native loopback HTTP cannot observe fragments). Do not send that
+        // URL as a Referer to any subsequent request.
+        "referrer-policy": "no-referrer"
+      }
     });
   }
 
@@ -194,7 +216,8 @@ async function route(
       contractVersion: contractVersionOf(body),
       provider,
       handoff: stringRequired(body, "handoff"),
-      state: stringRequired(body, "state")
+      state: stringRequired(body, "state"),
+      codeVerifier: stringRequired(body, "codeVerifier")
     });
     return jsonResponse(200, response, headers, corsHeaders);
   }
@@ -240,6 +263,18 @@ function requireQuery(url: URL, key: string): string {
     throw new BrokerContractError("invalid-request", `Missing required "${key}" parameter.`, false);
   }
   return value;
+}
+
+function rejectDuplicateQueryParams(query: URLSearchParams, keys: readonly string[]): void {
+  for (const key of keys) {
+    if (query.getAll(key).length > 1) {
+      throw new BrokerContractError(
+        "invalid-request",
+        "Authorization request contains duplicate parameters.",
+        false
+      );
+    }
+  }
 }
 
 const MAX_BODY_BYTES = 64 * 1024;
@@ -391,12 +426,12 @@ function loopbackOrigins(): string[] {
 }
 
 /** Redact-then-log a request line as structured JSON. Never logs bodies/tokens. */
-function redactLog(event: string, method: string | undefined, path: string, correlation: string): string {
-  const safe = redactForLog(`${method ?? "?"} ${path}`);
+function redactLog(event: string, method: string | undefined, url: URL, correlation: string): string {
+  const requestLine = `${method ?? "?"} ${url.pathname}${url.search}${url.hash}`;
+  const safe = redactForLog(requestLine);
   return JSON.stringify({ level: "info", event, path: safe, correlationId: correlation });
 }
 
 const defaultLog: BrokerLogger = (line) => {
-  // eslint-disable-next-line no-console
   console.log(line);
 };

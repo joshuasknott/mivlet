@@ -5,7 +5,8 @@ import type {
   KnowledgeScope,
   MemoryControlState,
   MemoryRecord,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
+import { redactSecretTextOrOmit } from "@mivlet/protocol";
 import { loadRuntimeMemoryState, saveRuntimeMemoryState } from "../runtime/domains/memory";
 
 /**
@@ -217,12 +218,12 @@ export async function promoteConversationConclusion(
   ports: MemoryPromotionPorts,
   input: ConversationConclusionInput,
 ): Promise<MemoryRecord> {
-  const title = input.title.trim();
-  const value = input.value.trim();
+  const title = redactSecretTextOrOmit(input.title.trim());
+  const value = redactSecretTextOrOmit(input.value.trim());
   if (!title || !value) {
     throw new Error("Add a title and the conclusion before saving it to Memory.");
   }
-  if (title.length > 120 || value.length > 2_000) {
+  if (input.title.trim().length > 120 || input.value.trim().length > 2_000) {
     throw new Error(
       "Use a title up to 120 characters and a conclusion up to 2,000 characters.",
     );

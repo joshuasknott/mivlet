@@ -92,19 +92,24 @@ fn require_scope(
 fn api_url(base: &str, path: &str) -> Result<Url, ConnectorCommandError> {
     let resolved_base = match base {
         "https://www.googleapis.com/drive/v3/" => {
-            std::env::var("FABLE_GOOGLE_DRIVE_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_DRIVE_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         "https://www.googleapis.com/upload/drive/v3/" => {
-            std::env::var("FABLE_GOOGLE_DRIVE_UPLOAD_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_DRIVE_UPLOAD_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         "https://gmail.googleapis.com/gmail/v1/" => {
-            std::env::var("FABLE_GOOGLE_GMAIL_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_GMAIL_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         "https://www.googleapis.com/calendar/v3/" => {
-            std::env::var("FABLE_GOOGLE_CALENDAR_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_CALENDAR_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         "https://openidconnect.googleapis.com/v1/" => {
-            std::env::var("FABLE_GOOGLE_OPENID_API").unwrap_or_else(|_| base.to_string())
+            crate::env_compat::var_named("MIVLET_GOOGLE_OPENID_API")
+                .unwrap_or_else(|_| base.to_string())
         }
         _ => base.to_string(),
     };
@@ -1257,9 +1262,12 @@ fn parse_json_field(
 pub(crate) async fn execute_action(
     app: &tauri::AppHandle,
     action: &ConnectorActionRequest,
+    expected_connection_id: &str,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
     let call_id = new_call_id(&action.connector_id);
-    let (_, tokens) = authorized_tokens(app, &action.connector_id).await?;
+    let (_, tokens) =
+        authorized_tokens_for_connection(app, &action.connector_id, Some(expected_connection_id))
+            .await?;
     let resource_id = match action.connector_id.as_str() {
         "google-drive" => execute_drive_action(&call_id, &tokens, action).await?,
         "gmail" => execute_gmail_action(&call_id, &tokens, action).await?,
@@ -1414,7 +1422,7 @@ fn drive_multipart_body(
             false,
         ));
     }
-    let boundary = "fable-google-drive-upload";
+    let boundary = "mivlet-google-drive-upload";
     let metadata = serde_json::to_string(metadata).map_err(|_| {
         error(
             "google-drive",
@@ -1479,7 +1487,7 @@ fn build_mime(payload: &BTreeMap<String, String>) -> Result<String, ConnectorCom
         return Ok(format!("{}\r\n\r\n{body}", headers.join("\r\n")));
     }
 
-    let boundary = "fable-gmail-attachment";
+    let boundary = "mivlet-gmail-attachment";
     headers.push(format!(
         "Content-Type: multipart/mixed; boundary={boundary}"
     ));
@@ -2397,7 +2405,8 @@ mod tests {
         let (url, request_rx) =
             mock_response("200 OK", r#"{"files":[],"nextPageToken":"drive-next"}"#, 0).await;
 
-        std::env::set_var("FABLE_GOOGLE_DRIVE_API", url.to_string());
+        std::env::set_var("MIVLET_GOOGLE_DRIVE_API", url.to_string());
+        std::env::remove_var("FABLE_GOOGLE_DRIVE_API");
 
         let drive_tokens = tokens(&[DRIVE_READONLY]);
         let (_, next_cursor) = drive_search(
@@ -2410,6 +2419,7 @@ mod tests {
         .await
         .unwrap();
 
+        std::env::remove_var("MIVLET_GOOGLE_DRIVE_API");
         std::env::remove_var("FABLE_GOOGLE_DRIVE_API");
 
         assert_eq!(next_cursor, Some("drive-next".to_string()));
@@ -2428,7 +2438,8 @@ mod tests {
         )
         .await;
 
-        std::env::set_var("FABLE_GOOGLE_GMAIL_API", url.to_string());
+        std::env::set_var("MIVLET_GOOGLE_GMAIL_API", url.to_string());
+        std::env::remove_var("FABLE_GOOGLE_GMAIL_API");
 
         let gmail_tokens = tokens(&[GMAIL_READONLY]);
         let (_, next_cursor) = gmail_search(
@@ -2441,6 +2452,7 @@ mod tests {
         .await
         .unwrap();
 
+        std::env::remove_var("MIVLET_GOOGLE_GMAIL_API");
         std::env::remove_var("FABLE_GOOGLE_GMAIL_API");
 
         assert_eq!(next_cursor, Some("gmail-next".to_string()));
@@ -2455,7 +2467,8 @@ mod tests {
         let (url, request_rx) =
             mock_response("200 OK", r#"{"items":[],"nextPageToken":"cal-next"}"#, 0).await;
 
-        std::env::set_var("FABLE_GOOGLE_CALENDAR_API", url.to_string());
+        std::env::set_var("MIVLET_GOOGLE_CALENDAR_API", url.to_string());
+        std::env::remove_var("FABLE_GOOGLE_CALENDAR_API");
 
         let cal_tokens = tokens(&[CALENDAR_READONLY]);
         let (_, next_cursor) =
@@ -2463,6 +2476,7 @@ mod tests {
                 .await
                 .unwrap();
 
+        std::env::remove_var("MIVLET_GOOGLE_CALENDAR_API");
         std::env::remove_var("FABLE_GOOGLE_CALENDAR_API");
 
         assert_eq!(next_cursor, Some("cal-next".to_string()));
@@ -2481,13 +2495,15 @@ mod tests {
         )
         .await;
 
-        std::env::set_var("FABLE_GOOGLE_GMAIL_API", url.to_string());
+        std::env::set_var("MIVLET_GOOGLE_GMAIL_API", url.to_string());
+        std::env::remove_var("FABLE_GOOGLE_GMAIL_API");
 
         let gmail_tokens = tokens(&[GMAIL_READONLY]);
         let (items, next_cursor) = gmail_search("test-call", &gmail_tokens, "query", 20, None)
             .await
             .unwrap();
 
+        std::env::remove_var("MIVLET_GOOGLE_GMAIL_API");
         std::env::remove_var("FABLE_GOOGLE_GMAIL_API");
 
         assert_eq!(next_cursor, Some("gmail-next".to_string()));
@@ -2514,8 +2530,8 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "requires deliberate FABLE_GOOGLE_LIVE_TEST credentials and provider account"]
+    #[ignore = "requires deliberate MIVLET_GOOGLE_LIVE_TEST credentials and provider account"]
     fn live_google_contract_is_opt_in() {
-        assert!(std::env::var("FABLE_GOOGLE_LIVE_TEST").is_ok());
+        assert!(crate::env_compat::var_named("MIVLET_GOOGLE_LIVE_TEST").is_ok());
     }
 }

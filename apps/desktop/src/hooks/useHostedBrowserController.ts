@@ -2,11 +2,11 @@ import { useEffect, useState } from "react";
 import type {
   ApprovalResolutionRequest,
   HostedBrowserSnapshot,
-} from "@fable/protocol";
-import type { ToolApprovalGate } from "@fable/connectors/native-api/tool-executor";
+} from "@mivlet/protocol";
+import type { ToolApprovalGate } from "@mivlet/connectors/native-api/tool-executor";
 import type { useHostedComputer } from "./useHostedComputer";
 import type { ShellRuntime } from "./useShellRuntime";
-import { navigateRuntimeHostedBrowser, prepareRuntimeHostedBrowser, snapshotRuntimeHostedBrowser } from "../runtime/domains/hosted-computer";
+import { navigateRuntimeHostedBrowser, openRuntimeHostedLiveView, prepareRuntimeHostedBrowser, snapshotRuntimeHostedBrowser, toPublicHostedBrowserSnapshot } from "../runtime/domains/hosted-computer";
 
 export function useHostedBrowserController({
   hostedWorkspaceId,
@@ -35,7 +35,7 @@ export function useHostedBrowserController({
   useEffect(() => {
     setHostedBrowserSnapshot(null);
     setHostedBrowserError(null);
-  }, [hostedWorkspaceId, activeAgentId]);
+  }, [hostedWorkspaceId, activeHostedDeviceId, activeAgentId]);
 
   const openHostedBrowser = async (url: string) => {
     if (
@@ -82,7 +82,6 @@ export function useHostedBrowserController({
         request: prepared.approval,
         decision: "once",
         decidedAt: new Date().toISOString(),
-        confirmationText: prepared.approval.confirmationPhrase,
       };
       const snapshot = await navigateRuntimeHostedBrowser(
         prepared.proposal,
@@ -92,7 +91,7 @@ export function useHostedBrowserController({
         throw new Error(
           "Hosted browser navigation requires the desktop runtime.",
         );
-      setHostedBrowserSnapshot(snapshot);
+      setHostedBrowserSnapshot(toPublicHostedBrowserSnapshot(snapshot));
       return snapshot;
     } catch (error) {
       setHostedBrowserError(
@@ -121,7 +120,7 @@ export function useHostedBrowserController({
         throw new Error(
           "Hosted browser inspection requires the desktop runtime.",
         );
-      setHostedBrowserSnapshot(snapshot);
+      setHostedBrowserSnapshot(toPublicHostedBrowserSnapshot(snapshot));
       return snapshot;
     } catch (error) {
       setHostedBrowserError(
@@ -135,13 +134,30 @@ export function useHostedBrowserController({
     }
   };
 
+  const openLiveView = async () => {
+    if (!hostedWorkspaceId || !activeHostedDeviceId || !activeAgentId) {
+      throw new Error("The hosted browser Live View is unavailable.");
+    }
+    const opened = await openRuntimeHostedLiveView({
+      workspaceId: hostedWorkspaceId,
+      agentId: activeAgentId,
+      deviceId: activeHostedDeviceId,
+    });
+    if (!opened) {
+      throw new Error("Hosted Live View requires the desktop runtime.");
+    }
+  };
+
   return {
     snapshot: hostedBrowserSnapshot,
-    setSnapshot: setHostedBrowserSnapshot,
+    setSnapshot: (snapshot: HostedBrowserSnapshot | null) => {
+      setHostedBrowserSnapshot(snapshot ? toPublicHostedBrowserSnapshot(snapshot) : null);
+    },
     phase: hostedBrowserPhase,
     opening: hostedBrowserPhase !== "idle",
     error: hostedBrowserError,
     open: openHostedBrowser,
     refresh: refreshHostedBrowser,
+    openLiveView,
   };
 }

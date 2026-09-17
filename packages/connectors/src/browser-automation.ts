@@ -10,7 +10,7 @@ import type {
   PermissionMode,
   PermissionProfileId,
   RecordActionHistoryRequest
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   effectForBrowserAction,
   evaluatePermissionPolicy,
@@ -348,7 +348,7 @@ export class BrowserAutomationBoundary {
   }
 }
 
-export function policyFor(action: string): BrowserActionPolicy | null {
+function policyFor(action: string): BrowserActionPolicy | null {
   const policy = BROWSER_ACTION_POLICY[action];
   if (!policy) return null;
   return policy;

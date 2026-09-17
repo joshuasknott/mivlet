@@ -6,7 +6,7 @@ import type {
   ProviderRouteQualitySnapshot,
   ProviderRouteSelection,
   Spine
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 type ProviderRoute = Spine.Connections.ProviderRoute;
 

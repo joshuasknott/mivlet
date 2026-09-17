@@ -341,22 +341,8 @@ pub fn validate_scope(scope: &str) -> Result<()> {
 /// note can never persist a token. A note that *is* a secret becomes the
 /// sentinel rather than being rejected outright (notes are optional/free-form).
 fn redact_note(note: &str) -> String {
-    let lower = note.to_ascii_lowercase();
-    const MARKERS: &[&str] = &[
-        "authorization:",
-        "bearer ",
-        "cookie:",
-        "access_token",
-        "refresh_token",
-        "client_secret",
-        "xoxb-",
-        "xoxp-",
-        "ghp_",
-        "github_pat_",
-        "ya29.",
-        "sk-",
-    ];
-    if MARKERS.iter().any(|m| lower.contains(m)) {
+    const NOTE_SECRET_EXTRAS: &[&str] = &["1//"];
+    if crate::secret_redaction::looks_secret_with(note, NOTE_SECRET_EXTRAS) {
         crate::store::repos::connector_cache::REDACTED.to_string()
     } else {
         note.to_string()

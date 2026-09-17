@@ -27,8 +27,9 @@ import type {
   PreparedExecutionContext,
   ExecutionContextAudience,
   ExecutionContextReceipt
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
+import { isUsableKnowledgeText, redactKnowledgeText } from "../redact";
 import { authorityScopeAllowsAudience, isLiveMemory, scopeSatisfies } from "../store";
 import { splitsSurrogatePair } from "../retrieval/retrieve";
 import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
@@ -82,7 +83,7 @@ export interface AssembledContext extends PreparedExecutionContext {
 
 export interface ContextAuthorizationRules {
   /**
-   * Predicate over a connector, optional account, and exact Fable Connection.
+   * Predicate over a connector, optional account, and exact Mivlet Connection.
    * Return false to exclude that source before it enters the turn (for example,
    * after revocation or selection change). Defaults to allow-all.
    */
@@ -191,8 +192,10 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     if (!record || !isLiveMemory(record)) continue;
     if (!authorityScopeAllowsAudience(record.authorityScope, input.audience)) continue;
     if (!isMemoryAuthorized(record, isAuthorized)) continue;
+    const fields = redactedMemoryFields(record);
+    if (!fields) continue;
     pinnedMemorySeen.add(record.id);
-    pushPart(`Pinned memory — ${record.title}: ${record.value}`);
+    pushPart(`Pinned memory — ${fields.title}: ${fields.value}`);
     usage.push({ id: record.id, kind: "memory", reason: "pinned" });
   }
 
@@ -216,7 +219,9 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     const memoryLines: string[] = ["Approved memory (authoritative):"];
     for (const record of orderedMemory) {
       if (appliedMemory.has(record.id)) continue;
-      memoryLines.push(`- ${record.title}: ${record.value}`);
+      const fields = redactedMemoryFields(record);
+      if (!fields) continue;
+      memoryLines.push(`- ${fields.title}: ${fields.value}`);
       appliedMemory.add(record.id);
       usage.push({
         id: record.id,
@@ -317,8 +322,8 @@ export function assembleContext(input: AssembleContextInput): AssembledContext {
     // run does not satisfy must not enter (retrieval already filters; this is
     // the same defense-in-depth the memory path applies).
     if (!scopeSatisfies(citation.scope ?? GLOBAL_SCOPE, scope)) continue;
-    const excerpt = truncate(citation.snippet, MAX_EXCERPT_CHARS);
-    if (!excerpt) continue;
+    const excerpt = truncate(redactKnowledgeText(citation.snippet), MAX_EXCERPT_CHARS);
+    if (!isUsableKnowledgeText(excerpt)) continue;
     const line = `- [${citation.sourceId}] ${citation.title}: ${excerpt}`;
     // Skip (not stop): a later, smaller line may still fit — inclusion stays
     // within the budget either way.
@@ -397,6 +402,20 @@ function immutableReceipt(receipt: ExecutionContextReceipt): ExecutionContextRec
   Object.freeze(receipt.citations);
   Object.freeze(receipt.contributions);
   return Object.freeze(receipt);
+}
+
+/**
+ * Scrub memory title/value before they enter the prefix. Omit-only values
+ * never contribute: they would otherwise re-enter as authoritative context.
+ */
+function redactedMemoryFields(record: MemoryRecord): { title: string; value: string } | null {
+  const title = redactKnowledgeText(record.title);
+  const value = redactKnowledgeText(record.value);
+  if (!isUsableKnowledgeText(value)) return null;
+  return {
+    title: isUsableKnowledgeText(title) ? title : "Memory",
+    value
+  };
 }
 
 /** A memory is authorized when its provenance source (if any) is authorized. */

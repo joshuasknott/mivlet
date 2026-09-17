@@ -14,7 +14,7 @@ import type {
   MemoryProvenance,
   MemoryRecord,
   MemorySuggestion
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { detectContradiction, detectDuplicate } from "./duplicate";
 
 export interface MemorySuggestionContext {

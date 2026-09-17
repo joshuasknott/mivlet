@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApprovalRequest } from "@fable/protocol";
-import type { McpFrame, McpNotification, McpRequest } from "@fable/connectors";
-import { McpClient } from "@fable/connectors/mcp/sdk-client";
+import type { ApprovalRequest } from "@mivlet/protocol";
+import type { McpFrame, McpNotification, McpRequest } from "@mivlet/connectors";
+import { McpClient } from "@mivlet/connectors/mcp/sdk-client";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
-import { buildToolApproval } from "@fable/connectors/native-api/approvals";
+import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
+import { createApprovalGate } from "@mivlet/connectors/native-api/tool-executor";
 
 vi.mock("./native-mcp-client", () => ({ McpClient }));
 
@@ -50,8 +51,9 @@ describe("computer authority across approvals", () => {
     await expect(execute(approval(), args)).resolves.toBe("Saved");
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ computerGeneration: 4, workspaceId: "workspace-a", agentId: "agent-a" }));
     expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({
-      approval: expect.objectContaining({ decision: "once", confirmationText: "approve write-file" }),
+      approval: expect.objectContaining({ decision: "once" }),
     }));
+    expect(runtime.executeTool.mock.calls[0]?.[0]?.approval?.confirmationText).toBeUndefined();
   });
   it("discards an in-flight result after a scope/control change", async () => {
     const current = computer();
@@ -82,22 +84,40 @@ describe("computer authority across approvals", () => {
     }));
     expect(runtime.prepareHosted).not.toHaveBeenCalled();
   });
+  it("does not auto-satisfy a standing grant before native minting", async () => {
+    runtime.executeTool.mockReset().mockResolvedValue({ ok: true, output: "Saved" });
+    const gate = createApprovalGate();
+    const source = approval();
+    gate.replaceStandingGrants([
+      {
+        id: "session-write",
+        requestId: source.id,
+        scope: "session",
+        service: source.service,
+        action: source.action,
+        mode: source.mode,
+        dataUsed: source.dataUsed,
+        createdAt: new Date(0).toISOString(),
+      },
+    ]);
+    const execute = createDesktopToolExecutor(gate, { localComputer: computer() });
+    const pending = execute(source, args);
+    await Promise.resolve();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+    expect(gate.pendingCount()).toBe(1);
+    gate.resolveGrant(source.id);
+    await expect(pending).resolves.toBe("Saved");
+    expect(runtime.executeTool).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tool: "write-file",
+        approval: expect.objectContaining({ decision: "once", request: expect.objectContaining({ id: source.id }) }),
+      }),
+    );
+  });
 });
 
 describe("native connector chat tools", () => {
-  it("requires current app access for a token plugin before and after the native read", async () => {
-    runtime.executeTool.mockClear();
-    const args = JSON.stringify({ connectorId: "shopify", capability: "products.list", input: {} });
-    const approval = buildToolApproval("Codex", "plugin-read", args);
-    const missing = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { workspaceId: "workspace-1" });
-    await expect(missing(approval, args)).rejects.toThrow("Mention this connected app");
-    expect(runtime.executeTool).not.toHaveBeenCalled();
-    let allowed = true;
-    runtime.executeTool.mockImplementationOnce(async () => { allowed = false; return { ok: true, output: "stale private result" }; });
-    const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { workspaceId: "workspace-1", connectorAccessCurrent: () => allowed });
-    await expect(execute(approval, args)).rejects.toThrow("Mention this connected app");
-    expect(runtime.executeTool).toHaveBeenCalledWith(expect.objectContaining({ tool: "plugin-read", workspaceId: "workspace-1" }));
-  });
+
   it("passes an approved Drive read to the scoped native boundary", async () => {
     runtime.executeTool.mockResolvedValue({ ok: true, output: "live result" });
     const execute = createDesktopToolExecutor({ waitForDecision: async () => "granted" }, { workspaceId: "workspace-1", connectorAccessCurrent: (id) => id === "google-drive" });
@@ -151,7 +171,11 @@ inspectRuntimeHostedProcess: runtime.inspectHosted,
 prepareRuntimeHostedBrowser: runtime.prepareBrowser,
 navigateRuntimeHostedBrowser: runtime.navigateBrowser,
 prepareRuntimeHostedBrowserAction: runtime.prepareBrowserAction,
-actRuntimeHostedBrowser: runtime.actBrowser
+actRuntimeHostedBrowser: runtime.actBrowser,
+toPublicHostedBrowserSnapshot: (snapshot: { liveViewUrl?: string; takeoverAvailable?: boolean }) => {
+  const { liveViewUrl, ...rest } = snapshot;
+  return { ...rest, takeoverAvailable: rest.takeoverAvailable === true || Boolean(liveViewUrl) };
+}
 }));
 vi.mock("./mcp-transport", () => ({
   createDesktopMcpTransport: mcpFactory,
@@ -496,9 +520,12 @@ describe("hosted cloud browser execution", () => {
       expect.objectContaining({ request: browserApproval, decision: "once" }),
       expect.objectContaining({ request: sourceApproval, decision: "once" })
     );
+    expect(runtime.navigateBrowser.mock.calls[0]?.[1]?.confirmationText).toBeUndefined();
+    expect(runtime.navigateBrowser.mock.calls[0]?.[2]?.confirmationText).toBeUndefined();
     expect(onHostedBrowserSnapshot).toHaveBeenCalledWith(
-      expect.objectContaining({ liveViewUrl: expect.stringContaining("live.browser.run") })
+      expect.objectContaining({ takeoverAvailable: true })
     );
+    expect(onHostedBrowserSnapshot.mock.calls[0][0].liveViewUrl).toBeUndefined();
     expect(output).toContain('"title":"Example Domain"');
     expect(output).toContain('"name":"More information"');
     expect(output).toContain('"canScrollDown":true');
@@ -779,10 +806,10 @@ describe("desktop semantic capability grants", () => {
       },
       expect.objectContaining({
         request: grantApproval,
-        decision: "once",
-        confirmationText: "allow connected source search"
+        decision: "once"
       })
     );
+    expect(runtime.commitGrant.mock.calls[0]?.[1]?.confirmationText).toBeUndefined();
     expect(runtime.executeTool).toHaveBeenCalledWith(
       expect.objectContaining({
         tool: "connection-read",

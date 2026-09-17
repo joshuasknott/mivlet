@@ -1,8 +1,8 @@
 /**
- * Cloudflare Workers transport for the Fable auth broker.
+ * Cloudflare Workers transport for the Mivlet auth broker.
  *
  * Workers receive a standard Web `Request` and an `env` object (bindings +
- * vars), so this transport is a thin glue layer: it builds a {@link FableBroker}
+ * vars), so this transport is a thin glue layer: it builds a {@link MivletBroker}
  * from the Worker `env` and routes every fetch event through the same
  * runtime-neutral {@link createBrokerRouter} the Node transport uses. The two
  * runtimes therefore share one implementation of routing, CORS, rate limiting,
@@ -10,16 +10,19 @@
  * OAuth lifecycle.
  *
  * Secrets: provider client id/secret are configured as Worker secrets (or
- * encrypted vars) named exactly as in `.env.example` (FABLE_BROKER_<PROVIDER>_*).
+ * encrypted vars) named exactly as in `.env.example` (MIVLET_BROKER_<PROVIDER>_*).
+ * Missing MIVLET_* values fall back once to legacy FABLE_* aliases.
  * They are read into broker memory only and sent solely to provider token/
  * revocation endpoints over TLS; never logged, returned, or persisted. The
  * default memory backend keeps short-lived pending exchanges and handoff
- * tickets per isolate. The opt-in durable backend routes those values through
+ * tickets per isolate and is refused whenever the public URL is public HTTPS
+ * (HTTPS and not loopback). Unlabeled or `local` Workers with a public URL
+ * fail closed. The opt-in durable backend routes those values through
  * encrypted, SQLite-backed Durable Objects and coordinates rate limits across
  * isolates.
  */
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { createBrokerRouter, type RateLimiter } from "./router.js";
 import type { BrokerEnv } from "./provider-profiles.js";
 import { createStores } from "./stores.js";
@@ -31,6 +34,7 @@ import {
 } from "./durable-stores.js";
 import { createEphemeralOps } from "./ephemeral-rpc.js";
 import { StoreCryptoError, assertStoreEncryptionKey } from "./store-crypto.js";
+import { withLegacyFableEnv } from "@mivlet/protocol";
 
 /**
  * Worker environment bindings. Plain text/secret vars are strings; secrets are
@@ -39,39 +43,39 @@ import { StoreCryptoError, assertStoreEncryptionKey } from "./store-crypto.js";
  */
 export interface Env {
   /** Public HTTPS origin registered in every provider console. Required. */
-  FABLE_BROKER_PUBLIC_URL?: string;
+  MIVLET_BROKER_PUBLIC_URL?: string;
   /** Requests per minute per route+peer. Default 60. */
-  FABLE_BROKER_RATE_LIMIT_PER_MINUTE?: string;
+  MIVLET_BROKER_RATE_LIMIT_PER_MINUTE?: string;
   /** Declared deploy environment: local, staging, or production. */
-  FABLE_BROKER_ENVIRONMENT?: string;
+  MIVLET_BROKER_ENVIRONMENT?: string;
   /** Comma-separated exact HTTPS desktop callbacks (loopback allowed by rule). */
-  FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS?: string;
+  MIVLET_BROKER_ALLOWED_DESKTOP_REDIRECTS?: string;
 
   /** Storage backend: "memory" (default, for Node + local) or "durable" (Worker with DO). */
-  FABLE_BROKER_STORAGE_BACKEND?: string;
+  MIVLET_BROKER_STORAGE_BACKEND?: string;
   /** Required only when backend=durable. 32-byte base64url secret. Never in code. */
-  FABLE_BROKER_STORE_ENCRYPTION_KEY?: string;
+  MIVLET_BROKER_STORE_ENCRYPTION_KEY?: string;
 
   /** Typed Durable Object bindings (wired in wrangler.jsonc; not used on memory path). */
   BROKER_PENDING?: DurableObjectNamespace<BrokerPending>;
   BROKER_HANDOFF?: DurableObjectNamespace<BrokerHandoff>;
   BROKER_RATELIMIT?: DurableObjectNamespace<BrokerRateLimit>;
 
-  FABLE_BROKER_GITHUB_CLIENT_ID?: string;
-  FABLE_BROKER_GITHUB_CLIENT_SECRET?: string;
-  FABLE_BROKER_VERCEL_CLIENT_ID?: string;
-  FABLE_BROKER_VERCEL_CLIENT_SECRET?: string;
-  FABLE_BROKER_LINEAR_CLIENT_ID?: string;
-  FABLE_BROKER_LINEAR_CLIENT_SECRET?: string;
-  FABLE_BROKER_NOTION_CLIENT_ID?: string;
-  FABLE_BROKER_NOTION_CLIENT_SECRET?: string;
-  FABLE_BROKER_SLACK_CLIENT_ID?: string;
-  FABLE_BROKER_SLACK_CLIENT_SECRET?: string;
+  MIVLET_BROKER_GITHUB_CLIENT_ID?: string;
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET?: string;
+  MIVLET_BROKER_VERCEL_CLIENT_ID?: string;
+  MIVLET_BROKER_VERCEL_CLIENT_SECRET?: string;
+  MIVLET_BROKER_LINEAR_CLIENT_ID?: string;
+  MIVLET_BROKER_LINEAR_CLIENT_SECRET?: string;
+  MIVLET_BROKER_NOTION_CLIENT_ID?: string;
+  MIVLET_BROKER_NOTION_CLIENT_SECRET?: string;
+  MIVLET_BROKER_SLACK_CLIENT_ID?: string;
+  MIVLET_BROKER_SLACK_CLIENT_SECRET?: string;
 }
 
 /** Lazy per-isolate broker + router; built once per Worker isolate. */
 interface BrokerRuntime {
-  broker: FableBroker;
+  broker: MivletBroker;
   router: ReturnType<typeof createBrokerRouter>;
 }
 
@@ -80,7 +84,8 @@ const runtimes = new WeakMap<Env, BrokerRuntime>();
 function runtimeFor(env: Env): BrokerRuntime {
   const cached = runtimes.get(env);
   if (cached) return cached;
-  const backend = (env.FABLE_BROKER_STORAGE_BACKEND ?? "memory").toLowerCase();
+  const vars = withLegacyFableEnv(stringBindings(env));
+  const backend = (vars.MIVLET_BROKER_STORAGE_BACKEND ?? "memory").toLowerCase();
   const useDurable = backend === "durable";
 
   // Default to memory adapters for Node/local determinism. Durable mode uses
@@ -92,7 +97,7 @@ function runtimeFor(env: Env): BrokerRuntime {
   let pendingForBroker: any;
   let handoffForBroker: any;
   if (useDurable) {
-    const secret = env.FABLE_BROKER_STORE_ENCRYPTION_KEY;
+    const secret = vars.MIVLET_BROKER_STORE_ENCRYPTION_KEY;
     assertStoreEncryptionKey(secret ?? "");
     ephemeralOps = createEphemeralOps(
       {
@@ -103,7 +108,7 @@ function runtimeFor(env: Env): BrokerRuntime {
       clock
     );
     rateLimiter = createDurableRateLimiter(env.BROKER_RATELIMIT!, {
-      limit: parsePositiveInt(env.FABLE_BROKER_RATE_LIMIT_PER_MINUTE, 60),
+      limit: parsePositiveInt(vars.MIVLET_BROKER_RATE_LIMIT_PER_MINUTE, 60),
       windowMs: 60_000,
       clock
     });
@@ -114,16 +119,16 @@ function runtimeFor(env: Env): BrokerRuntime {
     handoffForBroker = stores.handoff;
   }
 
-  const broker = new FableBroker({
-    env: stringBindings(env),
-    publicBaseUrl: env.FABLE_BROKER_PUBLIC_URL,
+  const broker = new MivletBroker({
+    env: vars,
+    publicBaseUrl: vars.MIVLET_BROKER_PUBLIC_URL,
     requirePublicBaseUrl: true,
     fetch: fetch.bind(globalThis),
     pending: pendingForBroker,
     handoff: handoffForBroker,
     ephemeralOps,
   });
-  const requestsPerMinute = parsePositiveInt(env.FABLE_BROKER_RATE_LIMIT_PER_MINUTE, 60);
+  const requestsPerMinute = parsePositiveInt(vars.MIVLET_BROKER_RATE_LIMIT_PER_MINUTE, 60);
   const router = createBrokerRouter({
     broker,
     requestsPerMinute,
@@ -159,10 +164,21 @@ export default {
 };
 
 function validateWorkerConfig(env: Env): string | undefined {
-  const backend = (env.FABLE_BROKER_STORAGE_BACKEND ?? "memory").toLowerCase();
-  const deployment = (env.FABLE_BROKER_ENVIRONMENT ?? "local").toLowerCase();
+  const vars = withLegacyFableEnv(stringBindings(env));
+  const backend = (vars.MIVLET_BROKER_STORAGE_BACKEND ?? "memory").toLowerCase();
+  const rawDeployment = vars.MIVLET_BROKER_ENVIRONMENT;
+  const deployment = (rawDeployment ?? "local").toLowerCase();
+  const unlabeledOrLocal = !rawDeployment?.trim() || deployment === "local";
   if (backend !== "memory" && backend !== "durable") {
     return "Storage backend must be memory or durable.";
+  }
+  // Label is not a reachability control. Public callback URLs cannot use the
+  // local/unlabeled environment, and in-memory OAuth state cannot back public HTTPS.
+  if (unlabeledOrLocal && isPublicUrl(vars.MIVLET_BROKER_PUBLIC_URL)) {
+    return "Local Workers cannot use a public URL.";
+  }
+  if (backend === "memory" && isPublicHttpsUrl(vars.MIVLET_BROKER_PUBLIC_URL)) {
+    return "Public HTTPS Workers require durable storage.";
   }
   if ((deployment === "staging" || deployment === "production") && backend !== "durable") {
     return "Staging and production Workers require durable storage.";
@@ -171,28 +187,50 @@ function validateWorkerConfig(env: Env): string | undefined {
     if (!env.BROKER_PENDING || !env.BROKER_HANDOFF || !env.BROKER_RATELIMIT) {
       return "Durable Object bindings are required for durable backend.";
     }
-    if (!env.FABLE_BROKER_STORE_ENCRYPTION_KEY) {
+    if (!vars.MIVLET_BROKER_STORE_ENCRYPTION_KEY) {
       return "Encryption key required for durable backend.";
     }
     try {
-      assertStoreEncryptionKey(env.FABLE_BROKER_STORE_ENCRYPTION_KEY);
+      assertStoreEncryptionKey(vars.MIVLET_BROKER_STORE_ENCRYPTION_KEY);
     } catch {
       return "Durable storage encryption key is invalid.";
     }
-    if (!isHttpsPublicUrl(env.FABLE_BROKER_PUBLIC_URL)) {
+    if (!isHttpsUrl(vars.MIVLET_BROKER_PUBLIC_URL)) {
       return "Durable Worker deployments require an explicit HTTPS public URL.";
     }
   }
   return undefined;
 }
 
-function isHttpsPublicUrl(value: string | undefined): boolean {
-  if (!value) return false;
+function parseBrokerUrl(value: string | undefined): URL | undefined {
+  if (!value) return undefined;
   try {
-    return new URL(value).protocol === "https:";
+    return new URL(value);
   } catch {
-    return false;
+    return undefined;
   }
+}
+
+function isLoopbackHostname(hostname: string): boolean {
+  const host = hostname.toLowerCase();
+  return host === "127.0.0.1" || host === "localhost" || host === "[::1]" || host === "::1";
+}
+
+/** Any non-loopback origin, including public HTTP. */
+function isPublicUrl(value: string | undefined): boolean {
+  const url = parseBrokerUrl(value);
+  return Boolean(url && !isLoopbackHostname(url.hostname));
+}
+
+/** HTTPS origin that is not loopback — the public Internet callback case. */
+function isPublicHttpsUrl(value: string | undefined): boolean {
+  const url = parseBrokerUrl(value);
+  return Boolean(url && url.protocol === "https:" && !isLoopbackHostname(url.hostname));
+}
+
+function isHttpsUrl(value: string | undefined): boolean {
+  const url = parseBrokerUrl(value);
+  return Boolean(url && url.protocol === "https:");
 }
 
 function configurationRequired(message: string): Response {

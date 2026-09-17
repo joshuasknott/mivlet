@@ -14,9 +14,9 @@
 
 import { describe, expect, it, vi } from "vitest";
 
-import { BROKER_CONTRACT_VERSION, type BrokerProviderId } from "@fable/connectors";
+import { BROKER_CONTRACT_VERSION, BROKER_PKCE_S256_EXAMPLE, type BrokerProviderId } from "@mivlet/connectors";
 
-import { FableBroker } from "./broker.js";
+import { MivletBroker } from "./broker.js";
 import { createBrokerRouter, CORRELATION_HEADER } from "./router.js";
 import {
   providerProfile,
@@ -25,12 +25,19 @@ import {
   type ProviderCredentials
 } from "./provider-profiles.js";
 import type { BrokerFetch } from "./provider-client.js";
+import { BROKER_AUTHORIZE_STATE_MIN_LENGTH } from "./stores.js";
+
+function oauthState(tag: string): string {
+  return tag.length >= BROKER_AUTHORIZE_STATE_MIN_LENGTH
+    ? tag
+    : `${tag}${"x".repeat(BROKER_AUTHORIZE_STATE_MIN_LENGTH - tag.length)}`;
+}
 
 const ENV: BrokerEnv = {
-  FABLE_BROKER_GITHUB_CLIENT_ID: "gh-id",
-  FABLE_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
-  FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id",
-  FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret"
+  MIVLET_BROKER_GITHUB_CLIENT_ID: "gh-id",
+  MIVLET_BROKER_GITHUB_CLIENT_SECRET: "gh-secret",
+  MIVLET_BROKER_VERCEL_CLIENT_ID: "vc-id",
+  MIVLET_BROKER_VERCEL_CLIENT_SECRET: "vc-secret"
 };
 
 /** A fetch that serves canned token/identity/revoke responses for a provider. */
@@ -98,7 +105,7 @@ function creds(provider: BrokerProviderId): ProviderCredentials {
 }
 
 function makeRouter(env: BrokerEnv, fetch?: BrokerFetch) {
-  const broker = new FableBroker({ env, fetch, publicBaseUrl: "https://broker.test/" });
+  const broker = new MivletBroker({ env, fetch, publicBaseUrl: "https://broker.test/" });
   const router = createBrokerRouter({ broker });
   return { broker, router };
 }
@@ -113,20 +120,25 @@ function makeRequest(method: string, path: string, body?: unknown, headers: Reco
 }
 
 /** Run the full authorize → callback → redeem lifecycle to obtain a token set. */
-async function completeFlow(router: ReturnType<typeof createBrokerRouter>, broker: FableBroker, provider: BrokerProviderId, state: string) {
+async function completeFlow(router: ReturnType<typeof createBrokerRouter>, broker: MivletBroker, provider: BrokerProviderId, state: string) {
+  const authorizeState = oauthState(state);
   await broker.authorize({
     contractVersion: BROKER_CONTRACT_VERSION, provider,
-    redirectUri: "http://127.0.0.1:9999/callback", state, codeChallenge: "ch", codeChallengeMethod: "S256"
+    redirectUri: "http://127.0.0.1:9999/callback", state: authorizeState, codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256"
   });
   const callbackRes = await router.handle(
-    makeRequest("GET", `/oauth/${provider}/callback?code=provider-code&state=${state}`),
+    makeRequest("GET", `/oauth/${provider}/callback?code=provider-code&state=${authorizeState}`),
     "127.0.0.1"
   );
   expect(callbackRes.status).toBe(302);
+  expect(callbackRes.headers.get("referrer-policy")).toBe("no-referrer");
   const location = callbackRes.headers.get("location")!;
   // The token never appears in the desktop redirect — only the opaque handoff.
   expect(location).not.toContain("provider-access-token");
   const url = new URL(location);
+  // Query (not fragment): native loopback HTTP cannot observe fragments.
+  expect(url.searchParams.get("handoff")).toBeTruthy();
+  expect(url.hash).toBe("");
   return { handoff: url.searchParams.get("handoff")!, state: url.searchParams.get("state")!, location };
 }
 
@@ -149,11 +161,11 @@ describe("router: lifecycle + transport", () => {
     // completeFlow drives authorize -> callback and returns the single-use handoff.
     const { handoff, state } = await completeFlow(router, broker, "github", "valid-cb");
     expect(handoff).toBeTruthy();
-    expect(state).toBe("valid-cb");
+    expect(state).toBe(oauthState("valid-cb"));
 
     // Redeem the handoff for the token set over a direct POST.
     const redeemRes = await router.handle(
-      makeRequest("POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state }), "127.0.0.1"
+      makeRequest("POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state, codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier }), "127.0.0.1"
     );
     expect(redeemRes.status).toBe(200);
     const redeemed = await redeemRes.json();
@@ -161,7 +173,7 @@ describe("router: lifecycle + transport", () => {
     expect(redeemed.account.id).toBe("4242");
     // The single-use handoff cannot be redeemed twice (token replay impossible).
     const replayRes = await router.handle(
-      makeRequest("POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state }), "127.0.0.1"
+      makeRequest("POST", "/oauth/github/handoff", { contractVersion: BROKER_CONTRACT_VERSION, handoff, state, codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier }), "127.0.0.1"
     );
     expect(replayRes.status).toBe(400);
     expect((await replayRes.json()).error).toBe("invalid-handoff");
@@ -179,9 +191,9 @@ describe("router: lifecycle + transport", () => {
     // Missing code.
     await broker.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
-      redirectUri: "http://127.0.0.1:9999/callback", state: "no-code", codeChallenge: "ch", codeChallengeMethod: "S256"
+      redirectUri: "http://127.0.0.1:9999/callback", state: oauthState("no-code"), codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256"
     });
-    const noCode = await router.handle(makeRequest("GET", `/oauth/github/callback?state=no-code`), "127.0.0.1");
+    const noCode = await router.handle(makeRequest("GET", `/oauth/github/callback?state=${oauthState("no-code")}`), "127.0.0.1");
     expect(noCode.status).toBe(400);
 
     // Unknown / replayed state: nothing pending, rejected before any token exchange.
@@ -192,9 +204,9 @@ describe("router: lifecycle + transport", () => {
 
   it("missing config: an unconfigured provider fails closed with configuration-required (503)", async () => {
     // GitHub has no credentials in this env.
-    const { router } = makeRouter({ FABLE_BROKER_VERCEL_CLIENT_ID: "vc-id", FABLE_BROKER_VERCEL_CLIENT_SECRET: "vc-secret" }, providerFetch("github"));
+    const { router } = makeRouter({ MIVLET_BROKER_VERCEL_CLIENT_ID: "vc-id", MIVLET_BROKER_VERCEL_CLIENT_SECRET: "vc-secret" }, providerFetch("github"));
     const res = await router.handle(
-      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=ch`), "127.0.0.1"
+      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=s&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`), "127.0.0.1"
     );
     expect(res.status).toBe(503);
     const body = await res.json();
@@ -244,9 +256,9 @@ describe("router: lifecycle + transport", () => {
     const { broker, router } = makeRouter(ENV, fetch);
     await broker.authorize({
       contractVersion: BROKER_CONTRACT_VERSION, provider: "github",
-      redirectUri: "http://127.0.0.1:9999/callback", state: "id-fail", codeChallenge: "ch", codeChallengeMethod: "S256"
+      redirectUri: "http://127.0.0.1:9999/callback", state: oauthState("id-fail"), codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge, codeChallengeMethod: "S256"
     });
-    const res = await router.handle(makeRequest("GET", `/oauth/github/callback?code=c&state=id-fail`), "127.0.0.1");
+    const res = await router.handle(makeRequest("GET", `/oauth/github/callback?code=c&state=${oauthState("id-fail")}`), "127.0.0.1");
     expect(res.status).toBe(502); // provider-unavailable (5xx from identity)
     expect((await res.json()).error).toBe("provider-unavailable");
   });
@@ -269,14 +281,14 @@ describe("router: lifecycle + transport", () => {
     const log = (line: string) => lines.push(line);
     const { router } = makeRouter(ENV, providerFetch("github"));
     // Build a tight-budget router to exercise the limiter path directly.
-    const broker = new FableBroker({ env: ENV, fetch: providerFetch("github"), publicBaseUrl: "https://broker.test/" });
+    const broker = new MivletBroker({ env: ENV, fetch: providerFetch("github"), publicBaseUrl: "https://broker.test/" });
     const limited = createBrokerRouter({ broker, requestsPerMinute: 1 });
     const ok = await limited.handle(
-      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=a&code_challenge=ch`), "127.0.0.1", log
+      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("a")}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`), "127.0.0.1", log
     );
     expect(ok.status).toBe(302);
     const blocked = await limited.handle(
-      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=b&code_challenge=ch`), "127.0.0.1", log
+      makeRequest("GET", `/oauth/github/authorize?redirect_uri=http://127.0.0.1:1/callback&state=${oauthState("b")}&code_challenge=E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM&code_challenge_method=S256`), "127.0.0.1", log
     );
     expect(blocked.status).toBe(429);
     expect((await blocked.json()).error).toBe("rate-limited");
@@ -284,5 +296,24 @@ describe("router: lifecycle + transport", () => {
     expect(lines.join("\n")).not.toContain("gh-secret");
     expect(lines.join("\n")).not.toContain("provider-access-token");
     void router; // router built for symmetry; limiter path is the subject
+  });
+
+  it("redacts handoff tickets from logged request URLs", async () => {
+    const lines: string[] = [];
+    const log = (line: string) => lines.push(line);
+    const { router } = makeRouter(ENV, providerFetch("github"));
+    const ticket = "live-handoff-ticket-value";
+    const alias = "live-ticket-alias-value";
+    const res = await router.handle(
+      makeRequest("GET", `/oauth/github/handoff?handoff=${ticket}&ticket=${alias}`),
+      "127.0.0.1",
+      log
+    );
+    expect(res.status).toBe(400);
+    const joined = lines.join("\n");
+    expect(joined).not.toContain(ticket);
+    expect(joined).not.toContain(alias);
+    expect(joined).toContain("handoff=[redacted]");
+    expect(joined).toContain("ticket=[redacted]");
   });
 });

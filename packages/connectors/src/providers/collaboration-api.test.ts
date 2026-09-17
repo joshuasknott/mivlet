@@ -1,9 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ConnectorApprovalRecord, ConnectorTokenSet } from "@fable/protocol";
+
+import {
+  BROKER_PKCE_S256_EXAMPLE
+} from "./broker-contract";
+import { readMivletEnvValue, type ConnectorApprovalRecord, type ConnectorTokenSet } from "@mivlet/protocol";
 import { ConnectorRuntime } from "../sdk";
 import type { ProviderFetch } from "./http";
 import { createNotionAdapter, NOTION_CAPABILITIES } from "./notion-api";
-import { createSlackAdapter, SLACK_CAPABILITIES } from "./slack-api";
+import { createSlackAdapter, SLACK_CAPABILITIES, SLACK_OAUTH_SCOPES } from "./slack-api";
 
 const tokens: ConnectorTokenSet = { accessToken: "test-token", tokenType: "Bearer", scopes: [] };
 const json = (body: unknown, status = 200, headers?: Record<string, string>) => new Response(JSON.stringify(body), { status, headers: { "content-type": "application/json", ...headers } });
@@ -64,7 +68,7 @@ describe("Notion production adapter", () => {
   });
 
   it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
-    const start = await notion(vi.fn()).startAuth({ redirectUri: base.redirectUri, state: "s", codeChallenge: "c" });
+    const start = await notion(vi.fn()).startAuth({ redirectUri: base.redirectUri, state: "s", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge });
     expect(start.authorizationUrl).toContain("https://auth.example/oauth/notion/authorize");
     expect(start.state).toBe("s");
   });
@@ -80,7 +84,7 @@ describe("Notion production adapter", () => {
       return json({ contractVersion: 1, revoked: true });
     });
     const adapter = notion(fetcher);
-    const auth = await adapter.completeAuth({ callbackUrl: `${base.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    const auth = await adapter.completeAuth({ callbackUrl: `${base.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     expect(auth).toMatchObject({ tokens: { accessToken: "a", refreshToken: "r" }, account: { id: "ws" } });
     await expect(adapter.refresh(auth.tokens)).resolves.toMatchObject({ accessToken: "a2", refreshToken: "r" });
     await expect(adapter.revoke(auth.tokens)).resolves.toBeUndefined();
@@ -102,7 +106,7 @@ describe("Notion production adapter", () => {
       return json({ error: "invalid route" }, 404);
     });
     const adapter = notion(fetcher);
-    const auth = await adapter.completeAuth({ callbackUrl: `${base.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: "unused" });
+    const auth = await adapter.completeAuth({ callbackUrl: `${base.redirectUri}?handoff=t&state=s`, expectedState: "s", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     await adapter.refresh(auth.tokens);
     await adapter.revoke(auth.tokens);
     expect(seen).toEqual(["/oauth/notion/handoff", "/oauth/notion/refresh", "/oauth/notion/revoke"]);
@@ -253,8 +257,13 @@ describe("Slack production adapter", () => {
   });
 
   it("routes auth through the broker oauth paths like the other confidential adapters", async () => {
-    const start = await slack(vi.fn()).startAuth({ redirectUri: base.redirectUri, state: "s2", codeChallenge: "c" });
+    const start = await slack(vi.fn()).startAuth({ redirectUri: base.redirectUri, state: "s2", codeChallenge: BROKER_PKCE_S256_EXAMPLE.challenge });
+    const authorize = new URL(start.authorizationUrl);
+    expect(authorize.pathname).toBe("/oauth/slack/authorize");
     expect(start.authorizationUrl).toContain("https://auth.example/oauth/slack/authorize");
+    expect(authorize.searchParams.get("scope")).toBe(SLACK_OAUTH_SCOPES.join(" "));
+    expect(authorize.searchParams.get("scope")).toContain("chat:write");
+    expect(authorize.searchParams.get("scope")).toContain("reactions:write");
   });
 
   it("redeems, refreshes, and revokes only through Slack broker contract routes", async () => {
@@ -270,7 +279,7 @@ describe("Slack production adapter", () => {
       return json({ error: "invalid route" }, 404);
     });
     const adapter = slack(fetcher);
-    const auth = await adapter.completeAuth({ callbackUrl: `${base.redirectUri}?handoff=t&state=s2`, expectedState: "s2", codeVerifier: "unused" });
+    const auth = await adapter.completeAuth({ callbackUrl: `${base.redirectUri}?handoff=t&state=s2`, expectedState: "s2", codeVerifier: BROKER_PKCE_S256_EXAMPLE.verifier });
     await adapter.refresh(auth.tokens);
     await adapter.revoke(auth.tokens);
     expect(seen).toEqual(["/oauth/slack/handoff", "/oauth/slack/refresh", "/oauth/slack/revoke"]);
@@ -366,6 +375,6 @@ describe("Slack production adapter", () => {
   });
 });
 
-describe.runIf(Boolean(process.env.FABLE_LIVE_CONNECTOR_TESTS))("live collaboration connectors", () => {
+describe.runIf(Boolean(readMivletEnvValue(process.env, "LIVE_CONNECTOR_TESTS")))("live collaboration connectors", () => {
   it.skip("runs only when deliberately supplied credentials are handled by the native keyring boundary", () => undefined);
 });

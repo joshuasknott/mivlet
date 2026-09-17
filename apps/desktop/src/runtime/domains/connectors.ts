@@ -11,7 +11,7 @@ import type {
   ConnectorSyncRequest,
   ConnectorSyncState,
   KnowledgeSource,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   hasTauriRuntime,
   invoke,
@@ -63,33 +63,6 @@ export async function listRuntimeConnectorStatuses() {
     return mergeConnectorConnections(verifiedNative, remote);
   } catch {
     return null;
-  }
-}
-
-export async function connectRuntimeTokenPlugin(
-  workspaceId: string,
-  connectorId: string,
-  credential: {
-    token: string;
-    baseUrl?: string;
-    accountId?: string;
-    developerToken?: string;
-    loginCustomerId?: string;
-  },
-): Promise<ConnectorManifest> {
-  if (!hasTauriRuntime())
-    throw new Error("Open the Mivlet desktop app to connect this plugin.");
-  const scope = activeDataScope();
-  if (!scope || scope.workspaceId !== workspaceId)
-    throw new Error("Select the active workspace before connecting.");
-  try {
-    return await invoke<ConnectorManifest>("connect_token_plugin", {
-      workspaceId,
-      connectorId,
-      credential,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
   }
 }
 
@@ -244,10 +217,16 @@ export async function prepareRuntimeConnectorToolAction(
   action: string,
   payload: Record<string, string>,
 ) {
-  return invokeNative<{ action: ConnectorActionRequest; preview: string }>(
-    "prepare_connector_tool_action",
-    { workspaceId, connectorId, action, payload },
-  );
+  return invokeNative<{
+    action: ConnectorActionRequest;
+    preview: string;
+    connectionId?: string | null;
+  }>("prepare_connector_tool_action", {
+    workspaceId,
+    connectorId,
+    action,
+    payload,
+  });
 }
 
 export async function executeRuntimeConnectorAction(request: {

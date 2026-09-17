@@ -257,7 +257,7 @@ export type CollaborationCommand =
       status: "completed" | "failed" | "cancelled" | "awaiting-user";
       reason?: string;
     }
-  | { action: "stop-work"; id: string }
+  | { action: "stop-work"; id: string; expectedGeneration?: number }
   | { action: "stop-project"; projectId: string }
   | {
       action: "continue-work";

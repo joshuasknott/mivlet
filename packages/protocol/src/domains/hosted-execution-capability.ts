@@ -62,11 +62,21 @@ function ownedArrayBuffer(bytes: Uint8Array): ArrayBuffer {
   return owned.buffer;
 }
 
-async function capabilityKey(rootSecret: string, usages: KeyUsage[]): Promise<CryptoKey> {
+const CAPABILITY_KEY_DOMAINS = [
+  "mivlet-hosted-execution-capability:v1",
+  // Deprecated: former product HMAC domain. Verify-only fallback for in-flight tokens.
+  "fable-hosted-execution-capability:v1"
+] as const;
+
+async function capabilityKey(
+  rootSecret: string,
+  usages: KeyUsage[],
+  domain: string = CAPABILITY_KEY_DOMAINS[0]
+): Promise<CryptoKey> {
   if (rootSecret.length < 32) throw new Error("capability-configuration-required");
   const root = await crypto.subtle.digest(
     "SHA-256",
-    new TextEncoder().encode(`fable-hosted-execution-capability:v1:${rootSecret}`)
+    new TextEncoder().encode(`${domain}:${rootSecret}`)
   );
   return crypto.subtle.importKey("raw", root, { name: "HMAC", hash: "SHA-256" }, false, usages);
 }
@@ -112,23 +122,24 @@ export async function signHostedExecutionCapability(
   return `${TOKEN_PREFIX}.${encodedPayload}.${encodeBase64Url(new Uint8Array(signature))}`;
 }
 
-export async function verifyHostedExecutionCapability(
+/** HMAC-authenticate a capability token and return its payload without use checks. */
+export async function readHostedExecutionCapability(
   rootSecret: string,
-  token: string,
-  expected: { computerId: string; scope: HostedExecutionCapabilityScope; now?: number }
+  token: string
 ): Promise<HostedExecutionCapabilityPayload> {
   if (!token || token.length > MAX_TOKEN_CHARACTERS) throw new Error("invalid-capability");
   const parts = token.split(".");
   if (parts.length !== 3 || parts[0] !== TOKEN_PREFIX || !parts[1] || !parts[2]) {
     throw new Error("invalid-capability");
   }
-  const key = await capabilityKey(rootSecret, ["verify"]);
-  const verified = await crypto.subtle.verify(
-    "HMAC",
-    key,
-    ownedArrayBuffer(decodeBase64Url(parts[2])),
-    new TextEncoder().encode(parts[1])
-  );
+  const signature = ownedArrayBuffer(decodeBase64Url(parts[2]));
+  const message = new TextEncoder().encode(parts[1]);
+  let verified = false;
+  for (const domain of CAPABILITY_KEY_DOMAINS) {
+    const key = await capabilityKey(rootSecret, ["verify"], domain);
+    verified = await crypto.subtle.verify("HMAC", key, signature, message);
+    if (verified) break;
+  }
   if (!verified) throw new Error("invalid-capability");
   let decoded: unknown;
   try {
@@ -136,15 +147,41 @@ export async function verifyHostedExecutionCapability(
   } catch {
     throw new Error("invalid-capability");
   }
-  const payload = validatePayload(decoded);
+  return validatePayload(decoded);
+}
+
+export function assertHostedExecutionCapability(
+  payload: HostedExecutionCapabilityPayload,
+  expected: {
+    computerId: string;
+    scope: HostedExecutionCapabilityScope;
+    generation: number;
+    now?: number;
+  }
+): void {
   const now = expected.now ?? Date.now();
   if (
     payload.computerId !== expected.computerId
     || !payload.scopes.includes(expected.scope)
+    || payload.generation !== expected.generation
     || now < payload.issuedAt - 30_000
     || now >= payload.expiresAt
   ) {
     throw new Error("capability-rejected");
   }
+}
+
+export async function verifyHostedExecutionCapability(
+  rootSecret: string,
+  token: string,
+  expected: {
+    computerId: string;
+    scope: HostedExecutionCapabilityScope;
+    generation: number;
+    now?: number;
+  }
+): Promise<HostedExecutionCapabilityPayload> {
+  const payload = await readHostedExecutionCapability(rootSecret, token);
+  assertHostedExecutionCapability(payload, expected);
   return payload;
 }

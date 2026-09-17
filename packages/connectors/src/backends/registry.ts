@@ -1,6 +1,6 @@
 /** Current provider catalogue shown by onboarding and Settings. */
 
-import type { BackendProvider } from "@fable/protocol";
+import type { BackendProvider } from "@mivlet/protocol";
 import { BUILT_IN_PROVIDER_DRIVERS } from "./driver-registry";
 import { additionalNativeProviderCatalog } from "./additional-native";
 

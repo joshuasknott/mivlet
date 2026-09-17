@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { ReactNode, useState } from "react";
 
-function createFableQueryClient() {
+function createMivletQueryClient() {
   return new QueryClient({
     defaultOptions: {
       queries: {
@@ -19,7 +19,7 @@ function createFableQueryClient() {
   });
 }
 
-export function FableQueryProvider({ children }: { children: ReactNode }) {
-  const [client] = useState(() => createFableQueryClient());
+export function MivletQueryProvider({ children }: { children: ReactNode }) {
+  const [client] = useState(() => createMivletQueryClient());
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }

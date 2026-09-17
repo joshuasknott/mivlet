@@ -213,7 +213,7 @@ export interface ExecutionAttempt {
 
 /**
  * The transport a backend speaks. Codex reaches its app-server, while native
- * API providers speak their HTTP/SSE APIs directly with Fable owning the loop.
+ * API providers speak their HTTP/SSE APIs directly with Mivlet owning the loop.
  */
 export type BackendType =
   | "codex-app-server"
@@ -385,7 +385,7 @@ export type BackendCapability =
   | "cancellation";
 
 /**
- * The closed set of per-model capabilities Fable represents. Each field is a
+ * The closed set of per-model capabilities Mivlet represents. Each field is a
  * truthful ceiling: it is only present when the adapter (or curated catalogue)
  * actually knows the model can honor it. An adapter must never populate a field
  * it cannot back — unknown capabilities stay `undefined` on the model, never
@@ -483,7 +483,7 @@ export interface BackendVerifyResult {
 
 /**
  * A consequential action a backend wants to perform (tool call, file write,
- * shell command). Fable routes these into its existing ApprovalRequest system
+ * shell command). Mivlet routes these into its existing ApprovalRequest system
  * rather than letting the backend execute them directly.
  */
 export interface BackendConsequentialEvent {
@@ -539,7 +539,7 @@ export interface NativeToolCall {
   continuationToken?: string;
 }
 
-/** A tool the loop advertises to the model (Fable-owned, from the registry). */
+/** A tool the loop advertises to the model (Mivlet-owned, from the registry). */
 export interface NativeToolSpec {
   name: string;
   description: string;
@@ -547,7 +547,7 @@ export interface NativeToolSpec {
   parameters: string;
 }
 
-/** An Fable-owned tool the native loop may dispatch after approval. */
+/** An Mivlet-owned tool the native loop may dispatch after approval. */
 export interface BackendTool {
   name: string;
   description: string;
@@ -580,14 +580,14 @@ export interface ProviderRouteExecutionBinding {
 /**
  * A normalized agent-loop event streamed back to the shell — the shared event
  * surface for the native-API loop. Model tool calls arrive as `tool-call`
- * carrying a pre-shaped ApprovalRequest so they route through Fable's existing
+ * carrying a pre-shaped ApprovalRequest so they route through Mivlet's existing
  * approval queue before the tool is executed.
  */
 export type BackendAgentEvent =
   | { type: "text-delta"; text: string }
   | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
   | {
-      /** Provider-owned read activity that never enters Fable's approval/execution gate. */
+      /** Provider-owned read activity that never enters Mivlet's approval/execution gate. */
       type: "provider-tool";
       callId: string;
       tool: string;
@@ -611,7 +611,7 @@ export type BackendAgentEvent =
       outputTokens: number;
       costUsd: number;
       costEstimated?: boolean;
-      /** True when the provider supplied no cost and Fable has no trusted rate. */
+      /** True when the provider supplied no cost and Mivlet has no trusted rate. */
       costUnknown?: boolean;
     }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
@@ -661,12 +661,12 @@ export interface AgentTurnRequest {
 /**
  * Options for one agent turn. Provider-neutral: the execute/shouldCancel/approval
  * seams are the same ones the native-API loop uses, so any backend that issues
- * tool calls routes through Fable's shared approval queue.
+ * tool calls routes through Mivlet's shared approval queue.
  */
 export interface AgentTurnOptions {
   /** Executes an approved tool. Backends call this for each tool-call event. */
   execute: (approval: ApprovalRequest, args: string) => Promise<string>;
-  /** Grants or denies a provider-owned action without executing it twice in Fable. */
+  /** Grants or denies a provider-owned action without executing it twice in Mivlet. */
   authorize?: (approval: ApprovalRequest) => Promise<void>;
   /** Cooperative cancellation hook, checked between events. */
   shouldCancel?: () => boolean;

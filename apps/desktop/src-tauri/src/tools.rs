@@ -1,6 +1,6 @@
 //! Mivlet-owned tool execution boundary (Rust side).
 //!
-//! The TypeScript executor (see `@fable/connectors` `tool-executor.ts`) runs only
+//! The TypeScript executor (see `@mivlet/connectors` `tool-executor.ts`) runs only
 //! after the shell's permission gate allows it. This module is the defense-in-depth Rust
 //! layer each tool call must still cross: it re-validates the approval, confines
 //! file paths to the teammate's Mivlet-owned workspace, and performs the actual
@@ -10,9 +10,10 @@
 //! Hard invariants:
 //!   - Allowlisted native connector reads use scoped account consent, with exact
 //!     argument/policy binding, without a redundant persisted user decision.
-//!   - Consequential commands re-check their approval before the side effect. A granted
-//!     `once`/`session`/`rule` decision is honored; a `deny` (or missing/reshaped
-//!     approval) fails closed with `approval-required` and performs nothing.
+//!   - Consequential commands consume a native-minted one-time permit before
+//!     the side effect. A WebView-synthesized `session`/`rule` decision is not
+//!     authority. A `deny` (or missing/reshaped approval) fails closed with
+//!     `approval-required` and performs nothing.
 //!   - File paths are confined to the teammate's local-computer workspace (no
 //!     `..` escapes or absolute escapes). Process tools execute only inside the
 //!     agent's Docker/WSL computer and never through the user's host shell.
@@ -82,7 +83,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 25] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 24] = [
     "read-file",
     "write-file",
     "create-spreadsheet",
@@ -100,7 +101,6 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 25] = [
     "local-desktop-action",
     "connection-read",
     "github-read",
-    "plugin-read",
     "vercel-read",
     "linear-read",
     "google-drive-read",
@@ -186,8 +186,9 @@ pub(crate) fn execute_tool_outcome(
     let workspace_id = request.workspace_id.clone();
     let mcp_session_id = request.mcp_session_id.clone();
 
-    // Defense in depth: re-resolve the approval exactly as the shell did. A deny
-    // (or an invalid/reshaped approval) fails closed here too — never executes.
+    // Defense in depth: re-check the WebView-supplied resolution shape. This
+    // does not mint a permit. Authority is the persisted record consumed by
+    // `verify_tool_authority` before this dispatch.
     let resolution = match resolve_approval(request.approval) {
         Ok(resolution) => resolution,
         Err(err) => {
@@ -241,19 +242,6 @@ pub(crate) fn execute_tool_outcome(
         "google-drive-read" | "gmail-read" | "google-calendar-read" => {
             ToolOutcome::NeedsGoogleRead { tool, arguments }
         }
-        "plugin-read" => {
-            let connector_id = arguments
-                .get("connectorId")
-                .and_then(serde_json::Value::as_str)
-                .unwrap_or_default();
-            if !crate::token_plugins::IDS.contains(&connector_id) {
-                return ToolOutcome::Done(Err("This plugin is not registered.".into()));
-            }
-            match connector_request_from_args(connector_id, &arguments) {
-                Ok(request) => ToolOutcome::NeedsConnectorRead { request },
-                Err(error) => ToolOutcome::Done(Err(error)),
-            }
-        }
         "search-notion" | "search-slack" => ToolOutcome::Done(Err(
             "connector searches must be executed through the async command boundary.".to_string(),
         )),
@@ -292,7 +280,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "computer-artifact" => Some(("read-only", "low")),
         "generate-image" | "edit-image" => Some(("full-access", "high")),
         "cloud-browser" | "cloud-browser-action" => Some(("full-access", "critical")),
-        "connection-read" | "github-read" | "vercel-read" | "linear-read" | "plugin-read" => {
+        "connection-read" | "github-read" | "vercel-read" | "linear-read" => {
             Some(("read-only", "medium"))
         }
         "google-drive-read" => Some(("read-only", "low")),
@@ -312,7 +300,6 @@ fn routine_connector_read(tool: &str) -> bool {
             | "gmail-read"
             | "google-calendar-read"
             | "github-read"
-            | "plugin-read"
             | "vercel-read"
             | "linear-read"
             | "search-notion"
@@ -336,10 +323,16 @@ fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<
         }
         return Ok(());
     }
+    if matches!(request.approval.decision.as_str(), "session" | "rule") {
+        return Err(
+            "Execution blocked: standing session/rule decisions cannot authorize this effect."
+                .into(),
+        );
+    }
     verify_and_consume_execution_approval(
         path,
         &request.approval.request,
-        &request.approval.decided_at,
+        &crate::execution_approvals::wall_clock_consumed_at(),
     )
 }
 
@@ -1229,6 +1222,21 @@ pub async fn execute_tool_call(
         );
         return Err(error);
     }
+    if let Err(error) = crate::execution_control::ensure_active_execution_allowed() {
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: "blocked",
+                error_code: "execution-paused",
+                message: &error,
+            },
+            None,
+        );
+        return Err(error);
+    }
     if let Err(error) = verify_tool_authority(&execution_approvals_path(&app)?, &request) {
         audit_tool_outcome(
             ToolOutcomeAudit {
@@ -1685,12 +1693,9 @@ pub async fn execute_tool_call(
         ToolOutcome::Done(result) => result,
         ToolOutcome::NeedsWebFetch { url, .. } => run_web_fetch_egress(&url).await,
         ToolOutcome::NeedsConnectorRead { request } => {
-            let result = if crate::token_plugins::IDS.contains(&request.connector_id.as_str()) {
-                crate::token_plugins::read(&app, request).await
-            } else {
-                connector_api::read_capability(&app, request).await
-            }
-            .map_err(|error| error.message)?;
+            let result = connector_api::read_capability(&app, request)
+                .await
+                .map_err(|error| error.message)?;
             serde_json::to_string(&result)
                 .map(|output| ToolResult { ok: true, output })
                 .map_err(|_| "Mivlet could not encode the connector result.".to_string())
@@ -1912,7 +1917,7 @@ async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
             // Re-check host for current hop (hostname DNS or IP literal).
             let mut client_builder = reqwest::Client::builder()
                 .timeout(Duration::from_secs(WEB_FETCH_TIMEOUT_SECS))
-                .user_agent("Fable/0.1 (web-fetch)")
+                .user_agent("Mivlet/0.1 (web-fetch)")
                 // Manual redirects ensure every destination gets a fresh
                 // policy check and pinned DNS answer.
                 .redirect(reqwest::redirect::Policy::none())
@@ -2048,15 +2053,42 @@ mod connector_authority_tests {
 
     fn request(tool: &str) -> ToolExecutionRequest {
         let (mode, risk) = tool_policy(tool).unwrap_or(("full-access", "critical"));
+        let now = crate::execution_approvals::wall_clock_consumed_at();
         serde_json::from_value(json!({
             "tool": tool, "arguments": {"query": "test"}, "approval": {
-                "decision": "once", "decidedAt": "2026-09-05T20:00:00Z", "request": {
+                "decision": "once", "decidedAt": now, "request": {
                     "id": "connector-test", "service": "Mivlet", "action": tool,
                     "mode": mode, "riskLevel": risk, "dataUsed": ["query: test"],
-                    "consequence": "Read data", "requestedAt": "2026-09-05T20:00:00Z", "decisions": ["once", "deny"]
+                    "consequence": "Read data", "requestedAt": now, "decisions": ["once", "deny"]
                 }
             }
-        })).unwrap()
+        }))
+        .unwrap()
+    }
+
+    fn persist_permit(path: &Path, request: &ToolExecutionRequest) {
+        crate::execution_approvals::record_execution_decision(
+            path,
+            &crate::models::ApprovalResolutionResponse {
+                persisted: true,
+                audit_entry: crate::models::ApprovalAuditEntry {
+                    id: format!("permit-{}", request.approval.request.id),
+                    request_id: request.approval.request.id.clone(),
+                    decision: request.approval.decision.clone(),
+                    decided_at: request.approval.decided_at.clone(),
+                    note: "approved".into(),
+                },
+                effective_request: request.approval.request.clone(),
+                dismissed: true,
+                grant: None,
+            },
+        )
+        .unwrap();
+    }
+
+    fn decided_at_offset(seconds: i64) -> String {
+        (chrono::Utc::now() + chrono::Duration::seconds(seconds))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
     }
 
     #[test]
@@ -2294,7 +2326,7 @@ mod connector_authority_tests {
     #[test]
     fn native_connector_reads_do_not_require_a_persisted_user_prompt() {
         let path = std::env::temp_dir()
-            .join(format!("fable-no-read-permits-{}", std::process::id()))
+            .join(format!("mivlet-no-read-permits-{}", std::process::id()))
             .join("missing.json");
         for tool in [
             "gmail-read",
@@ -2338,5 +2370,106 @@ mod connector_authority_tests {
         let mut downgraded = request("gmail-read");
         downgraded.approval.request.risk_level = "low".into();
         assert!(verify_tool_authority(path, &downgraded).is_err());
+    }
+
+    #[test]
+    fn tool_authority_rejects_stale_permits_against_wall_clock_consume_time() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        let mut approved = request("web-fetch");
+        let decided_at =
+            decided_at_offset(-(crate::execution_approvals::EXECUTION_APPROVAL_TTL_SECONDS + 1));
+        approved.approval.decided_at = decided_at.clone();
+        approved.approval.request.requested_at = decided_at;
+        persist_permit(&path, &approved);
+        let error = verify_tool_authority(&path, &approved)
+            .expect_err("reusing decided_at as consumed_at would keep this permit inside the TTL");
+        assert!(
+            error.contains("stale"),
+            "expected the freshness fence, got {error}"
+        );
+    }
+
+    #[test]
+    fn tool_authority_records_wall_clock_consume_time_not_decided_at() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        let mut approved = request("web-fetch");
+        let decided_at = decided_at_offset(-30);
+        approved.approval.decided_at = decided_at.clone();
+        approved.approval.request.requested_at = decided_at.clone();
+        persist_permit(&path, &approved);
+        verify_tool_authority(&path, &approved).expect("permit within the TTL consumes");
+        let records: Vec<serde_json::Value> =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        let consumed = records[0]["consumedAt"]
+            .as_str()
+            .expect("consume must persist wall-clock time");
+        assert_ne!(
+            consumed, decided_at,
+            "production consume must not reuse decided_at as consumed_at"
+        );
+    }
+
+    #[test]
+    fn webview_synthesized_once_without_a_native_permit_cannot_execute() {
+        let path = std::env::temp_dir().join(format!(
+            "fable-webview-mint-{}-{}",
+            std::process::id(),
+            "missing.json"
+        ));
+        let _ = std::fs::remove_file(&path);
+        let mut forged = request("web-fetch");
+        forged.approval.decision = "once".into();
+        let error =
+            verify_tool_authority(&path, &forged).expect_err("WebView JSON is not a minted permit");
+        assert!(
+            error.contains("no persisted user approval"),
+            "expected a missing native permit, got {error}"
+        );
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn standing_session_or_rule_decision_cannot_authorize_execution() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        for decision in ["session", "rule"] {
+            let mut approved = request("web-fetch");
+            approved.approval.decision = decision.into();
+            persist_permit(&path, &approved);
+            let error = verify_tool_authority(&path, &approved).expect_err(decision);
+            assert!(
+                error.contains("standing session/rule"),
+                "expected standing-grant refusal, got {error}"
+            );
+            // The native permit must remain unconsumed so a later once-resolution
+            // can still use the user decision recorded by resolve_approval_request.
+            crate::execution_approvals::verify_and_consume_execution_approval(
+                &path,
+                &approved.approval.request,
+                &crate::execution_approvals::wall_clock_consumed_at(),
+            )
+            .unwrap_or_else(|_| panic!("{decision} permit must remain consumable after refusal"));
+        }
+    }
+
+    #[test]
+    fn execute_tool_call_checks_workspace_pause_before_permit_consume() {
+        let source = include_str!("tools.rs");
+        let start = source
+            .find("pub async fn execute_tool_call")
+            .expect("execute_tool_call");
+        let body = &source[start..];
+        let pause = body
+            .find("ensure_active_execution_allowed")
+            .expect("pause gate on execute_tool_call");
+        let consume = body
+            .find("verify_tool_authority")
+            .expect("permit consume on execute_tool_call");
+        assert!(
+            pause < consume,
+            "paused workspaces must fail closed before a permit is consumed"
+        );
     }
 }

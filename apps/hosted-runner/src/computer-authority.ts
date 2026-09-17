@@ -5,13 +5,16 @@ import type {
   HostedProcessLaunchRequest,
   HostedProcessLifecycle,
   HostedProcessSnapshot
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { DurableObject } from "cloudflare:workers";
 import {
   validateComputerId,
   validateLaunchRequest,
   validateProcessId
 } from "./contracts";
+import { consumeCapabilityNonceRecord, nextEnsureGeneration } from "./capability-nonce";
+import { hostedProcessReplayKind } from "./generation-fence";
+import { redactHostedProcessOutput } from "./secret-redact";
 
 interface ComputerRow extends Record<string, SqlStorageValue> {
   computer_id: string;
@@ -48,14 +51,14 @@ export class ComputerAuthority extends DurableObject<Env> {
   async ensure(rawComputerId: string): Promise<HostedComputerSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     const previous = this.readComputer();
-    const generation = previous?.generation ?? 1;
+    const generation = nextEnsureGeneration(previous?.generation);
     const now = new Date().toISOString();
     this.writeComputer({ computerId, lifecycle: "provisioning", keepAlive: true, generation, updatedAt: now });
     const sandbox = this.sandbox(computerId);
     try {
       await sandbox.setKeepAlive(true);
-      await sandbox.mkdir("/workspace/.fable", { recursive: true });
-      await sandbox.writeFile("/workspace/.fable/computer.json", JSON.stringify({ computerId, generation, provisionedAt: now }));
+      await sandbox.mkdir("/workspace/.mivlet", { recursive: true });
+      await sandbox.writeFile("/workspace/.mivlet/computer.json", JSON.stringify({ computerId, generation, provisionedAt: now }));
       if (!this.isCurrentGeneration(generation)) {
         await sandbox.destroy();
         return this.snapshot(false);
@@ -84,30 +87,48 @@ export class ComputerAuthority extends DurableObject<Env> {
   }
 
   /** Generation fence for sibling computer-scoped services such as Browser Run. */
-  async requireReady(rawComputerId: string, expectedGeneration?: number): Promise<number> {
+  async requireReady(rawComputerId: string, expectedGeneration: number): Promise<number> {
     validateComputerId(rawComputerId);
+    this.requireCapabilityGeneration(expectedGeneration);
     const computer = this.readComputer();
-    if (
-      !computer
-      || computer.lifecycle !== "ready"
-      || !computer.keep_alive
-      || (expectedGeneration !== undefined && computer.generation !== expectedGeneration)
-    ) {
-      throw this.operationError(expectedGeneration === undefined ? "computer-not-ready" : "capability-stale");
-    }
+    if (!computer) throw this.operationError("capability-stale");
     return computer.generation;
   }
 
-  async launch(rawComputerId: string, rawRequest: unknown, expectedGeneration?: number): Promise<HostedProcessSnapshot> {
+  async consumeCapabilityNonce(
+    rawComputerId: string,
+    nonce: string,
+    expectedGeneration: number,
+    expiresAt: number
+  ): Promise<void> {
+    validateComputerId(rawComputerId);
+    this.requireCapabilityGeneration(expectedGeneration);
+    consumeCapabilityNonceRecord(
+      (query, ...params) => {
+        this.ctx.storage.sql.exec(query, ...params);
+      },
+      nonce,
+      expiresAt,
+      Date.now()
+    );
+  }
+
+  async launch(rawComputerId: string, rawRequest: unknown, expectedGeneration: number): Promise<HostedProcessSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     this.requireCapabilityGeneration(expectedGeneration);
     const request = validateLaunchRequest(rawRequest);
-    return this.launchValidated(computerId, request);
+    return this.launchValidated(computerId, request, expectedGeneration);
   }
 
-  private async launchValidated(computerId: string, request: HostedProcessLaunchRequest): Promise<HostedProcessSnapshot> {
+  private async launchValidated(
+    computerId: string,
+    request: HostedProcessLaunchRequest,
+    expectedGeneration: number
+  ): Promise<HostedProcessSnapshot> {
     const replay = this.readProcessByRequestKey(request.requestKey);
-    if (replay) return processSnapshot(replay);
+    const replayKind = hostedProcessReplayKind(replay?.generation, expectedGeneration);
+    if (replayKind === "stale") throw this.operationError("capability-stale");
+    if (replayKind === "hit" && replay) return processSnapshot(replay);
     const computer = this.readComputer();
     if (!computer || computer.lifecycle !== "ready" || !computer.keep_alive) {
       throw this.operationError("computer-not-ready");
@@ -138,12 +159,15 @@ export class ComputerAuthority extends DurableObject<Env> {
     }
   }
 
-  async inspect(rawComputerId: string, rawProcessId: string, expectedGeneration?: number): Promise<HostedProcessSnapshot> {
+  async inspect(rawComputerId: string, rawProcessId: string, expectedGeneration: number): Promise<HostedProcessSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     this.requireCapabilityGeneration(expectedGeneration);
     const processId = validateProcessId(rawProcessId);
     const stored = this.readProcessByProcessId(processId);
     if (!stored) throw this.operationError("process-not-found");
+    if (hostedProcessReplayKind(stored.generation, expectedGeneration) !== "hit") {
+      throw this.operationError("capability-stale");
+    }
     const process = await this.sandbox(computerId).getProcess(processId);
     if (!process) {
       this.markProcess(stored.request_key, "stale", { errorCode: "process-container-replaced", endedAt: new Date().toISOString() });
@@ -168,18 +192,21 @@ export class ComputerAuthority extends DurableObject<Env> {
     const output = await process.output({ encoding: "utf8", maxBytes: 256 * 1024, timeout: 5_000 });
     return {
       ...processSnapshot(this.readRequiredProcess(stored.request_key)),
-      stdout: output.stdout,
-      stderr: output.stderr,
+      stdout: redactHostedProcessOutput(output.stdout),
+      stderr: redactHostedProcessOutput(output.stderr),
       outputTruncated: output.truncated
     };
   }
 
-  async kill(rawComputerId: string, rawProcessId: string, expectedGeneration?: number): Promise<HostedProcessSnapshot> {
+  async kill(rawComputerId: string, rawProcessId: string, expectedGeneration: number): Promise<HostedProcessSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     this.requireCapabilityGeneration(expectedGeneration);
     const processId = validateProcessId(rawProcessId);
     const stored = this.readProcessByProcessId(processId);
     if (!stored) throw this.operationError("process-not-found");
+    if (hostedProcessReplayKind(stored.generation, expectedGeneration) !== "hit") {
+      throw this.operationError("capability-stale");
+    }
     const process = await this.sandbox(computerId).getProcess(processId);
     if (!process) {
       this.markProcess(stored.request_key, "stale", { errorCode: "process-container-replaced", endedAt: new Date().toISOString() });
@@ -216,8 +243,10 @@ export class ComputerAuthority extends DurableObject<Env> {
     return getSandbox(this.env.Sandbox, computerId, { keepAlive: true, normalizeId: true });
   }
 
-  private requireCapabilityGeneration(expectedGeneration: number | undefined): void {
-    if (expectedGeneration === undefined) return;
+  private requireCapabilityGeneration(expectedGeneration: number): void {
+    if (!Number.isSafeInteger(expectedGeneration) || expectedGeneration < 1) {
+      throw this.operationError("capability-stale");
+    }
     const computer = this.readComputer();
     if (
       !computer
@@ -260,7 +289,13 @@ export class ComputerAuthority extends DurableObject<Env> {
       );
       CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_process_id ON processes(process_id) WHERE process_id IS NOT NULL;
       CREATE INDEX IF NOT EXISTS idx_processes_run_id ON processes(run_id);
+      CREATE TABLE IF NOT EXISTS consumed_nonces (
+        nonce TEXT PRIMARY KEY,
+        expires_at INTEGER NOT NULL,
+        consumed_at INTEGER NOT NULL
+      );
       INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (1);
+      INSERT OR IGNORE INTO _sql_schema_migrations (id) VALUES (2);
     `);
   }
 

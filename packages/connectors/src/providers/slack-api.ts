@@ -1,4 +1,4 @@
-import type { ConnectorAccountSummary, ConnectorCapability, ConnectorPage, ConnectorTokenSet } from "@fable/protocol";
+import type { ConnectorAccountSummary, ConnectorCapability, ConnectorPage, ConnectorTokenSet } from "@mivlet/protocol";
 import type { ConnectorAdapter, ConnectorRequest, ConnectorWriteRequest } from "../sdk";
 import { ProviderHttpClient, oauthClient, page, type FetchLike, type JsonObject, type OAuthClientOptions } from "./http";
 
@@ -17,6 +17,23 @@ export interface SlackAdapterOptions extends Omit<OAuthClientOptions, "connector
 }
 
 /**
+ * Slack bot scopes Mivlet requests. `chat:write` covers post, reply, edit, and
+ * delete; `reactions:write` covers react-add and react-remove. Both match native
+ * write actions and are labeled write.
+ */
+export const SLACK_OAUTH_SCOPES = [
+  "channels:read",
+  "groups:read",
+  "channels:history",
+  "groups:history",
+  "im:read",
+  "mpim:read",
+  "users:read",
+  "chat:write",
+  "reactions:write"
+] as const;
+
+/**
  * Real Slack REST adapter. The confidential client exchange + identity stays at
  * the configured auth broker; this adapter only performs direct Slack Web API
  * reads and writes with a token resolved by the desktop credential boundary.
@@ -29,11 +46,7 @@ export function createSlackAdapter(options: SlackAdapterOptions): ConnectorAdapt
     handoffEndpoint: new URL("oauth/slack/handoff", broker).toString(),
     refreshEndpoint: new URL("oauth/slack/refresh", broker).toString(),
     revocationEndpoint: new URL("oauth/slack/revoke", broker).toString(),
-    scopes: [
-      "channels:read", "groups:read", "im:read", "mpim:read",
-      "channels:history", "groups:history",
-      "users:read", "chat:write", "reactions:write"
-    ]
+    scopes: [...SLACK_OAUTH_SCOPES]
   });
   const http = new ProviderHttpClient("slack", options.apiBaseUrl ?? "https://slack.com/api/", options.fetch);
   return {

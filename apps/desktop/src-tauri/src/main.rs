@@ -8,17 +8,17 @@ fn main() {
     match args.next().as_deref() {
         #[cfg(debug_assertions)]
         Some("--check-connectors") => {
-            fable_desktop_lib::check_connectors();
+            mivlet_desktop_lib::check_connectors();
             return;
         }
         Some("--antigravity-browser-open") => {
             if let Some(raw_url) = args.next() {
-                let _ = fable_desktop_lib::open_antigravity_browser_helper(&raw_url);
+                let _ = mivlet_desktop_lib::open_antigravity_browser_helper(&raw_url);
             }
             return;
         }
         Some("--antigravity-browser-suppress") => return,
         _ => {}
     }
-    fable_desktop_lib::run();
+    mivlet_desktop_lib::run();
 }

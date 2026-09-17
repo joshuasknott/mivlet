@@ -1,4 +1,4 @@
-import type { NativeSpeechPort, StagedRecordingReceipt } from "@fable/connectors/voice";
+import type { NativeSpeechPort, StagedRecordingReceipt } from "@mivlet/connectors/voice";
 import { getRuntimeAdapter } from "../runtime/adapters/select";
 export function createNativeSpeechPort(): NativeSpeechPort {
   const invoke = <T>(command: string, request: object) =>

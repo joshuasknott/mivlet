@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ApprovalRequest } from "@fable/protocol";
+import type { ApprovalRequest } from "@mivlet/protocol";
 import { createComputerTaskExecutor } from "./computer-task-executor";
 
 const approval = (tool: string) => ({ action: `${tool} approved action` } as ApprovalRequest);

@@ -1,6 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   HostedRunnerRequestError,
+  assertPublicHttpsUrl,
+  createPinnedDnsLookup,
+  setPublicAddressLookupForTests,
   validateBrowserActionRequest,
   validateBrowserNavigateRequest,
   validateComputerId,
@@ -10,6 +13,9 @@ import {
 } from "./contracts";
 
 describe("hosted runner contracts", () => {
+  afterEach(() => {
+    setPublicAddressLookupForTests();
+  });
   it("accepts a bounded argv launch rooted in the workspace", () => {
     expect(validateLaunchRequest({
       requestKey: "request:run-123:1",
@@ -67,9 +73,63 @@ describe("hosted runner contracts", () => {
     "https://10.1.2.3/",
     "https://192.168.1.2/",
     "https://[::1]/",
-    "https://user:secret@example.com/"
+    "https://[::ffff:127.0.0.1]/",
+    "https://user:secret@example.com/",
+    "https://0x7f000001/",
+    "https://2130706433/",
+    "https://127.1/",
+    "https://0177.0.0.1/",
+    "https://0x7f.0.0.1/"
   ])("rejects a non-public browser target: %s", (url) => {
     expect(() => validatePublicHttpsUrl(url)).toThrowError(HostedRunnerRequestError);
+  });
+
+  it("resolves hostnames and rejects DNS answers that are private or loopback", async () => {
+    setPublicAddressLookupForTests(async (hostname) => {
+      if (hostname === "example.com") return ["93.184.216.34"];
+      if (hostname === "127.0.0.1.nip.io") return ["127.0.0.1"];
+      if (hostname === "metadata.example") return ["169.254.169.254"];
+      if (hostname === "mapped.example") return ["::ffff:127.0.0.1"];
+      return [];
+    });
+    await expect(assertPublicHttpsUrl("https://example.com/path")).resolves.toEqual({
+      href: "https://example.com/path",
+      hostname: "example.com",
+      addresses: ["93.184.216.34"]
+    });
+    await expect(assertPublicHttpsUrl("https://1.1.1.1/dns")).resolves.toEqual({
+      href: "https://1.1.1.1/dns",
+      hostname: "1.1.1.1",
+      addresses: ["1.1.1.1"]
+    });
+    await expect(assertPublicHttpsUrl("https://127.0.0.1.nip.io/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
+    await expect(assertPublicHttpsUrl("https://metadata.example/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
+    await expect(assertPublicHttpsUrl("https://mapped.example/")).rejects.toBeInstanceOf(HostedRunnerRequestError);
+  });
+
+  it("pins the validated public answer set and ignores a later hostname lookup", () => {
+    const lookup = createPinnedDnsLookup(["93.184.216.34", "104.16.0.1"]);
+    let all: unknown;
+    lookup("rebind.example", { all: true }, (error: unknown, addresses: unknown) => {
+      expect(error).toBeNull();
+      all = addresses;
+    });
+    expect(all).toEqual([
+      { address: "93.184.216.34", family: 4 },
+      { address: "104.16.0.1", family: 4 }
+    ]);
+    let address = "";
+    let family = 0;
+    lookup("169.254.169.254.nip.io", {}, (error: unknown, value: unknown, parsedFamily: unknown) => {
+      expect(error).toBeNull();
+      address = String(value);
+      family = Number(parsedFamily);
+    });
+    expect(address).toBe("93.184.216.34");
+    expect(family).toBe(4);
+    expect(() => createPinnedDnsLookup(["169.254.169.254"])).toThrowError(HostedRunnerRequestError);
+    expect(() => createPinnedDnsLookup(["10.0.0.1"])).toThrowError(HostedRunnerRequestError);
+    expect(() => createPinnedDnsLookup(["93.184.216.34", "169.254.169.254"])).toThrowError(HostedRunnerRequestError);
   });
 
   it("accepts only an observed control action with the matching visible description", () => {
@@ -80,8 +140,8 @@ describe("hosted runner contracts", () => {
       controlRole: "textbox",
       controlName: "Search",
       action: "fill",
-      value: "Fable"
-    })).toMatchObject({ action: "fill", controlName: "Search", value: "Fable" });
+      value: "Mivlet"
+    })).toMatchObject({ action: "fill", controlName: "Search", value: "Mivlet" });
     expect(validateBrowserActionRequest({
       requestKey: "browser-action:request-124",
       observationId: "observation-1234567890abcdef",

@@ -1,6 +1,6 @@
-import type { NativeToolSpec, BackendModel, BackendProvider, BuiltinPlugins, LocalComputerSnapshot } from "@fable/protocol";
-import { registeredToolSpecs } from "@fable/connectors/native-api/tools";
-import { computerVisionUnavailableReason, supportsSharedComputerTools } from "@fable/connectors/native-api/computer-vision";
+import type { NativeToolSpec, BackendModel, BackendProvider, BuiltinPlugins, LocalComputerSnapshot } from "@mivlet/protocol";
+import { registeredToolSpecs } from "@mivlet/connectors/native-api/tools";
+import { computerVisionUnavailableReason, supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
 
 const COMPUTER_TOOLS = new Set([
   "read-file", "write-file", "create-spreadsheet", "create-document", "computer-artifact",

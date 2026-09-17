@@ -4,7 +4,7 @@ import type {
   CollaborationSnapshot,
   ConversationRoom,
   MemoryControlState,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import {
   createSideChat,
   deleteSideChat,
@@ -348,6 +348,22 @@ describe("deliberate Memory promotion", () => {
     expect(sink.saved).toHaveLength(1);
     expect(sink.saved[0].records[0]).toEqual(record);
     expect(sink.saved[0].records[1].id).toBe("existing");
+  });
+
+  it("scrubs secret-shaped conclusions before they are saved", async () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const sink = ports();
+    const record = await promoteConversationConclusion(sink, {
+      conversation: side,
+      title: "Deploy token",
+      value: `Keep the launch key ${leaked} in the vault.`,
+      scope: { level: "agent", id: "lead" },
+      promotedAt: "2026-04-01T00:00:00.000Z",
+    });
+    expect(record.value).toContain("Keep the launch key");
+    expect(record.value).not.toContain(leaked);
+    expect(record.value).toContain("[REDACTED]");
+    expect(sink.saved[0].records[0].value).not.toContain(leaked);
   });
 
   it("keeps thread and project scopes exact", async () => {

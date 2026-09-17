@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { chunk, fixtureInput, withHost, sendChunks } from "./support/host-process.mjs";
+import { test } from "./support/windows-host.mjs";
 
 // The real bundled executable and SDK process are exercised; provider SSE is synthetic.
 const providers = [

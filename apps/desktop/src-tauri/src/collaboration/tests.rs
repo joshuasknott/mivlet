@@ -12,7 +12,7 @@ const TIME: &str = "2026-09-12T10:00:00.000Z";
 fn store() -> Store {
     Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
 }
-fn profiles() -> Vec<FableAgentProfile> {
+fn profiles() -> Vec<MivletAgentProfile> {
     ["lead", "researcher", "reviewer"].iter().map(|id| serde_json::from_value(json!({"id":id,"name":id,"instructions":"Fixture teammate","modelId":"openai::fixture-model","icon":"sparkle","permissionLabel":"Ask Me"})).unwrap()).collect()
 }
 fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
@@ -20,7 +20,7 @@ fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
 }
 fn fixture_with_profiles<T>(
     store: &Store,
-    profiles: Vec<FableAgentProfile>,
+    profiles: Vec<MivletAgentProfile>,
     f: impl FnOnce(&Context<'_>) -> Result<T>,
 ) -> T {
     store
@@ -554,7 +554,13 @@ fn collaboration_cancel_fences_descendants_and_preserves_unrelated_work() {
             "child",
             delegate("researcher", "Question"),
         )?;
-        commands::apply(ctx, Command::StopWork { id: "root".into() })?;
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "root".into(),
+                expected_generation: None,
+            },
+        )?;
         assert_eq!(ctx.item("root")?.status, WorkStatus::Cancelled);
         assert!(ensure_run_current(ctx.conn, ctx.store, Some("run-lead")).is_err());
         assert!(work::agent_command(
@@ -653,6 +659,315 @@ fn collaboration_restart_marks_work_for_review_and_does_not_replay_attempts() {
         )?;
         assert_eq!(ctx.item("root")?.status, WorkStatus::Queued);
         assert_eq!(ctx.item("root")?.current_run_id, None);
+        Ok(())
+    });
+}
+
+#[test]
+fn remount_recovery_fences_orphaned_executing_work_and_rejects_late_writes() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        work::start(
+            ctx,
+            "queued".into(),
+            "group".into(),
+            "reviewer".into(),
+            "Later".into(),
+            false,
+            None,
+            None,
+        )?;
+        work::start(
+            ctx,
+            "approval".into(),
+            "group".into(),
+            "researcher".into(),
+            "Permit".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "approval", "run-approval")?;
+        let mut approval = ctx.item("approval")?;
+        approval.status = WorkStatus::AwaitingApproval;
+        ctx.work(&approval)?;
+        Ok(())
+    });
+    store
+        .transaction(|conn| fence_orphaned_executing_work(conn, &store, TIME))
+        .unwrap();
+    fixture(&store, |ctx| {
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::AwaitingUser);
+        assert_eq!(root.generation, 2);
+        assert_eq!(root.current_run_id, None);
+        assert!(root.reason.as_deref().unwrap().contains("execution owner"));
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run")).is_err());
+        let approval = ctx.item("approval")?;
+        assert_eq!(approval.status, WorkStatus::AwaitingUser);
+        assert_eq!(approval.generation, 2);
+        assert_eq!(approval.current_run_id, None);
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run-approval")).is_err());
+        assert_eq!(ctx.item("queued")?.status, WorkStatus::Queued);
+        assert_eq!(ctx.item("queued")?.generation, 1);
+        Ok(())
+    });
+}
+
+#[test]
+fn generation_fenced_stop_work_is_a_noop_after_remount_recovery() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        Ok(())
+    });
+    store
+        .transaction(|conn| fence_orphaned_executing_work(conn, &store, TIME))
+        .unwrap();
+    fixture(&store, |ctx| {
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "root".into(),
+                expected_generation: Some(1),
+            },
+        )?;
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::AwaitingUser);
+        assert_eq!(root.generation, 2);
+        assert_eq!(root.current_run_id, None);
+        assert!(root.reason.as_deref().unwrap().contains("execution owner"));
+        Ok(())
+    });
+}
+
+#[test]
+fn generation_fenced_stop_work_does_not_cancel_a_continued_assignment() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        Ok(())
+    });
+    store
+        .transaction(|conn| fence_orphaned_executing_work(conn, &store, TIME))
+        .unwrap();
+    fixture(&store, |ctx| {
+        commands::apply(
+            ctx,
+            Command::ContinueWork {
+                id: "root".into(),
+                expected_generation: 2,
+                reconcile: true,
+            },
+        )?;
+        bind(ctx, "root", "run-continued")?;
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "root".into(),
+                expected_generation: Some(1),
+            },
+        )?;
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::Running);
+        assert_eq!(root.current_run_id.as_deref(), Some("run-continued"));
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run-continued")).is_ok());
+        Ok(())
+    });
+}
+
+#[test]
+fn generation_fenced_stop_work_still_cancels_the_captured_generation() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "root".into(),
+                expected_generation: Some(1),
+            },
+        )?;
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::Cancelled);
+        assert_eq!(root.generation, 2);
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run")).is_err());
+        Ok(())
+    });
+}
+
+#[test]
+fn stop_work_omitting_expected_generation_deserializes_as_unfenced() {
+    let command: Command = serde_json::from_str(r#"{"action":"stop-work","id":"root"}"#).unwrap();
+    match command {
+        Command::StopWork {
+            id,
+            expected_generation,
+        } => {
+            assert_eq!(id, "root");
+            assert_eq!(expected_generation, None);
+        }
+        other => panic!("expected StopWork, got {other:?}"),
+    }
+}
+
+#[test]
+fn recover_interrupted_attempts_fences_executing_work_and_marks_the_journal() {
+    let store = store();
+    fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        Ok(())
+    });
+    let recovered =
+        crate::execution_attempts::recover_interrupted_attempts_in_store(&store, TIME).unwrap();
+    assert!(recovered
+        .iter()
+        .any(|attempt| attempt.id == "run" && attempt.status == "interrupted"));
+    fixture(&store, |ctx| {
+        let root = ctx.item("root")?;
+        assert_eq!(root.status, WorkStatus::AwaitingUser);
+        assert_eq!(root.generation, 2);
+        assert_eq!(root.current_run_id, None);
+        assert!(ensure_run_current(ctx.conn, ctx.store, Some("run")).is_err());
+        Ok(())
+    });
+}
+
+fn attempt_record(
+    run: &str,
+    room: &str,
+    status: &str,
+    transcript: &str,
+) -> crate::models::ExecutionAttempt {
+    serde_json::from_value(json!({
+        "id": run,
+        "providerId": "openai",
+        "model": "fixture-model",
+        "status": status,
+        "transcript": transcript,
+        "threadId": room,
+        "exchanges": [],
+        "turn": 1,
+        "usage": {"inputTokens": 100, "outputTokens": 100, "costUsd": 0.0},
+        "pendingApprovalIds": [],
+        "recoverable": true,
+        "retryCount": 0,
+        "createdAt": TIME,
+        "updatedAt": TIME,
+    }))
+    .unwrap()
+}
+
+#[test]
+fn save_path_rejects_interrupted_to_completed_and_allows_exact_replay() {
+    let store = store();
+    let room = fixture(&store, |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "root".into(),
+            "group".into(),
+            "lead".into(),
+            "Work".into(),
+            false,
+            None,
+            None,
+        )?;
+        bind(ctx, "root", "run")?;
+        Ok(ctx.item("root")?.conversation_id)
+    });
+    let interrupted = attempt_record("run", &room, "interrupted", "partial");
+    fixture(&store, |ctx| {
+        let payload = serde_json::to_value(&interrupted).unwrap();
+        execution_attempt::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            "run",
+            Some(&room),
+            "openai",
+            "fixture-model",
+            "interrupted",
+            1,
+            true,
+            0,
+            TIME,
+            TIME,
+            &payload,
+        )?;
+        Ok(())
+    });
+    let mut completed = interrupted.clone();
+    completed.status = "completed".into();
+    completed.transcript = "final".into();
+    completed.updated_at = "2026-09-12T10:01:00.000Z".into();
+    let error =
+        crate::execution_attempts::save_execution_attempt_record(&store, completed).unwrap_err();
+    assert!(
+        error.contains("immutable"),
+        "expected terminal immutability, got {error}"
+    );
+    crate::execution_attempts::save_execution_attempt_record(&store, interrupted.clone())
+        .expect("exact replay of a terminal attempt is allowed");
+    fixture(&store, |ctx| {
+        assert_eq!(ctx.item("root")?.status, WorkStatus::Running);
+        assert_eq!(ctx.item("root")?.current_run_id.as_deref(), Some("run"));
         Ok(())
     });
 }

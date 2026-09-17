@@ -35,17 +35,15 @@ fn read_records(path: &Path) -> Result<Vec<ConnectorApprovalRecord>, String> {
         .map_err(|_| "Mivlet could not parse connector approval records.".to_string())
 }
 
-fn write_records(path: &Path, records: &[ConnectorApprovalRecord]) -> Result<(), String> {
-    if crate::store::write_document(path, &records)? {
-        return Ok(());
-    }
-    let encoded = serde_json::to_vec_pretty(records)
-        .map_err(|_| "Mivlet could not encode connector approval records.".to_string())?;
-    let temporary = path.with_extension("json.tmp");
-    fs::write(&temporary, encoded)
-        .map_err(|_| "Mivlet could not save connector approval records.".to_string())?;
-    fs::rename(&temporary, path)
-        .map_err(|_| "Mivlet could not commit connector approval records.".to_string())
+fn mutate_records<R>(
+    path: &Path,
+    update: impl FnOnce(&mut Vec<ConnectorApprovalRecord>) -> Result<R, String>,
+) -> Result<R, String> {
+    crate::store::update_document(path, |current| {
+        let mut records = current.unwrap_or_default();
+        let result = update(&mut records)?;
+        Ok((Some(records), result))
+    })
 }
 
 fn is_sensitive_payload_key(key: &str) -> bool {
@@ -323,6 +321,25 @@ pub(crate) fn verify_prepared_connector_action(
     Ok(record)
 }
 
+/// Bind verify/execute to the account captured at prepare time. Selection at
+/// click time is not authority; a switch after preview fails closed.
+pub(crate) fn require_prepared_connector_account(
+    record: &ConnectorApprovalRecord,
+    current_account_id: Option<&str>,
+) -> Result<(), String> {
+    let prepared = record.account_id.trim();
+    if prepared.is_empty() || prepared == "unconnected" {
+        return Err("Connector action was prepared without a connected account.".to_string());
+    }
+    let current = current_account_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if current != Some(prepared) {
+        return Err("Connector account changed after its approval preview.".to_string());
+    }
+    Ok(())
+}
+
 pub(crate) fn update_connector_action_result(
     path: &Path,
     request_id: &str,
@@ -330,31 +347,33 @@ pub(crate) fn update_connector_action_result(
     at: &str,
     error_code: Option<&str>,
 ) -> Result<ConnectorApprovalRecord, String> {
-    let mut records = read_records(path)?;
-    let record = records
-        .iter_mut()
-        .find(|record| record.request_id == request_id)
-        .ok_or_else(|| "Connector action has no prepared approval record.".to_string())?;
-    record.result = result.to_string();
-    if matches!(result, "approved" | "denied") {
-        record.decided_at = Some(at.to_string());
-    }
-    if matches!(result, "completed" | "executed" | "failed") {
-        record.executed_at = Some(at.to_string());
-    }
-    record.error_code = error_code.map(str::to_string);
-    let updated = record.clone();
-    write_records(path, &records)?;
-    Ok(updated)
+    mutate_records(path, |records| {
+        let record = records
+            .iter_mut()
+            .find(|record| record.request_id == request_id)
+            .ok_or_else(|| "Connector action has no prepared approval record.".to_string())?;
+        if matches!(result, "approved" | "denied") && record.result != "pending" {
+            return Err("Connector action was already decided.".to_string());
+        }
+        record.result = result.to_string();
+        if matches!(result, "approved" | "denied") {
+            record.decided_at = Some(at.to_string());
+        }
+        if matches!(result, "completed" | "executed" | "failed") {
+            record.executed_at = Some(at.to_string());
+        }
+        record.error_code = error_code.map(str::to_string);
+        Ok(record.clone())
+    })
 }
 
 fn upsert(path: &Path, record: ConnectorApprovalRecord) -> Result<ConnectorApprovalRecord, String> {
-    let mut records = read_records(path)?;
-    records.retain(|existing| existing.id != record.id);
-    records.insert(0, record.clone());
-    records.truncate(500);
-    write_records(path, &records)?;
-    Ok(record)
+    mutate_records(path, |records| {
+        records.retain(|existing| existing.id != record.id);
+        records.insert(0, record.clone());
+        records.truncate(500);
+        Ok(record.clone())
+    })
 }
 
 #[tauri::command]
@@ -399,7 +418,7 @@ mod tests {
     #[test]
     fn connector_record_captures_required_audit_fields_and_binds_payload() {
         let path = std::env::temp_dir().join(format!(
-            "fable-connector-approval-{}.json",
+            "mivlet-connector-approval-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -429,7 +448,7 @@ mod tests {
     #[test]
     fn gmail_send_preview_shows_account_recipients_body_and_attachments() {
         let path = std::env::temp_dir().join(format!(
-            "fable-connector-approval-preview-{}.json",
+            "mivlet-connector-approval-preview-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -480,6 +499,110 @@ mod tests {
         assert!(record.preview.contains("Subject: Quarterly review"));
         assert!(record.preview.contains("Body: Please review the attached."));
         assert!(record.preview.contains("Attachments: report.pdf"));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn connector_decision_consume_succeeds_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("records.json");
+        let prepared = action("person@example.com");
+        record_pending_connector_action(&path, &prepared, "account-1", "person@example.com")
+            .unwrap();
+        update_connector_action_result(
+            &path,
+            &prepared.approval.id,
+            "approved",
+            "2026-06-27T12:00:02Z",
+            None,
+        )
+        .unwrap();
+        let error = update_connector_action_result(
+            &path,
+            &prepared.approval.id,
+            "approved",
+            "2026-06-27T12:00:03Z",
+            None,
+        )
+        .expect_err("second decision must fail closed");
+        assert!(error.contains("already decided"), "{error}");
+        update_connector_action_result(
+            &path,
+            &prepared.approval.id,
+            "completed",
+            "2026-06-27T12:00:04Z",
+            None,
+        )
+        .expect("post-decision execution outcome still records");
+    }
+
+    #[test]
+    fn concurrent_connector_decision_consume_succeeds_once() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = std::sync::Arc::new(directory.path().join("records.json"));
+        let prepared = action("person@example.com");
+        record_pending_connector_action(&path, &prepared, "account-1", "person@example.com")
+            .unwrap();
+        let request_id = std::sync::Arc::new(prepared.approval.id.clone());
+        let workers = 16;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(workers));
+        let successes = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        std::thread::scope(|scope| {
+            for _ in 0..workers {
+                let path = std::sync::Arc::clone(&path);
+                let request_id = std::sync::Arc::clone(&request_id);
+                let barrier = std::sync::Arc::clone(&barrier);
+                let successes = std::sync::Arc::clone(&successes);
+                scope.spawn(move || {
+                    barrier.wait();
+                    if update_connector_action_result(
+                        &path,
+                        &request_id,
+                        "approved",
+                        "2026-06-27T12:00:02Z",
+                        None,
+                    )
+                    .is_ok()
+                    {
+                        successes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    }
+                });
+            }
+        });
+        assert_eq!(successes.load(std::sync::atomic::Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn prepared_account_bind_fails_closed_when_selection_switches() {
+        let path = std::env::temp_dir().join(format!(
+            "mivlet-connector-approval-account-bind-{}.json",
+            std::process::id()
+        ));
+        let _ = fs::remove_file(&path);
+        let prepared = action("person@example.com");
+        let record =
+            record_pending_connector_action(&path, &prepared, "account-1", "person@example.com")
+                .expect("record");
+        assert!(verify_prepared_connector_action(&path, &prepared).is_ok());
+        assert!(require_prepared_connector_account(&record, Some("account-1")).is_ok());
+        let switched = require_prepared_connector_account(&record, Some("account-2")).unwrap_err();
+        assert_eq!(
+            switched,
+            "Connector account changed after its approval preview."
+        );
+        assert!(!switched.contains("account-1"));
+        assert!(!switched.contains("account-2"));
+        assert_eq!(
+            require_prepared_connector_account(&record, None).unwrap_err(),
+            "Connector account changed after its approval preview."
+        );
+        let unconnected =
+            record_pending_connector_action(&path, &prepared, "unconnected", "unconnected account")
+                .expect("unconnected");
+        assert_eq!(
+            require_prepared_connector_account(&unconnected, Some("account-1")).unwrap_err(),
+            "Connector action was prepared without a connected account."
+        );
         let _ = fs::remove_file(path);
     }
 }

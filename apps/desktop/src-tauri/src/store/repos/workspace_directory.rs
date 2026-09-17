@@ -675,6 +675,117 @@ fn selected_active_workspace(
     Ok(None)
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HostedComputerScope {
+    pub workspace_id: String,
+    pub device_id: String,
+}
+
+/// Remembered hosted selection when it is still an active membership. A stale
+/// row fails closed to "no selection" instead of blocking local account status.
+pub fn hosted_workspace_selection_for_current_user(
+    conn: &Connection,
+) -> Result<Option<ActiveWorkspaceSelection>> {
+    let Some(internal_user_id) = current_internal_user_id(conn)? else {
+        return Ok(None);
+    };
+    let selected = conn
+        .query_row(
+            "SELECT fable_workspace_id FROM active_workspace_selection WHERE internal_user_id=?1;",
+            [internal_user_id.as_str()],
+            |row| row.get::<_, String>(0),
+        )
+        .optional()?;
+    let Some(fable_workspace_id) = selected else {
+        return Ok(None);
+    };
+    Ok(
+        selectable_summary(conn, &internal_user_id, &fable_workspace_id)?.map(|summary| {
+            ActiveWorkspaceSelection {
+                local_workspace_id: summary.local_workspace_id,
+                fable_workspace_id: Some(summary.fable_workspace_id),
+                name: summary.name,
+                source: "hosted".into(),
+            }
+        }),
+    )
+}
+
+/// Explicit native selection, otherwise the sole active membership. Never the
+/// first mirrored row of a multi-membership inventory.
+pub fn resolve_hosted_workspace_id(
+    workspaces: &[WorkspaceDirectorySummary],
+    selected: Option<&ActiveWorkspaceSelection>,
+) -> Option<String> {
+    if let Some(selected_id) = selected.and_then(|value| value.fable_workspace_id.as_deref()) {
+        let match_workspace = workspaces
+            .iter()
+            .find(|workspace| workspace.fable_workspace_id == selected_id)?;
+        if selected.is_some_and(|value| {
+            value.source == "hosted"
+                && value.local_workspace_id != match_workspace.local_workspace_id
+        }) {
+            return None;
+        }
+        return Some(match_workspace.fable_workspace_id.clone());
+    }
+    if workspaces.len() == 1 {
+        Some(workspaces[0].fable_workspace_id.clone())
+    } else {
+        None
+    }
+}
+
+pub fn resolve_hosted_device_id(devices: &[AccountDeviceSummary]) -> Option<String> {
+    let active = devices
+        .iter()
+        .filter(|device| device.status == "active")
+        .collect::<Vec<_>>();
+    if active.len() == 1 {
+        Some(active[0].device_id.clone())
+    } else {
+        None
+    }
+}
+
+pub fn resolve_hosted_computer_scope(
+    workspaces: &[WorkspaceDirectorySummary],
+    devices: &[AccountDeviceSummary],
+    selected: Option<&ActiveWorkspaceSelection>,
+) -> Option<HostedComputerScope> {
+    let workspace_id = resolve_hosted_workspace_id(workspaces, selected)?;
+    let device_id = resolve_hosted_device_id(devices)?;
+    Some(HostedComputerScope {
+        workspace_id,
+        device_id,
+    })
+}
+
+pub fn resolve_hosted_computer_scope_for_current_user(
+    conn: &Connection,
+) -> Result<Option<HostedComputerScope>> {
+    let Some(internal_user_id) = current_internal_user_id(conn)? else {
+        return Ok(None);
+    };
+    let workspaces = list_authoritative_summaries(conn, &internal_user_id)?;
+    let devices = list_account_device_summaries_for_current_user(conn)?.unwrap_or_default();
+    let selected = hosted_workspace_selection_for_current_user(conn)?;
+    Ok(resolve_hosted_computer_scope(
+        &workspaces,
+        &devices,
+        selected.as_ref(),
+    ))
+}
+
+pub fn hosted_scope_matches(
+    scope: &HostedComputerScope,
+    workspace_id: &str,
+    device_id: Option<&str>,
+) -> bool {
+    scope.workspace_id == workspace_id
+        && device_id.is_none_or(|device_id| scope.device_id == device_id)
+}
+
 pub(crate) fn current_internal_user_id(conn: &Connection) -> Result<Option<String>> {
     conn.query_row(
         "SELECT u.internal_user_id
@@ -1273,6 +1384,145 @@ mod tests {
                 })
                 .unwrap(),
             "user-alpha"
+        );
+    }
+    fn hosted_summary(id: &str) -> WorkspaceDirectorySummary {
+        WorkspaceDirectorySummary {
+            fable_workspace_id: id.into(),
+            local_workspace_id: format!("local-{id}"),
+            name: id.into(),
+            workspace_status: "active".into(),
+            workspace_revision: 1,
+            policy_revision: 1,
+            member_id: format!("member-{id}"),
+            role: "editor".into(),
+            membership_status: "active".into(),
+            membership_revision: 1,
+            updated_at: "now".into(),
+        }
+    }
+
+    fn hosted_device(id: &str, status: &str) -> AccountDeviceSummary {
+        AccountDeviceSummary {
+            device_id: id.into(),
+            kind: "desktop".into(),
+            label: id.into(),
+            status: status.into(),
+            registered_at: "now".into(),
+            last_seen_at: None,
+            revoked_at: None,
+        }
+    }
+
+    #[test]
+    fn hosted_computer_scope_uses_only_membership_or_explicit_selection() {
+        let zeta = hosted_summary("workspace-zeta");
+        let alpha = hosted_summary("workspace-alpha");
+        let beta = hosted_summary("workspace-beta");
+        let desktop = hosted_device("device-desktop", "active");
+        let revoked = hosted_device("device-revoked", "revoked");
+
+        assert_eq!(
+            resolve_hosted_workspace_id(std::slice::from_ref(&zeta), None).as_deref(),
+            Some("workspace-zeta")
+        );
+        assert!(resolve_hosted_workspace_id(&[alpha.clone(), beta.clone()], None).is_none());
+
+        let selected = ActiveWorkspaceSelection {
+            local_workspace_id: "default".into(),
+            fable_workspace_id: Some("workspace-beta".into()),
+            name: "On this PC".into(),
+            source: "local".into(),
+        };
+        assert_eq!(
+            resolve_hosted_computer_scope(
+                &[alpha.clone(), beta.clone()],
+                &[revoked, desktop],
+                Some(&selected)
+            ),
+            Some(HostedComputerScope {
+                workspace_id: "workspace-beta".into(),
+                device_id: "device-desktop".into(),
+            })
+        );
+
+        let mismatched = ActiveWorkspaceSelection {
+            local_workspace_id: "local-alpha".into(),
+            fable_workspace_id: Some("workspace-beta".into()),
+            name: "Beta".into(),
+            source: "hosted".into(),
+        };
+        assert!(resolve_hosted_workspace_id(&[alpha, beta], Some(&mismatched)).is_none());
+        assert!(resolve_hosted_device_id(&[
+            hosted_device("device-a", "active"),
+            hosted_device("device-b", "active")
+        ])
+        .is_none());
+        assert!(hosted_scope_matches(
+            &HostedComputerScope {
+                workspace_id: "workspace-beta".into(),
+                device_id: "device-desktop".into(),
+            },
+            "workspace-beta",
+            Some("device-desktop")
+        ));
+        assert!(!hosted_scope_matches(
+            &HostedComputerScope {
+                workspace_id: "workspace-beta".into(),
+                device_id: "device-desktop".into(),
+            },
+            "workspace-alpha",
+            Some("device-desktop")
+        ));
+    }
+
+    #[test]
+    fn current_user_hosted_scope_requires_explicit_or_only_membership() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let alpha = summary("user-alpha", "workspace-alpha", "Alpha");
+        let beta = summary("user-alpha", "workspace-beta", "Beta");
+        let device = AccountDeviceMirrorUpsert {
+            device_id: "device-desktop".into(),
+            kind: "desktop".into(),
+            label: "Desk".into(),
+            status: "active".into(),
+            registered_at: "2026-07-10T12:00:00Z".into(),
+            last_seen_at: None,
+            revoked_at: None,
+        };
+        store
+            .transaction(|conn| {
+                upsert_authoritative_summary(conn, &alpha)?;
+                upsert_authoritative_summary(conn, &beta)?;
+                set_current_internal_user(conn, "user-alpha", "now")?;
+                upsert_account_device_summaries(
+                    conn,
+                    "user-alpha",
+                    std::slice::from_ref(&device),
+                    "now",
+                )?;
+                Ok(())
+            })
+            .unwrap();
+        assert!(store
+            .with_conn(resolve_hosted_computer_scope_for_current_user)
+            .unwrap()
+            .is_none());
+        store
+            .transaction(|conn| {
+                select_active_workspace_for_current_user(conn, "workspace-beta", "later")
+                    .map(|_| ())
+            })
+            .unwrap();
+        assert_eq!(
+            store
+                .with_conn(resolve_hosted_computer_scope_for_current_user)
+                .unwrap()
+                .unwrap(),
+            HostedComputerScope {
+                workspace_id: "workspace-beta".into(),
+                device_id: "device-desktop".into(),
+            }
         );
     }
 }

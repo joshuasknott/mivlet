@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import type { KnowledgeSource, ExecutionContextAudience, SourceChunk } from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+import type { KnowledgeSource, ExecutionContextAudience, SourceChunk } from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { filterRetrievable, retrieve, type RetrievalSource } from "./retrieve";
 import { cosineSimilarity, type EmbeddingProvider } from "./semantic";
 
@@ -742,5 +742,66 @@ describe("retrieve — audience privacy", () => {
   it("retains legacy filtering only when no audience is supplied", async () => {
     const result = await retrieve(sources(), { query: "legacy" });
     expect(result.citations.map((citation) => citation.sourceId)).toContain("legacy-missing");
+  });
+});
+
+describe("retrieve — secret-shaped content", () => {
+  it("does not retrieve leaked credentials into citation snippets", async () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const result = await retrieve(
+      [
+        src(makeSource({ id: "secret-doc", title: "Launch notes" }), [
+          makeChunk("secret-doc", 0, `Launch plan milestone. my key is ${leaked}`)
+        ])
+      ],
+      { query: "launch plan" }
+    );
+    expect(result.citations).toHaveLength(1);
+    expect(result.citations[0].snippet).toContain("Launch plan");
+    expect(result.citations[0].snippet).not.toContain(leaked);
+    expect(result.citations[0].snippet).toContain("[REDACTED]");
+  });
+
+  it("does not rank a source by an already-stored secret token", async () => {
+    const leaked = "ghp_abcdefghijklmnopqrstuvwx1234567890";
+    const result = await retrieve(
+      [
+        src(makeSource({ id: "secret-doc", title: "Notes" }), [
+          makeChunk("secret-doc", 0, `export GITHUB_TOKEN=${leaked}`)
+        ])
+      ],
+      { query: leaked }
+    );
+    expect(result.citations.every((citation) => !citation.snippet.includes(leaked))).toBe(true);
+  });
+
+  it("drops omit-only chunks instead of returning them as citations", async () => {
+    const result = await retrieve(
+      [
+        src(makeSource({ id: "omit-doc", title: "Launch omit", scope: GLOBAL_SCOPE }), [
+          makeChunk("omit-doc", 0, "[content omitted: secret-shaped content]")
+        ]),
+        src(makeSource({ id: "live-doc", title: "Launch plan" }), [
+          makeChunk("live-doc", 0, "Launch plan milestone")
+        ])
+      ],
+      { query: "launch plan" }
+    );
+    expect(result.citations.map((citation) => citation.sourceId)).toEqual(["live-doc"]);
+    expect(result.citations.every((citation) => !citation.snippet.includes("[content omitted"))).toBe(
+      true
+    );
+  });
+
+  it("does not auto-retrieve a global omit-only preview into a thread run", async () => {
+    const result = await retrieve(
+      [
+        src(makeSource({ id: "global-omit", title: "Global notes", scope: GLOBAL_SCOPE }), [
+          makeChunk("global-omit", 0, "[content omitted: secret-shaped content]")
+        ])
+      ],
+      { query: "notes", scope: { level: "thread", threadId: "t1" } }
+    );
+    expect(result.citations).toEqual([]);
   });
 });

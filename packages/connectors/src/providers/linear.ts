@@ -1,4 +1,4 @@
-import type { ConnectorCapability } from "@fable/protocol";
+import type { ConnectorCapability } from "@mivlet/protocol";
 import type { ConnectorAdapter, ConnectorRequest, ConnectorWriteRequest } from "../sdk";
 import { ProviderHttpClient, asObjects, isObject, oauthClient, page, providerError, stringValue, type FetchLike, type JsonObject, type OAuthClientOptions } from "./http";
 
@@ -16,6 +16,14 @@ export interface LinearAdapterOptions extends Omit<OAuthClientOptions, "connecto
   fetch?: FetchLike;
 }
 
+/**
+ * Linear OAuth scopes Mivlet requests. `write` is required for issue updates;
+ * Linear's create-only `issues:create` and `comments:create` are subsets of
+ * `write` and are not requested separately. Native actions create and update
+ * issues and create comments after exact approval.
+ */
+export const LINEAR_OAUTH_SCOPES = ["read", "write"] as const;
+
 export function createLinearAdapter(options: LinearAdapterOptions): ConnectorAdapter<JsonObject, JsonObject> {
   const broker = new URL(options.authBaseUrl);
   const auth = oauthClient({
@@ -24,7 +32,7 @@ export function createLinearAdapter(options: LinearAdapterOptions): ConnectorAda
     handoffEndpoint: new URL("oauth/linear/handoff", broker).toString(),
     refreshEndpoint: new URL("oauth/linear/refresh", broker).toString(),
     revocationEndpoint: new URL("oauth/linear/revoke", broker).toString(),
-    scopes: ["read", "write", "issues:create", "comments:create"]
+    scopes: [...LINEAR_OAUTH_SCOPES]
   });
   const http = new ProviderHttpClient("linear", options.apiUrl ?? "https://api.linear.app/", options.fetch);
   return {

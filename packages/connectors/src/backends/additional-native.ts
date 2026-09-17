@@ -1,4 +1,4 @@
-import type { ModelCapabilities } from "@fable/protocol";
+import type { ModelCapabilities } from "@mivlet/protocol";
 
 /** Direct API routes reviewed against the linked vendor documentation on 2026-09-12.
  * Budgets are conservative Mivlet limits. Tool support applies only to these

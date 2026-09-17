@@ -16,18 +16,20 @@
  * - No real DO/SQLite or credentials touched on test/Node paths.
  */
 
-import { BrokerContractError, type BrokerProviderId } from "@fable/connectors";
-import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
+import { BrokerContractError, type BrokerProviderId } from "@mivlet/connectors";
+import type { ConnectorAccountSummary, ConnectorTokenSet } from "@mivlet/protocol";
 import { DurableObject } from "cloudflare:workers";
 
 import type { BrokerClock } from "./clock.js";
-import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
+import { BROKER_HANDOFF_TTL_SECONDS } from "@mivlet/connectors";
 import {
   PendingExchange,
   HandoffEntry,
   type PendingExchangeStore,
   type HandoffStore,
-  urlSafeToken
+  urlSafeToken,
+  pendingStateInUseError,
+  assertAuthorizeState
 } from "./stores.js";
 import {
   createRateLimiter,
@@ -38,13 +40,7 @@ import {
 import {
   computeStateHash,
   computeHandoffHash,
-  computeRateLimitHash,
-  encryptVerifier,
-  decryptVerifier,
-  encryptHandoffPayload,
-  decryptHandoffPayload,
-  StoreCryptoError,
-  type HandoffPayload
+  computeRateLimitHash
 } from "./store-crypto.js";
 
 /** TTL in ms. */
@@ -86,8 +82,8 @@ export function createDurableMemoryPendingStore(
   secret?: string
 ): PendingExchangeStore {
   const pending = new Map<string, MemPendingRow>();
-  // side cache for plaintext verifier so broker flow works without leaking into the "storage" row when secret present
-  const plainVerifiers = new Map<string, string>();
+  // side cache for plaintext secrets so broker flow works without leaking into the "storage" row when secret present
+  const plainSecrets = new Map<string, { verifier?: string; codeChallenge: string }>();
   let lastPrune = 0;
 
   function maybePrune(now: number) {
@@ -99,21 +95,27 @@ export function createDurableMemoryPendingStore(
 
   return {
     create(entry) {
+      assertAuthorizeState(entry.state);
       const now = clock.nowMs();
       maybePrune(now);
+      const existing = pending.get(entry.state);
+      if (existing && now <= existing.expiresAt) {
+        throw pendingStateInUseError();
+      }
+      if (existing) {
+        pending.delete(entry.state);
+        plainSecrets.delete(entry.state);
+      }
       const expiresAt = now + TTL_MS;
       let verifierEnc: Uint8Array | null = null;
-      if (entry.verifier) {
-        if (secret) {
-          // simulate encrypted storage: deterministic non-plain blob (real enc is async in prod RPC path)
-          // side cache keeps plaintext only for sync flow simulation; the stored row never contains plaintext
-          verifierEnc = new Uint8Array(32).fill(0xab);
-          plainVerifiers.set(entry.state, entry.verifier); // side only, not persisted in row
-        } else {
-          plainVerifiers.set(entry.state, entry.verifier);
-        }
+      if (secret) {
+        verifierEnc = new Uint8Array(32).fill(0xab);
       }
-      const row: any = {
+      plainSecrets.set(entry.state, {
+        verifier: entry.verifier,
+        codeChallenge: entry.codeChallenge
+      });
+      const row: MemPendingRow = {
         provider: entry.provider,
         redirectUri: entry.redirectUri,
         providerRedirectUri: entry.providerRedirectUri,
@@ -122,7 +124,6 @@ export function createDurableMemoryPendingStore(
         createdAt: now,
         expiresAt
       };
-      // never set _plainVerifier in the row when secret (storage sim has enc or marker)
       pending.set(entry.state, row);
     },
     consume(state) {
@@ -132,36 +133,37 @@ export function createDurableMemoryPendingStore(
       if (!row) return undefined;
       if (now > row.expiresAt) {
         pending.delete(state);
-        plainVerifiers.delete(state);
+        plainSecrets.delete(state);
         return undefined;
       }
       pending.delete(state);
+      const secrets = plainSecrets.get(state);
+      plainSecrets.delete(state);
+      if (!secrets?.codeChallenge) return undefined;
       const ex: PendingExchange = {
         provider: row.provider,
         redirectUri: row.redirectUri,
         providerRedirectUri: row.providerRedirectUri,
         state: row.state,
+        codeChallenge: secrets.codeChallenge,
         createdAt: row.createdAt
       };
-      const plain = plainVerifiers.get(state);
-      if (plain) {
-        ex.verifier = plain;
-        plainVerifiers.delete(state);
-      }
-      // note: in real durable path the enc would be decrypted here; for mem-sim we use side for flow
+      if (secrets.verifier) ex.verifier = secrets.verifier;
       return ex;
     },
     peek(state) {
       const row = pending.get(state);
       if (!row) return undefined;
-      const ex: PendingExchange = {
+      const secrets = plainSecrets.get(state);
+      return {
         provider: row.provider,
         redirectUri: row.redirectUri,
         providerRedirectUri: row.providerRedirectUri,
         state: row.state,
-        createdAt: row.createdAt
+        codeChallenge: secrets?.codeChallenge ?? "",
+        createdAt: row.createdAt,
+        ...(secrets?.verifier ? { verifier: secrets.verifier } : {})
       };
-      return ex;
     }
   };
 }
@@ -172,7 +174,7 @@ export function createDurableMemoryHandoffStore(
   secret?: string
 ): HandoffStore {
   const handoffs = new Map<string, MemHandoffRow>();
-  const plainPayloads = new Map<string, {tokens: any, account: any}>();
+  const plainPayloads = new Map<string, {tokens: ConnectorTokenSet, account: ConnectorAccountSummary, codeChallenge: string}>();
   let lastPrune = 0;
 
   function maybePrune(now: number) {
@@ -200,10 +202,18 @@ export function createDurableMemoryHandoffStore(
         // marker for encrypted (real path uses async encryptHandoffPayload); never store plaintext
         payloadEnc = new Uint8Array(32).fill(0xcd);
         row.payloadEnc = payloadEnc;
-        plainPayloads.set(ticket, {tokens: entry.tokens, account: entry.account});
+        plainPayloads.set(ticket, {
+          tokens: entry.tokens,
+          account: entry.account,
+          codeChallenge: entry.codeChallenge
+        });
       }
       // when !secret the flow uses the entry directly in redeem via plainPayloads
-      plainPayloads.set(ticket, {tokens: entry.tokens, account: entry.account});
+      plainPayloads.set(ticket, {
+        tokens: entry.tokens,
+        account: entry.account,
+        codeChallenge: entry.codeChallenge
+      });
       handoffs.set(ticket, row);
       return ticket;
     },
@@ -228,6 +238,7 @@ export function createDurableMemoryHandoffStore(
         tokens,
         account,
         state: row.state,
+        codeChallenge: plain?.codeChallenge ?? "",
         createdAt: row.createdAt
       } as HandoffEntry;
     }
@@ -277,7 +288,12 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
   const sharedPending = new Map<string, MemPendingRow>();
   const impl = {
     async create(entry: Omit<PendingExchange, "createdAt">) {
+      assertAuthorizeState(entry.state);
       const now = clock.nowMs();
+      const existing = sharedPending.get(entry.state);
+      if (existing && now <= existing.expiresAt) {
+        throw pendingStateInUseError();
+      }
       const expiresAt = now + TTL_MS;
       sharedPending.set(entry.state, {
         provider: entry.provider,
@@ -289,6 +305,7 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
         expiresAt
       } as MemPendingRow);
       if (entry.verifier) (sharedPending.get(entry.state) as any)._plainVerifier = entry.verifier;
+      (sharedPending.get(entry.state) as any)._plainChallenge = entry.codeChallenge;
     },
     async consume(state: string) {
       const now = clock.nowMs();
@@ -304,6 +321,7 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
         redirectUri: row.redirectUri,
         providerRedirectUri: row.providerRedirectUri,
         state: row.state,
+        codeChallenge: (row as any)._plainChallenge ?? "",
         createdAt: row.createdAt
       };
       if ((row as any)._plainVerifier) ex.verifier = (row as any)._plainVerifier;
@@ -318,6 +336,7 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
         providerRedirectUri: row.providerRedirectUri,
         state: row.state,
         createdAt: row.createdAt,
+        codeChallenge: (row as any)._plainChallenge ?? "",
         verifier: (row as any)._plainVerifier
       } as PendingExchange;
     }
@@ -325,7 +344,12 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
   const stub = new SerialDurableStub(impl);
   const makeAdapter = (): PendingExchangeStore => ({
     create(entry) {
+      assertAuthorizeState(entry.state);
       const now = clock.nowMs();
+      const existing = sharedPending.get(entry.state);
+      if (existing && now <= existing.expiresAt) {
+        throw pendingStateInUseError();
+      }
       const expiresAt = now + TTL_MS;
       sharedPending.set(entry.state, {
         provider: entry.provider,
@@ -337,7 +361,7 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
         expiresAt
       } as any);
       if (entry.verifier) (sharedPending.get(entry.state) as any)._plainVerifier = entry.verifier;
-      void stub.invoke("create", entry);
+      (sharedPending.get(entry.state) as any)._plainChallenge = entry.codeChallenge;
     },
     consume(state) {
       const row = sharedPending.get(state);
@@ -347,14 +371,21 @@ export function createSerialPendingStoresForTest(clock: BrokerClock): {
         return undefined;
       }
       sharedPending.delete(state);
-      const ex: PendingExchange = { provider: row.provider, redirectUri: row.redirectUri, providerRedirectUri: row.providerRedirectUri, state: row.state, createdAt: row.createdAt };
+      const ex: PendingExchange = {
+        provider: row.provider,
+        redirectUri: row.redirectUri,
+        providerRedirectUri: row.providerRedirectUri,
+        state: row.state,
+        codeChallenge: (row as any)._plainChallenge ?? "",
+        createdAt: row.createdAt
+      };
       if ((row as any)._plainVerifier) ex.verifier = (row as any)._plainVerifier;
       return ex;
     },
     peek(state) {
       const row = sharedPending.get(state);
       if (!row) return undefined;
-      return { provider: row.provider, redirectUri: row.redirectUri, providerRedirectUri: row.providerRedirectUri, state: row.state, createdAt: row.createdAt } as any;
+      return { provider: row.provider, redirectUri: row.redirectUri, providerRedirectUri: row.providerRedirectUri, state: row.state, codeChallenge: (row as any)._plainChallenge ?? "", createdAt: row.createdAt } as any;
     }
   });
   return { storeA: makeAdapter(), storeB: makeAdapter(), stub };
@@ -375,6 +406,7 @@ export function createSerialHandoffStoresForTest(clock: BrokerClock): {
       const r: MemHandoffRow = { provider: entry.provider, state: entry.state, payloadEnc: new Uint8Array(), createdAt: now, expiresAt: expires };
       (r as any)._plainTokens = entry.tokens;
       (r as any)._plainAccount = entry.account;
+      (r as any)._plainChallenge = entry.codeChallenge;
       shared.set(ticket, r);
       return ticket;
     },
@@ -390,6 +422,7 @@ export function createSerialHandoffStoresForTest(clock: BrokerClock): {
         tokens: (row as any)._plainTokens,
         account: (row as any)._plainAccount,
         state: row.state,
+        codeChallenge: (row as any)._plainChallenge ?? "",
         createdAt: row.createdAt
       } as HandoffEntry;
     }
@@ -401,7 +434,7 @@ export function createSerialHandoffStoresForTest(clock: BrokerClock): {
       const ticket = urlSafeToken(32);
       const expires = now + TTL_MS;
       const r: any = { provider: entry.provider, state: entry.state, payloadEnc: new Uint8Array(), createdAt: now, expiresAt: expires };
-      r._plainTokens = entry.tokens; r._plainAccount = entry.account;
+      r._plainTokens = entry.tokens; r._plainAccount = entry.account; r._plainChallenge = entry.codeChallenge;
       shared.set(ticket, r);
       return ticket;
     },
@@ -412,7 +445,7 @@ export function createSerialHandoffStoresForTest(clock: BrokerClock): {
       shared.delete(handoff);
       if (now > row.expiresAt) return undefined;
       if (row.state !== state) return undefined;
-      return { provider: row.provider, tokens: (row as any)._plainTokens, account: (row as any)._plainAccount, state: row.state, createdAt: row.createdAt } as HandoffEntry;
+      return { provider: row.provider, tokens: (row as any)._plainTokens, account: (row as any)._plainAccount, state: row.state, codeChallenge: (row as any)._plainChallenge ?? "", createdAt: row.createdAt } as HandoffEntry;
     }
   });
   return { storeA: make(), storeB: make(), stub };
@@ -424,7 +457,7 @@ export function createSerialHandoffStoresForTest(clock: BrokerClock): {
 /* ------------------------------------------------------------------ */
 
 export interface BrokerDurableEnv {
-  FABLE_BROKER_STORE_ENCRYPTION_KEY?: string;
+  MIVLET_BROKER_STORE_ENCRYPTION_KEY?: string;
 }
 
 export class BrokerPending extends DurableObject<BrokerDurableEnv> {
@@ -456,14 +489,27 @@ export class BrokerPending extends DurableObject<BrokerDurableEnv> {
     verifierEnc?: Uint8Array | null;
     createdAt: number;
     expiresAt: number;
-  }) {
+  }): Promise<boolean> {
     const stateHash = await computeStateHash(args.state);
+    const injectedNow = (this.ctx as DurableObjectState & { nowMs?: () => number }).nowMs;
+    const now = typeof injectedNow === "function" ? injectedNow() : Date.now();
+    // Treat an expired row as absent so a new flow may reuse the state after TTL.
     this.ctx.storage.sql.exec(
-      `INSERT OR REPLACE INTO pending (state_hash, provider, redirect_uri, provider_redirect_uri, state, verifier_enc, created_at_ms, expires_at_ms)
+      `DELETE FROM pending WHERE state_hash = ? AND expires_at_ms <= ?`,
+      stateHash,
+      now
+    );
+    const existing = Array.from(
+      this.ctx.storage.sql.exec(`SELECT 1 FROM pending WHERE state_hash = ?`, stateHash)
+    );
+    if (existing.length > 0) return false;
+    this.ctx.storage.sql.exec(
+      `INSERT INTO pending (state_hash, provider, redirect_uri, provider_redirect_uri, state, verifier_enc, created_at_ms, expires_at_ms)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       stateHash, args.provider, args.redirectUri, args.providerRedirectUri, args.state, args.verifierEnc ?? null, args.createdAt, args.expiresAt
     );
     await this.ctx.storage.setAlarm(args.expiresAt);
+    return true;
   }
 
   async consumePending(state: string): Promise<PendingExchange | undefined> {

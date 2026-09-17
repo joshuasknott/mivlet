@@ -1,7 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
-import type { BackendProvider } from "@fable/protocol";
+import type { BackendProvider } from "@mivlet/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { SettingsPage } from "./SettingsPage";
 

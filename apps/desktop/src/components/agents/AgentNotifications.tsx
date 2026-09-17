@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { CollaborationWorkItem, FableAgentProfile, WorkStatus } from "@fable/protocol";
+import type { CollaborationWorkItem, MivletAgentProfile, WorkStatus } from "@mivlet/protocol";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 
 const messages: Partial<Record<WorkStatus, string>> = {
@@ -10,7 +10,7 @@ type Notice = { id: string; agentId: string; conversationId: string; message: st
 
 /** Session-local notices. Historical work never replays on workspace hydration. */
 export function AgentNotifications({ agents, work, onOpen }: {
-  agents: FableAgentProfile[];
+  agents: MivletAgentProfile[];
   work: CollaborationWorkItem[];
   onOpen: (conversationId: string) => void;
 }) {

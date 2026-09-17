@@ -4,6 +4,9 @@ import {
   listSupportedConnectors,
   SUPPORTED_CONNECTOR_IDS
 } from "./catalog";
+import { LINEAR_OAUTH_SCOPES } from "./providers/linear";
+import { SLACK_OAUTH_SCOPES } from "./providers/slack-api";
+import { VERCEL_OAUTH_SCOPES } from "./providers/vercel";
 
 describe("connector catalogue", () => {
   it("contains each supported provider exactly once", () => {
@@ -25,6 +28,62 @@ describe("connector catalogue", () => {
       expect(connector.authMode).not.toBe("none");
       expect(connector.scopes?.every((scope) => !scope.granted)).toBe(true);
     }
+  });
+
+  it("requests read-appropriate GitHub scopes and does not label write power as read", () => {
+    const github = connectorCatalog.find((connector) => connector.id === "github");
+    expect(github?.scopes?.map((scope) => scope.id)).toEqual(["read:user", "read:org"]);
+    expect(github?.scopes?.every((scope) => scope.required && scope.access === "read")).toBe(true);
+    expect(github?.scopes?.some((scope) => scope.id === "repo")).toBe(false);
+    expect(github?.setupMessage).toMatch(/classic GitHub OAuth App/i);
+    expect(github?.setupMessage).not.toMatch(/GitHub App with read-only repository permissions/i);
+    expect(github?.permissions.join(" ")).toMatch(/private repositories are not granted/i);
+    expect(github?.permissions.join(" ")).not.toMatch(/GitHub App/i);
+    const drive = connectorCatalog.find((connector) => connector.id === "google-drive");
+    const driveFile = drive?.scopes?.find(
+      (scope) => scope.id === "https://www.googleapis.com/auth/drive.file"
+    );
+    expect(driveFile?.access).toBe("write");
+  });
+
+  it("does not list Notion console capabilities as OAuth scope ids", () => {
+    const notion = connectorCatalog.find((connector) => connector.id === "notion");
+    expect(notion?.scopes).toEqual([]);
+    expect(notion?.setupMessage).toMatch(/does not take OAuth scope query parameters/i);
+  });
+
+  it("keeps write-capable Vercel, Linear, and Slack scopes required on Connect", () => {
+    const vercel = connectorCatalog.find((connector) => connector.id === "vercel");
+    const linear = connectorCatalog.find((connector) => connector.id === "linear");
+    const slack = connectorCatalog.find((connector) => connector.id === "slack");
+    const vercelWrite = vercel?.scopes?.find((scope) => scope.id === "deployment:write");
+    const linearWrite = linear?.scopes?.find((scope) => scope.id === "write");
+    const slackChat = slack?.scopes?.find((scope) => scope.id === "chat:write");
+    const slackReactions = slack?.scopes?.find((scope) => scope.id === "reactions:write");
+
+    expect(VERCEL_OAUTH_SCOPES).toEqual([
+      "user:read",
+      "team:read",
+      "project:read",
+      "deployment:read",
+      "deployment:write"
+    ]);
+    expect(LINEAR_OAUTH_SCOPES).toEqual(["read", "write"]);
+    expect(SLACK_OAUTH_SCOPES).toContain("chat:write");
+    expect(SLACK_OAUTH_SCOPES).toContain("reactions:write");
+
+    expect(vercelWrite).toMatchObject({ access: "write", required: true });
+    expect(linearWrite).toMatchObject({ access: "write", required: true });
+    expect(linear?.scopes?.map((scope) => scope.id)).toEqual(["read", "write"]);
+    expect(linear?.scopes?.some((scope) => scope.id === "issues:create" || scope.id === "comments:create")).toBe(
+      false
+    );
+    expect(slackChat).toMatchObject({ access: "write", required: true });
+    expect(slackReactions).toMatchObject({ access: "write", required: true });
+    expect(slack?.scopes?.filter((scope) => scope.access === "write").map((scope) => scope.id)).toEqual([
+      "chat:write",
+      "reactions:write"
+    ]);
   });
 
   it("keeps explicit local files available without authentication", () => {

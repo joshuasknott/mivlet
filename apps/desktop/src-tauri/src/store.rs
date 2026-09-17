@@ -8,8 +8,9 @@
 //! ([`repos`]) borrow a `&Store` and execute parameterized, bounded queries.
 //! All multi-record writes run inside a [`Store::transaction`].
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use sha2::{Digest, Sha256};
@@ -25,6 +26,7 @@ pub mod schema;
 pub mod vault;
 
 /// Filename of the durable database inside the Tauri app-data dir.
+/// On-disk name is unchanged so existing installs keep their encrypted vault.
 pub const DB_FILENAME: &str = "fable-vault.db";
 const BACKUP_FORMAT: &str = "fable.encrypted-sqlite-backup";
 const BACKUP_FORMAT_VERSION: u32 = 1;
@@ -748,6 +750,123 @@ pub fn write_workspace_document<T: serde::Serialize>(
         })
         .map_err(|error| error.to_string())?;
     Ok(true)
+}
+
+/// Atomically read-modify-write a workspace document.
+///
+/// Production uses one SQLite transaction (serialized by the store connection
+/// mutex). Isolated tests without a store use a path-keyed lock around the
+/// JSON fixture so check-and-set cannot lose an update.
+pub fn update_document<T, R>(
+    path: &Path,
+    update: impl FnOnce(Option<T>) -> std::result::Result<(Option<T>, R), String>,
+) -> std::result::Result<R, String>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    if GLOBAL_STORE.get().is_some() {
+        let scope = repos::scope::DataScope::workspace(repos::scope::DEFAULT_WORKSPACE_ID)
+            .map_err(|error| error.to_string())?;
+        return update_workspace_document(path, &scope, update);
+    }
+    update_json_file(path, update)
+}
+
+pub fn update_workspace_document<T, R>(
+    path: &Path,
+    scope: &repos::scope::DataScope,
+    update: impl FnOnce(Option<T>) -> std::result::Result<(Option<T>, R), String>,
+) -> std::result::Result<R, String>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    let store = GLOBAL_STORE
+        .get()
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
+    let (storage_scope, key) = scoped_document_location(path, scope)?;
+    store
+        .transaction(|tx| {
+            let current = repos::preferences::get_scoped(tx, store, &storage_scope, &key)?
+                .map(serde_json::from_value)
+                .transpose()
+                .map_err(|_| {
+                    StoreError::Invalid(
+                        "Mivlet could not decode an encrypted local document.".into(),
+                    )
+                })?;
+            let (replacement, result) = update(current).map_err(StoreError::Invalid)?;
+            if let Some(replacement) = replacement {
+                let value = serde_json::to_value(replacement).map_err(|_| {
+                    StoreError::Invalid(
+                        "Mivlet could not encode an encrypted local document.".into(),
+                    )
+                })?;
+                repos::preferences::upsert_scoped(
+                    tx,
+                    store,
+                    &storage_scope,
+                    &key,
+                    &value,
+                    &timestamp(),
+                )?;
+            }
+            Ok(result)
+        })
+        .map_err(|error| error.to_string())
+}
+
+fn document_file_lock(path: &Path) -> Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    LOCKS
+        .get_or_init(|| Mutex::new(HashMap::new()))
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .entry(path.to_path_buf())
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone()
+}
+
+fn read_json_file<T: serde::de::DeserializeOwned>(
+    path: &Path,
+) -> std::result::Result<Option<T>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let contents = std::fs::read_to_string(path)
+        .map_err(|_| "Mivlet could not read a local document.".to_string())?;
+    if contents.trim().is_empty() {
+        return Ok(None);
+    }
+    serde_json::from_str(&contents)
+        .map(Some)
+        .map_err(|_| "Mivlet could not parse a local document.".to_string())
+}
+
+fn write_json_file<T: serde::Serialize>(path: &Path, value: &T) -> std::result::Result<(), String> {
+    let encoded = serde_json::to_vec_pretty(value)
+        .map_err(|_| "Mivlet could not encode a local document.".to_string())?;
+    let temporary = path.with_extension("json.tmp");
+    std::fs::write(&temporary, encoded)
+        .map_err(|_| "Mivlet could not save a local document.".to_string())?;
+    std::fs::rename(&temporary, path)
+        .map_err(|_| "Mivlet could not commit a local document.".to_string())
+}
+
+fn update_json_file<T, R>(
+    path: &Path,
+    update: impl FnOnce(Option<T>) -> std::result::Result<(Option<T>, R), String>,
+) -> std::result::Result<R, String>
+where
+    T: serde::de::DeserializeOwned + serde::Serialize,
+{
+    let lock = document_file_lock(path);
+    let _guard = lock.lock().unwrap_or_else(|error| error.into_inner());
+    let current = read_json_file(path)?;
+    let (replacement, result) = update(current)?;
+    if let Some(replacement) = replacement {
+        write_json_file(path, &replacement)?;
+    }
+    Ok(result)
 }
 
 pub fn write_private_workspace_document<T: serde::Serialize>(

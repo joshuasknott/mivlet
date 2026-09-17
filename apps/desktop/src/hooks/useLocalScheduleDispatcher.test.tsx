@@ -1,6 +1,6 @@
 import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { BackendProvider, FableAgentProfile } from "@fable/protocol";
+import type { BackendProvider, MivletAgentProfile } from "@mivlet/protocol";
 import type { ScheduledResearchRunInput } from "../lib/agent-run-service";
 import type { LocalSchedule, LocalScheduleDispatchClaim } from "../runtime/domains/local-schedules";
 import { useLocalScheduleDispatcher } from "./useLocalScheduleDispatcher";
@@ -13,7 +13,7 @@ vi.mock("../runtime/domains/local-schedules", () => ({
 }));
 vi.mock("../lib/agent-run-service", () => ({ AgentRunService: class { runScheduledResearch = mocks.run; } }));
 
-const agent: FableAgentProfile = { id: "researcher", name: "Researcher", modelId: "codex::fixture", reasoningEffort: "high", instructions: "Research carefully.", icon: "agent", iconColor: "blue", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" };
+const agent: MivletAgentProfile = { id: "researcher", name: "Researcher", modelId: "codex::fixture", reasoningEffort: "high", instructions: "Research carefully.", icon: "agent", iconColor: "blue", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" };
 const provider = { id: "codex", backendType: "codex-app-server", authState: "connected", models: [{ id: "fixture", available: true, capabilities: { streaming: true } }] } as BackendProvider;
 const schedule: LocalSchedule = { id: "schedule", agentId: agent.id, providerId: "codex", model: "fixture", reasoningEffort: "low", prompt: "Read official release notes.", timezone: "UTC", trigger: { kind: "daily", localTime: "09:00" }, status: "enabled", revision: 2, promptRevision: 1, nextRunAt: "2020-01-01T09:00:00Z", createdAt: "2020-01-01T00:00:00Z", updatedAt: "2020-01-01T00:00:00Z" };
 const claim: LocalScheduleDispatchClaim = { scheduleId: schedule.id, occurrenceId: "occurrence", scheduleRevision: 2, promptRevision: 1, scheduledFor: schedule.nextRunAt!, claimToken: "fixture-token", leaseExpiresAt: "2099-01-01T00:00:00Z", agentId: agent.id, providerId: "codex", model: "fixture", reasoningEffort: "low", prompt: schedule.prompt };

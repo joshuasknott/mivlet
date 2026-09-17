@@ -37,6 +37,7 @@ mod conversations;
 mod diagnostics;
 mod embedded_agent;
 mod embedded_mcp;
+mod env_compat;
 mod execution_approvals;
 mod execution_attempts;
 mod execution_control;
@@ -60,9 +61,9 @@ mod permission_policy;
 mod product_spine_parity;
 mod provider_process;
 mod search;
+mod secret_redaction;
 mod snapshot;
 mod store;
-mod token_plugins;
 pub mod tools;
 mod window_controls;
 
@@ -252,7 +253,6 @@ pub fn run() {
             connector_sync::cancel_connector_sync,
             connectors::search_connector,
             connectors::read_connector_capability,
-            connectors::connect_token_plugin,
             connectors::import_connector_item,
             connectors::list_connector_knowledge_sources,
             connectors::set_connector_knowledge_source_disabled,
@@ -301,6 +301,7 @@ pub fn run() {
             hosted_computer::hosted_browser_action_prepare,
             hosted_computer::hosted_browser_action,
             hosted_computer::hosted_browser_snapshot,
+            hosted_computer::hosted_browser_open_live_view,
             local_computer::plugins::builtin_plugins_status,
             local_computer::plugins::builtin_plugin_set,
             local_computer::plugins::builtin_plugin_prepare_computer,

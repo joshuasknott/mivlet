@@ -23,7 +23,7 @@
         mark_discovery_changed(session_id);
 
         for (request, initialized) in [
-            r#"{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"Fable","version":"0.1.0"}}}"#,
+            r#"{"jsonrpc":"2.0","id":"init","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"Mivlet","version":"0.1.0"}}}"#,
             r#"{"jsonrpc":"2.0","id":"list","method":"tools/list","params":{}}"#,
             r#"{"jsonrpc":"2.0","id":"resources","method":"resources/list","params":{}}"#,
             r#"{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"echo","arguments":{"text":"hello"}}}"#,
@@ -152,7 +152,7 @@
         let mut lines = BufReader::new(stdout).lines();
         stdin
             .write_all(
-                br#"{"jsonrpc":"2.0","id":"init-after-crash","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"Fable","version":"0.1.0"}}}"#,
+                br#"{"jsonrpc":"2.0","id":"init-after-crash","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"Mivlet","version":"0.1.0"}}}"#,
             )
             .await
             .unwrap();

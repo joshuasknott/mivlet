@@ -1,12 +1,12 @@
 {
-  "name": "@fable/broker",
+  "name": "@mivlet/broker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "description": "Mivlet confidential-OAuth auth broker. Deployable, not deployed.",
   "main": "./dist/server.js",
   "bin": {
-    "fable-broker": "./dist/server.js"
+    "mivlet-broker": "./dist/server.js"
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -22,8 +22,8 @@
     "test": "vitest run --configLoader runner"
   },
   "dependencies": {
-    "@fable/connectors": "workspace:*",
-    "@fable/protocol": "workspace:*"
+    "@mivlet/connectors": "workspace:*",
+    "@mivlet/protocol": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",

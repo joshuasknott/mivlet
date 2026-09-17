@@ -1,4 +1,4 @@
-import type { BackendProvider, ProviderDriverKind } from "@fable/protocol";
+import type { BackendProvider, ProviderDriverKind } from "@mivlet/protocol";
 import type {
   AgentBackend,
   AgentBackendFactory,

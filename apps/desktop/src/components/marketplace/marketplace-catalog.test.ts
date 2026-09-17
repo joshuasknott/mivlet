@@ -14,14 +14,17 @@ describe("connector marketplace catalogue", () => {
       "Communication & meetings",
       "Product & design",
       "Engineering & delivery",
-      "Marketing & social",
       "Commerce & support",
-      "Legal & compliance",
-      "People & recruiting",
     ]);
     expect(
       new Set(marketplaceConnectorEntries.map((entry) => entry.id)).size,
     ).toBe(marketplaceConnectorEntries.length);
+  });
+
+  it("never lists a removed plugin or an empty category", () => {
+    const removed = ["outlook", "microsoft-teams", "zoom", "linkedin", "instagram", "youtube", "google-ads", "meta-ads", "shopify", "docusign", "greenhouse", "lever", "workday"];
+    expect(marketplaceConnectorEntries.filter((entry) => removed.includes(entry.id))).toEqual([]);
+    expect(marketplaceConnectorSections.every((section) => section.connectors.length > 0)).toBe(true);
   });
 
   it("keeps the implemented connector families prominent", () => {

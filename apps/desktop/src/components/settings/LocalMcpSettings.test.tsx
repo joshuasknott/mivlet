@@ -1,7 +1,7 @@
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { McpFrame, McpNotification, McpRequest, McpTransport } from "@fable/connectors";
-import { McpClient } from "@fable/connectors/mcp/sdk-client";
+import type { McpFrame, McpNotification, McpRequest, McpTransport } from "@mivlet/connectors";
+import { McpClient } from "@mivlet/connectors/mcp/sdk-client";
 
 vi.mock("../../lib/native-mcp-client", () => ({ McpClient }));
 
@@ -187,9 +187,9 @@ describe("LocalMcpSettings", () => {
     await waitFor(() => expect(runtime.resolve).toHaveBeenCalledTimes(1));
     expect(runtime.resolve.mock.calls[0]?.[0]).toMatchObject({
       request: approval,
-      decision: "once",
-      confirmationText: "configure local-files"
+      decision: "once"
     });
+    expect(runtime.resolve.mock.calls[0]?.[0]?.confirmationText).toBeUndefined();
     await waitFor(() => expect(runtime.commit).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("Local files")).toBeInTheDocument();
     expect(screen.getByText("Saved locally · No tools enabled by default")).toBeInTheDocument();

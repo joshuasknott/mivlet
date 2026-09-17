@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
-import { test } from "node:test";
 import { chunk, fixtureInput, withHost, sendChunks } from "./support/host-process.mjs";
+import { test } from "./support/windows-host.mjs";
 
 function anthropic(id, parts, stop = "end_turn") {
   return [
@@ -44,7 +44,7 @@ test("native provider failure is forwarded without another model request", async
   await withHost(async host => {
     host.write({ type: "start", input: fixtureInput() });
     const request = await host.nextType("model-request");
-    sendChunks(host, request.id, [JSON.stringify({ __fableTransport: { kind: "error", code: "authentication", message: "Provider authentication failed.", retryable: false } })]);
+    sendChunks(host, request.id, [JSON.stringify({ __mivletTransport: { kind: "error", code: "authentication", message: "Provider authentication failed.", retryable: false } })]);
     const error = await host.nextType("error");
     assert.equal(error.code, "authentication");
     await host.waitForExit();
@@ -58,7 +58,7 @@ test("native provider retry is forwarded and the same model request can continue
     host.write({ type: "start", input: fixtureInput() });
     const request = await host.nextType("model-request");
     sendChunks(host, request.id, [
-      JSON.stringify({ __fableTransport: { kind: "retrying", code: "rate-limited", message: "Retrying.", retryable: true } }),
+      JSON.stringify({ __mivletTransport: { kind: "retrying", code: "rate-limited", message: "Retrying.", retryable: true } }),
       chunk({ content: "Recovered." }),
       chunk({}, "stop"),
       "[DONE]",

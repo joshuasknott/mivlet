@@ -16,7 +16,8 @@ owners, telemetry, backups, and access controls.
 4. Revoke exposed credentials and capabilities at their owning provider before
    attempting application repair.
 5. Use a clean checkout and known-safe build for diagnosis. Do not overwrite the
-   only copy of an affected database or Docker volume.
+   only copy of an affected database. Native computer use does not rely on Docker;
+   ignore leftover Docker volumes from retired computer runtimes.
 
 ## Provider or Connection credential exposure
 
@@ -66,7 +67,7 @@ owners, telemetry, backups, and access controls.
 
 ## Optional account, sync, or hosted incident
 
-- Revoke the affected session, device, HMAC/root secret, and active capabilities
+- Revoke the affected session, device, HMAC signing secret, service Bearer, and active capabilities
   at the authoritative service.
 - Disable remote writes or hosted provisioning while preserving local work.
 - Check workspace scoping, current membership/device state, idempotency records,

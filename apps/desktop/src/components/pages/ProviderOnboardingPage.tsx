@@ -15,7 +15,7 @@ type ProviderSetupRuntime = Pick<
   | "signOutIdentity"
 >;
 
-export function ProviderOnboardingPage({
+function ProviderOnboardingPage({
   runtime,
 }: {
   runtime: ProviderSetupRuntime;

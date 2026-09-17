@@ -1,7 +1,14 @@
-import type { GenericMutationCtx, GenericQueryCtx } from "convex/server";
-import type { GenericDataModel } from "convex/server";
-
-type AuthCtx = GenericQueryCtx<GenericDataModel> | GenericMutationCtx<GenericDataModel>;
+/** Queries, mutations, actions, and HTTP actions all expose `ctx.auth`. */
+export type ConvexAuthReader = {
+  auth: {
+    getUserIdentity: () => Promise<null | {
+      subject?: unknown;
+      issuer?: unknown;
+      tokenIdentifier?: unknown;
+      [key: string]: unknown;
+    }>;
+  };
+};
 
 export interface CloudIdentity {
   provider: string;
@@ -49,18 +56,48 @@ export function validatedDisplayProfile(identity: { [key: string]: unknown }): V
   return displayName || emailHint ? { ...(displayName ? { displayName } : {}), ...(emailHint ? { emailHint } : {}) } : undefined;
 }
 
-export async function requireConvexAccountIdentity(ctx: AuthCtx): Promise<ConvexAccountIdentity> {
-  const identity = await ctx.auth.getUserIdentity();
-  const issuer = readStringClaim(identity ?? {}, "issuer") ?? readIssuerFromTokenIdentifier(identity?.tokenIdentifier);
-  if (!identity?.subject || !issuer) throw new Error("A validated issuer and subject are required.");
+/**
+ * Convex HTTP actions throw from `getUserIdentity` when the Bearer JWT is
+ * missing or invalid; queries, mutations, and actions return `null`. Both
+ * become the same fail-closed identity error.
+ */
+export async function requireConvexAccountIdentity(ctx: ConvexAuthReader): Promise<ConvexAccountIdentity> {
+  let identity: { [key: string]: unknown } | null;
+  try {
+    identity = await ctx.auth.getUserIdentity();
+  } catch {
+    throw new Error("A validated issuer and subject are required.");
+  }
+  const issuer = readStringClaim(identity ?? {}, "issuer") ?? readIssuerFromTokenIdentifier(
+    typeof identity?.tokenIdentifier === "string" ? identity.tokenIdentifier : undefined,
+  );
+  if (!identity?.subject || typeof identity.subject !== "string" || !issuer) {
+    throw new Error("A validated issuer and subject are required.");
+  }
   return {
     external: { provider: "clerk", normalizedIssuer: normalizeIssuer(issuer), subject: identity.subject },
     profile: validatedDisplayProfile(identity),
   };
 }
 
+/**
+ * HTTP/native mint path. Same Clerk facts as `requireConvexAccountIdentity`,
+ * with a stable kebab-case code so the HTTP gate can return 401 instead of a
+ * generic capability failure.
+ */
+export async function requireHttpClerkIdentity(ctx: ConvexAuthReader): Promise<ConvexAccountIdentity> {
+  try {
+    return await requireConvexAccountIdentity(ctx);
+  } catch (error) {
+    if (error instanceof Error && error.message === "A validated issuer and subject are required.") {
+      throw new Error("authentication-required");
+    }
+    throw error;
+  }
+}
+
 /** Extract only validated provider facts; organization claims are intentionally ignored. */
-export async function requireConvexIdentity(ctx: AuthCtx): Promise<CloudIdentity> {
+export async function requireConvexIdentity(ctx: ConvexAuthReader): Promise<CloudIdentity> {
   return (await requireConvexAccountIdentity(ctx)).external;
 }
 function readStringClaim(value: { [key: string]: unknown }, key: string) { const claim = value[key]; return typeof claim === "string" && claim.trim() ? claim : undefined; }

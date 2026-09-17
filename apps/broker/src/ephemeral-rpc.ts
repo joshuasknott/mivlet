@@ -10,17 +10,17 @@
  * This is the production path for durable; sync store contracts remain untouched for memory/default.
  */
 
-import type { BrokerProviderId } from "@fable/connectors";
-import type { ConnectorAccountSummary, ConnectorTokenSet } from "@fable/protocol";
+import type { BrokerProviderId } from "@mivlet/connectors";
+import type { ConnectorAccountSummary, ConnectorTokenSet } from "@mivlet/protocol";
 
 import type { BrokerClock } from "./clock.js";
-import { BROKER_HANDOFF_TTL_SECONDS } from "@fable/connectors";
-import type { PendingExchange, HandoffEntry } from "./stores.js";
+import { BROKER_HANDOFF_TTL_SECONDS } from "@mivlet/connectors";
+import { pendingStateInUseError, assertAuthorizeState, type PendingExchange, type HandoffEntry } from "./stores.js";
 import {
   computeStateHash,
   computeHandoffHash,
-  encryptVerifier,
-  decryptVerifier,
+  encryptPendingSecrets,
+  decryptPendingSecrets,
   encryptHandoffPayload,
   decryptHandoffPayload,
   assertStoreEncryptionKey,
@@ -51,16 +51,17 @@ export function createEphemeralOps(
   return {
     async createPending(entry) {
       if (!pendingNS) throw new Error("BROKER_PENDING binding required");
+      assertAuthorizeState(entry.state);
       const stateHash = await computeStateHash(entry.state);
       const id = pendingNS.idFromName(stateHash);
       const stub = pendingNS.get(id);
-      let verifierEnc: Uint8Array | null = null;
-      if (entry.verifier) {
-        verifierEnc = await encryptVerifier(secret, entry.state, entry.provider, entry.verifier);
-      }
+      const verifierEnc = await encryptPendingSecrets(secret, entry.state, entry.provider, {
+        verifier: entry.verifier,
+        codeChallenge: entry.codeChallenge
+      });
       const now = clock.nowMs();
       const expiresAt = now + TTL_MS;
-      await stub.putPending({
+      const created = await stub.putPending({
         state: entry.state,
         provider: entry.provider,
         redirectUri: entry.redirectUri,
@@ -69,6 +70,7 @@ export function createEphemeralOps(
         createdAt: now,
         expiresAt,
       });
+      if (created === false) throw pendingStateInUseError();
     },
 
     async consumePending(state) {
@@ -79,19 +81,24 @@ export function createEphemeralOps(
       const row: any = await stub.consumePending(state);
       if (!row) return undefined;
       let verifier: string | undefined;
+      let codeChallenge = "";
       if (row.verifierEnc && secret) {
         try {
-          verifier = await decryptVerifier(secret, stateHash, row.provider, row.verifierEnc);
+          const secrets = await decryptPendingSecrets(secret, stateHash, row.provider, row.verifierEnc);
+          verifier = secrets.verifier;
+          codeChallenge = secrets.codeChallenge;
         } catch {
           return undefined; // corruption -> miss
         }
       }
+      if (!codeChallenge) return undefined;
       return {
         provider: row.provider,
         redirectUri: row.redirectUri,
         providerRedirectUri: row.providerRedirectUri,
         state: row.state,
         verifier,
+        codeChallenge,
         createdAt: row.createdAt ?? row.created_at_ms,
       } as PendingExchange;
     },
@@ -104,7 +111,8 @@ export function createEphemeralOps(
       const payloadEnc = await encryptHandoffPayload(secret, ticket, entry.provider, entry.state, {
         tokens: entry.tokens,
         account: entry.account,
-      } as any);
+        codeChallenge: entry.codeChallenge
+      });
       const ticketHash = await computeHandoffHash(ticket);
       const id = handoffNS.idFromName(ticketHash);
       const stub = handoffNS.get(id);
@@ -126,22 +134,26 @@ export function createEphemeralOps(
       const stub = handoffNS.get(id);
       const row: any = await stub.redeemHandoff(handoff, state);
       if (!row) return undefined;
-      let tokens: ConnectorTokenSet = {} as any;
-      let account: ConnectorAccountSummary = {} as any;
+      let tokens: ConnectorTokenSet = {} as ConnectorTokenSet;
+      let account: ConnectorAccountSummary = {} as ConnectorAccountSummary;
+      let codeChallenge = "";
       if (row.payloadEnc && secret) {
         try {
           const p = await decryptHandoffPayload(secret, ticketHash, row.provider, row.state ?? state, row.payloadEnc);
-          tokens = p.tokens as any;
-          account = p.account as any;
+          tokens = p.tokens as ConnectorTokenSet;
+          account = p.account as ConnectorAccountSummary;
+          codeChallenge = p.codeChallenge;
         } catch {
           return undefined;
         }
       }
+      if (!codeChallenge) return undefined;
       return {
         provider: row.provider,
         tokens,
         account,
         state: row.state,
+        codeChallenge,
         createdAt: row.createdAt ?? row.created_at_ms,
       } as HandoffEntry;
     },
@@ -160,7 +172,7 @@ function urlSafeTokenForRpc(bytes: number): string {
 /**
  * Create deterministic async ops for tests using SerialDurableStub + real DO class instances.
  * Uses real encrypt/decrypt, in-memory "storage" via mock ctx, serial execution for races.
- * The returned ops can be passed as ephemeralOps to FableBroker for durable-path E2E tests.
+ * The returned ops can be passed as ephemeralOps to MivletBroker for durable-path E2E tests.
  */
 export async function createSerialInMemoryEphemeralOps(
   clock: BrokerClock,
@@ -193,7 +205,8 @@ export async function createSerialInMemoryEphemeralOps(
             row.expires_at_ms = bindings[5]; row.expiresAt = bindings[5];
           }
           const idx = rows.findIndex((r: any) => (tableName === "pending" ? r.state_hash === hash : r.ticket_hash === hash));
-          if (idx >= 0) rows[idx] = row; else rows.push(row);
+          if (idx >= 0) throw new Error("UNIQUE constraint failed");
+          rows.push(row);
           return [];
         }
         if (q.includes("select")) {
@@ -204,7 +217,13 @@ export async function createSerialInMemoryEphemeralOps(
         if (q.includes("delete")) {
           const hash = bindings[0];
           const idx = rows.findIndex((r: any) => (tableName === "pending" ? r.state_hash === hash : r.ticket_hash === hash));
-          if (idx >= 0) rows.splice(idx, 1);
+          if (idx < 0) return [];
+          if (q.includes("expires_at_ms") && bindings.length >= 2) {
+            const expiresAt = rows[idx].expires_at_ms ?? rows[idx].expiresAt;
+            if (expiresAt <= bindings[1]) rows.splice(idx, 1);
+            return [];
+          }
+          rows.splice(idx, 1);
           return [];
         }
         return [];
@@ -237,15 +256,17 @@ export async function createSerialInMemoryEphemeralOps(
   // Now build ops that go through the stubs (for serial) + real enc
   const ops: EphemeralOps = {
     async createPending(entry) {
-      const stateHash = await computeStateHash(entry.state);
-      // simulate idFromName by using the inst directly via stub
+      assertAuthorizeState(entry.state);
       let verifierEnc: Uint8Array | null = null;
-      if (entry.verifier && secret) {
-        verifierEnc = await encryptVerifier(secret, entry.state, entry.provider, entry.verifier);
+      if (secret) {
+        verifierEnc = await encryptPendingSecrets(secret, entry.state, entry.provider, {
+          verifier: entry.verifier,
+          codeChallenge: entry.codeChallenge
+        });
       }
       const now = clock.nowMs();
       const expiresAt = now + TTL_MS;
-      await pendingStub.invoke("putPending", {
+      const created = await pendingStub.invoke("putPending", {
         state: entry.state,
         provider: entry.provider,
         redirectUri: entry.redirectUri,
@@ -254,26 +275,32 @@ export async function createSerialInMemoryEphemeralOps(
         createdAt: now,
         expiresAt,
       });
+      if (created === false) throw pendingStateInUseError();
     },
 
     async consumePending(state) {
       const row: any = await pendingStub.invoke("consumePending", state);
       if (!row) return undefined;
       let verifier: string | undefined;
+      let codeChallenge = "";
       if (row.verifierEnc && secret) {
         const h = await computeStateHash(state);
         try {
-          verifier = await decryptVerifier(secret, h, row.provider, row.verifierEnc);
+          const secrets = await decryptPendingSecrets(secret, h, row.provider, row.verifierEnc);
+          verifier = secrets.verifier;
+          codeChallenge = secrets.codeChallenge;
         } catch {
           return undefined;
         }
       }
+      if (!codeChallenge) return undefined;
       return {
         provider: row.provider,
         redirectUri: row.redirectUri || row.redirect_uri,
         providerRedirectUri: row.providerRedirectUri || row.provider_redirect_uri,
         state: row.state,
         verifier,
+        codeChallenge,
         createdAt: row.createdAt || row.created_at_ms,
       } as PendingExchange;
     },
@@ -285,7 +312,8 @@ export async function createSerialInMemoryEphemeralOps(
         payloadEnc = await encryptHandoffPayload(secret, ticket, entry.provider, entry.state, {
           tokens: entry.tokens,
           account: entry.account,
-        } as any);
+          codeChallenge: entry.codeChallenge
+        });
       }
       const now = clock.nowMs();
       const expiresAt = now + TTL_MS;
@@ -303,23 +331,27 @@ export async function createSerialInMemoryEphemeralOps(
     async redeemHandoff(handoff, state) {
       const row: any = await handoffStub.invoke("redeemHandoff", handoff, state);
       if (!row) return undefined;
-      let tokens: any = {};
-      let account: any = {};
+      let tokens: ConnectorTokenSet = {} as ConnectorTokenSet;
+      let account: ConnectorAccountSummary = {} as ConnectorAccountSummary;
+      let codeChallenge = "";
       if (row.payloadEnc && secret) {
         const h = await computeHandoffHash(handoff);
         try {
           const p = await decryptHandoffPayload(secret, h, row.provider, row.state || state, row.payloadEnc);
-          tokens = p.tokens;
-          account = p.account;
+          tokens = p.tokens as ConnectorTokenSet;
+          account = p.account as ConnectorAccountSummary;
+          codeChallenge = p.codeChallenge;
         } catch {
           return undefined;
         }
       }
+      if (!codeChallenge) return undefined;
       return {
         provider: row.provider,
         tokens,
         account,
         state: row.state,
+        codeChallenge,
         createdAt: row.createdAt || row.created_at_ms,
       } as HandoffEntry;
     },

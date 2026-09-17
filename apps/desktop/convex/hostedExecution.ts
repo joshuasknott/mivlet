@@ -1,13 +1,16 @@
 import {
+  readMivletEnvValue,
   signHostedExecutionCapability,
   type HostedComputerSnapshot,
   type HostedExecutionCapabilityReceipt,
   type HostedExecutionCapabilityScope
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { v } from "convex/values";
 import { requireActiveDevice, requireActiveMembership, requireRole } from "./authorization";
+import { requireHttpClerkIdentity, type ConvexAuthReader } from "./convexAuth";
 import { internal } from "./_generated/api";
-import { action, internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { internalAction, internalMutation, internalQuery, mutation, query } from "./_generated/server";
+import { consumeExecutionCapabilityMintBudget } from "./executionCapabilityMintRate";
 import {
   hostedComputerId,
   hostedRunnerBaseUrl,
@@ -35,6 +38,24 @@ export const requestProvision = mutation({
         throw new Error("The hosted execution request is unavailable.");
       }
       return { requestKey, executionNodeId, computerId, status: existing.status };
+    }
+    const inFlight = await ctx.db.query("hosted_execution_requests")
+      .withIndex("by_computer_operation_status", (q) =>
+        q.eq("computerId", computerId).eq("operation", "provision").eq("status", "pending"),
+      )
+      .collect();
+    if (inFlight.length > 1) throw new Error("The hosted execution request is unavailable.");
+    const pending = inFlight[0];
+    if (pending) {
+      if (pending.workspaceId !== args.workspaceId || pending.agentId !== agentId || pending.computerId !== computerId) {
+        throw new Error("The hosted execution request is unavailable.");
+      }
+      return {
+        requestKey: pending.requestKey,
+        executionNodeId: pending.executionNodeId,
+        computerId,
+        status: pending.status,
+      };
     }
     const nodes = await ctx.db.query("hosted_execution_nodes")
       .withIndex("by_workspace_agent", (q) => q.eq("workspaceId", args.workspaceId).eq("agentId", agentId)).collect();
@@ -84,11 +105,13 @@ export const getComputer = query({
 export const authorizeExecutionCapability = internalQuery({
   args: { workspaceId: v.string(), deviceId: v.string(), agentId: v.string() },
   handler: async (ctx, args) => {
-    const authz = await requireActiveDevice(ctx, args.workspaceId, args.deviceId);
+    const workspaceId = requireHostedIdentifier(args.workspaceId, "Workspace id");
+    const deviceId = requireHostedIdentifier(args.deviceId, "Device id");
+    const authz = await requireActiveDevice(ctx, workspaceId, deviceId);
     requireRole(authz.membership.role, ["owner", "admin", "editor"]);
     const agentId = requireHostedIdentifier(args.agentId, "Agent id");
     const nodes = await ctx.db.query("hosted_execution_nodes")
-      .withIndex("by_workspace_agent", (q) => q.eq("workspaceId", args.workspaceId).eq("agentId", agentId)).collect();
+      .withIndex("by_workspace_agent", (q) => q.eq("workspaceId", workspaceId).eq("agentId", agentId)).collect();
     if (nodes.length !== 1) throw new Error("The hosted execution node is unavailable.");
     const node = nodes[0];
     if (node.status !== "ready" || !node.keepAlive || node.runnerGeneration < 1) {
@@ -98,53 +121,87 @@ export const authorizeExecutionCapability = internalQuery({
   }
 });
 
+const executionCapabilityArgs = {
+  workspaceId: v.string(),
+  deviceId: v.string(),
+  agentId: v.string(),
+  scope: v.union(
+    v.literal("process:launch"),
+    v.literal("process:inspect"),
+    v.literal("process:kill"),
+    v.literal("browser:navigate"),
+    v.literal("browser:act"),
+    v.literal("browser:snapshot")
+  )
+};
+
 /**
- * Mints a short-lived bearer capability for the native boundary. The runner
- * root credential remains in Convex/Worker secrets and never reaches the
- * renderer. Capabilities are generation-fenced and cannot provision or destroy
- * computers.
+ * Mints a short-lived bearer capability for the native boundary. Internal so a
+ * renderer Convex client cannot pull tokens into WebView state. Native calls
+ * `/native/execution-capability` with the OS-keyring Clerk session.
+ * The HTTP gate and this action both assert that Clerk identity before the
+ * internal membership/device query, so minting fails closed if Convex does
+ * not forward auth into internals. The runner signing secret remains in
+ * Convex/Worker secrets and never reaches the renderer. Capabilities are
+ * generation-fenced and cannot provision or destroy computers. The service
+ * Bearer (`MIVLET_HOSTED_RUNNER_API_KEY`) is lifecycle-only.
  */
-export const requestExecutionCapability = action({
-  args: {
-    workspaceId: v.string(),
-    deviceId: v.string(),
-    agentId: v.string(),
-    scope: v.union(
-      v.literal("process:launch"),
-      v.literal("process:inspect"),
-      v.literal("process:kill"),
-      v.literal("browser:navigate"),
-      v.literal("browser:act"),
-      v.literal("browser:snapshot")
-    )
+export async function mintExecutionCapability(
+  ctx: ConvexAuthReader & {
+    runQuery: Function;
   },
-  handler: async (ctx, args): Promise<HostedExecutionCapabilityReceipt> => {
-    const authorized: { computerId: string; generation: number } = await ctx.runQuery(
-      internal.hostedExecution.authorizeExecutionCapability,
-      args
-    );
-    const rootSecret = process.env.FABLE_HOSTED_RUNNER_API_KEY;
-    if (!rootSecret || rootSecret.length < 32) throw new Error("runner-configuration-required");
-    const runnerUrl = hostedRunnerBaseUrl(process.env.FABLE_HOSTED_RUNNER_URL).toString().replace(/\/$/, "");
-    const issuedAt = Date.now();
-    const expiresAt = issuedAt + EXECUTION_CAPABILITY_LIFETIME_MS;
-    const token = await signHostedExecutionCapability(rootSecret, {
-      version: 1,
-      computerId: authorized.computerId,
-      generation: authorized.generation,
-      scopes: [args.scope as HostedExecutionCapabilityScope],
-      issuedAt,
-      expiresAt,
-      nonce: `cap-${crypto.randomUUID()}`
-    });
-    return {
-      runnerUrl,
-      token,
-      computerId: authorized.computerId,
-      generation: authorized.generation,
-      expiresAt
-    };
-  }
+  args: {
+    workspaceId: string;
+    deviceId: string;
+    agentId: string;
+    scope: HostedExecutionCapabilityScope;
+  },
+): Promise<HostedExecutionCapabilityReceipt> {
+  await requireHttpClerkIdentity(ctx);
+  const authorized: { computerId: string; generation: number } = await ctx.runQuery(
+    internal.hostedExecution.authorizeExecutionCapability,
+    {
+      workspaceId: args.workspaceId,
+      deviceId: args.deviceId,
+      agentId: args.agentId,
+    },
+  );
+  const signingKey = readMivletEnvValue(process.env, "HOSTED_RUNNER_SIGNING_KEY");
+  if (!signingKey || signingKey.length < 32) throw new Error("runner-configuration-required");
+  const runnerUrl = hostedRunnerBaseUrl(readMivletEnvValue(process.env, "HOSTED_RUNNER_URL")).toString().replace(/\/$/, "");
+  const issuedAt = Date.now();
+  const expiresAt = issuedAt + EXECUTION_CAPABILITY_LIFETIME_MS;
+  const token = await signHostedExecutionCapability(signingKey, {
+    version: 1,
+    computerId: authorized.computerId,
+    generation: authorized.generation,
+    scopes: [args.scope],
+    issuedAt,
+    expiresAt,
+    nonce: `cap-${crypto.randomUUID()}`
+  });
+  return {
+    runnerUrl,
+    token,
+    computerId: authorized.computerId,
+    generation: authorized.generation,
+    expiresAt
+  };
+}
+
+export const requestExecutionCapability = internalAction({
+  args: executionCapabilityArgs,
+  handler: mintExecutionCapability,
+});
+
+/**
+ * HTTP mint gate consumes this before `requestExecutionCapability`. Internal so
+ * a renderer client cannot reset or inspect mint windows. Clerk identity is
+ * read from `ctx`; `deviceId` is only the per-device half of the key.
+ */
+export const consumeExecutionCapabilityMint = internalMutation({
+  args: { deviceId: v.string() },
+  handler: consumeExecutionCapabilityMintBudget,
 });
 
 export const loadProvisionRequest = internalQuery({
@@ -194,8 +251,8 @@ export const provisionScheduled = internalAction({
     let snapshot: HostedComputerSnapshot | undefined;
     let errorCode: string | undefined;
     try {
-      const baseUrl = hostedRunnerBaseUrl(process.env.FABLE_HOSTED_RUNNER_URL);
-      const apiKey = process.env.FABLE_HOSTED_RUNNER_API_KEY;
+      const baseUrl = hostedRunnerBaseUrl(readMivletEnvValue(process.env, "HOSTED_RUNNER_URL"));
+      const apiKey = readMivletEnvValue(process.env, "HOSTED_RUNNER_API_KEY");
       if (!apiKey || apiKey.length < 32) throw new Error("runner-configuration-required");
       const response = await fetch(new URL(`/v1/computers/${request.computerId}`, baseUrl), {
         method: "PUT",

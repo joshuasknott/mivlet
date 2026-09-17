@@ -7,19 +7,24 @@
  *
  * 1. Authorization + handoff issuance:
  *    - desktop calls authorize(redirect, state, desktopChallenge)
- *    - broker builds the provider authorization URL with its confidential client_id
- *      and (for broker-pkce providers) its OWN verifier, stores a pending exchange
- *      keyed by the desktop state, returns the URL
+ *    - broker validates the desktop S256 challenge (never forwards it), builds
+ *      the provider authorization URL with its confidential client_id and (for
+ *      broker-pkce providers) its OWN verifier, stores a pending exchange keyed
+ *      by the desktop state + desktop challenge, returns the URL
  *    - the provider calls the broker callback with code+state
  *    - broker consumes the single-use pending exchange, validates state, performs
  *      the confidential exchange with the provider secret + its verifier, resolves
- *      identity, issues a single-use short-lived handoff ticket bound to the state,
- *      and 302-redirects the browser to the desktop's exact redirect_uri with the
- *      handoff + state as query params
+ *      identity, issues a single-use short-lived handoff ticket bound to the state
+ *      and desktop challenge, and 302-redirects the browser to the desktop's exact
+ *      redirect_uri with the handoff + state as query params. A URL fragment cannot
+ *      carry the ticket: native loopback HTTP omits fragments from the
+ *      request-target, so fragment delivery would break desktop redeem. The
+ *      desktop redeems immediately over POST /handoff in the same callback turn.
  *
  * 2. Handoff redemption, refresh, revocation: direct (non-browser) POSTs from the
- *    desktop. The token set crosses ONLY at handoff redemption, after the single-use
- *    ticket + bound state are validated.
+ *    desktop. Redeem requires the desktop PKCE verifier. The token set crosses
+ *    ONLY at handoff redemption, after the single-use ticket + bound state +
+ *    verifier are validated.
  */
 
 import {
@@ -36,13 +41,15 @@ import {
   type BrokerRefreshResponse,
   type BrokerRevokeRequest,
   type BrokerRevokeResponse,
+  assertBrokerPkceChallenge,
+  assertBrokerPkceVerifier,
   assertContractVersion,
   isBrokerProvider
-} from "@fable/connectors";
-import type { ConnectorTokenSet } from "@fable/protocol";
+} from "@mivlet/connectors";
+import { withLegacyFableEnv, type ConnectorTokenSet } from "@mivlet/protocol";
 
 import type { BrokerClock } from "./clock.js";
-import { generatePkcePair } from "./pkce.js";
+import { generatePkcePair, verifierMatchesS256Challenge } from "./pkce.js";
 import {
   normalizeAccount,
   exchangeCode,
@@ -62,7 +69,7 @@ import {
   type BrokerEnv,
   type ProviderProfile
 } from "./provider-profiles.js";
-import { createStores, type HandoffStore, type PendingExchangeStore } from "./stores.js";
+import { assertAuthorizeState, createStores, type HandoffStore, type PendingExchangeStore } from "./stores.js";
 import type { EphemeralOps } from "./ephemeral-rpc.js";
 
 export interface BrokerOptions {
@@ -99,7 +106,7 @@ export interface BrokerCallbackOutput {
   redirect: URL;
 }
 
-export class FableBroker {
+export class MivletBroker {
   private readonly clock: BrokerClock;
   private readonly fetcher?: BrokerFetch;
   private readonly pending: PendingExchangeStore;
@@ -118,7 +125,7 @@ export class FableBroker {
   private readonly allowedDesktopRedirects: Set<string>;
 
   constructor(options: BrokerOptions) {
-    this.env = options.env;
+    this.env = withLegacyFableEnv(options.env);
     this.requirePublicBaseUrl = options.requirePublicBaseUrl ?? false;
     try {
       this.publicBaseUrl = options.publicBaseUrl ? new URL(options.publicBaseUrl) : undefined;
@@ -132,7 +139,7 @@ export class FableBroker {
     this.handoff = options.handoff ?? stores.handoff;
     this.ephemeralOps = options.ephemeralOps;
     this.allowedDesktopRedirects = parseAllowedDesktopRedirects(
-      this.env.FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS
+      this.env.MIVLET_BROKER_ALLOWED_DESKTOP_REDIRECTS
     );
   }
 
@@ -158,6 +165,8 @@ export class FableBroker {
     const credentials = resolveCredentials(request.provider, this.env, profile);
     validateDesktopRedirect(request.redirectUri, this.allowedDesktopRedirects);
     const providerRedirectUri = new URL(`oauth/${request.provider}/callback`, this.publicBaseUrlOrDefault()).toString();
+    assertAuthorizeState(request.state);
+    assertBrokerPkceChallenge(request.codeChallenge, request.codeChallengeMethod);
 
     const url = new URL(resolveAuthorizationEndpoint(profile, this.env, credentials));
     url.searchParams.set("client_id", credentials.clientId);
@@ -180,6 +189,8 @@ export class FableBroker {
     }
 
     // Store the single-use pending exchange keyed by the desktop state.
+    // Create-if-absent: a second authorize with the same state cannot replace
+    // the bound desktop redirect before the provider callback.
     if (this.ephemeralOps) {
       await this.ephemeralOps.createPending({
         provider: request.provider,
@@ -187,6 +198,7 @@ export class FableBroker {
         providerRedirectUri,
         state: request.state,
         verifier,
+        codeChallenge: request.codeChallenge
       });
     } else {
       this.pending.create({
@@ -195,6 +207,7 @@ export class FableBroker {
         providerRedirectUri,
         state: request.state,
         verifier,
+        codeChallenge: request.codeChallenge
       });
     }
 
@@ -248,6 +261,9 @@ export class FableBroker {
     if (pending.provider !== provider) {
       throw new BrokerContractError("invalid-state", "Authorization state did not match the provider.", false);
     }
+    if (!pending.codeChallenge) {
+      throw new BrokerContractError("invalid-state", "Authorization state is missing the desktop PKCE challenge.", false);
+    }
 
     const credentials = resolveCredentials(provider, this.env, profile);
     const clientOptions = { provider, credentials, profile, fetch: this.fetcher, clock: this.clock };
@@ -279,17 +295,17 @@ export class FableBroker {
           tokens: exchange.tokens,
           account,
           state,
+          codeChallenge: pending.codeChallenge
         })
       : this.handoff.issue({
           provider,
           tokens: exchange.tokens,
           account,
           state,
+          codeChallenge: pending.codeChallenge
         });
 
-    const redirect = new URL(pending.redirectUri);
-    redirect.searchParams.set("handoff", ticket);
-    redirect.searchParams.set("state", state);
+    const redirect = desktopHandoffRedirect(pending.redirectUri, ticket, state);
     return { redirect };
   }
 
@@ -297,6 +313,7 @@ export class FableBroker {
   async redeem(request: BrokerHandoffRedeemRequest): Promise<BrokerHandoffRedeemResponse> {
     assertContractVersion(request.contractVersion);
     this.requireProvider(request.provider);
+    assertBrokerPkceVerifier(request.codeVerifier);
     const entry = this.ephemeralOps
       ? await this.ephemeralOps.redeemHandoff(request.handoff, request.state)
       : this.handoff.redeem(request.handoff, request.state);
@@ -309,6 +326,16 @@ export class FableBroker {
     }
     if (entry.provider !== request.provider) {
       throw new BrokerContractError("invalid-handoff", "The handoff token did not match the provider.", false);
+    }
+    if (
+      !entry.codeChallenge
+      || !(await verifierMatchesS256Challenge(request.codeVerifier, entry.codeChallenge))
+    ) {
+      throw new BrokerContractError(
+        "invalid-handoff",
+        "The handoff token did not match the desktop PKCE verifier.",
+        false
+      );
     }
     return {
       contractVersion: BROKER_CONTRACT_VERSION,
@@ -390,7 +417,7 @@ export class FableBroker {
 }
 
 /**
- * Parse the `FABLE_BROKER_ALLOWED_DESKTOP_REDIRECTS` env value into an exact-match
+ * Parse the `MIVLET_BROKER_ALLOWED_DESKTOP_REDIRECTS` env value into an exact-match
  * set once, at construction. Comma-separated entries are trimmed and empties
  * dropped, preserving the prior split/trim/filter semantics.
  */
@@ -424,6 +451,21 @@ function validateDesktopRedirect(value: string, allowed: Set<string>): void {
   if ((!loopback && !exact) || redirect.username || redirect.password || redirect.search || redirect.hash) {
     throw new BrokerContractError("invalid-request", "Desktop redirect URI is not allowed.", false);
   }
+}
+
+/**
+ * Build the desktop landing URL after a successful confidential exchange.
+ *
+ * The ticket stays in the query string (not a fragment): the native loopback
+ * HTTP parser only sees the request-target, and browsers omit fragments there.
+ * Fragment delivery would break desktop redeem. The desktop POSTs `/handoff`
+ * in the same callback turn; the ticket remains 60s TTL and single-use.
+ */
+function desktopHandoffRedirect(redirectUri: string, ticket: string, state: string): URL {
+  const redirect = new URL(redirectUri);
+  redirect.searchParams.set("handoff", ticket);
+  redirect.searchParams.set("state", state);
+  return redirect;
 }
 
 function rejectDuplicateCallbackParams(query: URLSearchParams, keys: readonly string[]): void {

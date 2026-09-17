@@ -1,9 +1,9 @@
 /**
  * Pure, side-effect-free encryption helpers for broker Durable Object stores.
  *
- * All sensitive values (PKCE verifiers for broker-pkce providers, and full
- * token+account payloads for handoffs) are encrypted with AES-256-GCM before
- * any write to DO SQLite. A required per-Worker secret provides the IKM.
+ * All sensitive values (PKCE verifiers for broker-pkce providers, desktop
+ * PKCE challenges bound into pending rows, and full token+account payloads
+ * for handoffs) are encrypted with AES-256-GCM before any write to DO SQLite.
  *
  * Design:
  * - Versioned envelope byte + nonce(12) || ciphertext+tag
@@ -16,7 +16,7 @@
  * Used only by durable adapters; memory path and Node tests never call here.
  */
 
-import type { BrokerProviderId } from "@fable/connectors";
+import type { BrokerProviderId } from "@mivlet/connectors";
 import {
   base64url,
   base64urlToBytes,
@@ -27,14 +27,22 @@ import {
 } from "./crypto-web.js";
 
 const ENVELOPE_VERSION = 1;
-const HKDF_INFO_PENDING = "fable-broker-store:v1:pending-verifier";
-const HKDF_INFO_HANDOFF = "fable-broker-store:v1:handoff-payload";
+const HKDF_INFO_PENDING = "mivlet-broker-store:v1:pending-verifier";
+const HKDF_INFO_HANDOFF = "mivlet-broker-store:v1:handoff-payload";
 
 const TEXT_ENCODER = new TextEncoder(); // local for AAD consts if needed
 
 export interface HandoffPayload {
   tokens: unknown; // ConnectorTokenSet at runtime
   account: unknown; // ConnectorAccountSummary
+  /** Desktop S256 challenge proven at redeem. */
+  codeChallenge: string;
+}
+
+/** Desktop challenge plus optional broker-generated verifier, stored together. */
+export interface PendingRecordSecrets {
+  verifier?: string;
+  codeChallenge: string;
 }
 
 /** Thrown only for crypto failures inside durable path (never surface raw). */
@@ -179,14 +187,14 @@ export async function derivePeerKey(peer: string | undefined): Promise<string> {
 }
 
 /**
- * Encrypt a PKCE verifier for pending exchange.
- * AAD binds provider + stateHash so a verifier blob cannot be moved.
+ * Encrypt pending PKCE bindings (desktop challenge + optional broker verifier).
+ * AAD binds provider + stateHash so the blob cannot be moved.
  */
-export async function encryptVerifier(
+export async function encryptPendingSecrets(
   secret: string,
   state: string,
   provider: BrokerProviderId,
-  verifier: string
+  secrets: PendingRecordSecrets
 ): Promise<Uint8Array> {
   const stateHash = await computeStateHash(state);
   const raw = decodeMasterSecret(secret);
@@ -194,27 +202,47 @@ export async function encryptVerifier(
   const salt = utf8Encode(stateHash);
   const key = await deriveRecordKey(master, salt, HKDF_INFO_PENDING);
   const aad = utf8Encode(`pending:${provider}:${stateHash}`);
-  return aesGcmEncrypt(key, utf8Encode(verifier), aad);
+  return aesGcmEncrypt(key, utf8Encode(JSON.stringify(secrets)), aad);
 }
 
-/** Decrypt verifier; returns the original verifier string or throws on corruption/ key error. */
-export async function decryptVerifier(
+/** Decrypt pending PKCE bindings. Throws on corruption, key error, or malformed JSON. */
+export async function decryptPendingSecrets(
   secret: string,
   stateHash: string,
   provider: BrokerProviderId,
   blob: Uint8Array
-): Promise<string> {
+): Promise<PendingRecordSecrets> {
   const raw = decodeMasterSecret(secret);
   const master = await importMasterKey(raw);
   const salt = utf8Encode(stateHash);
   const key = await deriveRecordKey(master, salt, HKDF_INFO_PENDING);
   const aad = utf8Encode(`pending:${provider}:${stateHash}`);
   const pt = await aesGcmDecrypt(key, blob, aad);
-  return utf8Decode(pt);
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(utf8Decode(pt));
+  } catch {
+    throw new StoreCryptoError("payload parse failed");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new StoreCryptoError("payload parse failed");
+  }
+  const record = parsed as Record<string, unknown>;
+  if (typeof record.codeChallenge !== "string" || !record.codeChallenge) {
+    throw new StoreCryptoError("payload parse failed");
+  }
+  const secrets: PendingRecordSecrets = { codeChallenge: record.codeChallenge };
+  if (record.verifier !== undefined) {
+    if (typeof record.verifier !== "string" || !record.verifier) {
+      throw new StoreCryptoError("payload parse failed");
+    }
+    secrets.verifier = record.verifier;
+  }
+  return secrets;
 }
 
 /**
- * Encrypt handoff payload (tokens + account). Called after token exchange.
+ * Encrypt handoff payload (tokens + account + desktop PKCE challenge). Called after token exchange.
  * Ticket is generated before; hash used for routing and AAD.
  */
 export async function encryptHandoffPayload(
@@ -249,11 +277,20 @@ export async function decryptHandoffPayload(
   const aad = utf8Encode(`handoff:${provider}:${state}:${ticketHash}`);
   const pt = await aesGcmDecrypt(key, blob, aad);
   const json = utf8Decode(pt);
+  let parsed: unknown;
   try {
-    return JSON.parse(json) as HandoffPayload;
+    parsed = JSON.parse(json);
   } catch {
     throw new StoreCryptoError("payload parse failed");
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new StoreCryptoError("payload parse failed");
+  }
+  const payload = parsed as HandoffPayload;
+  if (typeof payload.codeChallenge !== "string" || !payload.codeChallenge) {
+    throw new StoreCryptoError("payload parse failed");
+  }
+  return payload;
 }
 
 /** For tests: check whether a blob looks like it could contain plaintext (heuristic). */

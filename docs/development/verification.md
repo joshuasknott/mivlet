@@ -18,10 +18,18 @@ snapshot persistence and execution ownership explicit when separating shell code
 `useAccountWorkspace` owns account requests and scope transitions;
 `useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;
 `useWorkspaceApprovals` owns the queue, audit and decision bridge.
-`useWorkspaceNavigation` owns view restoration and navigation, while
-`WorkspaceExecution` retains execution ownership. Native-agent regressions are
+`shell/TeammateWorkspace.tsx` remains the public shell entry (account, theme,
+and onboarding). `shell/ActiveWorkspace.tsx` owns live workspace composition
+and `WorkspaceExecution` service wiring. Conversation chrome, the context
+panel, and overlay dialogs live beside it; `workspace-presentation.ts` owns
+indicator, preview, and new-action parity. Lazy route islands stay in
+`workspace-lazy.tsx`. `shell/useWorkspaceNavigation.ts` owns view restoration
+and navigation, while `WorkspaceExecution` retains execution ownership. Native-agent regressions are
 split into context, persistence, recovery, cancellation and provider suites;
 their shared `native-agent-test-harness.ts` supplies deterministic native transport.
+The hook implementation lives in `hooks/native-agent/` behind the stable
+`hooks/useNativeAgent.ts` facade (`useNativeAgent`, `NativeAgentState`,
+`UseNativeAgentOptions`, `NativeAgentRunControl`).
 
 Generated logs, screenshots, reports and build comparisons belong under the
 ignored `output/` directory or the system temporary directory, not the repository
@@ -38,7 +46,8 @@ TypeScript changes run types, quality and package tests on Linux. Rust/Tauri,
 embedded host, protocol/connectors, dependency, release and workflow changes also
 run Windows host acceptance, Rust tests, Clippy and formatting with Cargo caching.
 The Windows Bun dependency is optional on other operating systems; Windows host
-builds still fail if it is absent. These tests never substitute a Linux host.
+builds still fail if it is absent. Linux daily loops use `pnpm test:pr`. Host
+executable tests remain `pnpm test:host` on Windows. These tests never substitute a Linux host.
 
 Full validation (`pnpm check`, Rust tests, Clippy and formatting) runs manually or
 nightly at 03:17 UTC. Installer generation remains manual in the Windows
@@ -52,15 +61,28 @@ Require the aggregate CI check before merging and rerun affected checks after co
 
 | Scope | Commands |
 | --- | --- |
-| Repository types and tests | `pnpm typecheck`, `pnpm test` |
-| Code quality | `pnpm quality` |
-| Production build validation | `pnpm verify:build` |
+| Repository types and tests | `pnpm typecheck`, `pnpm test:pr` (Linux PR package tests; excludes `@mivlet/agent-host`), `pnpm test` (full workspace, including host; fixture tests skip unless Windows + bundled executable) |
+| Linux PR loop (matches CI) | `pnpm check:pr` |
+| Linux package tests without agent-host | `pnpm test:pr` (`test:ci` is an alias) |
+| Code quality | `pnpm quality` (`lint` is security-subset ESLint via `lint:security` plus the explicit-any ratchet, not typed/React lint; `format:check` is an allowlisted ratchet, not repository-wide Prettier) |
+| Linux PR job | `pnpm check:pr` (`typecheck` + `quality` + `test:pr`) |
+| Mock Clerk deploy guard | `node scripts/ci/refuse-mock-clerk.mjs` (required CI `changes` step; refuses `MIVLET_CLERK_ALLOW_MOCK=1` + mock issuer on production/non-local configs) |
+| Production build validation | `pnpm verify:build` (includes hosted-runner `tsc` emit) |
 | Performance budgets | `pnpm perf:check`, `pnpm perf:test`, `pnpm perf:runtime` |
 | Release manifest | `pnpm release:test` |
 | Rust compile | `pnpm tauri:check` |
-| Embedded Windows agent host | `pnpm --filter @fable/agent-host typecheck`, `pnpm --filter @fable/agent-host build`, `pnpm --filter @fable/agent-host test` |
-| Hosted runner | `pnpm --filter @fable/hosted-runner test`, `pnpm --filter @fable/hosted-runner build` |
+| Embedded Windows agent host | `pnpm test:host` (also `pnpm --filter @mivlet/agent-host typecheck` / `build`) |
+| Hosted runner | `pnpm --filter @mivlet/hosted-runner test`, `pnpm --filter @mivlet/hosted-runner build`, `pnpm --filter @mivlet/hosted-runner worker:deploy:dry-run` |
 | Full repository gate | `pnpm check` |
+
+`pnpm test` still runs every workspace test, including `@mivlet/agent-host`. Host
+fixture tests skip unless they are on Windows with the bundled executable present,
+so the chain no longer aborts on Linux.
+`pnpm test:pr` matches PR CI, which excludes that package entirely.
+`pnpm check:pr` is the Linux TypeScript job (`typecheck`, `quality`, `test:pr`).
+`pnpm check` / `verify:build` compile the Windows Bun host even on Linux.
+Changing root `package.json` is a native path and schedules the 35-minute
+Windows job.
 
 For Rust changes, use the affected tests plus:
 
@@ -73,8 +95,10 @@ For Rust changes, use the affected tests plus:
 UI changes need browser/native inspection of affected flows and relevant viewport sizes. Packaging, native Windows control, authentication, deployment, and live smoke tests are separate evidence. Wrangler dry-runs establish packaging and bindings only. Report skipped checks and missing prerequisites without describing them as passes.
 
 `verify:build` builds the embedded host before the test gate runs its actual
-Windows executable. The fixture tests use the same cleared environment and
-stdio framing as native custody, with deterministic OpenAI-compatible,
+Windows executable. That compile runs on Linux as part of `pnpm check`; it is
+not a substitute for `pnpm test:host` on Windows. The fixture tests use the
+same cleared environment and stdio framing as native custody, with
+deterministic OpenAI-compatible,
 DeepSeek and Anthropic SSE. They verify tool results, denial, ordering, Stop,
 replay rejection, provider failures and absence of plaintext prompt/tool
 canaries on disk. These tests do not establish live provider or signed-installer

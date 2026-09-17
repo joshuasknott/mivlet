@@ -1,4 +1,4 @@
-import type { IdentityStatus } from "@fable/protocol";
+import type { IdentityStatus } from "@mivlet/protocol";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { ComponentProps } from "react";
@@ -17,7 +17,7 @@ const signedIn: IdentityStatus = {
   message: "Signed in.",
   authentication: {
     provider: "clerk",
-    normalizedIssuer: "https://accounts.fable.test",
+    normalizedIssuer: "https://accounts.mivlet.test",
     subject: "person-1",
     authenticationEventRef: "event-1",
     sessionRef: "session-1",

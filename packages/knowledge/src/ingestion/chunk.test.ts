@@ -22,9 +22,9 @@ describe("chunk: no lost source content", () => {
   });
 
   it("preserves YAML source positions with CRLF line endings", () => {
-    const text = "name: Fable\r\nkind: app\r\nversion: 1\r\n";
+    const text = "name: Mivlet\r\nkind: app\r\nversion: 1\r\n";
     const chunks = chunkSourceText(text, { sourceId: "s", type: "yaml" });
-    expect(chunks.map((chunk) => chunk.text.trim())).toEqual(["name: Fable", "kind: app", "version: 1"]);
+    expect(chunks.map((chunk) => chunk.text.trim())).toEqual(["name: Mivlet", "kind: app", "version: 1"]);
     expect(chunks.map((chunk) => chunk.charStart)).toEqual([0, text.indexOf("kind:"), text.indexOf("version:")]);
     for (const chunk of chunks) expect(text.slice(chunk.charStart, chunk.charEnd)).toBe(chunk.text);
   });
@@ -114,13 +114,13 @@ describe("chunk: JSON", () => {
   });
 
   it("object -> one chunk per top-level key/value", () => {
-    const chunks = chunkSourceText('{"name":"Fable","kind":"app"}', {
+    const chunks = chunkSourceText('{"name":"Mivlet","kind":"app"}', {
       sourceId: "s",
       type: "json"
     });
     expect(chunks).toHaveLength(2);
     const texts = chunks.map((c) => c.text).sort();
-    expect(texts).toEqual(['{"kind":"app"}', '{"name":"Fable"}']);
+    expect(texts).toEqual(['{"kind":"app"}', '{"name":"Mivlet"}']);
   });
 
   it("primitive -> fixed window over the raw text", () => {
@@ -204,7 +204,7 @@ describe("chunk: plain text fixed window with overlap", () => {
 
 describe("chunk: YAML structural boundaries", () => {
   it("splits a top-level mapping into one chunk per key, preserving offsets", () => {
-    const yaml = "name: Fable\nkind: app\nversion: 1\n";
+    const yaml = "name: Mivlet\nkind: app\nversion: 1\n";
     const chunks = chunkSourceText(yaml, { sourceId: "s", type: "yaml" });
     expect(chunks.length).toBe(3);
     // Each chunk references the original text by offset.
@@ -253,7 +253,7 @@ describe("chunk: JSON offsets", () => {
   });
 
   it("object entry chunks carry real charStart/charEnd into the source text", () => {
-    const text = '{"name":"Fable","kind":"app"}';
+    const text = '{"name":"Mivlet","kind":"app"}';
     const chunks = chunkSourceText(text, { sourceId: "s", type: "json" });
     expect(chunks.length).toBe(2);
     for (const c of chunks) {
@@ -437,7 +437,7 @@ describe("chunk: adversarial boundary invariants", () => {
     { type: "text" as const, text: "日本語のテキストです。".repeat(40) },
     { type: "text" as const, text: "aé😀\n\nb".repeat(40) },
     { type: "markdown" as const, text: "# H\n\n" + "para one. ".repeat(40) + "\n\n```\n# code\nx\n```\n\n## H2\n\n" + "y".repeat(200) },
-    { type: "yaml" as const, text: "name: Fable\r\nkind: app\r\nnotes: " + "x".repeat(500) + "\r\n" }
+    { type: "yaml" as const, text: "name: Mivlet\r\nkind: app\r\nnotes: " + "x".repeat(500) + "\r\n" }
   ];
 
   it.each(inputs)("covers every span exactly, stays bounded, and has no lone surrogates (%#)", ({ type, text }) => {

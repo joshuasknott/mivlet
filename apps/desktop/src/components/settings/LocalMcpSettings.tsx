@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { McpClient } from "../../lib/native-mcp-client";
-import type { ApprovalRequest, ApprovalResolutionRequest } from "@fable/protocol";
+import type { ApprovalRequest, ApprovalResolutionRequest } from "@mivlet/protocol";
 import { beginRuntimeRemoteMcpAuthorization, commitRuntimeMcpServerConfiguration, disconnectRuntimeRemoteMcpAuthorization, inspectRuntimeRemoteMcpAuthorization, listRuntimeMcpServerConfigurations, prepareRuntimeMcpServerConfiguration, setRuntimeMcpEnablement, type RuntimeMcpConnectionDetails, type RuntimeMcpServerConfiguration, type RuntimeMcpServerSummary } from "../../runtime/domains/mcp";
 import { resolveRuntimeApprovalRequest } from "../../runtime/domains/approvals";
 import {
@@ -134,7 +134,6 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
       request: pending.approval,
       decision,
       decidedAt: new Date().toISOString(),
-      ...(decision === "once" ? { confirmationText: confirmation } : {})
     };
     try {
       await resolveRuntimeApprovalRequest(resolution);

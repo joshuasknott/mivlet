@@ -2,7 +2,7 @@ import type {
   VoiceCapability,
   VoiceFailureCode,
   VoiceProviderDescriptor
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 export type SpeechToTextAvailability =
   | { status: "available" }

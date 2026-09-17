@@ -14,9 +14,9 @@
 
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 
-import { BrokerContractError } from "@fable/connectors";
+import { BrokerContractError } from "@mivlet/connectors";
 
-import type { FableBroker } from "./broker.js";
+import type { MivletBroker } from "./broker.js";
 import {
   createBrokerRouter,
   type BrokerRouterOptions,
@@ -151,7 +151,6 @@ async function writeWebResponse(res: ServerResponse, response: Response): Promis
   res.writeHead(response.status, headers);
   if (response.body) {
     const reader = response.body.getReader();
-    // eslint-disable-next-line no-constant-condition
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;

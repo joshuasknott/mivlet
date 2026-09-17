@@ -77,6 +77,18 @@ activity is explained as uncertain rather than presented as a failure.
 - **Stop** (`stop-work`/`stop-project`) is immediate: renderer sessions freeze
   streams and revoke computer control before the native fence cancels the
   request and its descendants; unrelated Work stays current.
+- **Dispose** is Stop for the whole workspace: it freezes streams, rejects new
+  serial work, and issues native `stop-work` immediately for `running` /
+  `awaiting-approval` assignments, including orphans with no renderer session.
+  Dispose binds each `stop-work` to the generation captured at freeze
+  (`expectedGeneration`). Pending account refresh unmounts the owner; the next
+  mount waits for that dispose to settle before remount recovery. If remount
+  recovery or Continue already bumped that generation, the late stop is a no-op
+  and cannot cancel the newer assignment. Remount recovery
+  (`recover_interrupted_execution_attempts`) fences leftover executing Work to
+  `awaiting-user`, bumps generation, and clears `current_run_id` so late
+  checkpoints fail `ensure_run_current`. Terminal attempts stay immutable
+  against non-identical overwrites.
 - **Approvals** stay contextual and exact: each session holds its own
   approval gate scoped to the request key and permission mode; approval
   requests keep their action, data-used and consequence, and are cleared when
@@ -131,10 +143,12 @@ The obsolete History and Project WorkItems implementations have been removed.
 ## Verification
 
 Native tests cover bounded attachment references, bind refresh, old-record
-decode, schedule origin, recovery retention without replay, steering fences and
-suspension. TypeScript tests cover captured-context isolation, steer command
-shape, detached execution, approval freshness, Stop, restart recovery,
+decode, schedule origin, recovery retention without replay, steering fences,
+suspension, remount orphan fencing, and terminal-attempt immutability.
+TypeScript tests cover captured-context isolation, steer command shape,
+detached execution, approval freshness, Stop, dispose≡Stop, restart recovery,
 attachment retention and partial outcomes (see `collaboration/tests.rs`,
+`execution_attempts.rs`, `lib/workspace-execution.test.ts`,
 `lib/execution-attachments.test.ts`, `lib/work-memory.test.ts`,
 `components/work/*.test.tsx`, `components/navigation/*.test.tsx`).
 

@@ -5,6 +5,7 @@ import { useHostedComputer } from "../hooks/useHostedComputer";
 import { useHostedBrowserController } from "../hooks/useHostedBrowserController";
 import type { WorkspaceExecution } from "../lib/workspace-execution";
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
+import { resolveHostedComputerScope } from "../lib/hosted-computer-scope";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -32,24 +33,15 @@ export function ComputerInspector({
     agentId,
     executionOwner: false,
   });
-  const workspace =
-    runtime.accountWorkspaceStatus.workspaces.find(
-      (workspace) =>
-        workspace.workspaceStatus === "active" &&
-        workspace.membershipStatus === "active",
-    )?.fableWorkspaceId ?? null;
-  const device =
-    runtime.accountWorkspaceStatus.devices.find(
-      (device) => device.status === "active",
-    )?.deviceId ?? null;
+  const hostedScope = resolveHostedComputerScope(runtime.accountWorkspaceStatus);
   const hosted = useHostedComputer({
-    workspaceId: workspace,
+    workspaceId: hostedScope?.workspaceId ?? null,
     agentId,
-    deviceId: device,
+    deviceId: hostedScope?.deviceId ?? null,
   });
   const browser = useHostedBrowserController({
-    hostedWorkspaceId: workspace,
-    activeHostedDeviceId: device,
+    hostedWorkspaceId: hostedScope?.workspaceId ?? null,
+    activeHostedDeviceId: hostedScope?.deviceId ?? null,
     activeAgentId: agentId,
     hostedComputer: hosted,
     approvalGate: gate,
@@ -92,10 +84,11 @@ export function ComputerInspector({
           browserError: browser.error,
           browserUrl: browser.snapshot?.currentUrl,
           browserTitle: browser.snapshot?.title,
-          liveViewUrl: browser.snapshot?.liveViewUrl,
+          liveViewAvailable: browser.snapshot?.takeoverAvailable,
           browserDownload: browser.snapshot?.lastDownload,
           onOpenBrowser: browser.open,
           onRefreshBrowser: browser.refresh,
+          onOpenLiveView: browser.openLiveView,
         }}
         screenPreviewUrl={browser.snapshot?.previewDataUrl}
         onClose={onClose}

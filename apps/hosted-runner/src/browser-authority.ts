@@ -1,10 +1,11 @@
 import { connect, launch, type Browser, type Download, type Page } from "@cloudflare/playwright";
 import { getSandbox } from "@cloudflare/sandbox";
-import type { HostedBrowserActionRequest, HostedBrowserControl, HostedBrowserDownloadSnapshot, HostedBrowserNavigateRequest, HostedBrowserSnapshot } from "@fable/protocol";
+import type { HostedBrowserActionRequest, HostedBrowserControl, HostedBrowserDownloadSnapshot, HostedBrowserNavigateRequest, HostedBrowserSnapshot } from "@mivlet/protocol";
 import { DurableObject } from "cloudflare:workers";
 import { Readable } from "node:stream";
 import { safeDownloadFileName } from "./browser-download";
-import { validateBrowserActionRequest, validateBrowserNavigateRequest, validateComputerId, validatePublicHttpsUrl } from "./contracts";
+import { settleHostedBrowserRoute } from "./browser-route";
+import { assertPublicHttpsUrl, validateBrowserActionRequest, validateBrowserNavigateRequest, validateComputerId, validatePublicHttpsUrl } from "./contracts";
 import {
   MAX_BROWSER_HISTORY,
   appendBrowserHistory,
@@ -13,6 +14,7 @@ import {
   replaceCurrentBrowserHistory,
   type BrowserHistoryState
 } from "./browser-history";
+import { browserSessionAfterFence } from "./generation-fence";
 
 const KEEP_ALIVE_MS = 10 * 60_000;
 const MAX_PREVIEW_BYTES = 300 * 1024;
@@ -52,13 +54,14 @@ export class BrowserAuthority extends DurableObject<Env> {
   ): Promise<HostedBrowserSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     const request = validateBrowserNavigateRequest(rawRequest);
+    const target = await assertPublicHttpsUrl(request.url);
     const page = await this.page(computerId, generation);
     const stored = this.readState();
-    if (stored?.last_request_key !== request.requestKey || page.url() !== request.url) {
+    if (stored?.last_request_key !== request.requestKey || page.url() !== target.href) {
       await this.guardPage(page);
-      await page.goto(request.url, { waitUntil: "domcontentloaded", timeout: 30_000 });
+      await page.goto(target.href, { waitUntil: "domcontentloaded", timeout: 30_000 });
     }
-    const currentUrl = validatePublicHttpsUrl(page.url());
+    const currentUrl = (await assertPublicHttpsUrl(page.url())).href;
     const title = (await page.title()).trim().slice(0, 240);
     const updatedAt = new Date().toISOString();
     const history = this.history(stored, currentUrl);
@@ -85,7 +88,7 @@ export class BrowserAuthority extends DurableObject<Env> {
     const page = await this.page(computerId, generation);
     const stored = this.readState();
     if (stored?.last_action_request_key === request.requestKey) {
-      const currentUrl = validatePublicHttpsUrl(page.url());
+      const currentUrl = (await assertPublicHttpsUrl(page.url())).href;
       const title = (await page.title()).trim().slice(0, 240);
       const updatedAt = new Date().toISOString();
       const history = this.history(stored, currentUrl);
@@ -109,7 +112,7 @@ export class BrowserAuthority extends DurableObject<Env> {
     if (
       !stored
       || stored.observation_id !== request.observationId
-      || stored.current_url !== validatePublicHttpsUrl(page.url())
+      || stored.current_url !== (await assertPublicHttpsUrl(page.url())).href
     ) {
       throw new Error("browser-observation-stale");
     }
@@ -129,13 +132,13 @@ export class BrowserAuthority extends DurableObject<Env> {
           window.scrollBy({ top: delta, left: 0, behavior: "instant" });
         }, distance * direction);
     } else {
-        const locator = page.locator(`[data-fable-control-ref="${request.elementRef}"]`);
+        const locator = page.locator(`[data-mivlet-control-ref="${request.elementRef}"]`);
         if (await locator.count() !== 1 || !await locator.isVisible() || !await locator.isEnabled()) {
           throw new Error("browser-control-stale");
         }
         if (
-          await locator.getAttribute("data-fable-control-role") !== request.controlRole
-          || await locator.getAttribute("data-fable-control-name") !== request.controlName
+          await locator.getAttribute("data-mivlet-control-role") !== request.controlRole
+          || await locator.getAttribute("data-mivlet-control-name") !== request.controlName
         ) {
           throw new Error("browser-control-changed");
         }
@@ -177,7 +180,7 @@ export class BrowserAuthority extends DurableObject<Env> {
         } else await locator.press(request.key ?? "", { timeout: 10_000 });
     }
     await page.waitForTimeout(250);
-    const currentUrl = validatePublicHttpsUrl(page.url());
+    const currentUrl = (await assertPublicHttpsUrl(page.url())).href;
     history = request.action === "history"
       ? replaceCurrentBrowserHistory(history, currentUrl)
       : appendBrowserHistory(history, currentUrl);
@@ -203,7 +206,7 @@ export class BrowserAuthority extends DurableObject<Env> {
   async snapshot(rawComputerId: string, generation: number): Promise<HostedBrowserSnapshot> {
     const computerId = validateComputerId(rawComputerId);
     const page = await this.page(computerId, generation);
-    const currentUrl = validatePublicHttpsUrl(page.url());
+    const currentUrl = (await assertPublicHttpsUrl(page.url())).href;
     const title = (await page.title()).trim().slice(0, 240);
     const updatedAt = new Date().toISOString();
     const stored = this.readState();
@@ -241,10 +244,21 @@ export class BrowserAuthority extends DurableObject<Env> {
 
   private async page(computerId: string, generation: number): Promise<Page> {
     const state = this.readState();
-    if (state && (state.computer_id !== computerId || state.generation !== generation)) {
+    const fence = browserSessionAfterFence(
+      state
+        ? {
+            computerId: state.computer_id,
+            generation: state.generation,
+            sessionId: state.session_id
+          }
+        : null,
+      computerId,
+      generation
+    );
+    if (fence.destroyPrevious) {
       await this.destroy(computerId);
     }
-    const browser = await this.ensureBrowser(state?.session_id ?? null);
+    const browser = await this.ensureBrowser(fence.resumeSessionId);
     const contexts = browser.contexts();
     const context = contexts[0] ?? await browser.newContext({ viewport: { width: 1280, height: 800 } });
     const pages = context.pages();
@@ -274,14 +288,21 @@ export class BrowserAuthority extends DurableObject<Env> {
 
   private async guardPage(page: Page): Promise<void> {
     await page.unroute("**/*");
-    await page.route("**/*", async (route) => {
-      try {
-        validatePublicHttpsUrl(route.request().url());
-        await route.continue();
-      } catch {
-        await route.abort("blockedbyclient");
-      }
-    });
+    await page.route("**/*", (route) => settleHostedBrowserRoute({
+      request: () => {
+        const incoming = route.request();
+        return {
+          url: () => incoming.url(),
+          method: () => incoming.method(),
+          headers: () => incoming.headers(),
+          postDataBuffer: () => incoming.postDataBuffer(),
+          resourceType: () => incoming.resourceType()
+        };
+      },
+      continue: () => route.continue(),
+      abort: (errorCode) => route.abort(errorCode),
+      fulfill: (response) => route.fulfill(response)
+    }));
   }
 
   private async snapshotFromPage(
@@ -319,7 +340,7 @@ export class BrowserAuthority extends DurableObject<Env> {
     const fileName = safeDownloadFileName(download.suggestedFilename());
     const suffix = requestKey.replace(/^browser-action-/u, "").replace(/[^A-Za-z0-9_-]/gu, "").slice(0, 48);
     const workspacePath = `/workspace/downloads/${suffix}-${fileName}`;
-    const temporaryPath = `/workspace/.fable/download-${suffix}.part`;
+    const temporaryPath = `/workspace/.mivlet/download-${suffix}.part`;
     const source = Readable.toWeb(await download.createReadStream()) as ReadableStream<Uint8Array>;
     let bytesWritten = 0;
     const bounded = source.pipeThrough(new TransformStream<Uint8Array, Uint8Array>({
@@ -409,9 +430,9 @@ export class BrowserAuthority extends DurableObject<Env> {
         const ref = `control-${prefix}-${index + 1}`;
         const role = clean(roleFor(element)).slice(0, 40);
         const name = nameFor(element);
-        element.setAttribute("data-fable-control-ref", ref);
-        element.setAttribute("data-fable-control-role", role);
-        element.setAttribute("data-fable-control-name", name);
+        element.setAttribute("data-mivlet-control-ref", ref);
+        element.setAttribute("data-mivlet-control-role", role);
+        element.setAttribute("data-mivlet-control-name", name);
         const options = element instanceof HTMLSelectElement
           ? [...new Set([...element.options]
             .filter((option) => !option.disabled)

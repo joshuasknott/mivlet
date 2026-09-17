@@ -1,5 +1,5 @@
 {
-  "name": "@fable/agent-host",
+  "name": "@mivlet/agent-host",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -7,11 +7,11 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
-    "test": "node --test test/*.test.mjs"
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
-    "@fable/connectors": "workspace:*",
-    "@fable/protocol": "workspace:*",
+    "@mivlet/connectors": "workspace:*",
+    "@mivlet/protocol": "workspace:*",
     "@opencode/plugin": "0.0.0-dev-19449",
     "@opencode/sdk": "0.0.0-dev-19449"
   },

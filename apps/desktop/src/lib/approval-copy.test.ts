@@ -4,7 +4,7 @@ import type {
   ApprovalRequest,
   ApprovalRiskLevel,
   PermissionMode
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { describe, expect, it } from "vitest";
 import {
   DECISION_LABELS,
@@ -182,6 +182,7 @@ describe("approval-copy — high-risk confirmation", () => {
     // The explanation must make clear this is a high-risk action requiring the
     // exact typed phrase, and must not promise the phrase makes it safe.
     expect(explanation.note.toLowerCase()).toMatch(/type|exact phrase/);
+    expect(explanation.note.toLowerCase()).toMatch(/system dialog/);
     expect(explanation.note.toLowerCase()).not.toMatch(/this is safe|guaranteed safe/);
   });
 });

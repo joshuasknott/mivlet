@@ -7,7 +7,13 @@
  * broker is the ONLY process that holds these secrets; the desktop never sees them.
  */
 
-import type { BrokerProviderId } from "@fable/connectors";
+import {
+  GITHUB_OAUTH_SCOPES,
+  LINEAR_OAUTH_SCOPES,
+  SLACK_OAUTH_SCOPES,
+  VERCEL_OAUTH_SCOPES,
+  type BrokerProviderId
+} from "@mivlet/connectors";
 
 /**
  * How a provider wants PKCE handled by the broker.
@@ -31,7 +37,7 @@ export interface ProviderProfile {
   revocationEndpoint: string;
   /** Endpoint the broker hits to resolve connected account identity. */
   identityEndpoint: string;
-  /** Scopes the broker requests on the desktop's behalf. */
+  /** Scopes the broker always requests on Connect for this provider. */
   scopes: readonly string[];
   /** Extra fixed authorization parameters required by the provider. */
   authorizationParams?: Readonly<Record<string, string>>;
@@ -67,15 +73,16 @@ export interface ProviderProfile {
   };
 }
 
+/** Classic GitHub OAuth App (`login/oauth/authorize`), not a GitHub App. */
 const GITHUB_PROFILE: ProviderProfile = {
   label: "GitHub",
   authorizationEndpoint: "https://github.com/login/oauth/authorize",
   tokenEndpoint: "https://github.com/login/oauth/access_token",
   revocationEndpoint: `https://api.github.com/applications/${"{clientId}"}/token`,
   identityEndpoint: "https://api.github.com/user",
-  scopes: ["read:user", "read:org", "repo"],
-  clientIdEnv: "FABLE_BROKER_GITHUB_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_GITHUB_CLIENT_SECRET",
+  scopes: [...GITHUB_OAUTH_SCOPES],
+  clientIdEnv: "MIVLET_BROKER_GITHUB_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_GITHUB_CLIENT_SECRET",
   pkce: "broker-pkce",
   supportsRefresh: false,
   tokenRequestStyle: "form",
@@ -100,9 +107,9 @@ const VERCEL_PROFILE: ProviderProfile = {
   tokenEndpoint: "https://api.vercel.com/v2/oauth/access_token",
   revocationEndpoint: "",
   identityEndpoint: "https://api.vercel.com/v2/user",
-  scopes: ["user:read", "team:read", "project:read", "deployment:read", "deployment:write"],
-  clientIdEnv: "FABLE_BROKER_VERCEL_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_VERCEL_CLIENT_SECRET",
+  scopes: [...VERCEL_OAUTH_SCOPES],
+  clientIdEnv: "MIVLET_BROKER_VERCEL_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_VERCEL_CLIENT_SECRET",
   pkce: "broker-pkce",
   supportsRefresh: false,
   tokenRequestStyle: "form-without-grant-type",
@@ -127,9 +134,9 @@ const LINEAR_PROFILE: ProviderProfile = {
   tokenEndpoint: "https://api.linear.app/oauth/token",
   revocationEndpoint: "https://api.linear.app/oauth/revoke",
   identityEndpoint: "https://api.linear.app/graphql",
-  scopes: ["read", "write", "issues:create", "comments:create"],
-  clientIdEnv: "FABLE_BROKER_LINEAR_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_LINEAR_CLIENT_SECRET",
+  scopes: [...LINEAR_OAUTH_SCOPES],
+  clientIdEnv: "MIVLET_BROKER_LINEAR_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_LINEAR_CLIENT_SECRET",
   pkce: "broker-pkce",
   scopeSeparator: ",",
   supportsRefresh: true,
@@ -161,8 +168,8 @@ const NOTION_PROFILE: ProviderProfile = {
   identityEndpoint: "https://api.notion.com/v1/users/me",
   scopes: [],
   authorizationParams: { owner: "user" },
-  clientIdEnv: "FABLE_BROKER_NOTION_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_NOTION_CLIENT_SECRET",
+  clientIdEnv: "MIVLET_BROKER_NOTION_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_NOTION_CLIENT_SECRET",
   pkce: "none",
   supportsRefresh: true,
   tokenRequestStyle: "json-basic",
@@ -188,19 +195,9 @@ const SLACK_PROFILE: ProviderProfile = {
   tokenEndpoint: "https://slack.com/api/oauth.v2.access",
   revocationEndpoint: "https://slack.com/api/auth.revoke",
   identityEndpoint: "https://slack.com/api/auth.test",
-  scopes: [
-    "channels:read",
-    "groups:read",
-    "channels:history",
-    "groups:history",
-    "im:read",
-    "mpim:read",
-    "users:read",
-    "chat:write",
-    "reactions:write"
-  ],
-  clientIdEnv: "FABLE_BROKER_SLACK_CLIENT_ID",
-  clientSecretEnv: "FABLE_BROKER_SLACK_CLIENT_SECRET",
+  scopes: [...SLACK_OAUTH_SCOPES],
+  clientIdEnv: "MIVLET_BROKER_SLACK_CLIENT_ID",
+  clientSecretEnv: "MIVLET_BROKER_SLACK_CLIENT_SECRET",
   pkce: "none",
   scopeSeparator: ",",
   supportsRefresh: false,

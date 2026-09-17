@@ -2,9 +2,9 @@ import { useEffect, useId, useReducer, useRef, useState, type ReactNode } from "
 import type {
   CollaborationWorkItem,
   ConversationRoom,
-  FableAgentProfile,
+  MivletAgentProfile,
   LocalProject,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { ChatCircle } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { CalendarBlank } from "@phosphor-icons/react/dist/csr/CalendarBlank";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
@@ -20,7 +20,7 @@ import "./navigation.css";
 import "./right-panel.css";
 
 export type NavContext =
-  | { kind: "agent"; agent: FableAgentProfile }
+  | { kind: "agent"; agent: MivletAgentProfile }
   | { kind: "project"; project: LocalProject }
   | { kind: "work"; item: CollaborationWorkItem }
   | null;

@@ -5,6 +5,10 @@
 //! broker. Access/refresh tokens and pending PKCE verifiers are stored only in
 //! the OS credential store; the local connection file contains non-secret
 //! account identity and expiry metadata.
+//!
+//! Brokered connectors keep a desktop S256 verifier in the keyring and prove it
+//! at handoff redeem. The broker does not forward that challenge to the
+//! provider; it mints its own PKCE pair for providers that require it.
 
 use std::{
     collections::BTreeMap,
@@ -225,7 +229,7 @@ fn now_epoch() -> u64 {
 /// are derived from the base URL, so this module can never surface a
 /// model/search/import/action endpoint.
 ///
-/// The base URL may be a bare host (`https://auth.fable.app`) or carry a path
+/// The base URL may be a bare host (`https://auth.mivlet.app`) or carry a path
 /// prefix (`https://app.example.com/broker/`) — common for a broker mounted at a
 /// route, including a Cloudflare Workers deployment exposed behind a path. A
 /// trailing slash is optional; the route is built by extending the base path so
@@ -317,7 +321,7 @@ pub(crate) struct BrokerEndpoints {
 pub(crate) fn provision_connector_configuration() -> Result<(), String> {
     if let (Some(client_id), Ok(secret)) = (
         google_oauth_client_id(),
-        std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET"),
+        crate::env_compat::var_named("MIVLET_GOOGLE_OAUTH_CLIENT_SECRET"),
     ) {
         if !secret.trim().is_empty() {
             NativeConnectorSecretStore
@@ -329,22 +333,22 @@ pub(crate) fn provision_connector_configuration() -> Result<(), String> {
 
 pub(crate) fn google_oauth_client_id() -> Option<String> {
     public_configuration(
-        "FABLE_GOOGLE_OAUTH_CLIENT_ID",
-        option_env!("FABLE_GOOGLE_OAUTH_CLIENT_ID"),
+        "MIVLET_GOOGLE_OAUTH_CLIENT_ID",
+        option_env!("MIVLET_GOOGLE_OAUTH_CLIENT_ID")
+            .or(option_env!("FABLE_GOOGLE_OAUTH_CLIENT_ID")),
     )
 }
 
 pub(crate) fn auth_broker_url() -> Option<String> {
     public_configuration(
-        "FABLE_AUTH_BROKER_URL",
-        option_env!("FABLE_AUTH_BROKER_URL"),
+        "MIVLET_AUTH_BROKER_URL",
+        option_env!("MIVLET_AUTH_BROKER_URL").or(option_env!("FABLE_AUTH_BROKER_URL")),
     )
 }
 
 fn public_configuration(key: &str, compiled: Option<&str>) -> Option<String> {
     let compiled = if cfg!(test) { None } else { compiled };
-    std::env::var(key)
-        .ok()
+    crate::env_compat::var_opt(key)
         .or_else(|| compiled.map(str::to_owned))
         .filter(|value| !value.trim().is_empty())
 }
@@ -414,7 +418,7 @@ fn provider_config(
         // resolved account, so no userinfo fallback is needed.
         userinfo_endpoint: None,
         handoff_endpoint: Some(endpoints.handoff_endpoint),
-        client_id: "fable-desktop".to_string(),
+        client_id: "mivlet-desktop".to_string(),
         scopes,
         brokered: true,
     })
@@ -428,7 +432,7 @@ fn google_oauth_client_secret(
         return Ok(None);
     }
     let environment_secret = if google_oauth_client_id().as_deref() == Some(client_id) {
-        std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET")
+        crate::env_compat::var_named("MIVLET_GOOGLE_OAUTH_CLIENT_SECRET")
             .ok()
             .filter(|secret| !secret.trim().is_empty())
     } else {
@@ -828,6 +832,7 @@ async fn redeem_handoff(
     handoff_endpoint: &str,
     handoff: &str,
     state: &str,
+    code_verifier: &str,
 ) -> Result<TokenResponse, ConnectorCommandError> {
     let response = reqwest::Client::new()
         .post(handoff_endpoint)
@@ -836,6 +841,7 @@ async fn redeem_handoff(
             "provider": connector_id,
             "handoff": handoff,
             "state": state,
+            "codeVerifier": code_verifier,
         }))
         .send()
         .await
@@ -1026,6 +1032,7 @@ async fn prepare_with_store(
             &handoff_endpoint,
             &handoff_ticket,
             state.as_ref(),
+            pending.verifier.as_str(),
         )
         .await?
     } else {
@@ -1529,110 +1536,6 @@ pub(crate) async fn complete_auth(
     )
     .await?;
     commit_prepared_auth(app, connector_id, scope, &secret_store, prepared)
-}
-
-pub(crate) async fn connect_token_plugin(
-    app: &tauri::AppHandle,
-    connector_id: &str,
-    credential: crate::token_plugins::Credential,
-    scope: &crate::authorized_scope::AuthorizedCommandScope,
-) -> Result<ConnectorAuthResult, ConnectorCommandError> {
-    let secret_store = NativeConnectorSecretStore;
-    let durable_store = crate::store::try_global().ok_or_else(|| {
-        command_error(
-            "unknown",
-            connector_id,
-            "Mivlet's encrypted store is not initialized.",
-            false,
-        )
-    })?;
-    let selection = durable_store
-        .with_conn(|tx| crate::store::repos::connection_selection::get(tx, scope, connector_id))
-        .map_err(|_| {
-            command_error(
-                "unknown",
-                connector_id,
-                "Could not inspect the selected connection.",
-                false,
-            )
-        })?;
-    let (credential, account) = crate::token_plugins::prepare(connector_id, credential).await?;
-    let tokens = StoredTokenSet {
-        access_token: serde_json::to_string(&credential).map_err(|_| {
-            command_error(
-                "unknown",
-                connector_id,
-                "Could not encode plugin credentials.",
-                false,
-            )
-        })?,
-        refresh_token: None,
-        token_type: "native-plugin".into(),
-        expires_at: None,
-        scopes: vec!["token-read".into()],
-        revocation_endpoint: None,
-        token_endpoint: None,
-        handoff_endpoint: None,
-        client_id: String::new(),
-        brokered: false,
-    };
-    let credential_ref = native_connector_credential_ref(connector_id, &account.id);
-    let previous_secret = secret_store
-        .get(&credential_ref)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    let encoded_tokens = serde_json::to_string(&tokens).map_err(|_| {
-        command_error(
-            "unknown",
-            connector_id,
-            "Could not encode plugin credentials.",
-            false,
-        )
-    })?;
-    let prepared = (
-        tokens,
-        account,
-        credential_ref.clone(),
-        CredentialRollback {
-            credential_ref,
-            previous_secret,
-        },
-        encoded_tokens,
-    );
-    let path = connector_connections_path(app)
-        .map_err(|message| command_error("unknown", connector_id, &message, false))?;
-    commit_prepared_auth_state(
-        &path,
-        durable_store,
-        connector_id,
-        scope,
-        &secret_store,
-        prepared,
-        || {
-            let current = durable_store
-                .with_conn(|tx| {
-                    crate::store::repos::connection_selection::get(tx, scope, connector_id)
-                })
-                .map_err(|_| {
-                    command_error(
-                        "unknown",
-                        connector_id,
-                        "Could not inspect the selected connection.",
-                        false,
-                    )
-                })?;
-            if selection.as_ref().map(|s| (&s.connection_id, s.revision))
-                != current.as_ref().map(|s| (&s.connection_id, s.revision))
-            {
-                return Err(command_error(
-                    "conflict",
-                    connector_id,
-                    "The selected connection changed while validating this token. Connect again.",
-                    true,
-                ));
-            }
-            Ok(())
-        },
-    )
 }
 
 fn commit_prepared_auth(
@@ -3031,7 +2934,7 @@ mod tests {
             revocation_endpoint: Some("https://broker.example/oauth/github/revoke".to_string()),
             userinfo_endpoint: None,
             handoff_endpoint: Some(handoff_endpoint.to_string()),
-            client_id: "fable-desktop".to_string(),
+            client_id: "mivlet-desktop".to_string(),
             scopes: vec!["items.read".to_string()],
             brokered: true,
         }
@@ -3090,8 +2993,16 @@ mod tests {
         );
         assert!(!query.contains_key("include_granted_scopes"));
         let pending = store.get(&pending_key("fixture", state)).unwrap().unwrap();
-        assert!(pending.contains("\"verifier\""));
-        assert!(!result.authorization_url.unwrap().contains("verifier"));
+        let pending: PendingOAuth = serde_json::from_str(&pending).unwrap();
+        let expected_challenge = pkce_challenge(&pending.verifier);
+        assert_eq!(
+            query.get("code_challenge").map(|value| value.as_ref()),
+            Some(expected_challenge.as_str())
+        );
+        assert!(!result
+            .authorization_url
+            .unwrap()
+            .contains(&pending.verifier));
     }
 
     #[test]
@@ -3136,7 +3047,7 @@ mod tests {
     #[test]
     fn connection_metadata_never_serializes_tokens() {
         let path = std::env::temp_dir().join(format!(
-            "fable-connector-connections-{}.json",
+            "mivlet-connector-connections-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -3168,7 +3079,7 @@ mod tests {
     #[test]
     fn metadata_failure_restores_previous_or_removes_new_credential() {
         let path = std::env::temp_dir()
-            .join(format!("fable-missing-parent-{}", std::process::id()))
+            .join(format!("mivlet-missing-parent-{}", std::process::id()))
             .join("connector-connections.json");
         let _ = fs::remove_dir_all(path.parent().unwrap());
         let connection = ConnectorConnection {
@@ -3324,7 +3235,7 @@ mod tests {
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let scope = authorized_test_scope(&durable);
         let path = std::env::temp_dir().join(format!(
-            "fable-canonical-auth-commit-{}.json",
+            "mivlet-canonical-auth-commit-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -3550,8 +3461,10 @@ mod tests {
 
     #[test]
     fn multiple_accounts_have_one_explicit_active_selection() {
-        let path =
-            std::env::temp_dir().join(format!("fable-google-accounts-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "mivlet-google-accounts-{}.json",
+            std::process::id()
+        ));
         let _ = fs::remove_file(&path);
         let connection = |id: &str, active: bool| ConnectorConnection {
             connector_id: "gmail".to_string(),
@@ -3637,8 +3550,8 @@ mod tests {
     // or non-secure (non-loopback http) base URL fails closed with
     // `configuration-required` — never a silent fallback.
     //
-    // The base URL may be a bare host (https://auth.fable.app), a Cloudflare
-    // Workers host (https://fable-broker.workers.dev), or a path-prefixed route
+    // The base URL may be a bare host (https://auth.mivlet.app), a Cloudflare
+    // Workers host (https://mivlet-broker.workers.dev), or a path-prefixed route
     // (https://app.example.com/broker/). All resolve correctly with or without a
     // trailing slash.
     // -------------------------------------------------------------------------
@@ -3671,22 +3584,22 @@ mod tests {
         // The desktop must match the broker contract exactly: authorize, handoff,
         // refresh, revoke. No `/token`, no `/identity` (the broker has neither).
         let endpoints =
-            resolve_broker_endpoints("github", Some("https://auth.fable.app/")).expect("https ok");
+            resolve_broker_endpoints("github", Some("https://auth.mivlet.app/")).expect("https ok");
         assert_eq!(
             endpoints.authorization_endpoint,
-            "https://auth.fable.app/oauth/github/authorize"
+            "https://auth.mivlet.app/oauth/github/authorize"
         );
         assert_eq!(
             endpoints.handoff_endpoint,
-            "https://auth.fable.app/oauth/github/handoff"
+            "https://auth.mivlet.app/oauth/github/handoff"
         );
         assert_eq!(
             endpoints.refresh_endpoint,
-            "https://auth.fable.app/oauth/github/refresh"
+            "https://auth.mivlet.app/oauth/github/refresh"
         );
         assert_eq!(
             endpoints.revocation_endpoint,
-            "https://auth.fable.app/oauth/github/revoke"
+            "https://auth.mivlet.app/oauth/github/revoke"
         );
         let serialized = serde_json::to_string(&endpoints).expect("serialize");
         assert!(!serialized.contains("/token"));
@@ -3697,15 +3610,15 @@ mod tests {
     fn broker_resolver_accepts_a_cloudflare_workers_url() {
         // A workers.dev host resolves the same four routes; no token/identity.
         let endpoints =
-            resolve_broker_endpoints("linear", Some("https://fable-broker.example.workers.dev"))
+            resolve_broker_endpoints("linear", Some("https://mivlet-broker.example.workers.dev"))
                 .expect("workers.dev ok");
         assert_eq!(
             endpoints.handoff_endpoint,
-            "https://fable-broker.example.workers.dev/oauth/linear/handoff"
+            "https://mivlet-broker.example.workers.dev/oauth/linear/handoff"
         );
         assert_eq!(
             endpoints.refresh_endpoint,
-            "https://fable-broker.example.workers.dev/oauth/linear/refresh"
+            "https://mivlet-broker.example.workers.dev/oauth/linear/refresh"
         );
     }
 
@@ -3745,7 +3658,7 @@ mod tests {
         // derivable. Anything else would let the broker become a connector or
         // model proxy, which the contract forbids.
         let endpoints =
-            resolve_broker_endpoints("notion", Some("https://auth.fable.app/")).expect("ok");
+            resolve_broker_endpoints("notion", Some("https://auth.mivlet.app/")).expect("ok");
         let serialized = serde_json::to_string(&endpoints).expect("serialize");
         assert!(!serialized.contains("/search"));
         assert!(!serialized.contains("/import"));
@@ -3767,14 +3680,14 @@ mod tests {
 
     #[test]
     fn broker_refresh_and_revoke_are_siblings_of_the_stored_handoff_endpoint() {
-        let handoff = "https://auth.fable.app/oauth/github/handoff";
+        let handoff = "https://auth.mivlet.app/oauth/github/handoff";
         assert_eq!(
             broker_sibling_endpoint(handoff, "refresh").unwrap(),
-            "https://auth.fable.app/oauth/github/refresh"
+            "https://auth.mivlet.app/oauth/github/refresh"
         );
         assert_eq!(
             broker_sibling_endpoint(handoff, "revoke").unwrap(),
-            "https://auth.fable.app/oauth/github/revoke"
+            "https://auth.mivlet.app/oauth/github/revoke"
         );
     }
 
@@ -4052,6 +3965,10 @@ mod tests {
         let broker = BrokerMock::start(200, body.to_string(), None).await;
         let handoff_url = broker.handoff_url();
         let state = start_brokered_flow(&store, &handoff_url);
+        let pending: PendingOAuth =
+            serde_json::from_str(&store.get(&pending_key("github", &state)).unwrap().unwrap())
+                .unwrap();
+        let verifier = pending.verifier.clone();
         let callback = format!("http://127.0.0.1:43123/callback?handoff=ticket&state={state}");
 
         let (tokens, account, credential_ref) = complete_with_store("github", &callback, &store)
@@ -4087,6 +4004,7 @@ mod tests {
         assert!(request.contains("\"provider\":\"github\""));
         assert!(request.contains("\"handoff\":\"ticket\""));
         assert!(request.contains(&format!("\"state\":\"{state}\"")));
+        assert!(request.contains(&format!("\"codeVerifier\":\"{verifier}\"")));
     }
 
     #[tokio::test]
@@ -4112,12 +4030,17 @@ mod tests {
     fn test_provider_config_pkce_missing_env_fails_closed() {
         let _lock = ENV_LOCK.lock().unwrap();
 
-        let old_val = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
+        let old_val = std::env::var("MIVLET_GOOGLE_OAUTH_CLIENT_ID").ok();
+        let old_legacy = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
+        std::env::remove_var("MIVLET_GOOGLE_OAUTH_CLIENT_ID");
         std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID");
 
         let result = provider_config("google-drive", "oauth-pkce", vec![]);
 
         if let Some(val) = old_val {
+            std::env::set_var("MIVLET_GOOGLE_OAUTH_CLIENT_ID", val);
+        }
+        if let Some(val) = old_legacy {
             std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", val);
         }
 
@@ -4131,21 +4054,26 @@ mod tests {
     fn test_provider_config_pkce_missing_client_secret_fails_closed() {
         let _lock = ENV_LOCK.lock().unwrap();
 
-        let old_id = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_ID").ok();
-        let old_secret = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET").ok();
+        let old_id = std::env::var("MIVLET_GOOGLE_OAUTH_CLIENT_ID").ok();
+        let old_secret = std::env::var("MIVLET_GOOGLE_OAUTH_CLIENT_SECRET").ok();
+        let old_legacy_secret = std::env::var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET").ok();
         std::env::set_var(
-            "FABLE_GOOGLE_OAUTH_CLIENT_ID",
+            "MIVLET_GOOGLE_OAUTH_CLIENT_ID",
             "google-desktop-client.apps.googleusercontent.com",
         );
+        std::env::remove_var("MIVLET_GOOGLE_OAUTH_CLIENT_SECRET");
         std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET");
 
         let result = provider_config("google-drive", "oauth-pkce", vec![]);
 
         match old_id {
-            Some(value) => std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_ID", value),
-            None => std::env::remove_var("FABLE_GOOGLE_OAUTH_CLIENT_ID"),
+            Some(value) => std::env::set_var("MIVLET_GOOGLE_OAUTH_CLIENT_ID", value),
+            None => std::env::remove_var("MIVLET_GOOGLE_OAUTH_CLIENT_ID"),
         }
         if let Some(value) = old_secret {
+            std::env::set_var("MIVLET_GOOGLE_OAUTH_CLIENT_SECRET", value);
+        }
+        if let Some(value) = old_legacy_secret {
             std::env::set_var("FABLE_GOOGLE_OAUTH_CLIENT_SECRET", value);
         }
 
@@ -4161,8 +4089,10 @@ mod tests {
         let durable =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let scope = authorized_test_scope(&durable);
-        let path =
-            std::env::temp_dir().join(format!("fable-disconnect-test-{}.json", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "mivlet-disconnect-test-{}.json",
+            std::process::id()
+        ));
         let _ = fs::remove_file(&path);
 
         // Spin up a mock server for the revocation endpoint
@@ -4268,7 +4198,7 @@ mod tests {
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let scope = authorized_test_scope(&durable);
         let path = std::env::temp_dir().join(format!(
-            "fable-disconnect-rollback-test-{}.json",
+            "mivlet-disconnect-rollback-test-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);
@@ -4374,7 +4304,7 @@ mod tests {
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let scope = authorized_test_scope(&durable);
         let path = std::env::temp_dir().join(format!(
-            "fable-canonical-refresh-test-{}.json",
+            "mivlet-canonical-refresh-test-{}.json",
             std::process::id()
         ));
         let _ = fs::remove_file(&path);

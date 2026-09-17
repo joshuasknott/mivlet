@@ -21,7 +21,7 @@ import type {
   BackendAuthState,
   BackendProvider,
   BackendVerifyOutcome,
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 
 /** How a provider authenticates. Determines the onboarding affordance. */
 export type BackendAuthKind = "api-key" | "provider-login" | "install-gated";

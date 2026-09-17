@@ -1,7 +1,7 @@
-import type { ConnectorManifest } from "@fable/protocol";
+import type { ConnectorManifest } from "@mivlet/protocol";
 import { remoteConnectors, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
 
-export const CONNECTOR_CONNECTIONS_CHANGED = "fable:connector-connections-changed";
+export const CONNECTOR_CONNECTIONS_CHANGED = "mivlet:connector-connections-changed";
 interface RemoteConnectionState {
   launchReference: string;
   authorizationState?: string;

@@ -7,7 +7,8 @@
  * retrieval / context / Knowledge-page path while staying auditable.
  */
 
-import type { MemoryKind, MemoryRecord } from "@fable/protocol";
+import type { MemoryKind, MemoryRecord } from "@mivlet/protocol";
+import { redactKnowledgeText } from "../redact";
 import { isLiveMemory } from "../store";
 
 /** Edit a memory's editable fields. Bumps updatedAt. */
@@ -18,8 +19,8 @@ export function editMemory(
 ): MemoryRecord {
   return {
     ...record,
-    ...(patch.title !== undefined ? { title: patch.title } : {}),
-    ...(patch.value !== undefined ? { value: patch.value } : {}),
+    ...(patch.title !== undefined ? { title: redactKnowledgeText(patch.title) } : {}),
+    ...(patch.value !== undefined ? { value: redactKnowledgeText(patch.value) } : {}),
     ...(patch.kind !== undefined ? { kind: patch.kind } : {}),
     updatedAt: now
   };

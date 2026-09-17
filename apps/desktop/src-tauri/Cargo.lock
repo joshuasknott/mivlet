@@ -1251,42 +1251,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fable-desktop"
-version = "0.1.0"
-dependencies = [
- "aes-gcm",
- "base64 0.22.1",
- "chrono",
- "chrono-tz",
- "crc32fast",
- "dom_smoothie",
- "futures-util",
- "getrandom 0.3.4",
- "hex",
- "jsonwebtoken",
- "keyring",
- "lopdf",
- "png 0.17.16",
- "quick-xml 0.42.0",
- "reqwest",
- "rfd",
- "rusqlite",
- "rustls",
- "serde",
- "serde_json",
- "sha2 0.10.9",
- "tauri",
- "tauri-build",
- "tauri-plugin-notification",
- "tempfile",
- "tokio",
- "url",
- "windows",
- "windows-sys 0.61.2",
- "zip",
-]
-
-[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2567,6 +2531,43 @@ dependencies = [
  "libc",
  "wasi",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "mivlet-desktop"
+version = "0.1.0"
+dependencies = [
+ "aes-gcm",
+ "base64 0.22.1",
+ "chrono",
+ "chrono-tz",
+ "crc32fast",
+ "dom_smoothie",
+ "futures-util",
+ "getrandom 0.3.4",
+ "hex",
+ "jsonwebtoken",
+ "keyring",
+ "lopdf",
+ "png 0.17.16",
+ "quick-xml 0.42.0",
+ "regex",
+ "reqwest",
+ "rfd",
+ "rusqlite",
+ "rustls",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-notification",
+ "tempfile",
+ "tokio",
+ "url",
+ "windows",
+ "windows-sys 0.61.2",
+ "zip",
 ]
 
 [[package]]

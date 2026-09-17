@@ -16,7 +16,7 @@ use serde_json::Value;
 use crate::authorized_scope::{AuthorizedCommandScope, ScopeAccess};
 use crate::collaboration::models::{ObjectReference, Work, WorkStatus};
 use crate::local_computer::artifacts::ArtifactReceipt;
-use crate::models::{FableAgentProfile, LocalFileImport};
+use crate::models::{LocalFileImport, MivletAgentProfile};
 use crate::store::repos::collaboration::{self as collaboration_repo, Kind};
 use crate::store::repos::{
     local_project, message as message_repo, preferences, scope::PrivateDataScope,
@@ -210,7 +210,7 @@ pub(crate) fn run(
     store: &Store,
     scope: &AuthorizedCommandScope,
     request: &SearchRequest,
-    agents: &[FableAgentProfile],
+    agents: &[MivletAgentProfile],
     files: &[LocalFileImport],
 ) -> Result<SearchResponse> {
     run_bounded(
@@ -230,7 +230,7 @@ pub(crate) fn run_bounded(
     store: &Store,
     scope: &AuthorizedCommandScope,
     request: &SearchRequest,
-    agents: &[FableAgentProfile],
+    agents: &[MivletAgentProfile],
     files: &[LocalFileImport],
     limits: &SearchLimits,
 ) -> Result<SearchResponse> {
@@ -378,7 +378,7 @@ fn requested_domains(kinds: Option<&[String]>) -> Result<BTreeSet<Domain>> {
 }
 
 fn scan_agents(
-    agents: &[FableAgentProfile],
+    agents: &[MivletAgentProfile],
     workspace_id: &str,
     tokens: &[String],
     summary: &mut SearchScanSummary,
@@ -1301,7 +1301,7 @@ mod tests {
             },
             "workspaceId": "default",
             "agentId": agent_id,
-            "exportName": "fable.txt",
+            "exportName": "mivlet.txt",
             "sha256": "0".repeat(64),
         });
         store
@@ -1339,7 +1339,7 @@ mod tests {
         .unwrap()
     }
 
-    fn agent(id: &str, name: &str, instructions: &str) -> FableAgentProfile {
+    fn agent(id: &str, name: &str, instructions: &str) -> MivletAgentProfile {
         serde_json::from_value(json!({
             "id": id,
             "name": name,
@@ -1355,7 +1355,7 @@ mod tests {
         store: &Store,
         scope: &AuthorizedCommandScope,
         query: &str,
-        agents: &[FableAgentProfile],
+        agents: &[MivletAgentProfile],
         files: &[LocalFileImport],
     ) -> SearchResponse {
         store
@@ -1367,7 +1367,7 @@ mod tests {
         store: &Store,
         scope: &AuthorizedCommandScope,
         query: &str,
-        agents: &[FableAgentProfile],
+        agents: &[MivletAgentProfile],
         files: &[LocalFileImport],
         limits: &SearchLimits,
     ) -> SearchResponse {

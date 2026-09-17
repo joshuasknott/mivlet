@@ -1,4 +1,4 @@
-import type { ConversationLayout, ConversationLayoutNode } from "@fable/protocol";
+import type { ConversationLayout, ConversationLayoutNode } from "@mivlet/protocol";
 import type { ReactNode } from "react";
 import type { LayoutAction } from "../../lib/conversation-layout";
 

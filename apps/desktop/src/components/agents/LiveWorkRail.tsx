@@ -36,10 +36,11 @@ export function LiveWorkRail({
     browserError: string | null;
     browserUrl?: string;
     browserTitle?: string;
-    liveViewUrl?: string;
+    liveViewAvailable?: boolean;
     browserDownload?: { fileName: string; workspacePath: string; bytesWritten: number };
     onOpenBrowser: (url: string) => Promise<unknown>;
     onRefreshBrowser: () => Promise<unknown>;
+    onOpenLiveView?: () => Promise<unknown>;
   };
   screenPreviewUrl?: string;
   onClose: () => void;
@@ -192,7 +193,7 @@ export function LiveWorkRail({
               <span><strong>{hostedComputer.browserTitle || `${agentName}'s screen`}</strong><small>{hostedComputer.browserUrl}</small></span>
               <span className="live-screen-modal__actions">
                 <button type="button" onClick={() => void hostedComputer.onRefreshBrowser().catch(() => undefined)} disabled={hostedComputer.browserOpening} aria-label="Refresh screen preview"><ArrowClockwise size={17} /></button>
-                {hostedComputer.liveViewUrl ? <a href={hostedComputer.liveViewUrl} target="_blank" rel="noreferrer" aria-label="Take over in Cloudflare Live View (opens in a new window)">Take over <ArrowSquareOut size={15} /></a> : null}
+                {hostedComputer.liveViewAvailable ? <button type="button" onClick={() => void hostedComputer.onOpenLiveView?.().catch(() => undefined)}>Take over <ArrowSquareOut size={15} /></button> : null}
                 <button type="button" onClick={() => setScreenOpen(false)} aria-label="Close screen"><X size={18} /></button>
               </span>
             </header>

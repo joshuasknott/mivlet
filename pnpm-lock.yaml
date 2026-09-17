@@ -72,10 +72,10 @@ importers:
 
   apps/broker:
     dependencies:
-      '@fable/connectors':
+      '@mivlet/connectors':
         specifier: workspace:*
         version: link:../../packages/connectors
-      '@fable/protocol':
+      '@mivlet/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
     devDependencies:
@@ -94,18 +94,18 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@fable/connectors':
-        specifier: workspace:*
-        version: link:../../packages/connectors
-      '@fable/knowledge':
-        specifier: workspace:*
-        version: link:../../packages/knowledge
-      '@fable/protocol':
-        specifier: workspace:*
-        version: link:../../packages/protocol
       '@fontsource/inter':
         specifier: ^5.2.8
         version: 5.2.8
+      '@mivlet/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
+      '@mivlet/knowledge':
+        specifier: workspace:*
+        version: link:../../packages/knowledge
+      '@mivlet/protocol':
+        specifier: workspace:*
+        version: link:../../packages/protocol
       '@phosphor-icons/react':
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -176,7 +176,7 @@ importers:
       '@cloudflare/sandbox':
         specifier: 0.13.0-next.738.2
         version: 0.13.0-next.738.2
-      '@fable/protocol':
+      '@mivlet/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol
     devDependencies:
@@ -198,10 +198,10 @@ importers:
 
   packages/agent-host:
     dependencies:
-      '@fable/connectors':
+      '@mivlet/connectors':
         specifier: workspace:*
         version: link:../connectors
-      '@fable/protocol':
+      '@mivlet/protocol':
         specifier: workspace:*
         version: link:../protocol
       '@opencode/plugin':
@@ -224,7 +224,7 @@ importers:
 
   packages/connectors:
     dependencies:
-      '@fable/protocol':
+      '@mivlet/protocol':
         specifier: workspace:*
         version: link:../protocol
       '@modelcontextprotocol/sdk':
@@ -243,7 +243,7 @@ importers:
 
   packages/knowledge:
     dependencies:
-      '@fable/protocol':
+      '@mivlet/protocol':
         specifier: workspace:*
         version: link:../protocol
     devDependencies:

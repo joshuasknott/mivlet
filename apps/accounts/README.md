@@ -9,12 +9,12 @@ The native app still owns OAuth state, PKCE and the loopback callback.
 ## Local development
 
 Copy `.env.example` to `.env.local` and set the public key for the desktop's
-existing Clerk instance. Then run `pnpm --filter @fable/accounts dev`.
+existing Clerk instance. Then run `pnpm --filter @mivlet/accounts dev`.
 Open `/sign-in`, `/sign-up` or `/oauth-consent` (the last requires a real signed-in
 OAuth request). Missing configuration fails closed. `/complete` tells users to
 return to the desktop; it does not claim that a native workspace was authorized.
 
-Run `pnpm --filter @fable/accounts build` and `pnpm --filter @fable/accounts test`.
+Run `pnpm --filter @mivlet/accounts build` and `pnpm --filter @mivlet/accounts test`.
 
 ## Connecting the account site
 

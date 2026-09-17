@@ -2,11 +2,11 @@ import "@testing-library/jest-dom/vitest";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { FableAgentProfile } from "@fable/protocol";
+import type { MivletAgentProfile } from "@mivlet/protocol";
 import { avatarVariant } from "../../lib/blob-avatar";
 import { AgentEditor } from "./AgentEditor";
 
-const profile: FableAgentProfile = {
+const profile: MivletAgentProfile = {
   id: "agent-a", name: "Ava", instructions: "Keep it simple.", modelId: "", icon: "agent",
   iconColor: "#865DFA", avatarSeed: "blob-v1:ava", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me"
 };
@@ -70,7 +70,7 @@ describe("agent portrait ownership", () => {
     await user.type(screen.getByLabelText("Name"), "New agent");
     expect(character.getAttribute("data-character")).toBe(firstCharacter);
     await user.click(screen.getByRole("button", { name: "Create agent" }));
-    const draft = onSave.mock.calls[0][0] as FableAgentProfile;
+    const draft = onSave.mock.calls[0][0] as MivletAgentProfile;
     expect(avatarVariant(draft.avatarSeed!)).toBe(Number(firstCharacter));
     view.rerender(<AgentEditor {...props} open={false} agent={null} onSave={onSave} />);
     view.rerender(<AgentEditor {...props} open agent={null} onSave={onSave} />);

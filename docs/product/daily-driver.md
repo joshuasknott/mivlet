@@ -23,7 +23,8 @@ single-use approvals, workspace/agent/request and window identity, freshness,
 generation fences, one-agent control leases and immediate Stop. Supported
 accessibility actions use background delivery; screenshots, keyboard and pixel
 actions require explicitly approved foreground selection. Minimized windows are
-unavailable. Full Access resolves the same exact approval without extra app grants.
+unavailable. Full Access uses the same exact approval without extra app grants;
+high-risk minting still requires a native OS confirm, not a WebView-echoed phrase.
 There is no host-shell fallback or separate local desktop.
 
 ### Browsing capabilities stay distinct
@@ -52,7 +53,6 @@ authorization. App actions retain exact connection and approval checks.
 | --- | --- | --- |
 | Native public OAuth | Gmail, Drive, Calendar | Google PKCE and token exchange stay behind the native credential boundary |
 | Confidential broker OAuth | GitHub, Vercel, Notion, Linear, Slack | Separate broker owns client secrets; desktop configuration and broker deployment are required |
-| Native token plugins | Outlook, Teams, Zoom and other documented token integrations | Native verification and OS credential storage; bounded reads, manual renewal, no writes or knowledge sync |
 | Official remote MCP | Vercel, Notion, Linear, Canva, Figma and other official presets | Native MCP OAuth, discovery and enabled-tool checks against the exact provider endpoint |
 
 [Connector capabilities and setup](connectors.md) maintains the full service list,

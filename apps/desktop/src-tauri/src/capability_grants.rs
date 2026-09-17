@@ -251,7 +251,7 @@ pub fn commit_capability_grant(
     crate::execution_approvals::verify_and_consume_execution_approval(
         &crate::paths::execution_approvals_path(&app)?,
         &resolution.effective_request,
-        &resolution.audit_entry.decided_at,
+        &crate::execution_approvals::wall_clock_consumed_at(),
     )?;
     let current = validate_proposal_with_app(&app, &request.proposal)?;
     if current.fingerprint != context.fingerprint {

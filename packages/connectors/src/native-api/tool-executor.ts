@@ -10,18 +10,19 @@
  *
  * CRITICAL SAFETY INVARIANT: the executor never runs until its {@link ApprovalGate}
  * reports a grant for the call. A tool-call's {@link ApprovalRequest} must be
- * surfaced to the user first; only once/session/rule grants (never `deny`) let
- * the executor proceed. The agent loop calls the executor synchronously per
- * tool-call event, but the approval decision is asynchronous — the gate blocks
- * the executor until the shell resolves it (or auto-satisfies it from a standing
- * session/rule grant).
+ * surfaced to the user first; only an exact native-backed grant (never `deny`)
+ * lets the executor proceed. Session/rule display grants never auto-satisfy here:
+ * the shell must mint a fresh one-time native permit for each high-privilege
+ * effect. The agent loop calls the executor synchronously per tool-call event,
+ * but the approval decision is asynchronous — the gate blocks the executor until
+ * the shell resolves it.
  *
  * Fail-closed everywhere: an unknown tool, a missing argument, a non-zero shell
  * exit, or a denied grant all reject (the loop turns the rejection into a
  * tool-role error message and continues).
  */
 
-import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@fable/protocol";
+import type { ApprovalGrant, ApprovalRequest, PermissionMode } from "@mivlet/protocol";
 import { lookupTool } from "./tools";
 import type { ToolExecutor } from "./agent-loop";
 import { effectForTool, evaluatePermissionPolicy } from "../permission-policy";
@@ -50,9 +51,9 @@ export interface ToolRuntime {
   openBrowser?(url: string): Promise<string>;
   /** Optional native Windows boundary; the desktop supplies its own exact approval executor. */
   listAppWindows?(): Promise<string>;
-  selectAppWindow?(windowId: string, deliveryMode?: import("@fable/protocol").NativeComputerDeliveryMode): Promise<string>;
+  selectAppWindow?(windowId: string, deliveryMode?: import("@mivlet/protocol").NativeComputerDeliveryMode): Promise<string>;
   observeApp?(): Promise<string>;
-  actApp?(input: import("@fable/protocol").NativeAppAction): Promise<string>;
+  actApp?(input: import("@mivlet/protocol").NativeAppAction): Promise<string>;
   /** Act on one opaque control ref from the latest hosted-browser observation. */
   actBrowser?(input: {
     action: "click" | "fill" | "press" | "select" | "scroll" | "history";
@@ -81,31 +82,32 @@ export interface ImageToolInput {
 
 /**
  * The approval gate the executor awaits. The shell implements this: it blocks
- * a tool call's executor until the user grants (once/session/rule) or denies,
- * or auto-satisfies the call immediately when a standing grant already covers
- * it. `register` lets the shell pre-create a pending entry when the tool-call
- * event arrives, so a grant that races the executor still resolves it.
+ * a tool call's executor until the user grants or denies. Standing session/rule
+ * grants are display-only and never auto-satisfy. `register` lets the shell
+ * pre-create a pending entry when the tool-call event arrives, so a grant that
+ * races the executor still resolves it.
  */
 export interface ApprovalGate {
   /**
-   * Resolve the approval decision for a tool call. Returns immediately with
-   * "granted" when a standing grant covers it; otherwise blocks until the shell
-   * resolves the pending call (grant → "granted", deny → "denied").
+   * Resolve the approval decision for a tool call. Blocks until the shell
+   * resolves the pending call (grant → "granted", deny → "denied"), except for
+   * allowlisted connector reads covered by existing account consent.
    */
   waitForDecision(approval: ApprovalRequest): Promise<DecisionResult>;
 }
 
 /**
  * The shell's side of the gate: the dispatch methods that drive pending tool
- * calls and manage standing grants. {@link ProductionApprovalGate} implements
- * this; the shell ({@link useShellRuntime}) requires it so a grant/deny in the
- * approval UI unblocks the tool call the agent loop is awaiting.
+ * calls. {@link ProductionApprovalGate} implements this; the shell
+ * ({@link useShellRuntime}) requires it so a grant/deny in the approval UI
+ * unblocks the tool call the agent loop is awaiting. Standing grants stay
+ * display-only.
  */
 export interface ToolApprovalGate extends ApprovalGate {
   /**
    * Register a pending tool call before the executor awaits. Returns true only
-   * when the shell needs to surface a fresh approval; exact standing grants and
-   * duplicate pending requests return false.
+   * when the shell needs to surface a fresh approval; duplicate pending
+   * requests return false. Standing session/rule grants never skip this.
    */
   register(approval: ApprovalRequest): boolean;
   /** Drive a pending call to "granted" (the executor proceeds). */
@@ -114,7 +116,10 @@ export interface ToolApprovalGate extends ApprovalGate {
   resolveDeny(approvalId: string): void;
   /** True when a tool call with this approval id is awaiting a decision. */
   hasPending(approvalId: string): boolean;
-  /** Replace the full set of standing (session/rule) grants. */
+  /**
+   * Session/rule grants are display-only. The shell may still sync them here;
+   * they never auto-satisfy execution or skip native permit minting.
+   */
   replaceStandingGrants(grants: ApprovalGrant[]): void;
   /**
    * Tear down every pending entry. Called when the agent run is cancelled so a
@@ -141,9 +146,9 @@ export function isRoutineConnectorRead(approval: ApprovalRequest): boolean {
 }
 
 /**
- * The production gate: tracks standing (session/rule) grants and pending calls.
- * Legacy standing grants may auto-satisfy matching low-risk calls. High-risk
- * calls always wait for a fresh decision.
+ * The production gate: pending calls wait for a native-backed decision.
+ * Standing session/rule grants are ignored so they cannot skip minting a
+ * fresh one-time permit. Allowlisted connector reads still use account consent.
  *
  * Concurrency model: a pending call is a deferred — an { resolve } pair held in
  * the pending map keyed by approval id. `register` pre-creates the entry (so a
@@ -153,33 +158,23 @@ export function isRoutineConnectorRead(approval: ApprovalRequest): boolean {
  * resolve race) are cached in `settled` and replayed by the next await.
  */
 export class ProductionApprovalGate implements ApprovalGate {
-  private readonly standingGrants: ApprovalGrant[] = [];
   /** Pending calls: approval id -> deferred. */
   private readonly pending = new Map<string, PendingEntry>();
   /** Resolutions that arrived before a waiter, cached for the next await. */
   private readonly settled = new Map<string, DecisionResult>();
 
-  /** Add a standing grant (session or rule) used to auto-satisfy matching calls. */
-  addStandingGrant(grant: ApprovalGrant): void {
-    this.standingGrants.push(grant);
-  }
+  /** Kept so tests can prove a standing grant never auto-satisfies execution. */
+  addStandingGrant(_grant: ApprovalGrant): void {}
 
   /**
-   * Replace the full set of standing grants. The shell re-syncs this whenever its
-   * session/rule grants change so the gate reflects the current grant state
-   * without accumulating duplicates.
+   * Session/rule grants are display-only. The shell may still sync them; they
+   * never auto-satisfy or skip native permit minting.
    */
-  replaceStandingGrants(grants: ApprovalGrant[]): void {
-    this.standingGrants.length = 0;
-    this.standingGrants.push(...grants);
-  }
+  replaceStandingGrants(_grants: ApprovalGrant[]): void {}
 
   /** Register a pending call (keyed by approval id) before the executor awaits. */
   register(approval: ApprovalRequest): boolean {
     if (isRoutineConnectorRead(approval)) return false;
-    if (this.standingGrants.some((grant) => grantMatches(grant, approval))) {
-      return false;
-    }
     if (this.pending.has(approval.id)) return false;
     // Create a deferred with no resolver yet; waitForDecision wires the promise
     // (and adopts an early resolution from `settled` if one is waiting).
@@ -224,10 +219,6 @@ export class ProductionApprovalGate implements ApprovalGate {
 
   async waitForDecision(approval: ApprovalRequest): Promise<DecisionResult> {
     if (isRoutineConnectorRead(approval)) return "granted";
-    // A legacy standing grant can cover only an exact low-risk request.
-    if (this.standingGrants.some((grant) => grantMatches(grant, approval))) {
-      return "granted";
-    }
     // An early resolution is replayed immediately (register-then-resolve race).
     const early = this.settled.get(approval.id);
     if (early !== undefined) {
@@ -272,31 +263,6 @@ interface PendingEntry {
   resolve?: (decision: DecisionResult) => void;
   /** Driven by cancelPending to tear down a never-granted call. */
   reject?: (error: Error) => void;
-}
-
-/**
- * Does a legacy standing grant cover this approval? High/critical risk never
- * auto-matches. Every remaining field represented by ApprovalGrant must agree
- * exactly so argument substitution and mode changes fail closed.
- */
-function grantMatches(grant: ApprovalGrant, approval: ApprovalRequest): boolean {
-  // Semantic Connection reads use a separate durable capability grant. A
-  // legacy session/rule approval must never become implicit standing source
-  // authority or replace the exact-action approval for an individual search.
-  if (approval.action.split(/\s+/)[0] === "connection-read") {
-    return false;
-  }
-  if (approval.riskLevel === "high" || approval.riskLevel === "critical") {
-    return false;
-  }
-  return (
-    grant.service === approval.service &&
-    grant.action === approval.action &&
-    grant.mode === approval.mode &&
-    grant.permissionProfile === approval.permissionProfile &&
-    grant.dataUsed.length === approval.dataUsed.length &&
-    grant.dataUsed.every((value, index) => value === approval.dataUsed[index])
-  );
 }
 
 /** Options for {@link createToolExecutor}. */
@@ -431,7 +397,7 @@ async function dispatch(
       const action = requireString(actionInput, toolName, "action");
       if (!["click", "type", "scroll", "key"].includes(action)) throw new Error("Unsupported Windows application action.");
       // Exact fields and native window authority are revalidated by the runtime.
-      return runtime.actApp({ ...actionInput, action: action as import("@fable/protocol").NativeAppAction["action"], observationId: requireString(parsed, toolName, "observationId") });
+      return runtime.actApp({ ...actionInput, action: action as import("@mivlet/protocol").NativeAppAction["action"], observationId: requireString(parsed, toolName, "observationId") });
     }
     case "cloud-browser-action": {
       if (!runtime.actBrowser) {

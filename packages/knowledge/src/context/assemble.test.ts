@@ -6,8 +6,8 @@ import type {
   NativeMessage,
   PinnedContextEntry,
   ExecutionContextAudience
-} from "@fable/protocol";
-import { GLOBAL_SCOPE } from "@fable/protocol";
+} from "@mivlet/protocol";
+import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { assembleContext } from "./assemble";
 import type { AuthorityScopedKnowledgeCitation } from "../retrieval/retrieve";
 
@@ -73,12 +73,12 @@ describe("assembleContext — deterministic order", () => {
   it("emits system instructions, memory, then sources in order", () => {
     const assembled = assembleContext({
       attemptId: "r1",
-      systemInstructions: "You are Fable.",
+      systemInstructions: "You are Mivlet.",
       memory: [makeMemory()],
       citations: [makeCitation()]
     });
 
-    const instrIdx = assembled.systemPrefix.indexOf("You are Fable.");
+    const instrIdx = assembled.systemPrefix.indexOf("You are Mivlet.");
     const memIdx = assembled.systemPrefix.indexOf("Approved memory");
     const srcIdx = assembled.systemPrefix.indexOf("Relevant sources");
     expect(instrIdx).toBeLessThan(memIdx);
@@ -696,5 +696,101 @@ describe("assembleContext — derived conversation history", () => {
     });
     expect(assembled.usage).toEqual([]);
     expect(assembled.systemPrefix).not.toContain("x".repeat(200));
+  });
+});
+
+describe("assembleContext — secret-shaped content", () => {
+  it("does not copy leaked credentials from retrieved snippets into model context", () => {
+    const leaked = "sk-ant-12345678901234567890abc123";
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [],
+      citations: [
+        makeCitation({
+          snippet: `connector recovery milestone bearer ${leaked}`
+        })
+      ]
+    });
+    expect(assembled.systemPrefix).toContain("connector recovery milestone");
+    expect(assembled.systemPrefix).not.toContain(leaked);
+    expect(assembled.citations[0].snippet).not.toContain(leaked);
+    expect(assembled.receipt.citations[0].snippet).not.toContain(leaked);
+  });
+
+  it("scrubs secret-shaped approved memory before it is labelled authoritative", () => {
+    const leaked = "sk-12345678901234567890abc123";
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [
+        makeMemory({
+          id: "m-secret",
+          title: "Deploy token",
+          value: `Keep the launch key ${leaked} in the vault.`
+        })
+      ],
+      citations: []
+    });
+    expect(assembled.systemPrefix).toContain("Approved memory (authoritative)");
+    expect(assembled.systemPrefix).toContain("Keep the launch key");
+    expect(assembled.systemPrefix).not.toContain(leaked);
+    expect(assembled.usage.find((u) => u.id === "m-secret")?.reason).toBe("memory-approved");
+  });
+
+  it("scrubs secret-shaped pinned memory before it enters the prefix", () => {
+    const leaked = "ghp_abcdefghijklmnopqrstuvwx1234567890";
+    const pinned = makeMemory({
+      id: "m-pin-secret",
+      pinned: true,
+      value: `export GITHUB_TOKEN=${leaked}`
+    });
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [pinned],
+      pinned: [{ id: "pe-secret", scope: GLOBAL_SCOPE, memoryId: pinned.id, pinnedAt: NOW }],
+      citations: []
+    });
+    expect(assembled.systemPrefix).toContain("Pinned memory");
+    expect(assembled.systemPrefix).not.toContain(leaked);
+    expect(assembled.usage.find((u) => u.id === "m-pin-secret")?.reason).toBe("pinned");
+  });
+
+  it("drops omit-only memory so it cannot re-enter model context", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      memory: [
+        makeMemory({
+          id: "m-omit",
+          value: "[content omitted: secret-shaped content]"
+        }),
+        makeMemory({ id: "m-live", value: "The user prefers concise answers." })
+      ],
+      citations: []
+    });
+    expect(assembled.systemPrefix).not.toContain("[content omitted: secret-shaped content]");
+    expect(assembled.usage.find((u) => u.id === "m-omit")).toBeUndefined();
+    expect(assembled.usage.find((u) => u.id === "m-live")).toBeDefined();
+  });
+
+  it("drops omit-only retrieved snippets including global-scope previews", () => {
+    const assembled = assembleContext({
+      attemptId: "r1",
+      scope: { level: "thread", threadId: "t1" },
+      memory: [],
+      citations: [
+        makeCitation({
+          sourceId: "global-omit",
+          snippet: "[content omitted: secret-shaped content]",
+          scope: GLOBAL_SCOPE
+        }),
+        makeCitation({
+          sourceId: "thread-live",
+          snippet: "connector recovery milestone",
+          scope: { level: "thread", threadId: "t1" }
+        })
+      ]
+    });
+    expect(assembled.citations.map((c) => c.sourceId)).toEqual(["thread-live"]);
+    expect(assembled.systemPrefix).not.toContain("[content omitted: secret-shaped content]");
+    expect(assembled.usage.map((u) => u.id)).toEqual(["thread-live"]);
   });
 });

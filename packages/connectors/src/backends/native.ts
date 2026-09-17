@@ -9,11 +9,11 @@
  * capability set, including `usage-cost`). There is no entitlement-pending
  * state for native providers.
  *
- * Per-provider HTTP/SSE shaping lives in `@fable/connectors/native-api/`; this
+ * Per-provider HTTP/SSE shaping lives in `@mivlet/connectors/native-api/`; this
  * module only declares the provider shape and capabilities for the registry.
  */
 
-import type { BackendProvider } from "@fable/protocol";
+import type { BackendProvider } from "@mivlet/protocol";
 import { resolveCapabilities } from "./capabilities";
 import {
   nativeProviderCatalog,

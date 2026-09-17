@@ -1,5 +1,5 @@
 {
-  "name": "@fable/connectors",
+  "name": "@mivlet/connectors",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -62,10 +62,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "pretest": "pnpm --filter @mivlet/protocol build",
     "test": "vitest run"
   },
   "dependencies": {
-    "@fable/protocol": "workspace:*",
+    "@mivlet/protocol": "workspace:*",
     "@modelcontextprotocol/sdk": "1.30.0"
   },
   "devDependencies": {

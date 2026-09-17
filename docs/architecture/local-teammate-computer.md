@@ -46,9 +46,10 @@ is not used or bundled. Cua cloud services and orchestration are not dependencie
 
 ## Permission and input
 
-Computer Use follows the existing global approvals setting. Full Access resolves
-exact single-use tool approvals automatically; other modes use the existing
-approval queue. There is no separate per-app permission prompt. The agent lists
+Computer Use follows the existing global approvals setting. Full Access still
+queues the same exact single-use tool approval; high-risk minting requires a
+native OS confirm, and WebView cannot mint by echoing a confirmation phrase.
+Other modes use the existing approval queue. There is no separate per-app permission prompt. The agent lists
 open applications and selects an opaque window ID itself, asking only when the
 user's intended target is ambiguous. Native execution consumes the exact approval
 and binds workspace, agent, request, window identity and turn generation. Only
@@ -146,7 +147,7 @@ tool execution support. Image input metadata alone cannot enable screenshots.
 | Custom API endpoint | Text/tool transport; endpoint configuration establishes neither image support nor an audited image profile | Unavailable, even when model metadata claims vision |
 | Managed Claude, Cursor ACP, Grok ACP, OpenCode | Provider-owned execution and yes/no permission responses; current Mivlet handles have no shared tool-result/image channel | Unavailable; requires a native Mivlet tool bridge, not a vision flag |
 | Antigravity ACP | Text prompts and provider-owned permission decisions; sessions currently register no Mivlet MCP servers | Unavailable for the same bridge reason |
-| Direct Gemini API | Text and tool turns exchange `functionCall`/`functionResponse` parts inside Gemini `contents`; the API key stays in the Rust egress header | Unavailable; no audited native screenshot bridge exists for this route, and vision metadata alone never enables one |
+| Direct Gemini API | Text and tool turns exchange `functionCall`/`functionResponse` parts inside Gemini `contents`; the API key stays in the Rust egress header. Local wire loop, not the embedded host ([Gemini provider](gemini-provider.md)). | Unavailable; no audited native screenshot bridge exists for this route, and vision metadata alone never enables one |
 
 The managed/ACP restriction describes Mivlet's current adapters, not an upstream
 claim that ACP, MCP or those models cannot carry images. Current ACP content
@@ -180,7 +181,7 @@ Hosted browser/process tools retain their separate deployment boundary.
 The scope hash and `local-computers/<scope>/workspace` directory are unchanged.
 File listing, reading, writing, repository ZIP import and artifact publication
 remain confined to this explicit Mivlet-owned scope. Paths are relative; legacy
-`/home/fable` or `/home/agent` paths never become arbitrary host filesystem access.
+`/home/mivlet` or `/home/agent` paths never become arbitrary host filesystem access.
 Artifacts retain strict type/content validation and immutable publication copies.
 Opening an artifact writes a fresh private launch copy of the receipt-verified
 bytes and re-verifies that exact copy against the receipt digest immediately

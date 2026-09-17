@@ -1,34 +1,13 @@
+import {
+  CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION,
+  type CapabilityGrantId,
+  type ConnectedSourceCitation,
+  type ConnectedSourceSearchResult,
+  type ConnectionId
+} from "@mivlet/protocol";
 import type { McpUntrustedToolResult } from "./client";
 
 const MAX_CITATIONS = 50;
-const CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION = "fable.connected-source-search.v1" as const;
-
-interface ConnectedSourceCitation {
-  citationId: string;
-  sourceId: string;
-  title: string;
-  snippet: string;
-  uri?: string;
-  provenance: string;
-  freshness: string;
-  trust: "external-untrusted";
-}
-
-interface ConnectedSourceSearchResult {
-  contractVersion: typeof CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION;
-  capabilityId: "knowledge.content.search";
-  query: string;
-  scope: { workspaceId: string; projectId?: string };
-  citations: readonly ConnectedSourceCitation[];
-  nextCursor?: string;
-  trust: "external-untrusted";
-  instructionAuthority: "none";
-  degraded: boolean;
-  degradationReasons: readonly string[];
-  connectionId: string;
-  matchedGrantIds: readonly string[];
-  implementation: { kind: "mcp"; evidence: "adapter-validated" };
-}
 
 function object(value: unknown): Record<string, unknown> | undefined {
   return typeof value === "object" && value !== null && !Array.isArray(value)
@@ -130,8 +109,8 @@ export function normalizeMcpConnectedSourceSearch(
     instructionAuthority: "none",
     degraded: context.degraded === true,
     degradationReasons: Object.freeze([...(context.degradationReasons ?? [])]),
-    connectionId: context.connectionId,
-    matchedGrantIds: Object.freeze([...context.matchedGrantIds]),
+    connectionId: context.connectionId as ConnectionId,
+    matchedGrantIds: Object.freeze([...context.matchedGrantIds]) as readonly CapabilityGrantId[],
     implementation: Object.freeze({ kind: "mcp", evidence: "adapter-validated" })
   });
 }

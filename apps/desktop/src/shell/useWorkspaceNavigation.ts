@@ -1,4 +1,4 @@
-import type { ConversationLayout, LocalProject } from "@fable/protocol";
+import type { ConversationLayout, LocalProject } from "@mivlet/protocol";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { RightPanelTab } from "../components/navigation/right-panel-state";
 import type { NavContext } from "../components/navigation/WorkspaceRightNav";
@@ -259,3 +259,5 @@ export function useWorkspaceNavigation(options: {
     openPanelChat,
   };
 }
+
+export type WorkspaceNavigation = ReturnType<typeof useWorkspaceNavigation>;

@@ -2,7 +2,8 @@
 
 This records the account and collaboration contracts used by the September 2026
 roadmap integration. The P1–P8 ownership allocations below describe that completed
-integration, not instructions to restart those workstreams. Use the current
+integration, not instructions to restart those workstreams. The merge-sequencing
+notes under Shared seams are archival. Use the current
 README for delivered behaviour and remaining limitations; hosted sync remains
 deployment-gated.
 
@@ -125,7 +126,7 @@ P8 owns final global layout styling; feature leaf styles belong to their track.
 | P1 Plugins | Renderer `components/marketplace/**`, `components/PluginPanel.tsx`, `components/pages/MarketplacePage.tsx`, `styles/marketplace.css`, `lib/builtin-plugins.ts`; native `token_plugins.rs`, `local_computer/plugins.rs`. Catalogue/cards/modals here; credential custody stays frozen. |
 | P2 Composer/Voice | Renderer `components/Composer.tsx`, `components/ComposerInput.tsx`, `components/ModelPicker.tsx`, `hooks/useComposerVoice.ts`, `hooks/useVoice.ts`, `hooks/useScopedComposer.ts`, `shell/composer-models.ts`; native `native_speech.rs` feature behavior, preserving account shutdown. |
 | P3 Main/Side Chats | Renderer `shell/ConversationPane.tsx`, `hooks/useDurableConversation.ts`, `hooks/useConversationScroll.ts`, `lib/conversation-runtime.ts`, `lib/conversation-presentation.ts`, `components/conversation/**` except P8 Tabs; native `conversations.rs`, `collaboration/chats.rs`, `store/repos/thread.rs`, `store/repos/message.rs`, `store/repos/draft.rs`. P3 integrates P2 controls through props. |
-| P4 Work | Renderer `lib/workspace-execution.ts`, `shell/ExecutionWorker.tsx`, `shell/useExecutionController.ts`, `hooks/useLocalScheduleDispatcher.ts`, `components/projects/WorkItems.tsx`, `components/settings/LocalSchedules.tsx`, `components/agents/SchedulesDialog.tsx`, `runtime/domains/local-schedules.ts`; native `collaboration/work.rs`, `collaboration/schedules.rs`, `local_schedules.rs`, `store/repos/local_schedule.rs`. New Work UI: `components/work/**`. |
+| P4 Work | Renderer `lib/workspace-execution.ts`, `shell/ExecutionWorker.tsx`, `shell/useExecutionController.ts`, `hooks/useLocalScheduleDispatcher.ts`, `components/work/**`, `components/settings/LocalSchedules.tsx`, `components/agents/SchedulesDialog.tsx`, `runtime/domains/local-schedules.ts`; native `collaboration/work.rs`, `collaboration/schedules.rs`, `local_schedules.rs`, `store/repos/local_schedule.rs`. |
 | P5 Projects/Teams | Renderer `hooks/useLocalProjects.ts`, `runtime/domains/local-projects.ts`, `components/projects/ConversationDialogs.tsx`, `components/projects/ProjectContextPanel.tsx`, `components/projects/ProjectFiles.tsx`, `components/projects/projects.css`; native `local_projects.rs`, `store/repos/local_project.rs`. New Team/Project leaves stay in these domains. |
 | P6 Memory/compaction | `packages/knowledge/src/**`; renderer `lib/collaboration-context.ts`, `components/settings/MemoryRecords.tsx`, new `components/memory/**`; native `memory.rs`, `collaboration/context.rs`, `store/repos/memory_record.rs`. |
 | P7 Search | New renderer `lib/search/**`, `runtime/domains/search.ts`, `components/search/**`; new native `search.rs`/`search/**` if needed. Scoped reads over existing repositories, stable references and reusable results, no replacement stores. |
@@ -167,10 +168,10 @@ head before affected tracks use it; they rebase on that migration. P7 starts wit
 scoped reads rather than an uncoordinated index migration. Dependencies are added
 only by the introducing track through pnpm and a reconciled lockfile.
 
-All tracks can start against these interfaces from the merged baseline. P8 can
-build immediately, but final integrated acceptance depends on P1–P7 components;
-placeholder UI is not final acceptance. Merge PRs sequentially, reconcile shared
-seams and run affected gates. This contract does not create an ongoing coordinator.
+All tracks started against these interfaces from the merged baseline. Sequential
+merge of P1–P8, shared-seam reconciliation, and placeholder-UI rules were the
+September 2026 integration process; they are not instructions for new work. This
+contract does not create an ongoing coordinator.
 
 ## Verification boundary
 

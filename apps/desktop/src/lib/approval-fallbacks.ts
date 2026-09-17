@@ -2,13 +2,23 @@ import type {
   ApprovalGrant,
   ApprovalResolutionRequest,
   ApprovalResolutionResponse
-} from "@fable/protocol";
+} from "@mivlet/protocol";
 import { toSlug } from "./helpers";
 
 /**
  * In-browser approval fallback used when the Tauri runtime is unavailable
- * (for example, in the browser dev server or vitest).
+ * (for example, in the browser dev server or vitest). Echoed confirmation
+ * phrases cannot stand in for a native mint; omitting them is preview-only.
  */
+
+export function webviewEchoedConfirmation(
+  confirmationText: string | undefined,
+  confirmationPhrase: string | undefined
+): boolean {
+  const provided = confirmationText?.trim() ?? "";
+  const expected = confirmationPhrase?.trim() ?? "";
+  return provided.length > 0 && expected.length > 0 && provided === expected;
+}
 
 export function resolveApprovalFallback(request: ApprovalResolutionRequest): ApprovalResolutionResponse {
   if (!request.request.decisions.includes(request.decision)) {
@@ -37,8 +47,8 @@ export function resolveApprovalFallback(request: ApprovalResolutionRequest): App
     if (!effectiveRequest.confirmationPhrase) {
       throw new Error("High-risk approvals need a confirmation phrase.");
     }
-    if (request.confirmationText?.trim() !== effectiveRequest.confirmationPhrase) {
-      throw new Error("Confirmation phrase did not match.");
+    if (webviewEchoedConfirmation(request.confirmationText, effectiveRequest.confirmationPhrase)) {
+      throw new Error("WebView cannot mint a high-risk permit by echoing the confirmation phrase.");
     }
   }
 

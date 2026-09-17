@@ -1,6 +1,6 @@
 # Embedded agent host
 
-`pnpm --filter @fable/agent-host build` compiles the workspace source with Bun
+`pnpm --filter @mivlet/agent-host build` compiles the workspace source with Bun
 1.3.3 into `mivlet-agent-host.exe` and records its SHA-256 in `runtime.json`.
 Both generated files are excluded from Git. Tauri development and packaging
 prepare them automatically. The native launcher checks the manifest and hash

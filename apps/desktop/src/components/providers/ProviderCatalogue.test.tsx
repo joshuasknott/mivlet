@@ -7,8 +7,8 @@ import {
 } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
-import type { BackendProvider } from "@fable/protocol";
-import { listBackendProviders } from "@fable/connectors";
+import type { BackendProvider } from "@mivlet/protocol";
+import { listBackendProviders } from "@mivlet/connectors";
 import {
   buildProviderFamilies,
   encodeCustomProviderSecret,

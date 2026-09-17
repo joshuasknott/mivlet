@@ -1,5 +1,8 @@
 import { toRuntimeError } from "../errors";
-import type { ApprovalResolutionRequest } from "@fable/protocol";
+import {
+  CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION,
+  type ApprovalResolutionRequest,
+} from "@mivlet/protocol";
 import { hasTauriRuntime, invoke, invokeNative, listen } from "../bridge";
 
 // Authenticated provider composition. These wrappers carry only prompt content and
@@ -31,7 +34,7 @@ export interface RuntimeMcpConnectionDetails {
   capabilityBindings: Array<{
     capabilityId: "knowledge.content.search";
     toolName: string;
-    contractVersion: "fable.connected-source-search.v1";
+    contractVersion: typeof CONNECTED_SOURCE_SEARCH_CONTRACT_VERSION;
     consequence: "read";
     trust: "untrusted";
   }>;
@@ -71,7 +74,7 @@ export interface RuntimeMcpToolProposal {
 export interface RuntimePreparedMcpToolCall {
   proposalFingerprint: string;
   requiresApproval?: boolean;
-  approval: import("@fable/protocol").ApprovalRequest;
+  approval: import("@mivlet/protocol").ApprovalRequest;
 }
 
 export interface RuntimeAuthorizedMcpToolCall {
@@ -104,7 +107,7 @@ export interface RuntimeMcpServerSummary {
 
 export interface RuntimePreparedMcpServerConfiguration {
   configurationFingerprint: string;
-  approval: import("@fable/protocol").ApprovalRequest;
+  approval: import("@mivlet/protocol").ApprovalRequest;
 }
 
 export interface RuntimeCapabilityGrantProposal {
@@ -145,7 +148,7 @@ export type RuntimePreparedCapabilityGrant =
         consequence: string;
         availability: string;
       };
-      approval: import("@fable/protocol").ApprovalRequest;
+      approval: import("@mivlet/protocol").ApprovalRequest;
     };
 
 export async function prepareRuntimeCapabilityGrant(
@@ -434,7 +437,7 @@ export async function listenRuntimeMcpFrames(
   onFrame: (line: string) => void,
 ) {
   if (!hasTauriRuntime()) return null;
-  if (!/^fable:\/\/mcp\/mcp-[0-9a-f]{32}$/.test(channel)) {
+  if (!/^mivlet:\/\/mcp\/mcp-[0-9a-f]{32}$/.test(channel)) {
     throw new Error("The MCP event channel is invalid.");
   }
   try {

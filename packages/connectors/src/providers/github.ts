@@ -1,4 +1,4 @@
-import type { ConnectorCapability, ConnectorPage, ConnectorSearchItem } from "@fable/protocol";
+import type { ConnectorCapability, ConnectorPage, ConnectorSearchItem } from "@mivlet/protocol";
 import type { ConnectorAdapter, ConnectorRequest } from "../sdk";
 import {
   ProviderHttpClient,
@@ -14,7 +14,6 @@ import {
 } from "./http";
 import {
   classifyConnectorError,
-  prepareConnectorAction,
   shapeConnectorSearchRequest,
   type ProviderErrorLike
 } from "./shared";
@@ -54,41 +53,15 @@ export function shapeGitHubSearch(query: string, limit?: number) {
   return shapeConnectorSearchRequest("github", query, limit);
 }
 
-export function prepareGitHubDraftPullRequest(payload: {
-  repository: string;
-  head: string;
-  base: string;
-  title: string;
-}) {
-  return prepareConnectorAction(
-    "github",
-    "GitHub",
-    "github.draft-pull-request",
-    { ...payload, targetId: payload.repository },
-    "medium",
-    "Creates a draft pull request after Mivlet approval."
-  );
-}
-
-export function prepareGitHubComment(payload: {
-  repository: string;
-  targetId: string;
-  body: string;
-}) {
-  return prepareConnectorAction(
-    "github",
-    "GitHub",
-    "github.comment",
-    payload,
-    "medium",
-    "Publishes a comment to the selected GitHub item after Mivlet approval."
-  );
-}
-
 export function mapGitHubError(error: ProviderErrorLike) {
   return classifyConnectorError("github", error);
 }
 
+/**
+ * REST read capabilities the adapter implements. Connect grants identity and
+ * organization membership only; repository-scoped reads are not a private-repo
+ * grant and typically succeed only for public repositories.
+ */
 export const GITHUB_CAPABILITIES = [
   "identity.read", "organizations.read", "repositories.list", "repositories.search",
   "branches.read", "commits.read", "files.read", "issues.read", "pull-requests.read",
@@ -106,6 +79,18 @@ export interface GitHubAdapterOptions extends Omit<OAuthClientOptions, "connecto
   fetch?: FetchLike;
 }
 
+/**
+ * Classic GitHub OAuth App scopes Mivlet requests on Connect. This is not a
+ * GitHub App. GitHub's `repo` scope is write-capable (private repository admin,
+ * including contents and webhooks) and is not requested. Private-repository
+ * reads are not granted. Public-repository REST can still succeed with these
+ * scopes when GitHub allows the token.
+ */
+export const GITHUB_OAUTH_SCOPES = ["read:user", "read:org"] as const;
+
+/** Classic GitHub OAuth scopes that grant write power Mivlet never exposes. */
+export const GITHUB_DISALLOWED_OAUTH_SCOPES = ["repo", "public_repo", "delete_repo"] as const;
+
 /** Real GitHub REST adapter. The GitHub OAuth App exchange stays at the configured auth broker. */
 export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAdapter<JsonObject, JsonObject> {
   const authBase = new URL(options.authBaseUrl);
@@ -116,7 +101,7 @@ export function createGitHubAdapter(options: GitHubAdapterOptions): ConnectorAda
     handoffEndpoint: new URL("oauth/github/handoff", authBase).toString(),
     refreshEndpoint: new URL("oauth/github/refresh", authBase).toString(),
     revocationEndpoint: new URL("oauth/github/revoke", authBase).toString(),
-    scopes: ["read:user", "read:org", "repo"]
+    scopes: [...GITHUB_OAUTH_SCOPES]
   });
   const http = new ProviderHttpClient("github", options.apiBaseUrl ?? "https://api.github.com/", options.fetch);
   return {

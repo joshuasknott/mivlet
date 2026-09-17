@@ -1,4 +1,4 @@
-import type { HostedBrowserSnapshot } from "@fable/protocol";
+import type { HostedBrowserSnapshot } from "@mivlet/protocol";
 
 export const MAX_BROWSER_HISTORY = 32;
 

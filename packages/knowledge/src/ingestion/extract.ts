@@ -12,7 +12,7 @@
  * yml — plus their standard MIMEs.
  */
 
-import type { ConnectorSourceCandidate, SkipReason } from "@fable/protocol";
+import type { ConnectorSourceCandidate, SkipReason } from "@mivlet/protocol";
 
 /** Two megabytes — same bound as `MAX_LOCAL_FILE_BYTES` in local-files. */
 export const MAX_CANDIDATE_BYTES = 2 * 1024 * 1024;

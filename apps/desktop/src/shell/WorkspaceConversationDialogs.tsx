@@ -1,4 +1,4 @@
-import type { LocalProject } from "@fable/protocol";
+import type { LocalProject } from "@mivlet/protocol";
 import { lazy, Suspense } from "react";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import type { useLocalProjects } from "../hooks/useLocalProjects";

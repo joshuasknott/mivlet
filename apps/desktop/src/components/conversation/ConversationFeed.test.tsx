@@ -1,13 +1,13 @@
 import "@testing-library/jest-dom/vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import type { FableAgentProfile } from "@fable/protocol";
+import type { MivletAgentProfile } from "@mivlet/protocol";
 import type { NativeAgentState } from "../../hooks/useNativeAgent";
 import { ConversationFeed } from "./ConversationFeed";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
 import { MessageMarkdown } from "./MessageMarkdown";
 
-const agent: FableAgentProfile = { id: "a", name: "Chief of Staff", icon: "agent", iconColor: "#24bb77", instructions: "", modelId: "", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" };
+const agent: MivletAgentProfile = { id: "a", name: "Chief of Staff", icon: "agent", iconColor: "#24bb77", instructions: "", modelId: "", connectorIds: [], knowledgeSourceIds: [], permissionLabel: "Ask Me" };
 const initial: NativeAgentState = { transcript: "", usage: null, running: true, lastError: null, status: "streaming", recoverableAttempts: [], contextReceipts: {}, providerRoutes: {}, usageReceipts: {}, currentAttemptId: "run-1", noTransport: false, progressThreadId: "thread-1", progressPrompt: "Check the files", responseParts: [
   { id: "text-0", kind: "text", content: "I’ll check the files." },
   { id: "call-1", kind: "tool", tool: "read-file", content: "", state: "running" },

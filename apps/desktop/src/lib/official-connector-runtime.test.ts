@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { ApprovalRequest } from "@fable/protocol";
+import type { ApprovalRequest } from "@mivlet/protocol";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 const open = vi.hoisted(() => vi.fn());
 vi.mock("./connector-mcp", () => ({ openConnectorTools: open }));

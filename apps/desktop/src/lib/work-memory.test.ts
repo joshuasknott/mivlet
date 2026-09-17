@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import type { CollaborationWorkItem, MemoryControlState } from "@fable/protocol";
+import type { CollaborationWorkItem, MemoryControlState } from "@mivlet/protocol";
 import {
   memoryRecordFromWorkOutput,
   promoteWorkOutputToMemory,
