@@ -144,7 +144,6 @@
 .conversation-response { justify-items: start; padding-bottom: 22px; }
 .turn-answer { width: fit-content; max-width: min(680px, 90%); padding: 10px 14px; border-radius: 16px; background: var(--surface-hover); }
 .turn-answer .message-markdown { font-size: 14px; line-height: 1.55; }
-.desktop-frame--agents .conversation-turn .conversation-message--user > p { background: var(--ink); color: var(--surface); padding: 10px 14px; font-size: 14px; }
 .conversation-message--user { padding-bottom: 22px; }
 .message-actions { position: absolute; bottom: 0; left: 0; height: 22px; margin: 0; opacity: 0; pointer-events: none; gap: 8px; }
 .conversation-message--user .message-actions { left: auto; right: 0; }

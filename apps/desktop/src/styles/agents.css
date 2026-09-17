@@ -284,7 +284,7 @@
 .desktop-frame--agents .conversation-message { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: start; gap: 0 14px; }
 .desktop-frame--agents .conversation-message > p { grid-column: 2; grid-row: 1; width: 100%; max-width: none; margin: 0; padding: 2px 0 0; background: transparent; border-radius: 0; font-size: 15px; line-height: 1.75; }
 .desktop-frame--agents .conversation-message--user { display: flex; align-items: flex-end; }
-.desktop-frame--agents .conversation-message--user > p { width: fit-content; max-width: 88%; padding: 12px 18px; background: var(--surface-hover); border-radius: 18px 18px 4px 18px; }
+.desktop-frame--agents .conversation-message--user > p { width: fit-content; max-width: 88%; padding: 10px 14px; background: var(--ink); color: var(--surface); font-size: 14px; border-radius: 18px 18px 4px 18px; }
 .desktop-frame--agents .conversation-message__attachments { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 88%; margin: 6px 0 0; padding: 0; list-style: none; }
 .desktop-frame--agents .conversation-message__attachments li { display: grid; gap: 1px; min-width: 0; max-width: 260px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface-raised); }
 .desktop-frame--agents .conversation-message__attachments strong, .desktop-frame--agents .conversation-message__attachments small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
