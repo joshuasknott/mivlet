@@ -82,7 +82,14 @@ a deployed or production-validated service.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.
-- Each named agent can have multiple private conversations. Projects own a shared
+- Each named agent can have multiple private conversations. A leading @mention
+  assigns work to an existing workspace agent, including from an ordinary Chat.
+  The composer picker saves stable agent IDs, supports several recipients and
+  leaves quoted or inline references as references. Replies use the recipient's
+  configured provider, model and permissions. Workspace discovery, delegation and
+  task messages let any configured agent coordinate a bounded effort; a project
+  is optional. Activity shows assignments, questions, blockers and Stop controls.
+  Projects own a shared
   Chat, Team, Work, files, artifacts and decisions with an optional coordinator,
   explicit @mention routing, bounded assignments, attributed results and
   inspectable decisions. Without a coordinator the sender picks a current
@@ -90,8 +97,7 @@ a deployed or production-validated service.
   convert into projects without losing history or authorship, and explicit shares
   record recipient, owner and snapshot/live-reference semantics. Delegation uses
   the Codex and native API routes that bridge Mivlet tools; provider-owned routes
-  without that bridge remain unavailable for project work and show that
-  prerequisite.
+  without that bridge cannot coordinate agents and show that prerequisite.
 - A collapsible right navigation lists Browser, Side chat and Schedules above
   closable content tabs. Collapsing it hides the entire panel except its window-bar
   toggle; the desktop agent sidebar stays expanded. Created files, search previews and side conversations

@@ -114,6 +114,40 @@ function fixture(work: CollaborationWorkItem[]) {
 }
 
 describe("workspace execution (deterministic fixtures, no live provider)", () => {
+  it("persists explicit recipient IDs and shares request attachments only within their effort", async () => {
+    const { service, command, update } = fixture([]);
+    await service.refresh();
+    const attachment = { id: "brief", name: "brief.txt", type: "text/plain", sizeBytes: 4, transientBytes: new Uint8Array([1, 2, 3, 4]) };
+    const rootId = await service.submit("ordinary", "a", "Review this", false, [attachment], ["a", "b"]);
+    expect(command).toHaveBeenCalledWith("fixture", expect.objectContaining({ action: "start-work", conversationId: "ordinary", recipientIds: ["a", "b"] }));
+    update([
+      fixtureWork(rootId, "a", { status: "waiting", conversationId: "ordinary" }),
+      fixtureWork("child", "b", { rootId, parentId: rootId, conversationId: "ordinary" }),
+      fixtureWork("other", "c", { conversationId: "ordinary" }),
+    ]);
+    await service.refresh();
+    service.admit(agents, models, [provider], "trusted-scope");
+    expect(service.getSnapshot().sessions.find(session => session.work.id === "child")?.attachments).toEqual([attachment]);
+    expect(service.getSnapshot().sessions.find(session => session.work.id === "other")?.attachments).toEqual([]);
+    await service.dispose();
+  });
+  it("serializes the same agent across efforts while other participants work independently", async () => {
+    const first = fixtureWork("first", "a");
+    const second = fixtureWork("second", "a");
+    const peer = fixtureWork("peer", "b");
+    const { service, update } = fixture([first, second, peer]);
+    await service.refresh();
+    service.admit(agents, models, [provider], "trusted-scope");
+    expect(service.getSnapshot().sessions.map(session => session.work.id)).toEqual(["first", "peer"]);
+    const original = service.getSnapshot().sessions[0];
+    update([{ ...first, status: "completed", runIds: ["first-run"] }, second, peer]);
+    await service.refresh();
+    await service.released(original);
+    service.admit(agents, models, [provider], "trusted-scope");
+    expect(service.getSnapshot().sessions.map(session => session.work.id)).toEqual(["peer", "second"]);
+    expect(service.current(original)).toBe(false);
+    await service.dispose();
+  });
   it("keeps attachments for an unstarted retry and releases them after a durable run", async () => {
     const { service, update } = fixture([]);
     await service.refresh();
@@ -383,6 +417,13 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     expect(service.getSnapshot().sessions).toEqual([]);
     service.dispose();
   });
+  it("caps queued work by the recipient's current permissions", async () => {
+    const { service } = fixture([fixtureWork("a", "a", { permissionMode: "full-access" })]);
+    await service.refresh();
+    service.admit([{ ...agents[0], permissionLabel: "Read Only" }], models, [provider], "full-access");
+    expect(service.getSnapshot().sessions[0].permissionMode).toBe("read-only");
+  });
+
   it("delegation can only narrow the effective permission mode", () => {
     expect(
       restrictedPermission("full-access", "read-only", "trusted-scope"),

@@ -1,4 +1,5 @@
 import { WorkDetails } from "../components/work/WorkDetails";
+import { CoordinationActivity } from "../components/work/CoordinationActivity";
 import { promoteWorkOutputToMemory } from "../lib/work-memory";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type {
@@ -30,7 +31,7 @@ import type { ComposerAttachment } from "../lib/types";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import { ProfileAgentAvatar } from "../components/agents/agent-icons";
 import { agentPresence } from "../lib/agent-presence";
-import { selectResponder } from "../lib/collaboration-mentions";
+import { resolveWorkspaceMentions, workspaceMentionToken } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
@@ -255,6 +256,9 @@ export function ConversationPane({
     id: item.id, prompt: item.userRequest || item.prompt, startedAt: item.createdAt, endedAt: item.updatedAt,
     parts: item.status === "failed" ? [{ id: `${item.id}-error`, kind: "notice", error: true, content: item.reason || "This request could not start." }] : [],
   }));
+  pendingTurns.push(...work.flatMap(item => (item.steering ?? []).map(event => ({
+    id: event.id, prompt: event.text, startedAt: event.createdAt, endedAt: event.createdAt, parts: [],
+  }))));
   const liveStates = sessions
     .filter((session) => session.state)
     .map((session) => ({
@@ -321,18 +325,32 @@ export function ConversationPane({
         status: connector.status,
       })),
   ];
-  const selection = selectResponder(composer.text, room.participants, {
-    selectedRecipientId: recipientId,
-    coordinatorId: room.facilitatorId,
-  });
-  const mentions = selection?.source === "mention" ? selection : null;
-  const responder = selection
-    ? runtime.agents.find((agent) => agent.id === selection.responderId)
-    : undefined;
+  const workspaceMentions = resolveWorkspaceMentions(composer.text, runtime.agents, connected.flatMap(item => [item.id, item.name]));
+  const mentions = workspaceMentions.shouldExecute ? workspaceMentions : null;
+  const effortIds = new Set(state.data.work.filter(item => item.conversationId === room.id && !item.parentId).map(item => item.rootId));
+  const effortWork = state.data.work.filter(item => effortIds.has(item.rootId));
+  const replyTarget = composer.replyWorkId ? effortWork.find(item => item.id === composer.replyWorkId) : undefined;
+  const responder = runtime.agents.find((agent) => agent.id === (mentions?.recipientIds[0] ?? replyTarget?.agentId ?? recipientId));
   const send = async () => {
     const prompt = composerSubmissionText(composer.text, composer.attachments);
     if (!composer.ready || !prompt || submission.current || voice.isBusy)
       return;
+    if (workspaceMentions.errors.length) {
+      setError(workspaceMentions.errors.join(" ") + " Choose an agent from the @ picker.");
+      return;
+    }
+    if (workspaceMentions.recipientIds.length && !workspaceMentions.assignment) {
+      setError("Add an assignment after the agent mention before sending.");
+      return;
+    }
+    if (composer.replyWorkId && !replyTarget) {
+      setError("The assignment for this follow-up is unavailable. Choose a current assignment or send a new request.");
+      return;
+    }
+    if (replyTarget && (composer.attachments.length || (mentions && (mentions.recipientIds.length !== 1 || mentions.recipientIds[0] !== replyTarget.agentId)))) {
+      setError("This follow-up belongs to the selected assignment. Choose New request to change recipients or attach new files.");
+      return;
+    }
     if (
       recipient === "discussion" &&
       !room.facilitatorId
@@ -341,8 +359,7 @@ export function ConversationPane({
       return;
     }
     if (
-      !responder ||
-      !room.participants.some((member) => member.agentId === responder.id)
+      !responder
     ) {
       setError(
         mentions
@@ -383,13 +400,11 @@ export function ConversationPane({
             ],
           });
       }
-      await service.submit(
-        room.id,
-        responder.id,
-        prompt,
-        recipient === "discussion",
-        composer.attachments,
-      );
+      if (replyTarget) {
+        await service.reply(replyTarget.id, replyTarget.generation, prompt);
+      } else {
+        await service.submit(room.id, responder.id, prompt, recipient === "discussion", composer.attachments, mentions?.recipientIds);
+      }
       await composer.consume(composer.revision);
       scroll.toLatest();
     } catch (error) {
@@ -557,7 +572,7 @@ export function ConversationPane({
             agent={displayAgent}
             authors={authors}
             requireAuthor
-            showAuthor={room.kind === "group"}
+            showAuthor={room.kind === "group" || work.some(item => item.agentId !== room.facilitatorId)}
             state={idleAgentState}
             liveStates={liveStates}
             threadId={room.id}
@@ -579,7 +594,11 @@ export function ConversationPane({
               focus();
             }}
           />
-          {work.filter(item => item.id === selectedWorkId).map(item => <section key={item.id} ref={activityDetailsRef} tabIndex={-1} className="conversation-attention" aria-label="Activity details">
+          <CoordinationActivity work={effortWork} agents={runtime.agents}
+            onInspect={id => onOpenWork?.(id)}
+            onStop={id => { void service.stop(id).catch(error => service.report(error)); }}
+            onFollowUp={(id, name, workId) => { composer.setReplyWork(workId); composer.setText(`${workspaceMentionToken({ id, name })}, `); focus(); }} />
+          {effortWork.filter(item => item.id === selectedWorkId).map(item => <section key={item.id} ref={activityDetailsRef} tabIndex={-1} className="conversation-attention" aria-label="Activity details">
             <button type="button" onClick={() => onOpenWork?.(null)}>Close details</button>
             <WorkDetails item={item} onOpen={() => onOpenWork?.(null)}
               onStop={id => service.stop(id)}
@@ -620,26 +639,13 @@ export function ConversationPane({
           ) : null}
           {mentions ? (
             <p className="conversation-attention" role="status">
-              Addressing{" "}
-              {runtime.agents.find(
-                (agent) => agent.id === mentions.responderId,
-              )?.name ?? "the mentioned participant"}
-              {mentions.mentionedIds.length > 1
-                ? ` · also mentioned: ${mentions.mentionedIds
-                    .slice(1)
-                    .map(
-                      (id) =>
-                        runtime.agents.find((agent) => agent.id === id)?.name ??
-                        id,
-                    )
-                    .join(", ")}`
-                : ""}
-              . Each reply stays attributed to its author.
+              Assigning to {mentions.recipientIds.map(id => runtime.agents.find(agent => agent.id === id)?.name ?? id).join(", ")}. Each agent uses its own model and permissions.
             </p>
           ) : null}
         </div>
       </div>
       <div className="conversation-pane-composer">
+        {composer.replyWorkId ? <p className="conversation-attention" role="status">Following up with {replyTarget?.agentName ?? "an unavailable agent"} in this effort. <button type="button" onClick={() => composer.setReplyWork(undefined)}>New request</button></p> : null}
         {empty ? <div className="team-conversation-welcome"><h1>What would you like to work on?</h1></div> : null}
         {scroll.showLatest ? (
           <button
@@ -651,6 +657,7 @@ export function ConversationPane({
           </button>
         ) : null}
         <Composer
+          agentMentions={runtime.agents}
           onConnectProvider={onProviders}
           onSaveConclusion={latestConclusion ? () => setMemoryOpen(true) : undefined}
           composerRef={composerRef}

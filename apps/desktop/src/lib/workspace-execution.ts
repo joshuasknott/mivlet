@@ -20,6 +20,7 @@ import {
   type ProviderModelOption,
 } from "./provider-models";
 import { ExecutionApprovalRouter } from "./execution-approvals";
+import { permissionModeFor } from "./agent-run";
 
 export const activeWork = (work: CollaborationWorkItem) =>
   ["queued", "running", "waiting", "awaiting-approval"].includes(work.status);
@@ -164,6 +165,7 @@ export class WorkspaceExecution {
   private tail: Promise<unknown> = Promise.resolve();
   private reads = new Map<string, Promise<void>>();
   private attachments = new Map<string, ComposerAttachment[]>();
+  private effortAttachments = new Map<string, ComposerAttachment[]>();
   private stopping = new Set<string>();
   private external = new Map<string, () => Promise<void>>();
   private disposed = false;
@@ -238,6 +240,12 @@ export class WorkspaceExecution {
   }
   private accept(data: CollaborationSnapshot) {
     if (this.disposed) return;
+    for (const rootId of this.effortAttachments.keys()) {
+      const effort = data.work.filter(work => work.rootId === rootId);
+      if (effort.length && effort.every(work => ["completed", "cancelled"].includes(work.status))) {
+        this.effortAttachments.delete(rootId);
+      }
+    }
     for (const [id, cancel] of this.external) {
       const item = data.work.find((work) => work.id === id);
       if (item && !activeWork(item))
@@ -283,15 +291,20 @@ export class WorkspaceExecution {
   steer(id: string, expectedGeneration: number, text: string) {
     return this.command({ action: "steer-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
   }
+  reply(id: string, expectedGeneration: number, text: string) {
+    return this.command({ action: "reply-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
+  }
   async submit(
     conversationId: string,
     agentId: string,
     prompt: string,
     discussion: boolean,
     attachments: ComposerAttachment[],
+    recipientIds?: string[],
   ) {
     const id = `work-${crypto.randomUUID()}`;
     this.attachments.set(id, [...attachments]);
+    this.effortAttachments.set(id, [...attachments]);
     try {
       await this.command({
         action: "start-work",
@@ -300,11 +313,13 @@ export class WorkspaceExecution {
         agentId,
         prompt,
         discussion,
+        recipientIds,
         attachments: composerAttachmentRefs(attachments),
       });
       return id;
     } catch (error) {
       this.attachments.delete(id);
+      this.effortAttachments.delete(id);
       throw error;
     }
   }
@@ -411,8 +426,9 @@ export class WorkspaceExecution {
         permissionMode: restrictedPermission(
           permissionMode,
           work.permissionMode,
+          permissionModeFor(profile.permissionLabel),
         ),
-        attachments: this.attachments.get(work.id) ?? [],
+        attachments: this.attachments.get(work.id) ?? (work.parentId ? this.effortAttachments.get(work.rootId) : undefined) ?? [],
         cancelled: false,
         started: false,
         approvalIds: new Set(),
@@ -546,6 +562,7 @@ export class WorkspaceExecution {
     this.approvals.cancelPending();
     this.listeners.clear();
     this.attachments.clear();
+    this.effortAttachments.clear();
     for (const { id } of targets) this.stopping.delete(id);
   }
 }

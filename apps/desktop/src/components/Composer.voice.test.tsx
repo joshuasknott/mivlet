@@ -110,6 +110,42 @@ describe("Composer dictation controls", () => {
     expect(props.onComposerChange).toHaveBeenCalledWith("@browser ");
     expect(props.onSubmit).not.toHaveBeenCalled();
   });
+  it("offers workspace agents with stable-ID chips and keyboard navigation", () => {
+    const props = propsFor("idle", {
+      composerValue: "@te",
+      agentMentions: [
+        { id: "test", name: "Test" },
+        { id: "test-two", name: "Test" },
+      ],
+    });
+    const view = render(<Composer {...props} />);
+    expect(screen.getByRole("listbox", { name: "Workspace agents" })).toBeInTheDocument();
+    expect(screen.getAllByRole("option")).toHaveLength(2);
+    const input = view.container.querySelector('[contenteditable="true"]')!;
+    fireEvent.keyDown(input, { key: "ArrowDown" });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(props.onComposerChange).toHaveBeenCalledWith("@[Test](agent:test-two) ");
+  });
+  it("completes an @ token at the caret and preserves the text after it", () => {
+    const props = propsFor("idle", {
+      composerValue: "Before @te after",
+      agentMentions: [{ id: "test", name: "Test" }],
+    });
+    const view = render(<Composer {...props} />);
+    const input = view.container.querySelector('[contenteditable="true"]')!;
+    props.composerRef.current!.setSelectionRange(10, 10);
+    fireEvent.mouseUp(input);
+    expect(screen.getByRole("listbox", { name: "Workspace agents" })).toBeInTheDocument();
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(props.onComposerChange).toHaveBeenCalledWith("Before @[Test](agent:test) after");
+  });
+  it("dismisses the workspace picker on Escape without changing the draft", () => {
+    const props = propsFor("idle", { composerValue: "@te", agentMentions: [{ id: "test", name: "Test" }] });
+    const view = render(<Composer {...props} />);
+    fireEvent.keyDown(view.container.querySelector('[contenteditable="true"]')!, { key: "Escape" });
+    expect(screen.queryByRole("listbox", { name: "Workspace agents" })).toBeNull();
+    expect(props.onComposerChange).not.toHaveBeenCalled();
+  });
   it("requires the recording upload decision and blocks typed submission while reviewing", () => {
     const props = propsFor("reviewing", { voiceReview: { recordingId: "recording", providerLabel: "OpenAI", model: "gpt-4o-mini-transcribe", durationMs: 4_000, sizeBytes: 1_024, mediaType: "audio/webm", maxDurationMs: 120_000 }, onAuthorizeVoice: vi.fn() });
     const view = render(<Composer {...props} />);

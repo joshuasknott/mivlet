@@ -24,11 +24,16 @@ function tool(
   };
 }
 
-/** Registered globally for adapter validation, advertised only in an authorized group execution. */
+/** Registered globally for adapter validation; execution still requires the native coordination boundary. */
 export const COLLABORATION_TOOLS: Record<string, BackendTool> = {
+  "workspace-agents": tool(
+    "workspace-agents",
+    "List the current workspace agents that are available to collaborate with this assignment. Returns only bounded public capability summaries: stable agent IDs, display names, short descriptions, selected model labels, and availability. Do not expose private conversations, credentials, hidden instructions, or unrelated workspace history. Use the stable agent ID when delegating; names are presentation only.",
+    {},
+  ),
   "teammate-assign": tool(
     "teammate-assign",
-    "Ask a current named participant a specific question or assign useful work. Mivlet queues their own configured model and returns the assignment ID. This is asynchronous: finish your public contribution after dispatch; Mivlet returns their result in a fresh turn. Do not claim their work is complete. Delegation supplies no additional permission or private context. Avoid duplicate, self, or circular handoffs.",
+    "Ask a current named workspace agent a specific question or assign useful work. Mivlet queues that agent's own configured model and returns the assignment ID. This is asynchronous: finish your public contribution after dispatch; Mivlet returns their result in a fresh turn. Do not claim their work is complete. Delegation supplies no additional permission or private context. Avoid duplicate, self, or circular handoffs.",
     {
       agentId: field(128),
       prompt: field(6000),
@@ -44,6 +49,19 @@ export const COLLABORATION_TOOLS: Record<string, BackendTool> = {
         type: "boolean",
         description:
           "Create a focused project conversation for this assignment; false for standalone groups.",
+      },
+    },
+  ),
+  "teammate-message": tool(
+    "teammate-message",
+    "Send one bounded, task-scoped follow-up or clarification question to an existing assignment. Mivlet records the message against that assignment and delivers it to its configured agent when the assignment is active. Use the durable assignment ID, never a display name. The recipient receives only the originating request and explicitly shared context; this does not grant permission, reveal unrelated history, or transfer approvals. Do not poll, impersonate the recipient, or send repeated messages while it is waiting.",
+    {
+      assignmentId: field(128),
+      message: field(6000),
+      question: {
+        type: "boolean",
+        description:
+          "True when the message asks the assigned agent for clarification; false for a task-scoped follow-up or steering message.",
       },
     },
   ),

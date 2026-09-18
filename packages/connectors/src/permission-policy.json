@@ -72,7 +72,9 @@
     "readLikeAllowed": "This read-like action is allowed by the active permission profile."
   },
   "toolEffects": {
+    "workspace-agents": "coordination",
     "teammate-assign": "coordination",
+    "teammate-message": "coordination",
     "project-record": "coordination",
     "team-await-user": "coordination",
     "read-file": "local-read",

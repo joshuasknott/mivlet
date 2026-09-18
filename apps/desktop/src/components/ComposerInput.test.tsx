@@ -9,6 +9,24 @@ const connectors = [
   { id: "gmail", name: "Gmail" },
 ];
 describe("connector mention input", () => {
+  it("renders workspace agent mentions as stable-ID chips and preserves the token", () => {
+    const token = "@[Renamed](agent:agent-1)";
+    render(
+      <ComposerInput
+        inputRef={createRef()}
+        value={`Ask ${token} to review`}
+        onChange={vi.fn()}
+        onKeyDown={vi.fn()}
+        placeholder="Message"
+        connectors={[]}
+        agentMentions={[{ id: "agent-1", name: "Current Name" }]}
+      />,
+    );
+    const input = screen.getByRole("textbox");
+    expect(input).toHaveTextContent("Ask Current Name to review");
+    expect(input.querySelector(".agent-mention")).toHaveAttribute("data-mention", token);
+  });
+
   it("renders inline chips while selection and dictation use canonical text offsets", () => {
     const ref = createRef<ComposerInputHandle>();
     const { rerender } = render(

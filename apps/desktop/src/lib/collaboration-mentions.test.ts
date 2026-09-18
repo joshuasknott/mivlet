@@ -1,79 +1,62 @@
 import { describe, expect, it } from "vitest";
 import {
-  mentionedAgentIds,
-  resolveMentionResponder,
-  selectResponder,
+  displayWorkspaceMentions,
+  resolveWorkspaceMentions,
+  workspaceMentionToken,
 } from "./collaboration-mentions";
 
-const participants = [
-  { agentId: "lead", name: "Ada" },
-  { agentId: "research", name: "Researcher" },
-  { agentId: "review", name: "Ada Lovelace" },
-];
+describe("workspace assignment mentions", () => {
+  const agents = [
+    { id: "test", name: "Test" },
+    { id: "test-two", name: "Test" },
+    { id: "research", name: "Researcher" },
+  ];
 
-describe("explicit @mentions", () => {
-  it("resolves a named participant in appearance order", () => {
-    expect(
-      mentionedAgentIds("Please ask @Researcher and @Ada Lovelace.", participants),
-    ).toEqual(["research", "review"]);
-  });
-
-  it("is case-insensitive and prefers the longest participant name", () => {
-    expect(mentionedAgentIds("@ada lovelace review this", participants)).toEqual([
-      "review",
-    ]);
-    expect(mentionedAgentIds("ping @ADA now", participants)).toEqual(["lead"]);
-  });
-
-  it("ignores unknown tokens, email addresses and plugin mentions", () => {
-    expect(
-      mentionedAgentIds("mail me at ada@example.com about @not-a-participant", participants),
-    ).toEqual([]);
-    expect(mentionedAgentIds("@connector-id should not route", participants)).toEqual(
-      [],
-    );
-  });
-
-  it("selects the first mention as the exact responder without a coordinator", () => {
-    expect(
-      resolveMentionResponder("Hey @Researcher, then @Ada.", participants),
-    ).toEqual({ responderId: "research", mentionedIds: ["research", "lead"] });
-    expect(resolveMentionResponder("No one named", participants)).toBeNull();
-  });
-
-  it("applies baseline responder selection without broadcasting", () => {
-    expect(
-      selectResponder("No names here", participants, {
-        selectedRecipientId: "review",
-      }),
-    ).toEqual({
-      responderId: "review",
-      mentionedIds: [],
-      source: "selected",
+  it("persists a selected recipient by stable ID and allows renames", () => {
+    const token = workspaceMentionToken({ id: "test", name: "Old Name" });
+    expect(resolveWorkspaceMentions(`${token} review this`, [{ ...agents[0], name: "Renamed" }])).toMatchObject({
+      recipientIds: ["test"],
+      assignment: "review this",
+      shouldExecute: true,
     });
-    expect(
-      selectResponder("No names here", participants, {
-        coordinatorId: "lead",
-      }),
-    ).toEqual({
-      responderId: "lead",
-      mentionedIds: [],
-      source: "coordinator",
+    const escaped = workspaceMentionToken({ id: "bracket", name: "A]gent" });
+    expect(resolveWorkspaceMentions(`${escaped} inspect`, [{ id: "bracket", name: "A]gent" }]).shouldExecute).toBe(true);
+  });
+
+  it("fails closed for ambiguous, removed, quoted, or reference-only recipients", () => {
+    expect(resolveWorkspaceMentions("@Test review this", agents).shouldExecute).toBe(false);
+    expect(resolveWorkspaceMentions("@missing review this", agents).errors).toHaveLength(1);
+    expect(resolveWorkspaceMentions("@[Test](agent:missing review this", agents).errors).toHaveLength(1);
+    expect(resolveWorkspaceMentions('"@research review this"', agents).shouldExecute).toBe(false);
+    expect(resolveWorkspaceMentions("@research", agents).shouldExecute).toBe(false);
+    expect(resolveWorkspaceMentions("@tes review this", agents).errors).toHaveLength(1);
+  });
+
+  it("resolves exact multiword names without prefix guessing", () => {
+    const named = [{ id: "ada", name: "Ada Lovelace" }];
+    expect(resolveWorkspaceMentions("@Ada Lovelace inspect", named).recipientIds).toEqual(["ada"]);
+    expect(resolveWorkspaceMentions("@Ad inspect", named).shouldExecute).toBe(false);
+  });
+
+  it("accepts several distinct leading recipients", () => {
+    const result = resolveWorkspaceMentions("@test-two @research compare these", agents);
+    expect(result.recipientIds).toEqual(["test-two", "research"]);
+    expect(result.assignment).toBe("compare these");
+    expect(result.shouldExecute).toBe(true);
+  });
+
+  it("keeps known plugin references from becoming invalid agent recipients", () => {
+    expect(resolveWorkspaceMentions("@computer open the page", agents, ["computer"])).toMatchObject({
+      recipientIds: [],
+      errors: [],
+      shouldExecute: false,
     });
-    expect(
-      selectResponder("Ask @Researcher", participants, {
-        selectedRecipientId: "lead",
-        coordinatorId: "lead",
-      }),
-    ).toEqual({
-      responderId: "research",
-      mentionedIds: ["research"],
-      source: "mention",
-    });
-    // A coordinator-less Project Team with no explicit choice fails closed.
-    expect(selectResponder("Help", participants, {})).toBeNull();
-    expect(
-      selectResponder("Help", participants, { selectedRecipientId: "removed" }),
-    ).toBeNull();
+    expect(resolveWorkspaceMentions("@research @computer review", agents, ["computer"]).recipientIds).toEqual(["research"]);
+    expect(resolveWorkspaceMentions("@computer review", [{ id: "agent-c", name: "Computer" }], ["computer"]).errors).toHaveLength(1);
+  });
+
+  it("formats stable mentions for display while retaining escaped labels", () => {
+    expect(displayWorkspaceMentions("Ask @[Renamed](agent:test) and @[A\\]gent](agent:bracket)"))
+      .toBe("Ask @Renamed and @A]gent");
   });
 });

@@ -7,6 +7,13 @@ use crate::store::vault::{MasterKey, Vault};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+#[path = "exchange_regressions.rs"]
+mod exchange_regressions;
+#[path = "scheduling_regressions.rs"]
+mod scheduling_regressions;
+#[path = "workspace_tests.rs"]
+mod workspace_tests;
+
 const TIME: &str = "2026-09-12T10:00:00.000Z";
 
 fn store() -> Store {
@@ -338,7 +345,7 @@ fn project(ctx: &Context<'_>, project: &str, conversation: &str) -> Result<Conve
 }
 
 #[test]
-fn collaboration_direct_histories_have_distinct_identity_and_private_dispatch_fails() {
+fn collaboration_direct_histories_have_distinct_identity_and_workspace_dispatch_is_explicit() {
     fixture(&store(), |ctx| {
         for key in ["private-one", "private-two"] {
             ctx.create_room(
@@ -373,7 +380,7 @@ fn collaboration_direct_histories_have_distinct_identity_and_private_dispatch_fa
             "call",
             delegate("researcher", "Share private text")
         )
-        .is_err());
+        .is_ok());
         complete(ctx, "work-private-one", "run-one", "Private result one")?;
         bind(ctx, "work-private-two", "run-two")?;
         complete(ctx, "work-private-two", "run-two", "Private result two")?;
@@ -1739,6 +1746,7 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
                 agent_id: "lead".into(),
                 prompt: "Read the brief".into(),
                 discussion: false,
+                recipient_ids: None,
                 attachments: Some(preview.clone()),
             },
         )?;
@@ -1937,6 +1945,7 @@ fn roadmap_attachment_refs_survive_restart_review_without_replay() {
                 agent_id: "lead".into(),
                 prompt: "Read the brief".into(),
                 discussion: false,
+                recipient_ids: None,
                 attachments: Some(refs.clone()),
             },
         )?;

@@ -4,6 +4,7 @@ mod capture_summary;
 mod chats;
 mod commands;
 mod context;
+mod exchanges;
 pub(crate) mod models;
 mod schedules;
 mod work;

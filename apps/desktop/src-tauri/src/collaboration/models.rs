@@ -125,6 +125,14 @@ pub struct Work {
     pub captured_context: Option<CapturedWorkContext>,
     #[serde(default)]
     pub steering: Vec<WorkSteering>,
+    /// Task-scoped agent traffic is separate from user steering and therefore
+    /// can never be interpreted as new user authority.
+    #[serde(default)]
+    pub messages: Vec<TaskMessage>,
+    #[serde(default)]
+    pub delivered_message_count: u32,
+    #[serde(default)]
+    pub delivered_steering_count: u32,
     #[serde(default = "default_permission")]
     pub permission_mode: String,
     #[serde(default)]
@@ -141,6 +149,20 @@ pub struct Work {
     pub parent_id: Option<String>,
     pub agent_id: String,
     pub agent_name: String,
+    /// True when this assignment was addressed explicitly by stable workspace
+    /// agent ID. Explicit recipients do not become conversation members; the
+    /// originating conversation remains the only context boundary.
+    #[serde(default)]
+    pub workspace_recipient: bool,
+    /// Shared-resource claims are durable and scoped to this effort. They are
+    /// deliberately opaque strings; the resource owner decides the namespace.
+    #[serde(default)]
+    pub resource_claims: Vec<String>,
+    /// Stable explicit recipients captured on the effort root. This makes
+    /// retry admission compare the complete recipient set rather than infer
+    /// it from mutable dependency rows.
+    #[serde(default)]
+    pub recipient_ids: Vec<String>,
     pub prompt: String,
     pub user_request: String,
     pub status: WorkStatus,
@@ -194,6 +216,18 @@ pub struct CapturedWorkContext {
 pub struct WorkSteering {
     pub id: String,
     pub text: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TaskMessage {
+    pub id: String,
+    pub from_work_id: String,
+    pub from_agent_id: String,
+    pub to_work_id: String,
+    pub text: String,
+    pub question: bool,
     pub created_at: String,
 }
 
@@ -285,6 +319,18 @@ pub enum AgentCommand {
         dependencies: Vec<String>,
         focused: bool,
     },
+    /// Send a bounded question or follow-up to a task-scoped assignment. The
+    /// recipient sees the original frozen request and this message only.
+    Message {
+        assignment_id: String,
+        message: String,
+        question: bool,
+    },
+    /// Reserve a shared workspace resource for this effort. Claims never add
+    /// provider or filesystem authority; they only prevent silent overwrite.
+    ClaimResource {
+        resource: String,
+    },
     RecordFact {
         text: String,
         fact_kind: String,
@@ -306,6 +352,12 @@ pub enum AgentCommand {
 )]
 pub enum Command {
     SteerWork {
+        id: String,
+        expected_generation: u32,
+        event_id: String,
+        text: String,
+    },
+    ReplyWork {
         id: String,
         expected_generation: u32,
         event_id: String,
@@ -365,6 +417,11 @@ pub enum Command {
         agent_id: String,
         prompt: String,
         discussion: bool,
+        /// Stable workspace agent IDs explicitly addressed by this request.
+        /// When present, each ID receives an isolated assignment in the same
+        /// effort while conversation membership remains unchanged.
+        #[serde(default)]
+        recipient_ids: Option<Vec<String>>,
         #[serde(default)]
         attachments: Option<Vec<WorkAttachment>>,
     },
