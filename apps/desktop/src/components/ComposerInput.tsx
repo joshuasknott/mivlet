@@ -8,6 +8,10 @@ import {
 import { mentionParts, type MentionConnector } from "./ConnectorMention";
 import { connectorLogos } from "./marketplace/connector-logos";
 import { builtinPluginEntries } from "../lib/builtin-plugins";
+import {
+  workspaceMentionParts,
+  type WorkspaceMentionAgent,
+} from "../lib/collaboration-mentions";
 
 export interface ComposerInputHandle {
   focus(): void;
@@ -71,6 +75,12 @@ export function ComposerInput({
   onKeyDown,
   placeholder,
   connectors,
+  agentMentions = [],
+  mentionPickerOpen = false,
+  mentionPickerId,
+  mentionActiveId,
+  onMentionPickerDismiss,
+  onSelectionChange,
 }: {
   inputRef: RefObject<ComposerInputHandle | null>;
   value: string;
@@ -78,9 +88,21 @@ export function ComposerInput({
   onKeyDown(event: KeyboardEvent<HTMLDivElement>): void;
   placeholder: string;
   connectors: readonly MentionConnector[];
+  agentMentions?: readonly WorkspaceMentionAgent[];
+  mentionPickerOpen?: boolean;
+  mentionPickerId?: string;
+  mentionActiveId?: string;
+  onMentionPickerDismiss?: () => void;
+  onSelectionChange?: (start: number, end: number) => void;
 }) {
   const elementRef = useRef<HTMLDivElement>(null);
   const composing = useRef(false);
+  const notifySelection = () => {
+    const element = elementRef.current;
+    if (!element) return;
+    const [start, end] = selectionOffsets(element);
+    onSelectionChange?.(start, end);
+  };
   useImperativeHandle(
     inputRef,
     () => ({
@@ -100,8 +122,20 @@ export function ComposerInput({
   useLayoutEffect(() => {
     const element = elementRef.current;
     if (!element || composing.current) return;
-    const parts = mentionParts(value, connectors);
-    const mentions = parts.filter((part) => part.connector).length;
+    type RenderPart = {
+      text: string;
+      connector?: MentionConnector;
+      agent?: WorkspaceMentionAgent;
+    };
+    const parts: RenderPart[] = [];
+    for (const part of workspaceMentionParts(value, agentMentions)) {
+      if (part.agent) parts.push({ text: part.text, agent: part.agent });
+      else {
+        for (const connectorPart of mentionParts(part.text, connectors))
+          parts.push({ text: connectorPart.text, connector: connectorPart.connector });
+      }
+    }
+    const mentions = parts.filter((part) => part.connector || part.agent).length;
     if (
       plainText(element) === value &&
       element.querySelectorAll("[data-mention]").length === mentions
@@ -111,22 +145,34 @@ export function ComposerInput({
     const [start, end] = selectionOffsets(element);
     element.replaceChildren();
     for (const part of parts) {
-      if (!part.connector) {
+      if (!part.connector && !part.agent) {
         if (part.text) element.append(document.createTextNode(part.text));
         continue;
       }
       const chip = document.createElement("span");
-      chip.className = "connector-mention";
+      chip.className = part.agent ? "agent-mention" : "connector-mention";
       chip.dataset.mention = part.text;
       chip.setAttribute("contenteditable", "false");
-      const logo = builtinPluginEntries.find((entry) => entry.id === part.connector?.id)?.icon ?? connectorLogos[part.connector.id];
-      if (logo) {
+      const logo = part.connector
+        ? builtinPluginEntries.find((entry) => entry.id === part.connector?.id)?.icon ?? connectorLogos[part.connector.id]
+        : undefined;
+      if (part.agent) {
+        const icon = document.createElement(part.agent.iconImageDataUrl ? "img" : "span");
+        icon.className = "agent-mention__avatar";
+        icon.setAttribute("aria-hidden", "true");
+        if (icon instanceof HTMLImageElement) {
+          icon.src = part.agent.iconImageDataUrl!;
+          icon.alt = "";
+        }
+        icon.dataset.initial = part.agent.name.trim().slice(0, 1).toUpperCase() || "A";
+        chip.append(icon);
+      } else if (logo) {
         const icon = document.createElement("img");
         icon.src = logo;
         icon.alt = "";
         chip.append(icon);
       }
-      chip.append(document.createTextNode(part.connector.name));
+      chip.append(document.createTextNode(part.agent?.name ?? part.connector?.name ?? part.text));
       element.append(chip);
     }
     if (focused)
@@ -135,7 +181,7 @@ export function ComposerInput({
         Math.min(start, value.length),
         Math.min(end, value.length),
       );
-  }, [value, connectors]);
+  }, [value, connectors, agentMentions]);
   return (
     <div
       ref={elementRef}
@@ -145,9 +191,14 @@ export function ComposerInput({
       role="textbox"
       aria-multiline="true"
       aria-label="Universal composer"
+      aria-autocomplete="list"
+      aria-expanded={mentionPickerOpen}
+      aria-controls={mentionPickerId}
+      aria-activedescendant={mentionActiveId}
       data-placeholder={placeholder}
       onInput={(event) => {
         if (!composing.current) onChange(plainText(event.currentTarget));
+        notifySelection();
       }}
       onCompositionStart={() => {
         composing.current = true;
@@ -155,8 +206,14 @@ export function ComposerInput({
       onCompositionEnd={(event) => {
         composing.current = false;
         onChange(plainText(event.currentTarget));
+        notifySelection();
       }}
-      onKeyDown={onKeyDown}
+      onKeyDown={(event) => {
+        if (mentionPickerOpen && event.key === "Escape") onMentionPickerDismiss?.();
+        onKeyDown(event);
+      }}
+      onKeyUp={notifySelection}
+      onMouseUp={notifySelection}
       onPaste={(event) => {
         event.preventDefault();
         document.execCommand(

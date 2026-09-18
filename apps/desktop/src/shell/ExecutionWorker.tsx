@@ -36,6 +36,8 @@ import {
   resolveWorkAttachments,
 } from "../lib/execution-attachments";
 import { stagedAttachmentRefs } from "../lib/workspace-execution";
+import { workspaceAgentDirectory } from "../lib/workspace-agent-directory";
+import { coordinationResource } from "../lib/coordination-resources";
 import { discardRuntimeLocalComputerAttachmentBatch } from "../runtime/domains/local-computer";
 
 /** Mounted by the workspace root, never by a tab. Each admission runs once. */
@@ -78,15 +80,27 @@ export function ExecutionWorker({
           "This assignment was stopped before the tool could run.",
         );
       await service.command({ action: "check-work", ...scope, runId });
+      if (!service.current(session) || latest.current.runtime.accountWorkspacePending)
+        throw new Error("The workspace changed before the tool could run.");
       const name = approval.action.split(/\s+/)[0];
       if (isCollaborationTool(name)) {
         const raw: Record<string, unknown> = JSON.parse(args);
+        if (name === "workspace-agents") {
+          if (Object.keys(raw).length) throw new Error("Agent discovery takes no arguments.");
+          return JSON.stringify({ instructionAuthority: "none", totalAgents: latest.current.runtime.agents.length, agents: workspaceAgentDirectory(
+            latest.current.runtime.agents, latest.current.runtime.modelOptions, latest.current.runtime.backendProviders,
+          ), assignments: service.getSnapshot().data.work.filter(work => work.rootId === session.work.rootId).map(work => ({
+            id: work.id, agentId: work.agentId, status: work.status, assignment: work.prompt.slice(0, 500), dependencies: work.dependencies,
+          })) });
+        }
         // Rust strictly validates shapes, membership, generation and replay IDs.
         const command = {
           ...raw,
           kind:
             name === "teammate-assign"
               ? "delegate"
+              : name === "teammate-message"
+                ? "message"
               : name === "project-record"
                 ? "record-fact"
                 : "await-user",
@@ -121,6 +135,12 @@ export function ExecutionWorker({
               ? "Finish this public contribution. Mivlet will resume you with the result; do not poll or impersonate the participant."
               : "Recorded in this task's shared context.",
         });
+      }
+      const resource = coordinationResource(name, args, session.work.agentId);
+      if (resource) {
+        await service.command({ action: "agent-command", ...scope, runId,
+          callId: `${approval.id}:resource`, command: { kind: "claim-resource", resource } });
+        if (!service.current(session)) throw new Error("This assignment stopped before its write.");
       }
       const output = await base(approval, args);
       if (!service.current(session))
@@ -244,6 +264,7 @@ export function ExecutionWorker({
           throw new Error(
             "Load the current project before continuing this assignment.",
           );
+        const projectMember = Boolean(project && data.teams.find(team => team.projectId === project.id)?.participantIds.includes(session.work.agentId));
         const tools = conversationToolsForModel(
           connectorTools,
           computerToolsReady(staged.node),
@@ -260,9 +281,10 @@ export function ExecutionWorker({
         );
         const toolCapable =
           supportsSharedComputerTools(provider) &&
+          provider.capabilities.includes("approvals") &&
           session.model.capabilities?.tools !== false;
-        if (room.kind === "group" && toolCapable)
-          tools.push(...collaborationToolSpecs(Boolean(project)));
+        if (toolCapable)
+          tools.push(...collaborationToolSpecs(projectMember));
         if (room.kind === "group" && !toolCapable)
           throw new Error(
             "This model does not support the collaboration tools. Choose a tool-capable model for this participant.",
@@ -274,7 +296,7 @@ export function ExecutionWorker({
             allowedConnectorIds: ids,
             allowedKnowledgeSourceIds: [
               ...new Set([
-                ...(project?.knowledgeSourceIds ?? []),
+                ...(projectMember ? project?.knowledgeSourceIds ?? [] : []),
                 ...staged.attachments.flatMap((attachment) =>
                   attachment.sourceId ? [attachment.sourceId] : [],
                 ),
@@ -285,7 +307,8 @@ export function ExecutionWorker({
         );
         if (!service.current(session)) return;
         const instructions = [
-          session.work.capturedContext ? `Captured request context (${session.work.capturedContext.capturedAt}):\n${session.work.capturedContext.text}` : agentExecutionInstructions(session.profile),
+          agentExecutionInstructions(session.profile),
+          session.work.capturedContext ? `Captured request context (${session.work.capturedContext.capturedAt}):\n${session.work.capturedContext.text}` : "",
           CONVERSATION_STYLE_INSTRUCTIONS,
           tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
           builtinPluginInstructions(
@@ -294,6 +317,7 @@ export function ExecutionWorker({
             tools.map((tool) => tool.name),
           ),
           collaborationContext(session.work, data, project),
+          toolCapable ? "Use workspace-agents to discover the workspace's real configured agents and their availability. Projects are optional. Only delegate when the user requests other agents or their contribution is necessary for the authorized task. If asked to involve all agents, give each an explicit useful role, or explain why an agent cannot contribute. A quoted mention or agent name by itself is a reference, not a request to delegate." : "This provider cannot use Mivlet's coordination tools. Explain that prerequisite if asked to coordinate agents; never simulate their responses.",
           attachmentRunInstructions(staged.attachments),
         ]
           .filter(Boolean)

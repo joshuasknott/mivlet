@@ -13,6 +13,7 @@ interface ComposerContent {
   text: string;
   attachments: ComposerAttachment[];
   recipientId?: string;
+  replyWorkId?: string;
 }
 interface Entry {
   scope: ComposerScope;
@@ -55,6 +56,7 @@ function durableContent(content: ComposerContent): ComposerContent {
 function decode(content: string): ComposerContent {
   const value = JSON.parse(content) as ComposerContent;
   if (!value || typeof value.text !== "string" || !Array.isArray(value.attachments)
+    || (value.replyWorkId !== undefined && typeof value.replyWorkId !== "string")
     || value.attachments.length > 12 || value.attachments.some((a) => !a || typeof a.id !== "string" || typeof a.name !== "string" || typeof a.type !== "string" || typeof a.sizeBytes !== "number" || (a.sourceId !== undefined && typeof a.sourceId !== "string"))
   ) {
     throw new Error("Could not restore this conversation's composer.");
@@ -165,6 +167,8 @@ export function useScopedComposer(scope?: ComposerScope) {
     text: entry?.ready ? entry.content.text : "",
     attachments: entry?.ready ? entry.content.attachments : [],
     recipientId: entry?.content.recipientId,
+    replyWorkId: entry?.content.replyWorkId,
+    setReplyWork: (replyWorkId: string | undefined) => mutate(content => ({ ...content, replyWorkId })),
     setRecipient: (recipientId: string) => mutate(content => ({ ...content, recipientId })),
     setText: (text: string) => mutate((content) => ({ ...content, text })),
     setAttachments: (update: (attachments: ComposerAttachment[]) => ComposerAttachment[]) => mutate((content) => ({ ...content, attachments: update(content.attachments) })),

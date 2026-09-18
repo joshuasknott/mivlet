@@ -31,6 +31,36 @@ The expected result is the request: nothing in the record overwrites
 
 ## Execution ownership
 
+Workspace agent mentions use this same execution owner and native repository.
+`start-work.recipientIds` contains explicitly resolved stable workspace IDs;
+it does not change conversation or project membership. The composer persists
+selected mentions as `@[label](agent:id)` and displays them as avatar chips.
+Exact pasted names must resolve uniquely. Only a leading address followed by an
+assignment dispatches to a mentioned agent; quotes, inline references and an
+agent name alone do not. Removed or ambiguous recipients fail visibly.
+
+Supported model routes receive `workspace-agents`, `teammate-assign`, and
+`teammate-message` in ordinary conversations as well as project conversations.
+Discovery returns profile identity, model availability and skill titles, never
+private instructions, credentials or conversation history. Each assignment uses
+its recipient's instructions and native access checks. Agent messages are
+durable task data and are never stored as user steering. Questions wake the
+addressed assignment at a safe turn boundary, with the existing effort's turn,
+depth and token limits. A lead is an ordinary agent, not a separate runtime.
+
+Activity is an expandable disclosure in the originating conversation. It shows
+attributed assignments and exchanges, detailed failures, individual cancellation
+and Stop effort. Files keep their existing access checks; native durable write
+reservations additionally prevent concurrent assignments from silently replacing
+the same resource. Opaque connector writes reserve the connected service
+conservatively. Reservations never convey approval or filesystem access.
+
+Follow up selects an existing assignment and persists its ID with the Chat draft.
+`reply-work` records an idempotent user steering event, so a question can resume
+in the same effort. Running provider attempts finish their current turn before
+seeing the reply. Interrupted work and unknown external outcomes still use the
+existing explicit Continue/Reconcile flow; replying does not replay old tools.
+
 `WorkspaceExecution` is an app-lifetime service created at the workspace root
 and shared through subscription snapshots. `ExecutionWorker` mounts once per
 admitted session at the workspace root, never inside a tab. Closing views,

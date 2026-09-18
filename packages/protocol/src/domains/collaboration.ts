@@ -66,6 +66,16 @@ export interface WorkOutput {
 
 export interface CapturedWorkContext extends Extract<ContextShare, { mode: "snapshot" }> { version: 1 }
 export interface WorkSteering { id: string; text: string; createdAt: string }
+/** Agent-authored data, never user steering or additional permission. */
+export interface TaskMessage {
+  id: string;
+  fromWorkId: string;
+  fromAgentId: string;
+  toWorkId: string;
+  text: string;
+  question: boolean;
+  createdAt: string;
+}
 /** Durable reference for one file or input attached to a request. */
 export interface WorkAttachment {
   id: string;
@@ -85,6 +95,9 @@ export interface CollaborationWorkItem {
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
   capturedContext?: CapturedWorkContext;
   steering?: WorkSteering[];
+  messages?: TaskMessage[];
+  deliveredMessageCount?: number;
+  deliveredSteeringCount?: number;
   /** Durable attachment references recorded at submission and refreshed at dispatch. */
   attachments?: WorkAttachment[];
   /** Where the request came from. Absent legacy Work predates origins (chat). */
@@ -98,6 +111,12 @@ export interface CollaborationWorkItem {
   parentId?: string;
   agentId: string;
   agentName: string;
+  /** Task-scoped workspace participation never grants conversation membership. */
+  workspaceRecipient?: boolean;
+  /** Immutable explicit recipients used to compare retries of the submission. */
+  recipientIds?: string[];
+  /** Native durable reservations; these convey no resource access. */
+  resourceClaims?: string[];
   prompt: string;
   /** Original user instruction retained separately from delegated contributions. */
   userRequest: string;
@@ -184,6 +203,7 @@ export interface CollaborationSnapshot {
 /** Exact native operation inputs. Agent operations additionally require a live bound attempt. */
 export type CollaborationCommand =
   | { action: "steer-work"; id: string; expectedGeneration: number; eventId: string; text: string }
+  | { action: "reply-work"; id: string; expectedGeneration: number; eventId: string; text: string }
   | { action: "open-main-chat"; agentId: string }
   | {
       action: "create-conversation";
@@ -244,6 +264,8 @@ export type CollaborationCommand =
       agentId: string;
       prompt: string;
       discussion: boolean;
+      /** Explicit workspace recipients; IDs come from the composer, never model text. */
+      recipientIds?: string[];
       /** Composer-level attachment references captured with the request. */
       attachments?: WorkAttachment[];
     }
@@ -299,6 +321,8 @@ export type CollaborationCommand =
   | { action: "save-layout"; layout: ConversationLayout };
 
 export type CollaborationAgentCommand =
+  | { kind: "message"; assignmentId: string; message: string; question: boolean }
+  | { kind: "claim-resource"; resource: string }
   | {
       kind: "delegate";
       agentId: string;

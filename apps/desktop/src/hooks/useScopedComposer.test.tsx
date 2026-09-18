@@ -44,6 +44,23 @@ describe("useScopedComposer", () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it("persists follow-up assignment identity with the conversation draft and clears it when sent", async () => {
+    const currentScope = scope("lead", "reply-room");
+    const first = renderHook(() => useScopedComposer(currentScope));
+    await act(async () => {});
+    act(() => { first.result.current.setReplyWork("assignment-a"); first.result.current.setText("The UK market"); });
+    await act(async () => first.result.current.flush());
+    expect(JSON.parse(mocks.drafts.get(composerScopeKey(currentScope))!.content).replyWorkId).toBe("assignment-a");
+    const duplicate = renderHook(() => useScopedComposer(currentScope));
+    await act(async () => {});
+    expect(duplicate.result.current.replyWorkId).toBe("assignment-a");
+    const separate = renderHook(() => useScopedComposer(scope("lead", "other-reply-room")));
+    await act(async () => {});
+    expect(separate.result.current.replyWorkId).toBeUndefined();
+    await act(async () => first.result.current.consume(first.result.current.revision));
+    expect(duplicate.result.current.replyWorkId).toBeUndefined();
+  });
+
   it("shares recipient, text and one submission lock across duplicate views, while another conversation stays private", async () => {
     const first = renderHook(() => useScopedComposer(scope("chief", "same-room")));
     const second = renderHook(() => useScopedComposer(scope("chief", "same-room")));
