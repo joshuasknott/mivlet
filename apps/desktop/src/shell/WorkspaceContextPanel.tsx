@@ -1,3 +1,4 @@
+import { WorkspaceLibrary } from "../components/navigation/WorkspaceLibrary";
 import { Suspense } from "react";
 import {
   PanelArtifact,
@@ -110,6 +111,7 @@ export function WorkspaceContextPanel({
           </p>
         );
       }}
+      library={<WorkspaceLibrary key={workspaceId} workspaceId={workspaceId} agents={runtime.agents} onOpen={nav.setPanelRequest} />}
       sideChats={
         navContext && navContext.kind !== "work" ? (
           <SideChatList

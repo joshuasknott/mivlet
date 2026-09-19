@@ -2,12 +2,7 @@ import type {
   CollaborationCommand,
   CollaborationSnapshot,
   ConversationRoom,
-  KnowledgeScope,
-  MemoryControlState,
-  MemoryRecord,
 } from "@mivlet/protocol";
-import { redactSecretTextOrOmit } from "@mivlet/protocol";
-import { loadRuntimeMemoryState, saveRuntimeMemoryState } from "../runtime/domains/memory";
 
 /**
  * Conversation-domain service for the durable main/Side Chat model. The shell's
@@ -174,95 +169,4 @@ export function deleteSideChat(
     id: room.id,
     expectedRevision: room.revision,
   });
-}
-
-/** Baseline Memory interface. P6 owns its internals; P3 only promotes records. */
-export interface MemoryPromotionPorts {
-  load(): Promise<MemoryControlState | null>;
-  save(state: MemoryControlState): Promise<MemoryControlState | null>;
-}
-
-export const runtimeMemoryPorts: MemoryPromotionPorts = {
-  load: loadRuntimeMemoryState,
-  save: saveRuntimeMemoryState,
-};
-
-export interface ConversationConclusionInput {
-  conversation: Pick<ConversationRoom, "id" | "title">;
-  title: string;
-  value: string;
-  /** Narrow scopes only: a promoted conclusion never becomes account-global. */
-  scope: { level: "thread" | "agent" | "project"; id: string };
-  promotedAt: string;
-}
-
-function conclusionScope(
-  scope: ConversationConclusionInput["scope"],
-): KnowledgeScope {
-  switch (scope.level) {
-    case "thread":
-      return { level: "thread", threadId: scope.id };
-    case "agent":
-      return { level: "agent", agentId: scope.id };
-    case "project":
-      return { level: "project", projectId: scope.id };
-  }
-}
-
-/**
- * Promotion is a deliberate user action: exactly one approved record with
- * retained provenance enters the selected scope. Transcript text is never
- * summarized or promoted automatically.
- */
-export async function promoteConversationConclusion(
-  ports: MemoryPromotionPorts,
-  input: ConversationConclusionInput,
-): Promise<MemoryRecord> {
-  const title = redactSecretTextOrOmit(input.title.trim());
-  const value = redactSecretTextOrOmit(input.value.trim());
-  if (!title || !value) {
-    throw new Error("Add a title and the conclusion before saving it to Memory.");
-  }
-  if (input.title.trim().length > 120 || input.value.trim().length > 2_000) {
-    throw new Error(
-      "Use a title up to 120 characters and a conclusion up to 2,000 characters.",
-    );
-  }
-  const state = await ports.load();
-  if (!state) {
-    throw new Error("Memory is unavailable. Open the installed app and retry.");
-  }
-  if (state.disabled) {
-    throw new Error(
-      "Memory is disabled. Enable it in Settings before promoting a conclusion.",
-    );
-  }
-  const record: MemoryRecord = {
-    id: `memory-chat-${crypto.randomUUID()}`,
-    kind: "fact",
-    title,
-    value,
-    source: `Promoted from “${input.conversation.title}”`,
-    freshness: "Promoted now",
-    approved: true,
-    pinned: false,
-    scope: conclusionScope(input.scope),
-    confidence: 1,
-    provenance: {
-      origin: "chat",
-      sourceId: input.conversation.id,
-      note: `You promoted a conclusion from ${input.conversation.title}.`,
-    },
-    approvalState: "approved",
-    createdAt: input.promotedAt,
-    updatedAt: input.promotedAt,
-  };
-  const saved = await ports.save({
-    disabled: state.disabled,
-    records: [record, ...state.records],
-  });
-  if (!saved) {
-    throw new Error("Mivlet could not save this conclusion to Memory.");
-  }
-  return record;
 }

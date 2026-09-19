@@ -98,8 +98,10 @@ a deployed or production-validated service.
   record recipient, owner and snapshot/live-reference semantics. Delegation uses
   the Codex and native API routes that bridge Mivlet tools; provider-owned routes
   without that bridge cannot coordinate agents and show that prerequisite.
-- A collapsible right navigation lists Browser, Side chat and Schedules above
-  closable content tabs. Collapsing it hides the entire panel except its window-bar
+- A collapsible right panel starts with centred Library, Browser, Side chat and
+  Schedules navigation. Each destination replaces the menu; Back returns to it.
+  Library lists saved agent workspace files with search and scoped previews.
+  Open documents and side conversations retain closable content tabs. Collapsing it hides the entire panel except its window-bar
   toggle; the desktop agent sidebar stays expanded. Created files, search previews and side conversations
   open alongside the main chat. Text, Markdown and images preview locally;
   PDF and Office files retain their native external-open flow. Explicit web-link

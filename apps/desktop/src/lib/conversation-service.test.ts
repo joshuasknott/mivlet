@@ -3,14 +3,12 @@ import type {
   CollaborationCommand,
   CollaborationSnapshot,
   ConversationRoom,
-  MemoryControlState,
 } from "@mivlet/protocol";
 import {
   createSideChat,
   deleteSideChat,
   mainChatForAgent,
   partitionSideChats,
-  promoteConversationConclusion,
   projectMainChat,
   renameSideChat,
   resolveMainChat,
@@ -18,13 +16,7 @@ import {
   setSideChatArchived,
   sideChatsFor,
   type ConversationCommandPort,
-  type MemoryPromotionPorts,
 } from "./conversation-service";
-
-vi.mock("../runtime/domains/memory", () => ({
-loadRuntimeMemoryState: vi.fn(),
-saveRuntimeMemoryState: vi.fn()
-}));
 
 const room = (over: Partial<ConversationRoom> = {}): ConversationRoom => ({
   id: "room",
@@ -294,155 +286,5 @@ describe("Side Chat lifecycle commands", () => {
     await expect(deleteSideChat(fake, side)).rejects.toThrow(
       "Reload before editing",
     );
-  });
-});
-
-describe("deliberate Memory promotion", () => {
-  const emptyState: MemoryControlState = {
-    disabled: false,
-    records: [
-      {
-        id: "existing",
-        kind: "preference",
-        title: "Existing",
-        value: "Keep",
-        source: "You",
-        freshness: "Today",
-        approved: true,
-        pinned: false,
-      },
-    ],
-  };
-
-  function ports(
-    state: MemoryControlState | null = emptyState,
-  ): MemoryPromotionPorts & { saved: MemoryControlState[] } {
-    const saved: MemoryControlState[] = [];
-    return {
-      saved,
-      load: async () => state,
-      save: async (next) => {
-        saved.push(next);
-        return next;
-      },
-    };
-  }
-
-  it("records one approved conclusion with narrow scope and provenance", async () => {
-    const sink = ports();
-    const record = await promoteConversationConclusion(sink, {
-      conversation: side,
-      title: "Deadline",
-      value: "Use the two week deadline.",
-      scope: { level: "agent", id: "lead" },
-      promotedAt: "2026-04-01T00:00:00.000Z",
-    });
-    expect(record.approved).toBe(true);
-    expect(record.kind).toBe("fact");
-    expect(record.scope).toEqual({ level: "agent", agentId: "lead" });
-    expect(record.scope && "threadId" in record.scope).toBe(false);
-    expect(record.provenance).toMatchObject({
-      origin: "chat",
-      sourceId: "side-lead",
-    });
-    expect(sink.saved).toHaveLength(1);
-    expect(sink.saved[0].records[0]).toEqual(record);
-    expect(sink.saved[0].records[1].id).toBe("existing");
-  });
-
-  it("scrubs secret-shaped conclusions before they are saved", async () => {
-    const leaked = "sk-12345678901234567890abc123";
-    const sink = ports();
-    const record = await promoteConversationConclusion(sink, {
-      conversation: side,
-      title: "Deploy token",
-      value: `Keep the launch key ${leaked} in the vault.`,
-      scope: { level: "agent", id: "lead" },
-      promotedAt: "2026-04-01T00:00:00.000Z",
-    });
-    expect(record.value).toContain("Keep the launch key");
-    expect(record.value).not.toContain(leaked);
-    expect(record.value).toContain("[REDACTED]");
-    expect(sink.saved[0].records[0].value).not.toContain(leaked);
-  });
-
-  it("keeps thread and project scopes exact", async () => {
-    const threadSink = ports();
-    const threadRecord = await promoteConversationConclusion(threadSink, {
-      conversation: side,
-      title: "Note",
-      value: "Only here.",
-      scope: { level: "thread", id: "side-lead" },
-      promotedAt: "2026-04-01T00:00:00.000Z",
-    });
-    expect(threadRecord.scope).toEqual({
-      level: "thread",
-      threadId: "side-lead",
-    });
-    const projectRecord = await promoteConversationConclusion(ports(), {
-      conversation: projectSide,
-      title: "Decision",
-      value: "Ship it.",
-      scope: { level: "project", id: "project" },
-      promotedAt: "2026-04-01T00:00:00.000Z",
-    });
-    expect(projectRecord.scope).toEqual({
-      level: "project",
-      projectId: "project",
-    });
-  });
-
-  it("refuses empty, oversized, disabled, unavailable and unsaved memory", async () => {
-    await expect(
-      promoteConversationConclusion(ports(), {
-        conversation: side,
-        title: " ",
-        value: "text",
-        scope: { level: "agent", id: "lead" },
-        promotedAt: "now",
-      }),
-    ).rejects.toThrow("Add a title");
-    await expect(
-      promoteConversationConclusion(ports(), {
-        conversation: side,
-        title: "Title",
-        value: "x".repeat(2_001),
-        scope: { level: "agent", id: "lead" },
-        promotedAt: "now",
-      }),
-    ).rejects.toThrow("2,000 characters");
-    await expect(
-      promoteConversationConclusion(
-        ports({ disabled: true, records: [] }),
-        {
-          conversation: side,
-          title: "Title",
-          value: "Value",
-          scope: { level: "agent", id: "lead" },
-          promotedAt: "now",
-        },
-      ),
-    ).rejects.toThrow("Memory is disabled");
-    await expect(
-      promoteConversationConclusion(ports(null), {
-        conversation: side,
-        title: "Title",
-        value: "Value",
-        scope: { level: "agent", id: "lead" },
-        promotedAt: "now",
-      }),
-    ).rejects.toThrow("Memory is unavailable");
-    await expect(
-      promoteConversationConclusion(
-        { load: async () => emptyState, save: async () => null },
-        {
-          conversation: side,
-          title: "Title",
-          value: "Value",
-          scope: { level: "agent", id: "lead" },
-          promotedAt: "now",
-        },
-      ),
-    ).rejects.toThrow("could not save");
   });
 });
