@@ -20,7 +20,6 @@ function stubRuntime(overrides: Partial<ShellRuntime> = {}): ShellRuntime {
     refreshConnector: vi.fn().mockResolvedValue(undefined),
     loadConnectorAccounts: vi.fn().mockResolvedValue(undefined),
     switchConnectorAccount: vi.fn().mockResolvedValue(undefined),
-    prepareConnectorAction: vi.fn().mockResolvedValue(undefined),
     backendProviders: [],
     connectedBackendIds: [],
     connectBackendWithVerify: vi.fn(async (providerId: string) => ({
