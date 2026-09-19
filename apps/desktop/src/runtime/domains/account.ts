@@ -7,7 +7,9 @@ import type { RuntimeAdapter } from "../ports";
  * optional; changing the account tears down and restarts the native process. */
 export interface AccountRuntimePort {
   loadIdentityStatus(): Promise<IdentityStatus | null>;
-  beginIdentitySignIn(): Promise<IdentityStatus | null>;
+  beginIdentitySignIn(
+    mode?: "sign-in" | "sign-up",
+  ): Promise<IdentityStatus | null>;
   beginIdentityRecovery(): Promise<IdentityStatus | null>;
   refreshIdentity(): Promise<IdentityStatus | null>;
   signOutIdentity(): Promise<IdentityStatus | null>;
@@ -37,8 +39,10 @@ function createAccountPort(adapter: RuntimeAdapter): AccountRuntimePort {
         };
       }
     },
-    beginIdentitySignIn: () =>
-      native ? invoke("identity_begin_sign_in") : Promise.resolve(null),
+    beginIdentitySignIn: (mode = "sign-in") =>
+      native
+        ? invoke("identity_begin_sign_in", { mode })
+        : Promise.resolve(null),
     beginIdentityRecovery: () =>
       native ? invoke("identity_begin_recovery") : Promise.resolve(null),
     refreshIdentity: () =>
@@ -69,8 +73,9 @@ function accountPort() {
 
 export const loadRuntimeIdentityStatus = () =>
   accountPort().loadIdentityStatus();
-export const beginRuntimeIdentitySignIn = () =>
-  accountPort().beginIdentitySignIn();
+export const beginRuntimeIdentitySignIn = (
+  mode: "sign-in" | "sign-up" = "sign-in",
+) => accountPort().beginIdentitySignIn(mode);
 export const beginRuntimeIdentityRecovery = () =>
   accountPort().beginIdentityRecovery();
 export const refreshRuntimeIdentity = () => accountPort().refreshIdentity();

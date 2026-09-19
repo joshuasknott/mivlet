@@ -43,13 +43,12 @@ describe("account entry", () => {
   it("starts with login and signup account entry and no setup wizard", () => {
     render(<OnboardingPage {...props()} />);
     expect(
-      screen.getByRole("heading", { name: "Welcome to Mivlet" }),
+      screen.getByRole("heading", { name: "Start using Mivlet" }),
     ).toHaveFocus();
-    expect(screen.getByText("Your personal AI workspace")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Log in" })).toHaveClass(
       "og-primary-button",
     );
-    expect(screen.getByRole("button", { name: "Sign up" })).toHaveClass(
+    expect(screen.getByRole("button", { name: "Create an account" })).toHaveClass(
       "og-secondary-button",
     );
     expect(screen.queryByLabelText(/Onboarding step/)).toBeNull();
@@ -58,17 +57,19 @@ describe("account entry", () => {
     ).toBeNull();
   });
 
-  it.each(["Log in", "Sign up"] as const)(
+  it.each(["Log in", "Create an account"] as const)(
     "opens %s sign-in without treating completion as workspace authority",
     async (entry) => {
       const user = userEvent.setup();
       const input = props();
       render(<OnboardingPage {...input} />);
       await user.click(screen.getByRole("button", { name: entry }));
-      expect(input.onSignIn).toHaveBeenCalledWith();
+      expect(input.onSignIn).toHaveBeenCalledWith(
+        entry === "Create an account" ? "sign-up" : "sign-in",
+      );
       expect(input.onOpenWorkspace).not.toHaveBeenCalled();
       expect(
-        screen.getByRole("heading", { name: "Welcome to Mivlet" }),
+        screen.getByRole("heading", { name: "Start using Mivlet" }),
       ).toBeVisible();
       expect(screen.getByRole("status")).toHaveTextContent(
         "Sign in to continue.",
@@ -93,12 +94,12 @@ describe("account entry", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Browser sign-in could not open.",
     );
-    await user.click(screen.getByRole("button", { name: "Sign up" }));
+    await user.click(screen.getByRole("button", { name: "Create an account" }));
     expect(
-      screen.getByRole("button", { name: "Opening sign in" }),
+      screen.getByRole("button", { name: "Opening sign up" }),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Sign up" })).toBeDisabled();
-    await user.click(screen.getByRole("button", { name: "Sign up" }));
+    expect(screen.getByRole("button", { name: "Log in" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Log in" }));
     expect(onSignIn).toHaveBeenCalledTimes(2);
     await act(async () => finish());
     expect(screen.queryByRole("alert")).toBeNull();

@@ -1,27 +1,23 @@
-/* Account entry shares the workspace's quiet palette and compact scale. */
-
+/* Compact account entry, matching the browser authentication forms. */
 .og-frame {
   position: relative;
-  display: grid;
-  grid-template-rows: minmax(min-content, 1fr);
+  display: flex;
+  flex-direction: column;
   height: 100dvh;
-  min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  padding: 32px 24px;
+  padding: clamp(72px, 17vh, 180px) 24px 48px;
   color: var(--ink);
   background: var(--surface);
 }
-
 .og-center {
+  flex-shrink: 0;
   display: flex;
-  width: min(100%, 560px);
-  margin: auto;
-  padding-block: 16px;
+  width: min(100%, 396px);
+  margin-inline: auto;
   flex-direction: column;
   align-items: center;
 }
-
 .og-screen {
   display: flex;
   width: 100%;
@@ -29,125 +25,87 @@
   align-items: center;
   text-align: center;
 }
-
 .og-heading {
   display: grid;
   gap: 12px;
   justify-items: center;
 }
-
 .og-heading h1 {
   margin: 0;
   color: var(--ink);
-  font-size: clamp(28px, 3vw, 44px);
-  font-weight: 600;
-  letter-spacing: -0.035em;
-  line-height: 1.2;
+  font-size: 24px;
+  font-weight: 400;
+  letter-spacing: -0.025em;
+  line-height: 1.3;
 }
-
 .og-heading h1:focus {
   outline: none;
 }
-
 .og-heading p {
-  max-width: 480px;
   margin: 0;
   color: var(--ink-muted);
-  font-size: 20px;
-  line-height: 1.55;
+  font-size: 14px;
+  line-height: 1.5;
 }
-
 .og-account-actions {
   display: flex;
-  width: min(100%, 396px);
+  width: 100%;
   flex-direction: column;
-  align-items: stretch;
   gap: 12px;
+  margin-top: 38px;
 }
-
-.og-account-actions {
-  margin-top: 58px;
-}
-
 .og-primary-button,
 .og-secondary-button {
   display: inline-flex;
   width: 100%;
-  min-height: 60px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
-  gap: 12px;
-  padding: 0 22px;
-  color: var(--surface);
-  background: var(--ink);
-  border: 1px solid var(--ink);
-  border-radius: 12px;
-
-  font-size: 20px;
-  font-weight: 600;
-  letter-spacing: -0.01em;
+  gap: 10px;
+  padding: 10px 20px;
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, var(--surface));
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 15px;
+  font-weight: 400;
   transition:
     background 120ms ease,
-    transform 120ms ease,
     opacity 120ms ease;
 }
-
-.og-primary-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ink) 90%, var(--surface));
+.og-primary-button:hover:not(:disabled),
+.og-secondary-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--ink) 10%, var(--surface));
 }
-
-.og-primary-button:active:not(:disabled) {
-  transform: translateY(1px);
-}
-
 .og-primary-button:disabled,
 .og-secondary-button:disabled {
   cursor: default;
   opacity: 0.5;
 }
-
-.og-secondary-button {
-  color: var(--ink);
-  background: transparent;
-  border-color: color-mix(in srgb, var(--ink) 40%, var(--surface));
-}
-
-.og-secondary-button:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--ink) 5%, var(--surface));
-}
-
 .og-primary-button:focus-visible,
 .og-secondary-button:focus-visible {
-  outline: 0;
-  box-shadow: var(--focus-ring);
+  outline: 2px solid var(--ink-muted);
+  outline-offset: 3px;
 }
-
 .og-brand.mivlet-brand--compact {
-  width: 110px;
-  margin-bottom: 42px;
+  width: 68px;
+  margin-bottom: 24px;
 }
 .og-feedback {
-  max-width: 480px;
+  max-width: 396px;
   margin: 18px 0 0;
   color: var(--ink-muted);
-  font-size: var(--text-12);
+  font-size: 12px;
   line-height: 1.5;
 }
-
 .og-feedback--danger {
   color: var(--destructive);
 }
-
-@media (max-width: 620px) {
+@media (max-width: 480px) {
   .og-frame {
-    padding: 32px 20px;
-  }
-
-  .og-heading h1 {
-    font-size: 27px;
+    padding: 72px 24px 32px;
   }
 }
-
 @media (prefers-reduced-motion: reduce) {
   .og-primary-button,
   .og-secondary-button {
