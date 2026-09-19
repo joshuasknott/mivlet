@@ -94,6 +94,12 @@ For Rust changes, use the affected tests plus:
 
 UI changes need browser/native inspection of affected flows and relevant viewport sizes. Packaging, native Windows control, authentication, deployment, and live smoke tests are separate evidence. Wrangler dry-runs establish packaging and bindings only. Report skipped checks and missing prerequisites without describing them as passes.
 
+Use `pnpm tauri:dev` for interactive desktop work. Its launcher owns the Vite
+server so account-driven native restarts cannot tear down the UI server. The
+server stays available after the native process exits; stop the development
+session with Ctrl+C when finished. A debug executable launched alone still
+requires that development server.
+
 `verify:build` builds the embedded host before the test gate runs its actual
 Windows executable. That compile runs on Linux as part of `pnpm check`; it is
 not a substitute for `pnpm test:host` on Windows. The fixture tests use the

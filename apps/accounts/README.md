@@ -9,12 +9,26 @@ The native app still owns OAuth state, PKCE and the loopback callback.
 ## Local development
 
 Copy `.env.example` to `.env.local` and set the public key for the desktop's
-existing Clerk instance. Then run `pnpm --filter @mivlet/accounts dev`.
+existing Clerk instance, plus `VITE_CLERK_ISSUER` and
+`VITE_CLERK_OAUTH_CLIENT_ID` from the desktop configuration. Then run
+`pnpm --filter @mivlet/accounts dev`.
 Open `/sign-in`, `/sign-up` or `/oauth-consent` (the last requires a real signed-in
 OAuth request). Missing configuration fails closed. `/complete` tells users to
 return to the desktop; it does not claim that a native workspace was authorized.
 
 Run `pnpm --filter @mivlet/accounts build` and `pnpm --filter @mivlet/accounts test`.
+
+When `apps/accounts/.env.local` exists, `pnpm tauri:dev` starts this site on
+`127.0.0.1:1421` alongside the desktop and sets the native account entry URL.
+Do not run a second account dev server on that port at the same time.
+
+Desktop Log in and Sign up enter `/desktop/start` with their distinct mode and
+the native-generated OAuth request. This route validates the issuer, client,
+PKCE parameters and literal loopback callback before ending only the active
+Mivlet browser session and opening the chosen Google/email form. Verification
+and OAuth callback pages never repeat that session reset. Switching forms
+preserves the original authorization continuation. Tokens are still exchanged
+and validated by the native process, not by this page.
 
 ## Connecting the account site
 
@@ -24,14 +38,22 @@ hosting-platform equivalents). Use a domain under the same registrable domain
 as the production Clerk instance. Keep the Clerk Account Portal enabled as a
 fallback until the new flow is verified.
 
+Set `MIVLET_CLERK_ACCOUNT_ENTRY_URL=https://<account-host>/desktop/start` in the
+desktop launch/build environment. Production refuses HTTP entry URLs. Without
+this setting, Log in uses Clerk's supported `login consent` prompt; Sign up
+reports the missing account-site configuration instead of silently logging in.
+The local development site is not a published authentication service.
+
 In the **same Clerk instance** used by the native app, configure Paths to use
 the new host for Sign in (`/sign-in`), Sign up (`/sign-up`) and OAuth consent
 (`/oauth-consent`). Configure the development host separately when testing.
 Keep OAuth application consent enabled. Start an actual native request and
 verify both Allow and Cancel and the return to the native loopback callback.
 Do not hardcode OAuth query parameters, scopes, identities or redirect URLs in
-the page. Do not override SDK force-redirect URLs: the pending OAuth flow must
-retain its own continuation.
+the page. The validated desktop entry preserves `authorization_url` separately
+and supplies it through the form's post-authentication redirect props. Do not
+put the OAuth endpoint in `redirect_url`: Clerk can enter OAuth immediately
+and replace the selected registration form with its hosted sign-in page.
 
 The supported **Application settings → Branding → Remove “Secured by Clerk”**
 setting controls branding; it is not hidden with CSS. This requires an eligible

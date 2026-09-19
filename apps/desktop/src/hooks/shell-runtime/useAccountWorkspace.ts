@@ -154,10 +154,10 @@ export function useAccountWorkspace(options: {
     if (hasTauriRuntime()) void refreshAccountWorkspace(false);
   }, [refreshAccountWorkspace]);
 
-  const signInIdentity = useCallback(async () => {
+  const signInIdentity = useCallback(async (mode: "sign-in" | "sign-up" = "sign-in") => {
     setIdentityPending(true);
     try {
-      const status = await beginRuntimeIdentitySignIn();
+      const status = await beginRuntimeIdentitySignIn(mode);
       const next =
         status ??
         (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);

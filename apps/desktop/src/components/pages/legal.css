@@ -1,0 +1,73 @@
+.mivlet-legal-footer {
+  margin-top: auto;
+  padding-top: 64px;
+  width: min(100%, 396px);
+  align-self: center;
+  flex-shrink: 0;
+  text-align: center;
+  color: #73736f;
+  font-size: 12px;
+  line-height: 1.8;
+}
+.mivlet-legal-footer button,
+.mivlet-legal-footer a {
+  color: inherit;
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 4px 0;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.mivlet-legal-footer :focus-visible,
+.mivlet-legal-close:focus-visible {
+  outline: 2px solid #55554e;
+  outline-offset: 3px;
+}
+.mivlet-legal-dialog {
+  box-sizing: border-box;
+  width: min(680px, calc(100% - 32px));
+  max-height: calc(100dvh - 48px);
+  padding: 32px;
+  border: 1px solid #d9d9d4;
+  border-radius: 12px;
+  background: #f7f7f5;
+  color: #171715;
+}
+.mivlet-legal-dialog::backdrop {
+  background: #0005;
+}
+.mivlet-legal-dialog form {
+  display: flex;
+  justify-content: flex-end;
+}
+.mivlet-legal-close {
+  padding: 10px 16px;
+  border: 1px solid #d9d9d4;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+}
+.mivlet-legal-document {
+  max-width: 640px;
+  margin: 0 auto;
+  color: #171715;
+  text-align: left;
+  font-size: 14px;
+  line-height: 1.7;
+}
+.mivlet-legal-document h1 {
+  font-size: 28px;
+  font-weight: 500;
+  line-height: 1.3;
+}
+.mivlet-legal-document h2 {
+  margin-top: 28px;
+  font-size: 17px;
+  font-weight: 500;
+}
+.mivlet-legal-notice {
+  color: #73613b;
+}
