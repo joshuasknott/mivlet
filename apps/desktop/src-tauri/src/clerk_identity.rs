@@ -8,7 +8,10 @@
 //! resolved outside this provider boundary.
 
 use std::collections::BTreeMap;
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{LazyLock, Mutex, MutexGuard};
+
+mod attempt;
+static LOGIN_ATTEMPTS: LazyLock<attempt::Attempts> = LazyLock::new(attempt::Attempts::default);
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
@@ -1439,7 +1442,11 @@ async fn exchange_code(
     code: &str,
 ) -> Result<TokenResponse, IdentityError> {
     crate::ensure_rustls_provider();
-    let response = reqwest::Client::new()
+    let response = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| identity_error("unknown", "Could not prepare account connection.", true))?
         .post(&pending.token_endpoint)
         .form(&[
             ("grant_type", "authorization_code"),
@@ -1475,7 +1482,11 @@ async fn refresh_tokens(
     refresh_token: &str,
 ) -> Result<TokenResponse, IdentityError> {
     crate::ensure_rustls_provider();
-    let response = reqwest::Client::new()
+    let response = reqwest::Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(30))
+        .build()
+        .map_err(|_| identity_error("unknown", "Could not prepare account connection.", true))?
         .post(token_endpoint)
         .form(&[
             ("grant_type", "refresh_token"),
@@ -1817,11 +1828,11 @@ fn account_entry_url(
                 false,
             ));
         }
-        // Clerk supports login, not select_account. Consent alone reuses the
-        // browser's previous identity without displaying authentication choices.
+        // Reuse an authenticated browser account; explicit OAuth consent still
+        // confirms the account granted to this native request.
         authorization
             .query_pairs_mut()
-            .append_pair("prompt", "login consent");
+            .append_pair("prompt", "consent");
         return Ok(authorization);
     };
     let mut entry = Url::parse(entry).map_err(|_| {
@@ -1843,8 +1854,8 @@ fn account_entry_url(
     {
         return Err(identity_error("configuration-required", "Account entry must be an HTTPS /desktop/start URL (literal loopback HTTP is allowed only in development).", false));
     }
-    // The account page clears the selected browser session before displaying
-    // either form. Requiring login again here would discard that fresh sign-in.
+    // The account page authenticates or explicitly reuses a browser account.
+    // Requiring login here would discard that completed authentication.
     authorization
         .query_pairs_mut()
         .append_pair("prompt", "consent");
@@ -1865,6 +1876,7 @@ fn account_entry_url(
 async fn begin_sign_in_with_store(
     store: &dyn IdentitySecretStore,
     mode: AccountEntryMode,
+    attempt_id: &str,
 ) -> Result<IdentityStatus, IdentityError> {
     let expected_generation = *IDENTITY_GENERATION
         .lock()
@@ -1948,6 +1960,10 @@ async fn begin_sign_in_with_store(
     store
         .set(&pending_key(&state), &encoded)
         .map_err(|message| identity_error("unknown", message, false))?;
+    let _pending_cleanup = PendingIdentityCleanup {
+        store,
+        key: pending_key(&state),
+    };
     if let Err(error) = open_browser(authorization.as_str()) {
         let _ = store.remove(&pending_key(&state));
         return Err(error);
@@ -1967,13 +1983,20 @@ async fn begin_sign_in_with_store(
         }
     };
 
-    complete_callback_with_store(store, &callback_url, Some(expected_generation)).await
+    complete_callback_with_store(
+        store,
+        &callback_url,
+        Some(expected_generation),
+        Some(attempt_id),
+    )
+    .await
 }
 
 async fn complete_callback_with_store(
     store: &dyn IdentitySecretStore,
     callback_url: &str,
     expected_generation: Option<u64>,
+    attempt_id: Option<&str>,
 ) -> Result<IdentityStatus, IdentityError> {
     let callback = Url::parse(callback_url).map_err(|_| {
         identity_error(
@@ -2087,7 +2110,11 @@ async fn complete_callback_with_store(
         userinfo_endpoint: pending.userinfo_endpoint.clone(),
     };
     let session = session_from_tokens(config.clone(), &metadata, None, tokens).await?;
-    write_session(store, &session, expected_generation)?;
+    if let Some(id) = attempt_id {
+        LOGIN_ATTEMPTS.commit(id, || write_session(store, &session, expected_generation))?;
+    } else {
+        write_session(store, &session, expected_generation)?;
+    }
     Ok(session_status(
         "signed-in",
         "Mivlet cloud identity is connected.",
@@ -2371,9 +2398,15 @@ pub async fn identity_status(_app: tauri::AppHandle) -> Result<IdentityStatus, S
 }
 
 pub(crate) async fn native_identity_status() -> Result<IdentityStatus, String> {
-    status_with_store(&NativeIdentitySecretStore)
-        .await
-        .map_err(command_message)
+    tokio::time::timeout(
+        Duration::from_secs(45),
+        status_with_store(&NativeIdentitySecretStore),
+    )
+    .await
+    .map_err(|_| {
+        "Account verification took too long. Check your connection and try again.".to_string()
+    })?
+    .map_err(command_message)
 }
 
 /// Refresh before the synchronous admission fence expires. Admission still
@@ -2440,17 +2473,48 @@ pub(crate) fn lock_native_identity_generation(
     Ok(NativeIdentityGenerationGuard { _guard: guard })
 }
 
+// Dropping a cancelled/expired future also removes its single-use PKCE secret.
+struct PendingIdentityCleanup<'a> {
+    store: &'a dyn IdentitySecretStore,
+    key: String,
+}
+impl Drop for PendingIdentityCleanup<'_> {
+    fn drop(&mut self) {
+        let _ = self.store.remove(&self.key);
+    }
+}
+
+#[tauri::command]
+pub fn identity_prepare_sign_in() -> Result<String, String> {
+    LOGIN_ATTEMPTS.prepare(random_urlsafe(32).map_err(command_message)?)
+}
+
+#[tauri::command]
+pub fn identity_cancel_sign_in(attempt_id: String) -> Result<bool, String> {
+    LOGIN_ATTEMPTS.cancel(&attempt_id)
+}
+
 #[tauri::command]
 pub async fn identity_begin_sign_in(
     app: tauri::AppHandle,
     mode: Option<AccountEntryMode>,
+    attempt_id: String,
 ) -> Result<IdentityStatus, String> {
+    let mut cancelled = LOGIN_ATTEMPTS.start(&attempt_id)?;
+    // A loaded account must never turn a Log in click into an implicit logout.
     if crate::account_session::binding().is_ok() {
-        return identity_sign_out(app).await;
+        LOGIN_ATTEMPTS.finish(&attempt_id);
+        return native_identity_status().await;
     }
-    let result = begin_sign_in_with_store(&NativeIdentitySecretStore, mode.unwrap_or_default())
-        .await
-        .map_err(command_message)?;
+    let result = tokio::select! {
+        biased;
+        _ = cancelled.changed() => Err("Sign-in cancelled. You can log in or create an account.".to_string()),
+        result = tokio::time::timeout(Duration::from_secs(360), begin_sign_in_with_store(&NativeIdentitySecretStore, mode.unwrap_or_default(), &attempt_id)) => {
+            result.map_err(|_| "Sign-in took too long. Please try again.".to_string()).and_then(|value| value.map_err(command_message))
+        }
+    };
+    LOGIN_ATTEMPTS.finish(&attempt_id);
+    let result = result?;
     if result.authentication.is_some() && matches!(result.state.as_str(), "signed-in" | "offline") {
         crate::account_session::restart(app).await;
     }
@@ -2463,14 +2527,25 @@ pub async fn identity_begin_recovery(app: tauri::AppHandle) -> Result<IdentitySt
         return identity_sign_out(app).await;
     }
     clear_session(&NativeIdentitySecretStore).map_err(command_message)?;
-    identity_begin_sign_in(app, Some(AccountEntryMode::SignIn)).await
+    identity_begin_sign_in(
+        app,
+        Some(AccountEntryMode::SignIn),
+        identity_prepare_sign_in()?,
+    )
+    .await
 }
 
 #[tauri::command]
 pub async fn identity_refresh(_app: tauri::AppHandle) -> Result<IdentityStatus, String> {
-    status_with_store(&NativeIdentitySecretStore)
-        .await
-        .map_err(command_message)
+    tokio::time::timeout(
+        Duration::from_secs(45),
+        status_with_store(&NativeIdentitySecretStore),
+    )
+    .await
+    .map_err(|_| {
+        "Account verification took too long. Check your connection and try again.".to_string()
+    })?
+    .map_err(command_message)
 }
 
 #[tauri::command]
@@ -2486,7 +2561,7 @@ pub async fn identity_sign_out(app: tauri::AppHandle) -> Result<IdentityStatus, 
 #[cfg(test)]
 mod tests {
     #[test]
-    fn account_entry_preserves_mode_and_requires_fresh_authentication() {
+    fn account_entry_preserves_mode_without_repeating_authentication() {
         let authorize = url::Url::parse(
             "https://clerk.example/oauth/authorize?state=fixture&code_challenge=fixture",
         )
@@ -2504,7 +2579,7 @@ mod tests {
                 .find(|(key, _)| key == "prompt")
                 .unwrap()
                 .1,
-            "login consent"
+            "consent"
         );
         assert!(super::account_entry_url(
             authorize.clone(),
@@ -2919,6 +2994,7 @@ mod tests {
         let error = complete_callback_with_store(
             &store,
             "http://127.0.0.1:1234/callback?state=state_1&error=access_denied",
+            None,
             None,
         )
         .await

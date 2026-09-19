@@ -201,6 +201,7 @@ export interface ShellRuntime {
   runtimeSnapshotError: string | null;
   runtimeSnapshotReady: boolean;
   accountWorkspacePending: boolean;
+  cancelIdentitySignIn: () => Promise<void>;
   signInIdentity: (mode?: "sign-in" | "sign-up") => Promise<void>;
   recoverIdentity: () => Promise<void>;
   refreshIdentity: () => Promise<void>;

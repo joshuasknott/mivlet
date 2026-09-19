@@ -284,6 +284,8 @@ pub fn run() {
             native_api::list_backend_models,
             native_api::verify_backend_credential,
             clerk_identity::identity_status,
+            clerk_identity::identity_prepare_sign_in,
+            clerk_identity::identity_cancel_sign_in,
             clerk_identity::identity_begin_sign_in,
             clerk_identity::identity_begin_recovery,
             clerk_identity::identity_refresh,

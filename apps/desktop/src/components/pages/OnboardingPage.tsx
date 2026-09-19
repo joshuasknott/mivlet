@@ -13,18 +13,25 @@ export function OnboardingPage({
   identityPending,
   workspaceMessage,
   onSignIn,
+  onCancelSignIn,
+  onSignOut,
   onOpenWorkspace,
 }: {
   identityStatus: IdentityStatus;
   identityPending: boolean;
   workspaceMessage: string;
   onSignIn: (mode: "sign-in" | "sign-up") => void | Promise<void>;
+  onCancelSignIn: () => Promise<void>;
+  onSignOut: () => Promise<void>;
   onOpenWorkspace: () => Promise<void>;
 }) {
   const [pending, setPending] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState("");
   const [entryMode, setEntryMode] = useState<"sign-in" | "sign-up">("sign-in");
+  const [cancelling, setCancelling] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const request = useRef(0);
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const actionPending = useRef(false);
@@ -41,6 +48,7 @@ export function OnboardingPage({
   const enter = async (mode: "sign-in" | "sign-up" = "sign-in") => {
     if (identityPending || actionPending.current) return;
     actionPending.current = true;
+    const generation = ++request.current;
     setEntryMode(mode);
     setPending(true);
     setAttempted(true);
@@ -49,14 +57,47 @@ export function OnboardingPage({
       if (signedIn) await onOpenWorkspace();
       else await onSignIn(mode);
     } catch (cause) {
+      if (generation !== request.current) return;
       setError(
         cause instanceof Error
           ? cause.message
           : "Your account could not open. Try again.",
       );
     } finally {
+      if (generation === request.current) {
+        actionPending.current = false;
+        setPending(false);
+      }
+    }
+  };
+
+  const back = async () => {
+    setCancelling(true);
+    setError("");
+    try {
+      await onCancelSignIn();
+      ++request.current;
       actionPending.current = false;
       setPending(false);
+      headingRef.current?.focus();
+    } catch (cause) {
+      setError(
+        cause instanceof Error
+          ? cause.message
+          : "Could not cancel sign-in. Try again.",
+      );
+    } finally {
+      setCancelling(false);
+    }
+  };
+  const signOut = async () => {
+    setSigningOut(true);
+    try {
+      await onSignOut();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not sign out.");
+    } finally {
+      setSigningOut(false);
     }
   };
 
@@ -76,21 +117,31 @@ export function OnboardingPage({
           </div>
           <div className="og-account-actions">
             {signedIn ? (
-              <button
-                type="button"
-                className="og-primary-button"
-                disabled={busy}
-                onClick={() => void enter()}
-              >
-                {busy ? (
-                  <>
-                    <Spinner size={17} className="og-spinner" /> Opening
-                    workspace
-                  </>
-                ) : (
-                  "Try opening workspace again"
-                )}
-              </button>
+              <>
+                <button
+                  type="button"
+                  className="og-primary-button"
+                  disabled={busy}
+                  onClick={() => void enter()}
+                >
+                  {busy ? (
+                    <>
+                      <Spinner size={17} className="og-spinner" /> Opening
+                      workspace
+                    </>
+                  ) : (
+                    "Try opening workspace again"
+                  )}
+                </button>
+                <button
+                  type="button"
+                  className="og-secondary-button"
+                  disabled={signingOut}
+                  onClick={() => void signOut()}
+                >
+                  {signingOut ? "Returning to login…" : "Back to login"}
+                </button>
+              </>
             ) : (
               <>
                 <button
@@ -101,8 +152,8 @@ export function OnboardingPage({
                 >
                   {busy && entryMode === "sign-in" ? (
                     <>
-                      <Spinner size={17} className="og-spinner" /> Opening sign
-                      in
+                      <Spinner size={17} className="og-spinner" /> Waiting for
+                      login
                     </>
                   ) : (
                     "Log in"
@@ -116,13 +167,23 @@ export function OnboardingPage({
                 >
                   {busy && entryMode === "sign-up" ? (
                     <>
-                      <Spinner size={17} className="og-spinner" /> Opening sign
-                      up
+                      <Spinner size={17} className="og-spinner" /> Waiting for
+                      sign-up
                     </>
                   ) : (
                     "Create an account"
                   )}
                 </button>
+                {busy && (
+                  <button
+                    type="button"
+                    className="og-secondary-button"
+                    disabled={cancelling}
+                    onClick={() => void back()}
+                  >
+                    {cancelling ? "Cancelling…" : "Back"}
+                  </button>
+                )}
               </>
             )}
           </div>

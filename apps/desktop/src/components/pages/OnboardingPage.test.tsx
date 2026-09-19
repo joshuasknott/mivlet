@@ -34,6 +34,8 @@ function props(
     identityPending: false,
     workspaceMessage: "Workspace unavailable. Try again.",
     onSignIn: vi.fn().mockResolvedValue(undefined),
+    onCancelSignIn: vi.fn().mockResolvedValue(undefined),
+    onSignOut: vi.fn().mockResolvedValue(undefined),
     onOpenWorkspace: vi.fn().mockResolvedValue(undefined),
     ...overrides,
   };
@@ -48,9 +50,9 @@ describe("account entry", () => {
     expect(screen.getByRole("button", { name: "Log in" })).toHaveClass(
       "og-primary-button",
     );
-    expect(screen.getByRole("button", { name: "Create an account" })).toHaveClass(
-      "og-secondary-button",
-    );
+    expect(
+      screen.getByRole("button", { name: "Create an account" }),
+    ).toHaveClass("og-secondary-button");
     expect(screen.queryByLabelText(/Onboarding step/)).toBeNull();
     expect(
       screen.queryByRole("button", { name: /Skip|Enter Mivlet/ }),
@@ -96,7 +98,7 @@ describe("account entry", () => {
     );
     await user.click(screen.getByRole("button", { name: "Create an account" }));
     expect(
-      screen.getByRole("button", { name: "Opening sign up" }),
+      screen.getByRole("button", { name: "Waiting for sign-up" }),
     ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Log in" })).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "Log in" }));
@@ -104,6 +106,30 @@ describe("account entry", () => {
     await act(async () => finish());
     expect(screen.queryByRole("alert")).toBeNull();
     expect(screen.getByRole("button", { name: "Log in" })).toBeEnabled();
+  });
+
+  it("lets a user go back from an unfinished sign-up and start login", async () => {
+    const user = userEvent.setup();
+    let finish!: () => void;
+    const input = props({
+      onSignIn: vi
+        .fn()
+        .mockImplementationOnce(
+          () =>
+            new Promise<void>((resolve) => {
+              finish = resolve;
+            }),
+        )
+        .mockResolvedValue(undefined),
+    });
+    render(<OnboardingPage {...input} />);
+    await user.click(screen.getByRole("button", { name: "Create an account" }));
+    await user.click(screen.getByRole("button", { name: "Back" }));
+    expect(input.onCancelSignIn).toHaveBeenCalledOnce();
+    expect(screen.getByRole("button", { name: "Log in" })).toBeEnabled();
+    await user.click(screen.getByRole("button", { name: "Log in" }));
+    expect(input.onSignIn).toHaveBeenLastCalledWith("sign-in");
+    await act(async () => finish());
   });
 
   it("retries the native workspace for an authenticated account without opening provider setup", async () => {
