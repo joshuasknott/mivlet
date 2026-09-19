@@ -19,6 +19,8 @@ import type { BackendProvider, BackendVerifyResult } from "@mivlet/protocol";
 import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
 import { enabledMivletProviders } from "../../lib/provider-availability";
 import { ProviderIcon } from "../ProviderIcon";
+import { GrokBotPanel } from "./GrokBotPanel";
+import { grokBotConnection } from "@mivlet/connectors/remote-bots/grok-bot";
 import {
   additionalNativeProviderCatalog,
   providerEndpointSetup,
@@ -525,6 +527,7 @@ function ProviderConnectionFlow({
   onStatus?: (message: string) => void;
 }) {
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
+  const [remoteBotOpen, setRemoteBotOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [locallyReady, setLocallyReady] = useState<string | null>(null);
   const [locallyConfigured, setLocallyConfigured] = useState<string | null>(
@@ -696,6 +699,8 @@ function ProviderConnectionFlow({
       setFeedback(null);
     } else onClose();
   };
+
+  if (remoteBotOpen) return <GrokBotPanel onBack={() => setRemoteBotOpen(false)} />;
 
   return (
     <section
@@ -1246,6 +1251,13 @@ function ProviderConnectionFlow({
             className="provider-connection-methods"
             aria-label={`Connection methods for ${family.label}`}
           >
+            {family.id === grokBotConnection.familyId && (
+              <button type="button" className="provider-connection-method" onClick={() => setRemoteBotOpen(true)}>
+                <span className="provider-connection-method__icon"><Globe size={20} /></span>
+                <span><strong>{grokBotConnection.label}</strong><small>Connect a bridge to your existing remote Bots.</small></span>
+                <CaretRight size={18} />
+              </button>
+            )}
             {family.methods.map((method) => {
               const connected = isProviderConnected(
                 method.provider,

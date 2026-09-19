@@ -6,6 +6,10 @@
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
   "exports": {
+    "./remote-bots/*": {
+      "types": "./dist/remote-bots/*.d.ts",
+      "import": "./dist/remote-bots/*.js"
+    },
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"

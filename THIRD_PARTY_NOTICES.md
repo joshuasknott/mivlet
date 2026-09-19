@@ -25,3 +25,12 @@ license does not relicense them or grant rights to third-party trademarks.
 Package-manager dependencies are pinned in `pnpm-lock.yaml` and
 `apps/desktop/src-tauri/Cargo.lock`. Consult each dependency's included license
 before redistribution. Public source availability is not a signed binary release.
+
+## Optional Grok Bot bridge
+
+The experimental Grok Bot adapter interoperates with the operator-installed
+`codex-grok-mcp` 0.2.0-beta.8 (MIT, Copyright 2026 Fato07), pinned to commit
+`a78fa0ac876bec756e373deacbd55cb98e018e55`. Mivlet does not bundle its code or
+credentials; retain the package's LICENSE when installing. The MIT-licensed
+MaisonnatM/grok-bot source was inspected as a gateway reference; no code or
+assets from it are included. See [setup and source evidence](docs/development/grok-bot.md).

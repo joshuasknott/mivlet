@@ -1,0 +1,114 @@
+.grok-bot-panel {
+  width: 100%;
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 20px;
+  box-sizing: border-box;
+  overflow-wrap: anywhere;
+}
+.grok-bot-panel h2 {
+  font-size: 22px;
+  margin: 20px 0 12px;
+}
+.grok-bot-panel p,
+.grok-bot-panel li {
+  line-height: 1.55;
+}
+.grok-bot-panel button,
+.grok-bot-panel select,
+.grok-bot-panel textarea,
+.grok-bot-panel summary {
+  min-height: 44px;
+  font: inherit;
+}
+.grok-bot-panel button {
+  border: 1px solid var(--line);
+  background: var(--surface, #fff);
+  color: inherit;
+  border-radius: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+}
+.grok-bot-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.grok-bot-panel :focus-visible {
+  outline: 2px solid var(--accent, #3973cc);
+  outline-offset: 3px;
+}
+.grok-bot-panel label {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.grok-bot-panel select,
+.grok-bot-panel textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  color: inherit;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 10px;
+}
+.grok-bot-panel textarea {
+  resize: vertical;
+}
+.grok-bot-panel details {
+  border-block: 1px solid var(--line);
+  padding: 12px 0;
+  margin: 16px 0;
+}
+.grok-bot-panel summary {
+  cursor: pointer;
+  align-content: center;
+}
+.grok-bot-panel code {
+  display: block;
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  padding: 12px;
+  background: var(--surface-hover);
+  border-radius: 8px;
+}
+.grok-bot-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-block: 12px;
+}
+.grok-bot-history {
+  max-height: 360px;
+  overflow-y: auto;
+  border-block: 1px solid var(--line);
+}
+.grok-bot-history article {
+  padding: 12px 0;
+}
+.grok-bot-history article + article {
+  border-top: 1px solid var(--line);
+}
+.grok-bot-history p {
+  white-space: pre-wrap;
+  margin: 6px 0;
+}
+.grok-bot-history small,
+.grok-bot-note {
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.grok-bot-panel [role="alert"] {
+  color: var(--destructive);
+}
+@media (max-width: 520px) {
+  .grok-bot-panel {
+    padding: 12px;
+  }
+  .grok-bot-panel h2 {
+    font-size: 20px;
+  }
+}

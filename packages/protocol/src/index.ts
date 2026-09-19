@@ -1,4 +1,5 @@
 export * from "./domains/voice.js";
+export * from "./domains/remote-bot.js";
 export * as Spine from "./spine/index.js";
 export * from "./domains/approvals.js";
 export * from "./domains/account-cloud.js";
