@@ -1,6 +1,6 @@
 import { act, renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { loadRuntimeConversationDraft } from "../runtime/domains/conversations";
+import { loadRuntimeConversationDraft, saveRuntimeConversationDraft } from "../runtime/domains/conversations";
 import type { ComposerScope } from "./useScopedComposer";
 import { composerScopeKey, useScopedComposer } from "./useScopedComposer";
 
@@ -43,6 +43,57 @@ describe("useScopedComposer", () => {
     vi.mocked(loadRuntimeConversationDraft).mockReset().mockImplementation(async (key: string) => mocks.drafts.get(key) ?? null);
   });
   afterEach(() => vi.useRealTimers());
+
+  it("notifies matching panes without rerendering unrelated or inactive composers on each edit", async () => {
+    const first = renderHook(() => useScopedComposer(scope("chief", "shared")));
+    const sharedRender = vi.fn(() => useScopedComposer(scope("chief", "shared")));
+    const separateRender = vi.fn(() => useScopedComposer(scope("chief", "separate")));
+    const inactiveRender = vi.fn(() => useScopedComposer());
+    const shared = renderHook(sharedRender);
+    renderHook(separateRender);
+    renderHook(inactiveRender);
+    await act(async () => {});
+    sharedRender.mockClear();
+    separateRender.mockClear();
+    inactiveRender.mockClear();
+
+    for (let index = 1; index <= 20; index++) {
+      act(() => first.result.current.setText(`Draft ${index}`));
+    }
+
+    expect(shared.result.current.text).toBe("Draft 20");
+    expect(sharedRender).toHaveBeenCalledTimes(20);
+    expect(separateRender).not.toHaveBeenCalled();
+    expect(inactiveRender).not.toHaveBeenCalled();
+  });
+
+  it("notifies the saved scope after switching panes and stops listening to the previous scope", async () => {
+    const oldScope = scope("chief", "old-save");
+    const nextScope = scope("chief", "next-save");
+    const render = vi.fn(({ value }: { value: ComposerScope }) => useScopedComposer(value));
+    const pane = renderHook(render, { initialProps: { value: oldScope } });
+    const oldPane = renderHook(() => useScopedComposer(oldScope));
+    const nextPane = renderHook(() => useScopedComposer(nextScope));
+    await act(async () => {});
+    act(() => pane.result.current.setText("pending save"));
+    let rejectSave!: (error: Error) => void;
+    vi.mocked(saveRuntimeConversationDraft).mockImplementationOnce(() => new Promise((_, reject) => { rejectSave = reject; }));
+    let saving!: Promise<unknown>;
+    await act(async () => { saving = pane.result.current.flush().catch(() => undefined); });
+    pane.rerender({ value: nextScope });
+    render.mockClear();
+
+    await act(async () => { rejectSave(new Error("Could not save the old draft")); await saving; });
+    expect(oldPane.result.current.error).toBe("Could not save the old draft");
+    expect(pane.result.current.error).toBe("");
+    expect(render).not.toHaveBeenCalled();
+
+    act(() => oldPane.result.current.setText("old scope edit"));
+    expect(render).not.toHaveBeenCalled();
+    act(() => nextPane.result.current.setText("new scope edit"));
+    expect(render).toHaveBeenCalledOnce();
+    expect(pane.result.current.text).toBe("new scope edit");
+  });
 
   it("persists follow-up assignment identity with the conversation draft and clears it when sent", async () => {
     const currentScope = scope("lead", "reply-room");
