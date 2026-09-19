@@ -1,4 +1,4 @@
-import { StrictMode, type ReactNode } from "react";
+import { StrictMode, useEffect, useRef, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import {
   ClerkProvider,
@@ -17,7 +17,7 @@ import "@fontsource/inter/600.css";
 import { appearance, localization } from "./appearance";
 import { accountRoute } from "./routes";
 import { DesktopEntry } from "./DesktopEntry";
-import { desktopEntry, desktopFormUrl } from "./desktop-entry";
+import { desktopContinuation, desktopFormUrl } from "./desktop-entry";
 import symbol from "../../desktop/public/brand/mivlet-symbol-light.png";
 import "./styles.css";
 import { LegalDocument } from "../../desktop/src/components/pages/LegalDocument";
@@ -33,6 +33,32 @@ function Message({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+function CompleteDesktop({ authorizationUrl }: { authorizationUrl?: string }) {
+  const started = useRef(false);
+  useEffect(() => {
+    if (authorizationUrl && !started.current) {
+      started.current = true;
+      window.location.replace(authorizationUrl);
+    }
+  }, [authorizationUrl]);
+  return (
+    <Message
+      title={
+        authorizationUrl ? "Returning to Mivlet" : "Browser sign-in complete"
+      }
+    >
+      {authorizationUrl ? (
+        <>
+          Finishing desktop authorization…{" "}
+          <a href={authorizationUrl}>Continue to Mivlet</a>
+        </>
+      ) : (
+        "This browser session is signed in. Open Log in in Mivlet to connect it to your workspace; you can reuse this account."
+      )}
+    </Message>
+  );
+}
+
 function AccountPage() {
   const route = accountRoute(window.location.pathname);
   if (route === "desktop-entry") return <DesktopEntry />;
@@ -40,24 +66,29 @@ function AccountPage() {
   let signInUrl = "/sign-in";
   let signUpUrl = "/sign-up";
   if (
-    (route === "sign-in" || route === "sign-up") &&
-    new URLSearchParams(window.location.search).has("authorization_url")
+    route === "sign-in" ||
+    route === "sign-up" ||
+    route === "complete" ||
+    route === "consent"
   ) {
     try {
-      const entry = desktopEntry(
+      const entry = desktopContinuation(
         window.location.search,
         import.meta.env.VITE_CLERK_ISSUER?.trim() ?? "",
         import.meta.env.VITE_CLERK_OAUTH_CLIENT_ID?.trim() ?? "",
+        window.sessionStorage,
       );
-      continuation = entry.authorizationUrl;
-      signInUrl = desktopFormUrl(
-        { ...entry, mode: "sign-in" },
-        window.location.origin,
-      );
-      signUpUrl = desktopFormUrl(
-        { ...entry, mode: "sign-up" },
-        window.location.origin,
-      );
+      if (entry) {
+        continuation = entry.authorizationUrl;
+        signInUrl = desktopFormUrl(
+          { ...entry, mode: "sign-in" },
+          window.location.origin,
+        );
+        signUpUrl = desktopFormUrl(
+          { ...entry, mode: "sign-up" },
+          window.location.origin,
+        );
+      }
     } catch {
       return (
         <Message title="Account unavailable">
@@ -73,7 +104,7 @@ function AccountPage() {
           <OAuthConsent />
         </Show>
         <Show when="signed-out">
-          <RedirectToSignIn />
+          <RedirectToSignIn redirectUrl={window.location.href} />
         </Show>
       </>
     );
@@ -109,10 +140,7 @@ function AccountPage() {
         <RedirectToSignIn />
       </Show>
       <Show when="signed-in">
-        <Message title="Your account is ready">
-          Return to Mivlet to continue. If the desktop app is still waiting,
-          start Log in again there.
-        </Message>
+        <CompleteDesktop authorizationUrl={continuation} />
       </Show>
     </>
   );

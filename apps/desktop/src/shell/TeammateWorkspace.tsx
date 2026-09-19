@@ -1,4 +1,5 @@
 import { ProviderOnboardingGate } from "../components/pages/ProviderOnboardingPage";
+import { WorkspaceLoadingPage } from "../components/pages/WorkspaceLoadingPage";
 import {
   Suspense,
   useEffect,
@@ -62,11 +63,9 @@ export function TeammateWorkspace() {
     account,
     onboardingRequired: runtime.onboardingRequired,
   });
-  if (gate === "loading")
+  if (gate === "loading" || (account.accountBound && runtime.runtimeSnapshotError))
     return (
-      <main className="team-loading" role="status">
-        Opening your workspace…
-      </main>
+      <WorkspaceLoadingPage failure={runtime.runtimeSnapshotError} onRetry={runtime.reconcileAccountWorkspace} onSignOut={runtime.signOutIdentity} />
     );
   if (gate === "onboarding")
     return (
@@ -75,6 +74,8 @@ export function TeammateWorkspace() {
           identityStatus={runtime.identityStatus}
           identityPending={runtime.identityPending}
           onSignIn={(mode) => runtime.signInIdentity(mode)}
+          onCancelSignIn={runtime.cancelIdentitySignIn}
+          onSignOut={runtime.signOutIdentity}
           workspaceMessage={account.message}
           onOpenWorkspace={runtime.reconcileAccountWorkspace}
         />

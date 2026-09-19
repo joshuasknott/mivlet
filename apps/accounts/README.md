@@ -13,8 +13,8 @@ existing Clerk instance, plus `VITE_CLERK_ISSUER` and
 `VITE_CLERK_OAUTH_CLIENT_ID` from the desktop configuration. Then run
 `pnpm --filter @mivlet/accounts dev`.
 Open `/sign-in`, `/sign-up` or `/oauth-consent` (the last requires a real signed-in
-OAuth request). Missing configuration fails closed. `/complete` tells users to
-return to the desktop; it does not claim that a native workspace was authorized.
+OAuth request). Missing configuration fails closed. `/complete` resumes a validated desktop authorization saved in this tab. Without
+one, it explains that browser sign-in alone does not authorize a native workspace.
 
 Run `pnpm --filter @mivlet/accounts build` and `pnpm --filter @mivlet/accounts test`.
 
@@ -24,10 +24,11 @@ Do not run a second account dev server on that port at the same time.
 
 Desktop Log in and Sign up enter `/desktop/start` with their distinct mode and
 the native-generated OAuth request. This route validates the issuer, client,
-PKCE parameters and literal loopback callback before ending only the active
-Mivlet browser session and opening the chosen Google/email form. Verification
-and OAuth callback pages never repeat that session reset. Switching forms
-preserves the original authorization continuation. Tokens are still exchanged
+PKCE parameters and literal loopback callback. An existing browser session
+offers Continue with this account or an explicit account switch; only switching
+ends that session. Switching forms and verification callbacks preserve the
+validated authorization in tab-scoped storage for at most five minutes, without
+extending its lifetime on reload. Tokens are still exchanged
 and validated by the native process, not by this page.
 
 ## Connecting the account site
@@ -40,7 +41,7 @@ fallback until the new flow is verified.
 
 Set `MIVLET_CLERK_ACCOUNT_ENTRY_URL=https://<account-host>/desktop/start` in the
 desktop launch/build environment. Production refuses HTTP entry URLs. Without
-this setting, Log in uses Clerk's supported `login consent` prompt; Sign up
+this setting, Log in uses Clerk's supported `consent` prompt; Sign up
 reports the missing account-site configuration instead of silently logging in.
 The local development site is not a published authentication service.
 

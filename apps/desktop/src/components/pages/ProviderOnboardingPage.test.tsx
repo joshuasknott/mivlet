@@ -26,6 +26,18 @@ function runtime() {
   } as unknown as ComponentProps<typeof ProviderOnboardingGate>["runtime"];
 }
 describe("required provider onboarding", () => {
+  it("allows Back during provider sign-in without bypassing required setup", async () => {
+    const user = userEvent.setup();
+    const setup = runtime();
+    setup.backendProviders = setup.backendProviders.map((provider) => provider.id === "codex" ? { ...provider, authState: "sign-in-required" } : provider);
+    setup.startBackendBrowserLogin = vi.fn(() => new Promise<never>(() => {}));
+    render(<ProviderOnboardingGate runtime={setup}><p>Conversation workspace</p></ProviderOnboardingGate>);
+    await user.click(screen.getByRole("button", { name: "ChatGPT" }));
+    await user.click(screen.getByRole("button", { name: "Sign in with ChatGPT" }));
+    await user.click(screen.getByRole("button", { name: "Back to providers" }));
+    expect(screen.getByRole("button", { name: "ChatGPT" })).toBeVisible();
+    expect(screen.queryByText("Conversation workspace")).toBeNull();
+  });
   it("shows nine icon choices, expands providers, and does not mount chat until runtime has a usable connection", async () => {
     const user = userEvent.setup();
     const setup = runtime();

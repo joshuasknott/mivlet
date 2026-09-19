@@ -1,6 +1,7 @@
 import { toRuntimeError } from "../errors";
 import type { ExecutionAttempt, RuntimeSnapshot } from "@mivlet/protocol";
 import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
+import { readWithDeadline } from "../read-deadline";
 
 export async function loadRuntimeSnapshot(
   workspaceId = activeDataScope()?.workspaceId,
@@ -11,9 +12,12 @@ export async function loadRuntimeSnapshot(
   if (!workspaceId) return null;
 
   try {
-    return await invoke<RuntimeSnapshot | null>("load_runtime_snapshot", {
-      workspaceId,
-    });
+    return await readWithDeadline(
+      invoke<RuntimeSnapshot | null>("load_runtime_snapshot", {
+        workspaceId,
+      }),
+      "Loading your saved workspace took too long. Try again.",
+    );
   } catch (error) {
     throw toRuntimeError(error);
   }

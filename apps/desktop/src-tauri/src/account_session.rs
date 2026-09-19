@@ -78,6 +78,8 @@ pub(crate) fn public_command(command: &str) -> bool {
         command,
         "identity_status"
             | "identity_refresh"
+            | "identity_prepare_sign_in"
+            | "identity_cancel_sign_in"
             | "identity_begin_sign_in"
             | "identity_begin_recovery"
             | "identity_sign_out"

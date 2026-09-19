@@ -76,8 +76,17 @@ describe("TeammateWorkspace composition", () => {
     runtimeState.current = runtime({ accountWorkspacePending: true });
     render(<TeammateWorkspace />);
     expect(screen.getByRole("status")).toHaveTextContent(
-      "Opening your workspace…",
+      "Checking your account and loading this device’s workspace…",
     );
+  });
+
+  it("keeps a failed snapshot recoverable before provider setup or workspace entry", () => {
+    runtimeState.current = runtime({ runtimeSnapshotReady: false, runtimeSnapshotError: "Saved workspace could not load", connectedAgentBackends: [] });
+    render(<TeammateWorkspace />);
+    expect(screen.getByRole("status")).toHaveTextContent("Saved workspace could not load");
+    expect(screen.getByRole("button", { name: "Try again" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Back to login" })).toBeVisible();
+    expect(screen.queryByTestId("active-workspace")).toBeNull();
   });
 
   it("routes unbound or onboarding accounts to the lazy onboarding island", () => {

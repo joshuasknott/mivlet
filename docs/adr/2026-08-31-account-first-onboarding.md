@@ -2,24 +2,23 @@
 
 > Account-owned storage follows
 > [the roadmap baseline contract](../development/roadmap-parallel-contract.md).
-> The original installation-wide authority and mandatory provider setup were superseded.
+> The original installation-wide authority was superseded; provider setup remains required.
 
 Date: 2026-08-31
 
 Status: Accepted
 
-Updated 2026-09-15: authenticated accounts open their local workspace directly,
-without replaying onboarding or requiring provider setup to enter the app.
-Signed-out users authenticate first. A verified provider remains required for
-agent execution.
+Updated 2026-09-19: authenticated accounts must connect a usable AI provider
+before entering the workspace. Returning accounts with a usable provider open
+directly. Account login supports cancellation and retries without forcing a
+second browser login. Provider navigation remains available while connecting.
 
 ## Decision
 
-Mivlet's entry flow is account sign-in, then the account's local workspace.
-Google is the primary account entry point and email is the quiet secondary
-method; each can sign in or create an account. Provider setup and optional app
-connections remain available inside the workspace. A verified provider is
-required to execute an agent, not to enter the app.
+Mivlet's entry flow is Log in or Create an account, browser authentication,
+then required provider setup and the account's local workspace. Google and
+email authentication are available in the browser. Provider setup cannot be
+skipped; optional app connections remain available inside the workspace.
 
 Mivlet creates the default Chief of Staff in local state before first run, but
 does not mention or configure that teammate during onboarding. The teammate
@@ -45,7 +44,7 @@ Memory contains saved facts and their controls; backup, recovery, and privacy
 information are not settings sections. Dictation is in General.
 
 Connector setup is optional and lives in Plugins. Each connector keeps its
-existing authorization boundary. Removing the old onboarding stages grants
+existing authorization boundary. Navigating back through onboarding grants
 neither a connection nor permission for later actions.
 
 ## Local-first boundary

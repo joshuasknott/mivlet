@@ -3,6 +3,7 @@ import {
   desktopEntry,
   desktopFormUrl,
   openDesktopEntry,
+  desktopContinuation,
 } from "./desktop-entry";
 
 const issuer = "https://clerk.example.test";
@@ -26,6 +27,56 @@ function request(mode = "sign-up", change?: (url: URL) => void) {
 }
 
 describe("desktop account entry", () => {
+  it("reuses browser login without signing out on a desktop retry", async () => {
+    const signOut = vi.fn();
+    const navigate = vi.fn();
+    await openDesktopEntry(
+      "https://accounts.example.test/sign-in",
+      "session",
+      signOut,
+      navigate,
+      `${issuer}/oauth/authorize`,
+    );
+    expect(signOut).not.toHaveBeenCalled();
+    expect(navigate).toHaveBeenCalledWith(`${issuer}/oauth/authorize`);
+  });
+  it("recovers a lost verification query and expires it without extending on reload", () => {
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+      removeItem: (key: string) => {
+        values.delete(key);
+      },
+    };
+    const entry = desktopContinuation(
+      request(),
+      issuer,
+      "desktop",
+      storage,
+      1000,
+    );
+    expect(desktopContinuation("", issuer, "desktop", storage, 2000)).toEqual(
+      entry,
+    );
+    expect(
+      desktopContinuation(request("sign-in"), issuer, "desktop", storage, 3000)
+        ?.mode,
+    ).toBe("sign-in");
+    expect(() =>
+      desktopContinuation("", issuer, "desktop", storage, 301000),
+    ).toThrow(/expired/);
+    expect(
+      desktopContinuation("", issuer, "desktop", storage, 301001),
+    ).toBeNull();
+    desktopContinuation(request(), issuer, "desktop", storage, 302000);
+    expect(() =>
+      desktopContinuation("", "https://other.test", "desktop", storage, 303000),
+    ).toThrow();
+    expect(values.size).toBe(0);
+  });
   it("ends only the active browser session before continuing to the requested form", async () => {
     const signOut = vi.fn().mockResolvedValue(undefined);
     const navigate = vi.fn();

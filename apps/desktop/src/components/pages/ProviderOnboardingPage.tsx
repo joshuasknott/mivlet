@@ -54,7 +54,7 @@ function ProviderOnboardingPage({
           }
         }}
       >
-        {signingOut ? "Signing out…" : "Sign out"}
+        {signingOut ? "Returning to login…" : "Back to login"}
       </button>
     </main>
   );

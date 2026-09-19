@@ -77,10 +77,67 @@ export async function openDesktopEntry(
     redirectUrl: string;
   }) => Promise<void>,
   navigate: (url: string) => void,
+  authorizationUrl?: string,
 ) {
-  if (sessionId) {
+  if (sessionId && authorizationUrl) {
+    navigate(authorizationUrl);
+  } else if (sessionId) {
     await signOut({ sessionId, redirectUrl: destination });
   } else {
     navigate(destination);
   }
+}
+
+const CONTINUATION_KEY = "mivlet.desktop-continuation";
+const MAX_AGE = 5 * 60 * 1000;
+type ContinuationStore = Pick<Storage, "getItem" | "setItem" | "removeItem">;
+
+/** Verification and social callbacks can lose the custom query. Keep the
+ * validated public PKCE request in this tab only, never tokens or credentials. */
+export function desktopContinuation(
+  search: string,
+  issuer: string,
+  clientId: string,
+  storage: ContinuationStore,
+  now = Date.now(),
+) {
+  const supplied = new URLSearchParams(search).has("authorization_url");
+  try {
+    const stored = storage.getItem(CONTINUATION_KEY);
+    const previous = stored
+      ? (JSON.parse(stored) as { search: string; createdAt: number })
+      : null;
+    const query = supplied ? search : previous?.search;
+    if (!query) return null;
+    const entry = desktopEntry(query, issuer, clientId);
+    // Changing forms or reloading must not extend the native callback deadline.
+    const same =
+      previous &&
+      new URLSearchParams(previous.search).get("authorization_url") ===
+        entry.authorizationUrl;
+    const createdAt = same || !supplied ? previous?.createdAt : now;
+    if (
+      typeof createdAt !== "number" ||
+      !Number.isFinite(createdAt) ||
+      createdAt > now ||
+      now - createdAt >= MAX_AGE
+    ) {
+      storage.removeItem(CONTINUATION_KEY);
+      throw new Error(
+        "This login request expired. Return to Mivlet and start again.",
+      );
+    }
+    storage.setItem(
+      CONTINUATION_KEY,
+      JSON.stringify({ search: query, createdAt }),
+    );
+    return entry;
+  } catch (error) {
+    storage.removeItem(CONTINUATION_KEY);
+    throw error;
+  }
+}
+
+export function clearDesktopContinuation(storage: ContinuationStore) {
+  storage.removeItem(CONTINUATION_KEY);
 }

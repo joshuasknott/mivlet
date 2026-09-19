@@ -8,6 +8,8 @@ import {
 import {
   beginRuntimeIdentityRecovery,
   beginRuntimeIdentitySignIn,
+  prepareRuntimeIdentitySignIn,
+  cancelRuntimeIdentitySignIn,
   clearRuntimeAccountWorkspaceSession,
   loadRuntimeAccountWorkspaceStatus,
   loadRuntimeIdentityStatus,
@@ -36,6 +38,12 @@ export function useAccountWorkspace(options: {
     hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS,
   );
   const [identityPending, setIdentityPending] = useState(false);
+  const [identityLoading, setIdentityLoading] = useState(hasTauriRuntime());
+  const loginRef = useRef<{
+    prepared: Promise<string | null>;
+    cancelled: boolean;
+  } | null>(null);
+  const identityReadGeneration = useRef(0);
   const [accountWorkspaceStatus, setAccountWorkspaceStatus] =
     useState<AccountWorkspaceStatus>(() =>
       hasTauriRuntime()
@@ -108,7 +116,7 @@ export function useAccountWorkspace(options: {
             ? error.message
             : "Mivlet could not load account workspaces.";
         let localFallback = accountWorkspaceFallback;
-        if (hasTauriRuntime()) {
+        if (reconcile && hasTauriRuntime()) {
           try {
             // Hosted reconciliation is optional. If it fails, re-read the
             // native local status so the validated account owner survives;
@@ -139,11 +147,14 @@ export function useAccountWorkspace(options: {
   );
 
   const refreshIdentityStatus = useCallback(async () => {
+    const generation = ++identityReadGeneration.current;
     const status = await loadRuntimeIdentityStatus();
+    if (generation !== identityReadGeneration.current) return;
     setIdentityStatus(
       status ??
         (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS),
     );
+    setIdentityLoading(false);
   }, []);
 
   useEffect(() => {
@@ -154,33 +165,90 @@ export function useAccountWorkspace(options: {
     if (hasTauriRuntime()) void refreshAccountWorkspace(false);
   }, [refreshAccountWorkspace]);
 
-  const signInIdentity = useCallback(async (mode: "sign-in" | "sign-up" = "sign-in") => {
-    setIdentityPending(true);
-    try {
-      const status = await beginRuntimeIdentitySignIn(mode);
-      const next =
-        status ??
-        (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
-      setIdentityStatus(next);
-      if (next.state === "signed-in") {
-        await refreshAccountWorkspace(true);
-      }
-      setLastAction(next.message);
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : "Mivlet cloud sign-in is unavailable.";
+  const signInIdentity = useCallback(
+    async (mode: "sign-in" | "sign-up" = "sign-in") => {
+      if (loginRef.current) return;
+      ++identityReadGeneration.current;
+      const attempt = {
+        prepared: prepareRuntimeIdentitySignIn(),
+        cancelled: false,
+      };
+      loginRef.current = attempt;
+      setIdentityPending(true);
       setIdentityStatus((current) => ({
         ...current,
-        state: current.enabled ? "error" : "disabled",
-        message,
+        message:
+          "Continue in your browser. Mivlet will reopen when your account is ready.",
       }));
-      setLastAction(message);
-    } finally {
-      setIdentityPending(false);
+      try {
+        const attemptId = await attempt.prepared;
+        if (attempt.cancelled) return;
+        const status = await beginRuntimeIdentitySignIn(
+          attemptId ?? "preview",
+          mode,
+        );
+        if (attempt.cancelled || loginRef.current !== attempt) return;
+        const next =
+          status ??
+          (hasTauriRuntime()
+            ? DEFAULT_IDENTITY_STATUS
+            : PREVIEW_IDENTITY_STATUS);
+        setIdentityStatus(next);
+        if (next.state === "signed-in") {
+          await refreshAccountWorkspace(false);
+        }
+        setLastAction(next.message);
+      } catch (error) {
+        if (attempt.cancelled || loginRef.current !== attempt) return;
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Mivlet cloud sign-in is unavailable.";
+        setIdentityStatus((current) => ({
+          ...current,
+          state: current.enabled ? "error" : "disabled",
+          message,
+        }));
+        setLastAction(message);
+      } finally {
+        if (loginRef.current === attempt && !attempt.cancelled) {
+          loginRef.current = null;
+          setIdentityPending(false);
+        }
+      }
+    },
+    [refreshAccountWorkspace],
+  );
+
+  const cancelIdentitySignIn = useCallback(async () => {
+    const attempt = loginRef.current;
+    if (!attempt) return;
+    attempt.cancelled = true;
+    try {
+      const id = await attempt.prepared.catch(() => null);
+      const cancelled = !id || (await cancelRuntimeIdentitySignIn(id));
+      if (!cancelled) {
+        attempt.cancelled = false;
+        setIdentityStatus((current) => ({
+          ...current,
+          message:
+            "Your account is verified. Mivlet is reopening your workspace…",
+        }));
+        return;
+      }
+      if (loginRef.current === attempt) {
+        loginRef.current = null;
+        setIdentityPending(false);
+        setIdentityStatus((current) => ({
+          ...current,
+          message: "Sign-in cancelled. Choose Log in or Create an account.",
+        }));
+      }
+    } catch (error) {
+      attempt.cancelled = false;
+      throw error;
     }
-  }, [refreshAccountWorkspace]);
+  }, []);
 
   const recoverIdentity = useCallback(async () => {
     setIdentityPending(true);
@@ -190,7 +258,7 @@ export function useAccountWorkspace(options: {
         status ??
         (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
       setIdentityStatus(next);
-      if (next.state === "signed-in") await refreshAccountWorkspace(true);
+      if (next.state === "signed-in") await refreshAccountWorkspace(false);
       setLastAction(next.message);
     } catch (error) {
       const message =
@@ -210,7 +278,7 @@ export function useAccountWorkspace(options: {
       if (status) {
         setIdentityStatus(status);
         setLastAction(status.message);
-        if (status.state === "signed-in") await refreshAccountWorkspace(true);
+        if (status.state === "signed-in") await refreshAccountWorkspace(false);
       } else {
         await refreshIdentityStatus();
       }
@@ -232,6 +300,8 @@ export function useAccountWorkspace(options: {
 
   const signOutIdentity = useCallback(async () => {
     ++accountRequestGenerationRef.current;
+    ++identityReadGeneration.current;
+    setIdentityLoading(false);
     setIdentityPending(true);
     try {
       const status = await signOutRuntimeIdentity();
@@ -245,7 +315,14 @@ export function useAccountWorkspace(options: {
       });
       const next =
         status ??
-        (hasTauriRuntime() ? DEFAULT_IDENTITY_STATUS : PREVIEW_IDENTITY_STATUS);
+        (hasTauriRuntime()
+          ? DEFAULT_IDENTITY_STATUS
+          : {
+              enabled: true,
+              state: "signed-out" as const,
+              scopes: [],
+              message: "Preview account signed out.",
+            });
       setIdentityStatus(next);
       setLastAction(next.message);
     } catch (error) {
@@ -264,19 +341,19 @@ export function useAccountWorkspace(options: {
   }, [applyAccountWorkspaceStatus]);
 
   const reconcileAccountWorkspace = useCallback(async () => {
-    const status = await refreshAccountWorkspace(
-      identityStatus.state === "signed-in",
-    );
+    await refreshIdentityStatus();
+    const status = await refreshAccountWorkspace(false);
     setLastAction(status.message);
-  }, [identityStatus.state, refreshAccountWorkspace]);
+  }, [refreshIdentityStatus, refreshAccountWorkspace]);
 
   return {
     runtime: {
       identityStatus,
       identityPending,
       accountWorkspaceStatus,
-      accountWorkspacePending,
+      accountWorkspacePending: accountWorkspacePending || identityLoading,
       signInIdentity,
+      cancelIdentitySignIn,
       recoverIdentity,
       refreshIdentity,
       signOutIdentity,

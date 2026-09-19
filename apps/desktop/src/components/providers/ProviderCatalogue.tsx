@@ -685,7 +685,10 @@ function ProviderConnectionFlow({
   };
 
   const goBack = () => {
-    if (pending) return;
+    if (pending) {
+      onClose();
+      return;
+    }
     if (selectedMethodId) {
       setSelectedMethodId(null);
       setReplacingCredential(false);
@@ -712,14 +715,14 @@ function ProviderConnectionFlow({
           ref={closeRef}
           type="button"
           className="provider-method-detail__back"
-          disabled={pending}
           onClick={goBack}
           aria-label={
-            selectedMethod ? "Back to connection methods" : "Back to providers"
+            selectedMethod && !pending ? "Back to connection methods" : "Back to providers"
           }
         >
-          <ArrowLeft size={18} /> {selectedMethod ? family.label : "Providers"}
+          <ArrowLeft size={18} /> {selectedMethod && !pending ? family.label : "Providers"}
         </button>
+        {pending && <p role="status">You can go back while this connection finishes.</p>}
         <header className="provider-connection-flow__header">
           <span className="provider-connection-flow__logo" aria-hidden="true">
             <ProviderIcon

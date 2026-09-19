@@ -14,9 +14,10 @@ it.each(["sign-in", "sign-up"] as const)(
   "preserves %s at the native boundary",
   async (mode) => {
     selectRuntimeAdapterForTest("native");
-    await beginRuntimeIdentitySignIn(mode);
+    await beginRuntimeIdentitySignIn("attempt-1", mode);
     expect(mocks.invoke).toHaveBeenCalledWith("identity_begin_sign_in", {
       mode,
+      attemptId: "attempt-1",
     });
   },
 );
