@@ -36,7 +36,10 @@ export const composerScopeKey = (scope: ComposerScope) => scope.threadId
 
 // One conversation draft, including transient attachments, across both panes.
 const sharedEntries = new Map<string, Entry>();
-const subscribers = new Set<() => void>();
+const subscribers = new Map<string, Set<() => void>>();
+function repaint(entry: Entry) {
+  for (const notify of subscribers.get(composerScopeKey(entry.scope)) ?? []) notify();
+}
 
 // Shared across remounts: a read/clear must not overtake an older in-flight save.
 const writes = new Map<string, Promise<unknown>>();
@@ -66,14 +69,12 @@ function decode(content: string): ComposerContent {
 
 /** One owner for text, attachments, and previously submitted source references. */
 export function useScopedComposer(scope?: ComposerScope) {
-  const entries = useRef(sharedEntries);
   const identity = scope ? JSON.stringify([scope.workspaceId, scope.accountId]) : "";
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
   const key = scope ? composerScopeKey(scope) : "";
   const [, render] = useState(0);
   const mounted = useRef(true);
-  const repaint = () => { for (const notify of subscribers) notify(); };
   const allowed = (entry: Entry) => currentIdentity.current === JSON.stringify([entry.scope.workspaceId, entry.scope.accountId]);
   const persist = (entry: Entry) => {
     clearTimeout(entry.timer);
@@ -84,27 +85,35 @@ export function useScopedComposer(scope?: ComposerScope) {
     return serialize(draftKey, async () => {
       if (!allowed(entry)) throw new Error("The account or workspace changed before the draft was saved.");
       await saveRuntimeConversationDraft({ draftKey, threadId: entry.scope.threadId, content, updatedAt: new Date().toISOString() }, entry.scope.workspaceId);
-    }).then(() => { entry.error = ""; repaint(); }, (error: unknown) => {
+    }).then(() => { entry.error = ""; repaint(entry); }, (error: unknown) => {
       entry.error = error instanceof Error ? error.message : "Could not save this draft.";
-      repaint();
+      repaint(entry);
       throw error;
     });
   };
-  let entry = entries.current.get(key);
+  let entry = sharedEntries.get(key);
   if (scope && !entry) {
     entry = { scope, content: empty(), ready: false, revision: 0, error: "" };
-    entries.current.set(key, entry);
+    sharedEntries.set(key, entry);
   }
   useEffect(() => {
     mounted.current = true;
-    const notify = () => { if (mounted.current) render(n => n + 1); };
-    subscribers.add(notify);
     return () => {
       mounted.current = false;
-      subscribers.delete(notify);
-      for (const pending of entries.current.values()) if (pending.timer) void persist(pending).catch(() => undefined);
+      for (const pending of sharedEntries.values()) if (pending.timer) void persist(pending).catch(() => undefined);
     };
   }, []);
+  useEffect(() => {
+    if (!key) return;
+    const notify = () => { if (mounted.current) render(n => n + 1); };
+    const listeners = subscribers.get(key) ?? new Set<() => void>();
+    subscribers.set(key, listeners);
+    listeners.add(notify);
+    return () => {
+      listeners.delete(notify);
+      if (!listeners.size) subscribers.delete(key);
+    };
+  }, [key]);
   useEffect(() => {
     if (!entry) return;
     const target = entry;
@@ -143,8 +152,8 @@ export function useScopedComposer(scope?: ComposerScope) {
           if (target.revision !== result.revisionAtStart) void persist(target).catch(() => undefined);
           target.error = result.error instanceof Error ? result.error.message : "Could not load this draft.";
         }
-        repaint();
-      }).catch(error => { target.loading = false; target.ready = true; target.error = error instanceof Error ? error.message : "Could not restore this draft."; repaint(); });
+        repaint(target);
+      }).catch(error => { target.loading = false; target.ready = true; target.error = error instanceof Error ? error.message : "Could not restore this draft."; repaint(target); });
     }
     return () => { if (target.timer) void persist(target).catch(() => undefined); };
   }, [key]);
@@ -154,14 +163,14 @@ export function useScopedComposer(scope?: ComposerScope) {
     entry.revision++;
     clearTimeout(entry.timer);
     entry.timer = setTimeout(() => { void persist(entry).catch(() => undefined); }, 400);
-    repaint();
+    repaint(entry);
   };
   return {
     key,
     revision: entry?.revision ?? 0,
     submitting: Boolean(entry?.submitting),
-    beginSubmission: () => { if (!entry?.ready || entry.submitting) return false; entry.submitting = true; repaint(); return true; },
-    endSubmission: () => { if (entry) { entry.submitting = false; repaint(); } },
+    beginSubmission: () => { if (!entry?.ready || entry.submitting) return false; entry.submitting = true; repaint(entry); return true; },
+    endSubmission: () => { if (entry) { entry.submitting = false; repaint(entry); } },
     ready: Boolean(entry?.ready),
     error: entry?.error ?? "",
     text: entry?.ready ? entry.content.text : "",
@@ -177,7 +186,7 @@ export function useScopedComposer(scope?: ComposerScope) {
       if (!entry?.ready || !allowed(entry)) throw new Error("Wait for this draft to load before continuing.");
       const destinationScope = { ...entry.scope, threadId };
       const destinationKey = composerScopeKey(destinationScope);
-      if (entries.current.has(destinationKey)) throw new Error("Choose a new conversation for this handoff.");
+      if (sharedEntries.has(destinationKey)) throw new Error("Choose a new conversation for this handoff.");
       const destination: Entry = {
         scope: destinationScope,
         content: { text, attachments: [] },
@@ -185,7 +194,7 @@ export function useScopedComposer(scope?: ComposerScope) {
         revision: 1,
         error: "",
       };
-      entries.current.set(destinationKey, destination);
+      sharedEntries.set(destinationKey, destination);
       await persist(destination);
     },
     consume: async (expectedRevision?: number) => {
@@ -199,7 +208,7 @@ export function useScopedComposer(scope?: ComposerScope) {
       if (!entry?.ready || !allowed(entry)) throw new Error("Wait for this draft to load before sending.");
       const destinationScope = { ...entry.scope, threadId };
       const destination: Entry = { scope: destinationScope, content: entry.content, ready: true, revision: 1, error: "" };
-      entries.current.set(composerScopeKey(destinationScope), destination);
+      sharedEntries.set(composerScopeKey(destinationScope), destination);
       await persist(destination);
       // Clear the old new-conversation slot before navigation, after its pending writes.
       mutate(() => empty());
