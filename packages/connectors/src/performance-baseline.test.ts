@@ -2,15 +2,9 @@ import { performance } from "node:perf_hooks";
 import { describe, expect, it } from "vitest";
 import type {
   BackendAgentEvent,
-  ConnectorSearchItem,
   KnowledgeSource,
   NativeCompletionRequest
 } from "@mivlet/protocol";
-import {
-  importConnectorSearchItem,
-  prepareConnectorAction,
-  shapeConnectorSearchRequest
-} from "./providers/shared";
 import { searchKnowledgeSources } from "./knowledge-search";
 import { SequencedFixtureTransport } from "./native-api/transport";
 import { runAgentLoop, type ToolExecutor } from "./native-api/agent-loop";
@@ -54,47 +48,6 @@ describe("performance baseline guardrails", () => {
 
     expect(value.citations).toHaveLength(8);
     expect(value.citations[0].title).toMatch(/connector/i);
-  });
-
-  it("shapes bounded connector requests without network or credentials", () => {
-    const shaped = timed("connector search request", () =>
-      shapeConnectorSearchRequest("github", "  mivlet  ", 10)
-    ).value;
-    expect(shaped).toMatchObject({ connectorId: "github", query: "mivlet", limit: 10 });
-
-    const item: ConnectorSearchItem = {
-      id: "repo-mivlet",
-      connectorId: "github",
-      connectionId: "connection-test",
-      title: "mivlet",
-      kind: "repository",
-      summary: "Repository metadata",
-      provenance: "GitHub",
-      freshness: "now",
-      trust: "untrusted",
-      providerMetadata: { owner: "acme" }
-    };
-    const imported = timed("connector import shaping", () =>
-      importConnectorSearchItem({
-        connectorId: "github",
-        item,
-        importedAt: "2026-07-02T00:00:00.000Z"
-      })
-    ).value;
-    expect(imported.source.origin).toBe("connector-import");
-
-    const action = timed("connector action shaping", () =>
-      prepareConnectorAction(
-        "linear",
-        "Linear",
-        "linear.comment",
-        { targetId: "ISS-1", body: "Prepared comment." },
-        "high",
-        "Posts the exact reviewed comment."
-      )
-    ).value;
-    expect(action.approval.decisions).toContain("once");
-    expect(action.payload.body).toBe("Prepared comment.");
   });
 
   it("runs a multi-turn native provider loop from fixture streams", async () => {

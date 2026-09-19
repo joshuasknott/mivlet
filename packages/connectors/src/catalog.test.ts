@@ -4,9 +4,6 @@ import {
   listSupportedConnectors,
   SUPPORTED_CONNECTOR_IDS
 } from "./catalog";
-import { LINEAR_OAUTH_SCOPES } from "./providers/linear";
-import { SLACK_OAUTH_SCOPES } from "./providers/slack-api";
-import { VERCEL_OAUTH_SCOPES } from "./providers/vercel";
 
 describe("connector catalogue", () => {
   it("contains each supported provider exactly once", () => {
@@ -61,16 +58,23 @@ describe("connector catalogue", () => {
     const slackChat = slack?.scopes?.find((scope) => scope.id === "chat:write");
     const slackReactions = slack?.scopes?.find((scope) => scope.id === "reactions:write");
 
-    expect(VERCEL_OAUTH_SCOPES).toEqual([
-      "user:read",
-      "team:read",
+    expect(vercel?.scopes?.map((scope) => scope.id)).toEqual([
       "project:read",
       "deployment:read",
       "deployment:write"
     ]);
-    expect(LINEAR_OAUTH_SCOPES).toEqual(["read", "write"]);
-    expect(SLACK_OAUTH_SCOPES).toContain("chat:write");
-    expect(SLACK_OAUTH_SCOPES).toContain("reactions:write");
+    expect(linear?.scopes?.map((scope) => scope.id)).toEqual(["read", "write"]);
+    expect(slack?.scopes?.map((scope) => scope.id)).toEqual([
+      "channels:read",
+      "channels:history",
+      "groups:read",
+      "groups:history",
+      "im:read",
+      "mpim:read",
+      "users:read",
+      "chat:write",
+      "reactions:write"
+    ]);
 
     expect(vercelWrite).toMatchObject({ access: "write", required: true });
     expect(linearWrite).toMatchObject({ access: "write", required: true });

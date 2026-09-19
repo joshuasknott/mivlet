@@ -34,10 +34,6 @@
       "types": "./dist/native-api/*.d.ts",
       "import": "./dist/native-api/*.js"
     },
-    "./providers/*": {
-      "types": "./dist/providers/*.d.ts",
-      "import": "./dist/providers/*.js"
-    },
     "./catalog": {
       "types": "./dist/catalog.d.ts",
       "import": "./dist/catalog.js"
@@ -53,10 +49,6 @@
     "./permission-policy": {
       "types": "./dist/permission-policy.d.ts",
       "import": "./dist/permission-policy.js"
-    },
-    "./sdk": {
-      "types": "./dist/sdk.d.ts",
-      "import": "./dist/sdk.js"
     }
   },
   "scripts": {

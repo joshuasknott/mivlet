@@ -206,13 +206,19 @@ production still require durable storage, encryption key, and DO bindings.
 
 ### H4 — GitHub OAuth token is full `repo` while the product surface is read-only
 
+**Current source status (2026-09-19).** The broker now requests only
+`read:user` and `read:org`. The native connector rejects write-capable classic
+GitHub scopes and requires reconnection; its catalog explicitly excludes
+private-repository access. Native scope checks and broker authorization-URL
+tests cover this behavior. The finding below describes the review revision,
+not a current grant or evidence of deployed behavior.
+
 **Paths:**
 `apps/broker/src/provider-profiles.ts` (`GITHUB_PROFILE.scopes`),
-`apps/desktop/src-tauri/src/connectors.rs` (`GITHUB_SCOPES` labels `repo` as
-`"read"`),
+`apps/desktop/src-tauri/src/connectors.rs` (`GITHUB_SCOPES` and scope validation),
 `packages/connectors/src/native-api/tools.ts` (GitHub tools are reads only),
-`packages/connectors/src/providers/developer-connectors.test.ts` (writes
-rejected)
+`apps/desktop/src-tauri/src/connectors.rs` and
+`apps/desktop/src-tauri/src/connector_api.rs` (native scope and write checks)
 
 **What the code does.** The broker requests `read:user`, `read:org`, and
 `repo`. GitHub’s `repo` scope is full private-repository access, including
