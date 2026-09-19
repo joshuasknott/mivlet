@@ -17,7 +17,18 @@ async function invoke(
   try {
     return await adapter.invoke<CollaborationSnapshot>(command, { request });
   } catch (error) {
-    throw toRuntimeError(error);
+    const runtimeError = toRuntimeError(error);
+    if (
+      command === "collaboration_command" &&
+      /unknown field [`'](?:recipientIds|recipients)[`']/.test(
+        runtimeError.message,
+      )
+    ) {
+      throw new Error(
+        "The desktop runtime is out of date. Restart Mivlet after updating it to use workspace agent mentions. Your draft has been kept.",
+      );
+    }
+    throw runtimeError;
   }
 }
 

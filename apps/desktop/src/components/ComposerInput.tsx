@@ -136,9 +136,13 @@ export function ComposerInput({
       }
     }
     const mentions = parts.filter((part) => part.connector || part.agent).length;
+    const identitiesCurrent = parts.filter((part) => part.agent).every((part, index) =>
+      element.querySelectorAll<HTMLElement>(".agent-mention")[index]?.dataset.identity ===
+        `${part.agent!.name}\n${part.agent!.iconImageDataUrl ?? ""}`,
+    );
     if (
       plainText(element) === value &&
-      element.querySelectorAll("[data-mention]").length === mentions
+      element.querySelectorAll("[data-mention]").length === mentions && identitiesCurrent
     )
       return;
     const focused = document.activeElement === element;
@@ -157,6 +161,8 @@ export function ComposerInput({
         ? builtinPluginEntries.find((entry) => entry.id === part.connector?.id)?.icon ?? connectorLogos[part.connector.id]
         : undefined;
       if (part.agent) {
+        chip.dataset.identity = `${part.agent.name}\n${part.agent.iconImageDataUrl ?? ""}`;
+        chip.title = `Mention ${part.agent.name}`;
         const icon = document.createElement(part.agent.iconImageDataUrl ? "img" : "span");
         icon.className = "agent-mention__avatar";
         icon.setAttribute("aria-hidden", "true");
@@ -164,7 +170,7 @@ export function ComposerInput({
           icon.src = part.agent.iconImageDataUrl!;
           icon.alt = "";
         }
-        icon.dataset.initial = part.agent.name.trim().slice(0, 1).toUpperCase() || "A";
+        if (!(icon instanceof HTMLImageElement)) icon.textContent = "@";
         chip.append(icon);
       } else if (logo) {
         const icon = document.createElement("img");
