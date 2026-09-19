@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { displayWorkspaceMentions } from "../../lib/collaboration-mentions";
 import type { ConnectorManifest, MivletAgentProfile, ProjectFact, Spine } from "@mivlet/protocol";
 import type { NativeAgentState } from "../../hooks/useNativeAgent";
 import type { ConversationMessageView } from "../../lib/conversation-runtime";
@@ -96,7 +97,7 @@ export function ConversationFeed(props: Props) {
 
 function UserMessage({ content, profileName, connectors, attachments, timestamp, workspaceId, agent, threadId }: { content: string; profileName: string; connectors: ConnectorManifest[]; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[]; timestamp?: string; workspaceId: string; agent: MivletAgentProfile; threadId?: string }) {
   return <article className="conversation-message conversation-message--user" aria-label={`${profileName}'s message`}>
-    <p><ConnectorMentionText text={content} connectors={connectors} /></p>
+    <p><ConnectorMentionText text={displayWorkspaceMentions(content)} connectors={connectors} /></p>
     {attachments?.length ? <MessageAttachments key={`${workspaceId}:${agent.id}:${threadId}`} attachments={attachments} workspaceId={workspaceId} agentId={agent.id} threadId={threadId} /> : null}
     <footer className="message-actions"><MessageTime value={timestamp} /><CopyButton text={content} label="Copy message" iconOnly /></footer>
   </article>;

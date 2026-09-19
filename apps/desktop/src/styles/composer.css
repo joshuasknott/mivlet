@@ -167,6 +167,9 @@
 .connector-mention { display: inline; white-space: nowrap; font-weight: 550; line-height: inherit; color: var(--ink); }
 .connector-mention > span { display: inline; }
 .connector-mention svg, .connector-mention img { display: inline-block; width: 15px; height: 15px; margin-right: 5px; vertical-align: -2px; object-fit: contain; }
+.agent-mention { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-weight: 550; line-height: inherit; color: var(--ink); }
+.agent-mention__avatar { display: inline-grid; place-items: center; width: 15px; height: 15px; color: var(--surface); background: var(--accent); border-radius: 50%; font-size: 9px; font-weight: 700; line-height: 1; }
+.agent-mention__avatar::before { content: attr(data-initial); }
 
 
 .composer-input:focus-visible {
@@ -209,6 +212,12 @@
   background: var(--accent-subtle);
   outline: none;
 }
+
+.agent-mention-picker button[aria-selected="true"] { background: var(--accent-subtle); }
+.agent-mention-picker button > .agent-avatar { flex: 0 0 auto; }
+.agent-mention-picker__identity { display: grid; min-width: 0; gap: 1px; }
+.agent-mention-picker__identity strong { overflow: hidden; color: var(--ink); font-family: inherit; font-size: var(--text-13); font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.agent-mention-picker__identity small { overflow: hidden; color: var(--ink-soft); font-size: var(--text-11); text-overflow: ellipsis; white-space: nowrap; }
 
 .composer-suggestions strong {
   color: var(--accent-strong);

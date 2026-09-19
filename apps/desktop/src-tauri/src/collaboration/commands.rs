@@ -49,6 +49,13 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             }
         }
 
+        Command::ReplyWork {
+            id,
+            expected_generation,
+            event_id,
+            text,
+        } => exchanges::reply_user(ctx, &id, expected_generation, &event_id, &text)?,
+
         Command::OpenMainChat { agent_id } => {
             chats::open_main(ctx, &agent_id)?;
         }
@@ -245,21 +252,41 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             agent_id,
             prompt,
             discussion,
+            recipient_ids,
             attachments,
         } => {
             if let Some(refs) = &attachments {
                 work::validate_attachments(refs)?;
             }
-            work::start(
-                ctx,
-                id,
-                conversation_id,
-                agent_id,
-                prompt,
-                discussion,
-                None,
-                attachments.as_deref(),
-            )?;
+            if let Some(recipient_ids) = recipient_ids {
+                if recipient_ids.first().is_none_or(|first| first != &agent_id) {
+                    return Err(invalid(
+                        "The primary agent must be the first explicit workspace recipient.",
+                    ));
+                }
+                work::start_for_recipients(
+                    ctx,
+                    id,
+                    conversation_id,
+                    recipient_ids,
+                    true,
+                    prompt,
+                    discussion,
+                    None,
+                    attachments.as_deref(),
+                )?;
+            } else {
+                work::start(
+                    ctx,
+                    id,
+                    conversation_id,
+                    agent_id,
+                    prompt,
+                    discussion,
+                    None,
+                    attachments.as_deref(),
+                )?;
+            }
         }
         Command::BindWork {
             id,
@@ -329,10 +356,11 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             }
             let room = ctx.room(&item.conversation_id)?;
             let agent = profile(ctx.profiles, &item.agent_id)?;
-            if !room
-                .participants
-                .iter()
-                .any(|p| p.agent_id == item.agent_id)
+            if !item.workspace_recipient
+                && !room
+                    .participants
+                    .iter()
+                    .any(|p| p.agent_id == item.agent_id)
             {
                 return Err(invalid("This teammate is no longer a participant. Create a new assignment for a current participant."));
             }
@@ -346,6 +374,19 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             }
             if item.captured_context.is_none() {
                 item.captured_context = Some(super::context::capture(ctx, &room, agent)?);
+            }
+            let current_permission = match agent.permission_label.as_str() {
+                "Work Freely" => "full-access",
+                "Ask Me" => "trusted-scope",
+                _ => "read-only",
+            };
+            let rank = |mode: &str| match mode {
+                "full-access" => 2,
+                "trusted-scope" => 1,
+                _ => 0,
+            };
+            if rank(current_permission) < rank(&item.permission_mode) {
+                item.permission_mode = current_permission.into();
             }
             item.model_option_id = agent.model_id.clone();
             item.conversation_generation = room.generation;
@@ -375,7 +416,11 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             status,
             reason,
         } => {
-            let mut item = work::current(ctx, &id, generation, None)?;
+            let mut item = if status == WorkStatus::Failed {
+                work::current_for_failure(ctx, &id, generation)?
+            } else {
+                work::current(ctx, &id, generation, None)?
+            };
             if !matches!(
                 status,
                 WorkStatus::AwaitingApproval | WorkStatus::Running | WorkStatus::Failed
@@ -389,7 +434,15 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             ctx.work(&item)?;
             if item.status == WorkStatus::Failed {
                 for child in ctx.all_work()? {
-                    if child.parent_id.as_deref() == Some(&item.id) && child.status.active() {
+                    let preserve_explicit_recipient = item.parent_id.is_none()
+                        && item
+                            .recipient_ids
+                            .iter()
+                            .any(|agent_id| agent_id == &child.agent_id);
+                    if child.parent_id.as_deref() == Some(&item.id)
+                        && child.status.active()
+                        && !preserve_explicit_recipient
+                    {
                         work::invalidate_descendants(
                             ctx,
                             &child.id,
@@ -398,7 +451,6 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                         )?;
                     }
                 }
-                work::wake_waiters(ctx)?;
             }
             work::wake_waiters(ctx)?;
         }
