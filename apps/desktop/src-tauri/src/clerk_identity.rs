@@ -19,8 +19,7 @@ use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::TcpListener;
 use url::Url;
 
 const KEYRING_SERVICE: &str = "com.fable.workspace.identity.clerk";
@@ -33,8 +32,6 @@ const KEYRING_CHUNK_UTF16_UNITS: usize = 900;
 const KEYRING_MAX_CHUNKS: usize = 64;
 const PENDING_MAX_AGE_SECONDS: u64 = 5 * 60;
 const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
-const CALLBACK_READ_TIMEOUT: Duration = Duration::from_secs(10);
-const MAX_CALLBACK_BYTES: usize = 8192;
 #[allow(dead_code)] // Reserved for the focused native hosted-account adapter.
 const MAX_CONVEX_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
 const CLOCK_SKEW_SECONDS: u64 = 60;
@@ -622,7 +619,8 @@ fn load_config_from(
     if scopes.is_empty() {
         scopes = vec!["openid".into(), "profile".into(), "email".into()];
     }
-    for required in ["openid", "profile", "email"] {
+    // A desktop session must be renewable after the access token expires.
+    for required in ["openid", "profile", "email", "offline_access"] {
         if !scopes.iter().any(|scope| scope == required) {
             scopes.push(required.to_string());
         }
@@ -1436,185 +1434,6 @@ fn bound_redirect(listener: &TcpListener) -> Result<String, IdentityError> {
     Ok(format!("http://127.0.0.1:{port}/callback"))
 }
 
-fn is_literal_loopback_host(value: &str) -> bool {
-    let value = value.trim();
-    value == "127.0.0.1"
-        || value
-            .strip_prefix("127.0.0.1:")
-            .is_some_and(|port| port.parse::<u16>().is_ok())
-}
-
-fn parse_callback_target(request: &[u8]) -> Result<String, IdentityError> {
-    let Some(header_end) = request.windows(4).position(|window| window == b"\r\n\r\n") else {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback request was incomplete.",
-            false,
-        ));
-    };
-    if header_end > MAX_CALLBACK_BYTES {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback request was too large.",
-            false,
-        ));
-    }
-    if !request[header_end + 4..].is_empty() {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback must contain a single header-only request.",
-            false,
-        ));
-    }
-    let text = std::str::from_utf8(&request[..header_end]).map_err(|_| {
-        identity_error(
-            "invalid-request",
-            "Identity callback request was not valid UTF-8.",
-            false,
-        )
-    })?;
-    if text.contains('\n') && !text.contains("\r\n") {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback used ambiguous line endings.",
-            false,
-        ));
-    }
-    let mut lines = text.split("\r\n");
-    let request_line = lines.next().unwrap_or_default();
-    let mut parts = request_line.split(' ');
-    let method = parts.next().unwrap_or_default();
-    let target = parts.next().unwrap_or_default();
-    let version = parts.next().unwrap_or_default();
-    if method != "GET" || parts.next().is_some() {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback must use a single GET request.",
-            false,
-        ));
-    }
-    if version != "HTTP/1.1" && version != "HTTP/1.0" {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback used an invalid HTTP version.",
-            false,
-        ));
-    }
-    if !(target == "/callback" || target.starts_with("/callback?"))
-        || target.contains("://")
-        || target.contains('#')
-    {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback target did not match the registered redirect.",
-            false,
-        ));
-    }
-    let mut host: Option<String> = None;
-    for line in lines {
-        if line.is_empty() {
-            continue;
-        }
-        if line.bytes().any(|byte| byte < 0x20 || byte == 0x7f) {
-            return Err(identity_error(
-                "invalid-request",
-                "Identity callback header contained control characters.",
-                false,
-            ));
-        }
-        let Some((name, value)) = line.split_once(':') else {
-            return Err(identity_error(
-                "invalid-request",
-                "Identity callback header was malformed.",
-                false,
-            ));
-        };
-        if name.eq_ignore_ascii_case("host") {
-            if host.is_some() {
-                return Err(identity_error(
-                    "invalid-request",
-                    "Identity callback had duplicate Host headers.",
-                    false,
-                ));
-            }
-            host = Some(value.trim().to_string());
-        }
-        if name.eq_ignore_ascii_case("content-length") && value.trim() != "0" {
-            return Err(identity_error(
-                "invalid-request",
-                "Identity callback must not include a request body.",
-                false,
-            ));
-        }
-        if name.eq_ignore_ascii_case("transfer-encoding") {
-            return Err(identity_error(
-                "invalid-request",
-                "Identity callback must not use request body framing.",
-                false,
-            ));
-        }
-    }
-    if version == "HTTP/1.1" && host.is_none() {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback was missing Host.",
-            false,
-        ));
-    }
-    if host
-        .as_deref()
-        .is_some_and(|host| !is_literal_loopback_host(host))
-    {
-        return Err(identity_error(
-            "invalid-request",
-            "Identity callback Host must be literal loopback.",
-            false,
-        ));
-    }
-    Ok(target.to_string())
-}
-
-async fn read_callback_target(stream: &mut TcpStream) -> Result<String, IdentityError> {
-    let mut buffer = Vec::with_capacity(MAX_CALLBACK_BYTES);
-    let mut tmp = [0_u8; 1024];
-    for _ in 0..16 {
-        let n = tokio::time::timeout(CALLBACK_READ_TIMEOUT, stream.read(&mut tmp))
-            .await
-            .map_err(|_| {
-                identity_error(
-                    "invalid-request",
-                    "Identity callback request timed out.",
-                    false,
-                )
-            })?
-            .map_err(|_| identity_error("unknown", "Identity callback was unreadable.", false))?;
-        if n == 0 {
-            break;
-        }
-        buffer.extend_from_slice(&tmp[..n]);
-        if buffer.len() > MAX_CALLBACK_BYTES {
-            return Err(identity_error(
-                "invalid-request",
-                "Identity callback request was too large.",
-                false,
-            ));
-        }
-        if buffer.windows(4).any(|window| window == b"\r\n\r\n") {
-            break;
-        }
-    }
-    parse_callback_target(&buffer)
-}
-
-fn callback_page(status: &str, message: &str) -> String {
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>Mivlet</title>\
-         <style>body{{font-family:system-ui;padding:2rem;max-width:32rem;margin:auto}}</style>\
-         </head><body><h1>{status}</h1><p>{message}</p>\
-         <p>You can close this tab and return to Mivlet.</p></body></html>"
-    )
-}
-
 async fn exchange_code(
     pending: &PendingClerkOAuth,
     code: &str,
@@ -1831,6 +1650,8 @@ async fn session_from_tokens(
 async fn status_with_store(
     store: &dyn IdentitySecretStore,
 ) -> Result<IdentityStatus, IdentityError> {
+    static REFRESH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _refresh = REFRESH.lock().await;
     let expected_generation = *IDENTITY_GENERATION
         .lock()
         .map_err(|_| identity_error("unknown", "Account state unavailable.", false))?;
@@ -1974,9 +1795,76 @@ async fn status_with_store(
     ))
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "kebab-case")]
+pub enum AccountEntryMode {
+    #[default]
+    SignIn,
+    SignUp,
+}
+
+fn account_entry_url(
+    mut authorization: Url,
+    mode: AccountEntryMode,
+    entry: Option<&str>,
+    production: bool,
+) -> Result<Url, IdentityError> {
+    let Some(entry) = entry.filter(|value| !value.trim().is_empty()) else {
+        if mode == AccountEntryMode::SignUp {
+            return Err(identity_error(
+                "configuration-required",
+                "Account registration is not configured. Start the Mivlet account site and configure MIVLET_CLERK_ACCOUNT_ENTRY_URL.",
+                false,
+            ));
+        }
+        // Clerk supports login, not select_account. Consent alone reuses the
+        // browser's previous identity without displaying authentication choices.
+        authorization
+            .query_pairs_mut()
+            .append_pair("prompt", "login consent");
+        return Ok(authorization);
+    };
+    let mut entry = Url::parse(entry).map_err(|_| {
+        identity_error(
+            "configuration-required",
+            "Account entry URL is invalid.",
+            false,
+        )
+    })?;
+    let local_dev =
+        !production && entry.scheme() == "http" && entry.host_str() == Some("127.0.0.1");
+    if (entry.scheme() != "https" && !local_dev)
+        || entry.host_str().is_none()
+        || !entry.username().is_empty()
+        || entry.password().is_some()
+        || entry.query().is_some()
+        || entry.fragment().is_some()
+        || entry.path() != "/desktop/start"
+    {
+        return Err(identity_error("configuration-required", "Account entry must be an HTTPS /desktop/start URL (literal loopback HTTP is allowed only in development).", false));
+    }
+    // The account page clears the selected browser session before displaying
+    // either form. Requiring login again here would discard that fresh sign-in.
+    authorization
+        .query_pairs_mut()
+        .append_pair("prompt", "consent");
+    entry
+        .query_pairs_mut()
+        .append_pair(
+            "mode",
+            if mode == AccountEntryMode::SignUp {
+                "sign-up"
+            } else {
+                "sign-in"
+            },
+        )
+        .append_pair("authorization_url", authorization.as_str());
+    Ok(entry)
+}
+
 async fn begin_sign_in_with_store(
     store: &dyn IdentitySecretStore,
-    prompt: &str,
+    mode: AccountEntryMode,
 ) -> Result<IdentityStatus, IdentityError> {
     let expected_generation = *IDENTITY_GENERATION
         .lock()
@@ -2026,8 +1914,15 @@ async fn begin_sign_in_with_store(
         .append_pair("scope", &config.scopes.join(" "))
         .append_pair("state", &state)
         .append_pair("code_challenge", &challenge)
-        .append_pair("code_challenge_method", "S256")
-        .append_pair("prompt", prompt);
+        .append_pair("code_challenge_method", "S256");
+    let entry = crate::env_compat::var_opt("MIVLET_CLERK_ACCOUNT_ENTRY_URL")
+        .or_else(|| option_env!("MIVLET_CLERK_ACCOUNT_ENTRY_URL").map(str::to_owned));
+    let authorization = account_entry_url(
+        authorization,
+        mode,
+        entry.as_deref(),
+        !cfg!(debug_assertions),
+    )?;
 
     let pending = PendingClerkOAuth {
         state: state.clone(),
@@ -2058,53 +1953,19 @@ async fn begin_sign_in_with_store(
         return Err(error);
     }
 
-    let accept = tokio::time::timeout(CALLBACK_TIMEOUT, listener.accept()).await;
-    let (mut stream, _) = match accept {
-        Ok(Ok(pair)) => pair,
-        Ok(Err(_)) => {
+    let callback_url = match crate::oauth_loopback::receive_loopback_callback(
+        listener,
+        &redirect_uri,
+        CALLBACK_TIMEOUT,
+    )
+    .await
+    {
+        Ok(callback) => callback,
+        Err(message) => {
             let _ = store.remove(&pending_key(&state));
-            return Err(identity_error(
-                "unknown",
-                "Mivlet could not accept the identity callback.",
-                true,
-            ));
-        }
-        Err(_) => {
-            let _ = store.remove(&pending_key(&state));
-            return Err(identity_error(
-                "invalid-request",
-                "Cloud sign-in timed out; try again.",
-                true,
-            ));
+            return Err(identity_error("invalid-request", message, true));
         }
     };
-
-    let target = match read_callback_target(&mut stream).await {
-        Ok(target) => target,
-        Err(error) => {
-            let _ = store.remove(&pending_key(&state));
-            return Err(error);
-        }
-    };
-    let callback_origin = redirect_uri
-        .strip_suffix("/callback")
-        .unwrap_or(&redirect_uri);
-    let callback_url = format!("{callback_origin}{target}");
-    let page_status = if callback_url.contains("error=") {
-        "Sign-in incomplete"
-    } else {
-        "Sign-in received"
-    };
-    let _ = stream
-        .write_all(
-            format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nConnection: close\r\n\r\n{}",
-                callback_page(page_status, "Finishing in Mivlet.")
-            )
-            .as_bytes(),
-        )
-        .await;
-    let _ = stream.shutdown().await;
 
     complete_callback_with_store(store, &callback_url, Some(expected_generation)).await
 }
@@ -2515,6 +2376,18 @@ pub(crate) async fn native_identity_status() -> Result<IdentityStatus, String> {
         .map_err(command_message)
 }
 
+/// Refresh before the synchronous admission fence expires. Admission still
+/// rejects an expired session while refresh is unavailable or in progress.
+pub(crate) async fn renew_native_identity_if_due() {
+    if read_session(&NativeIdentitySecretStore)
+        .ok()
+        .flatten()
+        .is_some_and(|session| session.expires_at <= now_epoch().saturating_add(60))
+    {
+        let _ = tokio::time::timeout(Duration::from_secs(20), native_identity_status()).await;
+    }
+}
+
 fn account_binding_for_authentication(authentication: &AccountAuthenticationFacts) -> String {
     let mut digest = Sha256::new();
     digest.update(b"fable.account-workspace.bootstrap.v1\0");
@@ -2568,11 +2441,14 @@ pub(crate) fn lock_native_identity_generation(
 }
 
 #[tauri::command]
-pub async fn identity_begin_sign_in(app: tauri::AppHandle) -> Result<IdentityStatus, String> {
+pub async fn identity_begin_sign_in(
+    app: tauri::AppHandle,
+    mode: Option<AccountEntryMode>,
+) -> Result<IdentityStatus, String> {
     if crate::account_session::binding().is_ok() {
         return identity_sign_out(app).await;
     }
-    let result = begin_sign_in_with_store(&NativeIdentitySecretStore, "consent")
+    let result = begin_sign_in_with_store(&NativeIdentitySecretStore, mode.unwrap_or_default())
         .await
         .map_err(command_message)?;
     if result.authentication.is_some() && matches!(result.state.as_str(), "signed-in" | "offline") {
@@ -2587,7 +2463,7 @@ pub async fn identity_begin_recovery(app: tauri::AppHandle) -> Result<IdentitySt
         return identity_sign_out(app).await;
     }
     clear_session(&NativeIdentitySecretStore).map_err(command_message)?;
-    identity_begin_sign_in(app).await
+    identity_begin_sign_in(app, Some(AccountEntryMode::SignIn)).await
 }
 
 #[tauri::command]
@@ -2609,6 +2485,83 @@ pub async fn identity_sign_out(app: tauri::AppHandle) -> Result<IdentityStatus, 
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn account_entry_preserves_mode_and_requires_fresh_authentication() {
+        let authorize = url::Url::parse(
+            "https://clerk.example/oauth/authorize?state=fixture&code_challenge=fixture",
+        )
+        .unwrap();
+        let login = super::account_entry_url(
+            authorize.clone(),
+            super::AccountEntryMode::SignIn,
+            None,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            login
+                .query_pairs()
+                .find(|(key, _)| key == "prompt")
+                .unwrap()
+                .1,
+            "login consent"
+        );
+        assert!(super::account_entry_url(
+            authorize.clone(),
+            super::AccountEntryMode::SignUp,
+            None,
+            true
+        )
+        .is_err());
+        for (mode, expected) in [
+            (super::AccountEntryMode::SignIn, "sign-in"),
+            (super::AccountEntryMode::SignUp, "sign-up"),
+        ] {
+            let entry = super::account_entry_url(
+                authorize.clone(),
+                mode,
+                Some("https://accounts.example/desktop/start"),
+                true,
+            )
+            .unwrap();
+            let params: std::collections::BTreeMap<_, _> =
+                entry.query_pairs().into_owned().collect();
+            assert_eq!(params["mode"], expected);
+            let continuation = url::Url::parse(&params["authorization_url"]).unwrap();
+            assert_eq!(
+                continuation
+                    .query_pairs()
+                    .find(|(key, _)| key == "prompt")
+                    .unwrap()
+                    .1,
+                "consent"
+            );
+            assert!(continuation
+                .as_str()
+                .contains("state=fixture&code_challenge=fixture"));
+        }
+        assert!(super::account_entry_url(
+            authorize.clone(),
+            super::AccountEntryMode::SignUp,
+            Some("http://127.0.0.1:1421/desktop/start"),
+            false
+        )
+        .is_ok());
+        for bad in [
+            "http://127.0.0.1:1421/desktop/start",
+            "https://user@accounts.example/desktop/start",
+            "https://accounts.example/desktop/start?next=evil",
+            "https://accounts.example/sign-up",
+        ] {
+            assert!(super::account_entry_url(
+                authorize.clone(),
+                super::AccountEntryMode::SignUp,
+                Some(bad),
+                true
+            )
+            .is_err());
+        }
+    }
     use super::*;
     use std::sync::Mutex;
 
@@ -2784,6 +2737,7 @@ mod tests {
             .unwrap();
         assert_eq!(config.audience, "mivlet-desktop");
         assert_eq!(config.authorized_party, None);
+        assert!(config.scopes.iter().any(|scope| scope == "offline_access"));
     }
 
     #[test]
@@ -2954,39 +2908,6 @@ mod tests {
         assert!(!serialized.contains("org_untrusted"));
         assert!(!serialized.contains("organization"));
         assert!(!serialized.contains("\"role\""));
-    }
-
-    #[test]
-    fn callback_parser_accepts_only_loopback_get_callback() {
-        let valid = b"GET /callback?code=c&state=s HTTP/1.1\r\nHost: 127.0.0.1:34567\r\n\r\n";
-        assert_eq!(
-            parse_callback_target(valid).unwrap(),
-            "/callback?code=c&state=s"
-        );
-
-        let bad_host = b"GET /callback?code=c&state=s HTTP/1.1\r\nHost: localhost:34567\r\n\r\n";
-        assert_eq!(
-            parse_callback_target(bad_host).unwrap_err().code,
-            "invalid-request"
-        );
-
-        let smuggled = b"GET /callback?code=c&state=s HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\nGET /other HTTP/1.1\r\n\r\n";
-        assert_eq!(
-            parse_callback_target(smuggled).unwrap_err().message,
-            "Identity callback must contain a single header-only request."
-        );
-
-        let wrong_path = b"GET /callbackevil?code=c&state=s HTTP/1.1\r\nHost: 127.0.0.1:1\r\n\r\n";
-        assert_eq!(
-            parse_callback_target(wrong_path).unwrap_err().message,
-            "Identity callback target did not match the registered redirect."
-        );
-
-        let framed_body = b"GET /callback?code=c&state=s HTTP/1.1\r\nHost: 127.0.0.1:1\r\nTransfer-Encoding: chunked\r\n\r\n";
-        assert_eq!(
-            parse_callback_target(framed_body).unwrap_err().message,
-            "Identity callback must not use request body framing."
-        );
     }
 
     #[tokio::test]

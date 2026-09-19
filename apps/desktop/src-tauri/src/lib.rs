@@ -348,6 +348,18 @@ pub fn run() {
             execution_control::execution_control_pause,
             execution_control::execution_control_resume
         ]))
-        .run(tauri::generate_context!())
-        .expect("failed to run Mivlet desktop runtime");
+        .build(tauri::generate_context!())
+        .expect("failed to build Mivlet desktop runtime")
+        .run(|_app, event| {
+            if let tauri::RunEvent::ExitRequested {
+                code: None, api, ..
+            } = event
+            {
+                // Account teardown destroys the last WebView before draining
+                // workers. Only its explicit restart/exit may end the process.
+                if account_session::is_restarting() {
+                    api.prevent_exit();
+                }
+            }
+        });
 }

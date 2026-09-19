@@ -3,7 +3,7 @@
 //! Desktop OAuth needs a real redirect URI the provider or auth broker can call
 //! back. We bind an ephemeral
 //! `http://127.0.0.1:{port}` listener, hand that exact URI to
-//! `start_auth`, and then accept a bounded number of local connections until
+//! `start_auth`, and then accept bounded requests within a fixed deadline until
 //! the real callback arrives. The received callback URL is forwarded to
 //! `complete_auth`, which already validates state, redirect match, and consumes
 //! the one-use PKCE verifier before network egress.
@@ -35,7 +35,6 @@ const MAX_REQUEST_LINE_BYTES: usize = 2048;
 const MAX_HEADER_BYTES: usize = 4096;
 const MAX_HEADERS: usize = 32;
 const MAX_TOTAL_HEADER_BYTES: usize = 8192;
-const MAX_CALLBACK_CONNECTIONS: usize = 8;
 
 /// Event payload emitted on the `mivlet://connector/auth` channel when an
 /// in-flight OAuth attempt resolves. The shell re-reads connector statuses on
@@ -815,8 +814,15 @@ async fn acknowledge_ignored_request(stream: &mut tokio::net::TcpStream) {
 async fn accept_valid_callback(
     listener: &TcpListener,
 ) -> Result<(tokio::net::TcpStream, String), ConnectorCommandError> {
-    let deadline = tokio::time::Instant::now() + CALLBACK_TIMEOUT;
-    for _ in 0..MAX_CALLBACK_CONNECTIONS {
+    accept_callback_until(listener, CALLBACK_TIMEOUT).await
+}
+
+async fn accept_callback_until(
+    listener: &TcpListener,
+    timeout: Duration,
+) -> Result<(tokio::net::TcpStream, String), ConnectorCommandError> {
+    let deadline = tokio::time::Instant::now() + timeout;
+    loop {
         let remaining = deadline.saturating_duration_since(tokio::time::Instant::now());
         if remaining.is_zero() {
             break;
@@ -841,7 +847,16 @@ async fn accept_valid_callback(
             }
             Ok(Ok(pair)) => pair,
         };
-        match read_callback_target(&mut stream).await {
+        // Bound the whole request, not each fragment, to keep speculative
+        // connections from extending the authorization window.
+        let read = tokio::time::timeout(
+            CALLBACK_READ_TIMEOUT
+                .min(deadline.saturating_duration_since(tokio::time::Instant::now())),
+            read_callback_target(&mut stream),
+        )
+        .await;
+        let Ok(read) = read else { continue };
+        match read {
             Ok(target) => match classify_callback_target(target) {
                 Ok(CallbackTargetDisposition::OAuth(target)) => return Ok((stream, target)),
                 Ok(CallbackTargetDisposition::Ignore) => {
@@ -872,10 +887,10 @@ async fn accept_valid_callback(
         }
     }
     Err(command_error(
-        "invalid-request",
+        "unknown",
         "oauth",
-        "Mivlet did not receive a valid OAuth callback.",
-        false,
+        "OAuth authorization timed out; try connecting again.",
+        true,
     ))
 }
 
@@ -895,7 +910,15 @@ pub(crate) async fn accept_loopback_callback(
     listener: TcpListener,
     redirect_uri: &str,
 ) -> Result<String, String> {
-    let (mut stream, target) = accept_valid_callback(&listener)
+    receive_loopback_callback(listener, redirect_uri, CALLBACK_TIMEOUT).await
+}
+
+pub(crate) async fn receive_loopback_callback(
+    listener: TcpListener,
+    redirect_uri: &str,
+    timeout: Duration,
+) -> Result<String, String> {
+    let (mut stream, target) = accept_callback_until(&listener, timeout)
         .await
         .map_err(|error| error.message)?;
     let callback_origin = redirect_uri
@@ -1456,6 +1479,56 @@ mod tests {
         let mut response = String::new();
         stream.read_to_string(&mut response).await.unwrap();
         response
+    }
+
+    #[tokio::test]
+    async fn shared_identity_receiver_survives_many_probes_and_acknowledges_callback() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let redirect = format!("http://127.0.0.1:{port}/callback");
+        let receiver = tokio::spawn(async move {
+            receive_loopback_callback(listener, &redirect, Duration::from_secs(5)).await
+        });
+        for _ in 0..16 {
+            let response = send_request(
+                port,
+                format!("GET /callback HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"),
+            )
+            .await;
+            assert!(response.starts_with("HTTP/1.1 204"));
+        }
+        let response = send_request(
+            port,
+            format!(
+            "GET /callback?code=fixture&state=fixture HTTP/1.1\r\nHost: 127.0.0.1:{port}\r\n\r\n"
+        ),
+        )
+        .await;
+        assert!(response.contains("Authorization received"));
+        assert!(!response.contains("fixture"));
+        assert_eq!(
+            receiver.await.unwrap().unwrap(),
+            format!("http://127.0.0.1:{port}/callback?code=fixture&state=fixture")
+        );
+    }
+
+    #[tokio::test]
+    async fn speculative_connection_cannot_extend_the_callback_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let receiver = tokio::spawn(async move {
+            accept_callback_until(&listener, Duration::from_millis(50)).await
+        });
+        let _idle = tokio::net::TcpStream::connect(("127.0.0.1", port))
+            .await
+            .unwrap();
+        let error = tokio::time::timeout(Duration::from_secs(2), receiver)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+        assert!(error.retryable);
+        assert!(error.message.contains("timed out"));
     }
 
     #[tokio::test]

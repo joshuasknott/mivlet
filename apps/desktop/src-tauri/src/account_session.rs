@@ -103,8 +103,13 @@ pub(crate) fn guard(
 
 pub(crate) fn start_watchdog(app: tauri::AppHandle) {
     tauri::async_runtime::spawn(async move {
+        let mut next_refresh = tokio::time::Instant::now();
         loop {
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            if ACCOUNT.get().is_some() && tokio::time::Instant::now() >= next_refresh {
+                crate::clerk_identity::renew_native_identity_if_due().await;
+                next_refresh = tokio::time::Instant::now() + std::time::Duration::from_secs(15);
+            }
             let needs_restart = if ACCOUNT.get().is_some() {
                 ensure_current().is_err()
             } else {
@@ -118,6 +123,10 @@ pub(crate) fn start_watchdog(app: tauri::AppHandle) {
             }
         }
     });
+}
+
+pub(crate) fn is_restarting() -> bool {
+    CLOSING.load(Ordering::Acquire)
 }
 
 pub(crate) async fn restart(app: tauri::AppHandle) {

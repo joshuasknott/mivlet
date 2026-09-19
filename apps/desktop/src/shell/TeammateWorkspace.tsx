@@ -70,11 +70,11 @@ export function TeammateWorkspace() {
     );
   if (gate === "onboarding")
     return (
-      <Suspense fallback={<main className="team-loading" aria-busy="true" />}>
+      <Suspense fallback={<main className="team-loading" role="status" aria-busy="true">Opening sign-in…</main>}>
         <OnboardingPage
           identityStatus={runtime.identityStatus}
           identityPending={runtime.identityPending}
-          onSignIn={() => runtime.signInIdentity()}
+          onSignIn={(mode) => runtime.signInIdentity(mode)}
           workspaceMessage={account.message}
           onOpenWorkspace={runtime.reconcileAccountWorkspace}
         />
