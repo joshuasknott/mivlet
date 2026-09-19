@@ -23,8 +23,19 @@ describe("connector mention input", () => {
       />,
     );
     const input = screen.getByRole("textbox");
-    expect(input).toHaveTextContent("Ask Current Name to review");
+    expect(input).toHaveTextContent("Ask @Current Name to review");
     expect(input.querySelector(".agent-mention")).toHaveAttribute("data-mention", token);
+  });
+
+  it("refreshes a renamed agent and uploaded avatar without changing the draft identity", () => {
+    const props = { inputRef: createRef<ComposerInputHandle>(), value: "@[Old](agent:agent-1) review", onChange: vi.fn(), onKeyDown: vi.fn(), placeholder: "Message", connectors: [] };
+    const { rerender } = render(<ComposerInput {...props} agentMentions={[{ id: "agent-1", name: "Old" }]} />);
+    const image = "data:image/png;base64,fixture";
+    rerender(<ComposerInput {...props} agentMentions={[{ id: "agent-1", name: "New", iconImageDataUrl: image }]} />);
+    expect(screen.getByRole("textbox")).toHaveTextContent("New review");
+    expect(screen.getByRole("textbox").querySelector("img")).toHaveAttribute("src", image);
+    expect(screen.getByRole("textbox").querySelector(".agent-mention")).toHaveAttribute("data-mention", "@[Old](agent:agent-1)");
+    expect(props.onChange).not.toHaveBeenCalled();
   });
 
   it("renders inline chips while selection and dictation use canonical text offsets", () => {
