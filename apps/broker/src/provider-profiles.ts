@@ -7,13 +7,31 @@
  * broker is the ONLY process that holds these secrets; the desktop never sees them.
  */
 
-import {
-  GITHUB_OAUTH_SCOPES,
-  LINEAR_OAUTH_SCOPES,
-  SLACK_OAUTH_SCOPES,
-  VERCEL_OAUTH_SCOPES,
-  type BrokerProviderId
-} from "@mivlet/connectors";
+import type { BrokerProviderId } from "@mivlet/connectors";
+
+// Confidential OAuth profiles own these grant scopes. GitHub's classic repo
+// scope grants writes, so its read-only product route requests identity/org only.
+// Vercel, Linear and Slack write scopes support their approved product actions.
+const GITHUB_OAUTH_SCOPES = ["read:user", "read:org"] as const;
+const VERCEL_OAUTH_SCOPES = [
+  "user:read",
+  "team:read",
+  "project:read",
+  "deployment:read",
+  "deployment:write"
+] as const;
+const LINEAR_OAUTH_SCOPES = ["read", "write"] as const;
+const SLACK_OAUTH_SCOPES = [
+  "channels:read",
+  "groups:read",
+  "channels:history",
+  "groups:history",
+  "im:read",
+  "mpim:read",
+  "users:read",
+  "chat:write",
+  "reactions:write"
+] as const;
 
 /**
  * How a provider wants PKCE handled by the broker.
