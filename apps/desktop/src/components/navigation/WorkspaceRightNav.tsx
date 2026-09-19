@@ -8,6 +8,7 @@ import type {
 import { ChatCircle } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { CalendarBlank } from "@phosphor-icons/react/dist/csr/CalendarBlank";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
+import { ClockCounterClockwise } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
 import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
@@ -38,6 +39,8 @@ export function WorkspaceRightNav({
   sideChats,
   schedules,
   library,
+  history,
+  historyRequestId,
   onSchedules,
   request,
   renderTab,
@@ -57,6 +60,8 @@ export function WorkspaceRightNav({
   sideChats?: ReactNode;
   schedules?: ReactNode;
   library?: ReactNode;
+  history?: ReactNode;
+  historyRequestId?: string | null;
   onSchedules?: () => void;
   request?: RightPanelTab | null;
   renderTab?: (tab: RightPanelTab, close: () => void) => ReactNode;
@@ -78,6 +83,9 @@ export function WorkspaceRightNav({
   useEffect(() => {
     if (request) dispatch({ type: "open", tab: request });
   }, [request]);
+  useEffect(() => {
+    if (historyRequestId) dispatch({ type: "select", id: "history" });
+  }, [historyRequestId]);
   const lastUtility = useRef("library");
   const navigationOnly = !computerAgentId && state.selected === "navigation";
   const lastSelection = useRef(state.selected);
@@ -119,6 +127,7 @@ export function WorkspaceRightNav({
     { id: "browser", label: "Browser", Icon: Globe },
     { id: "chats", label: "Side chat", Icon: ChatCircle },
     { id: "schedules", label: "Schedules", Icon: CalendarBlank },
+    { id: "history", label: "History", Icon: ClockCounterClockwise },
   ];
   return (
     <aside
@@ -248,6 +257,11 @@ export function WorkspaceRightNav({
           renderTab?.(selected, () => closeTab(selected.id))
         ) : state.selected === "library" ? (
           library ?? <p className="right-panel__empty">Saved files will appear here.</p>
+        ) : state.selected === "history" ? (
+          <div className="right-panel__library">
+            <div className="right-panel__section-heading"><h2>History</h2></div>
+            {history ?? <p className="right-panel__empty">No history for this conversation yet.</p>}
+          </div>
         ) : state.selected === "chats" ? (
           <div className="right-panel__library">
             {sideChats ?? (

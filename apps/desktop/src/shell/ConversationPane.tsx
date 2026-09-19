@@ -1,6 +1,4 @@
-import { WorkDetails } from "../components/work/WorkDetails";
-import { CoordinationActivity } from "../components/work/CoordinationActivity";
-import { promoteWorkOutputToMemory } from "../lib/work-memory";
+import { ArrowDown } from "@phosphor-icons/react";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ConversationRoom,
@@ -29,9 +27,9 @@ import { RecipientPicker } from "../components/conversation/RecipientPicker";
 import type { ComposerInputHandle } from "../components/ComposerInput";
 import type { ComposerAttachment } from "../lib/types";
 import { ConversationFeed } from "../components/conversation/ConversationFeed";
-import { ProfileAgentAvatar } from "../components/agents/agent-icons";
+import { ConversationIdentity } from "./ConversationIdentity";
 import { agentPresence } from "../lib/agent-presence";
-import { resolveWorkspaceMentions, workspaceMentionToken } from "../lib/collaboration-mentions";
+import { resolveWorkspaceMentions } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
@@ -82,8 +80,6 @@ export function ConversationPane({
   onProviders,
   onProjectUpdate,
   onDraftReady,
-  onOpenWork,
-  selectedWorkId,
 }: {
   view: WorkspaceView;
   room: ConversationRoom;
@@ -106,8 +102,6 @@ export function ConversationPane({
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
   ) => Promise<void>;
   onDraftReady: (append: (text: string) => void) => void;
-  onOpenWork?: (id: string | null) => void;
-  selectedWorkId?: string | null;
 }) {
   const owner = runtime.accountWorkspaceStatus.activeContextOwner;
   const composer = useScopedComposer({
@@ -213,13 +207,6 @@ export function ConversationPane({
     }));
   const baseState = liveStates[0]?.state ?? idleAgentState;
 
-  const activityDetailsRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (selectedWorkId) {
-      activityDetailsRef.current?.scrollIntoView({ block: "nearest" });
-      activityDetailsRef.current?.focus({ preventScroll: true });
-    }
-  }, [selectedWorkId, room.id]);
   const scroll = useConversationScroll(
     `${service.workspaceId}:${view.id}`,
     `${state.revision}:${history?.messages.length}`,
@@ -475,27 +462,15 @@ export function ConversationPane({
   return (
     <div className={`conversation-pane-content${empty ? " conversation-pane-content--empty" : ""}`}>
       <header className="team-conversation-header">
-        <div className="team-conversation-identity">
-          <button type="button" className="team-agent-settings-trigger" disabled={!profile} aria-label={`Agent settings for ${displayAgent.name}`} onClick={() => onAgentSettings(displayAgent.id)}>
-          <ProfileAgentAvatar
-            agent={displayAgent}
-            iconSize={29}
-            presence={agentPresence(baseState, approvals.length > 0)}
-          />
-          </button>
-          <div className="team-conversation-title">
-            <button type="button" className="team-agent-settings-trigger" disabled={!project && room.kind === "direct" && !profile}
-              title={room.kind === "direct" && !project ? `Agent settings for ${displayAgent.name}` : undefined}
-              onClick={() => project || room.kind === "group" ? onEdit() : onAgentSettings(displayAgent.id)}>
-              <strong>{room.kind === "direct" && !sideChat ? displayAgent.name : room.title}</strong>
-            </button>
-            {sideChat ? (
-              <small className="side-chat-marker">
-                Side Chat · separate conversation
-              </small>
-            ) : null}
-          </div>
-        </div>
+        <ConversationIdentity
+          agent={displayAgent}
+          presence={agentPresence(baseState, approvals.length > 0)}
+          name={project ? project.name : room.kind === "direct" && !sideChat ? displayAgent.name : room.title}
+          settingsLabel={project ? `Project settings for ${project.name}` : room.kind === "group" ? `Conversation settings for ${room.title}` : `Agent settings for ${displayAgent.name}`}
+          disabled={!project && room.kind === "direct" && !profile}
+          sideChat={sideChat}
+          onOpen={() => project || room.kind === "group" ? onEdit() : onAgentSettings(displayAgent.id)}
+        />
       </header>
       <div
         className="conversation-pane-scroll"
@@ -537,18 +512,6 @@ export function ConversationPane({
               focus();
             }}
           />
-          <CoordinationActivity work={effortWork} agents={runtime.agents}
-            onInspect={id => onOpenWork?.(id)}
-            onStop={id => { void service.stop(id).catch(error => service.report(error)); }}
-            onFollowUp={(id, name, workId) => { composer.setReplyWork(workId); composer.setText(`${workspaceMentionToken({ id, name })}, `); focus(); }} />
-          {effortWork.filter(item => item.id === selectedWorkId).map(item => <section key={item.id} ref={activityDetailsRef} tabIndex={-1} className="conversation-attention" aria-label="Activity details">
-            <button type="button" onClick={() => onOpenWork?.(null)}>Close details</button>
-            <WorkDetails item={item} onOpen={() => onOpenWork?.(null)}
-              onStop={id => service.stop(id)}
-              onContinue={async (id, generation) => { await service.command({ action: "continue-work", id, expectedGeneration: generation, reconcile: true }); }}
-              onSteer={async (id, generation, text) => { await service.steer(id, generation, text); }}
-              onPromote={async (output, workItem, value) => { await promoteWorkOutputToMemory(workItem, output, value, runtime.memoryState); }} />
-          </section>)}
           {running
             .filter(
               (item) =>
@@ -594,9 +557,11 @@ export function ConversationPane({
           <button
             type="button"
             className="conversation-jump"
+            aria-label="Jump to latest"
+            title="Jump to latest"
             onClick={scroll.toLatest}
           >
-            Jump to latest
+            <ArrowDown size={20} weight="regular" aria-hidden="true" />
           </button>
         ) : null}
         <Composer

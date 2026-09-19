@@ -143,8 +143,10 @@ export function WorkspaceDialogs({
                 nav.open(plan.conversationId);
                 nav.selectNavWork(plan.workId);
               } else if (plan.kind === "agent-room") nav.open(plan.conversationId);
-              else if (plan.kind === "agent-editor")
+              else if (plan.kind === "agent-editor") {
+                nav.setProjectDetailsId(null);
                 setAgentEditor({ id: plan.agentId });
+              }
               else {
                 nav.setPanelRequest(plan.request);
                 nav.setComputer(null);
@@ -226,7 +228,7 @@ export function WorkspaceDialogs({
           onOpen={nav.open}
         />
       ) : null}
-      {agentEditor ? (
+      {agentEditor && !nav.projectDetailsId ? (
         <Suspense fallback={null}>
           <AgentEditor
             presentation={agentEditor.id ? "panel" : "modal"}

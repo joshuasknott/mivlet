@@ -11,7 +11,7 @@ describe("conversation coordination activity", () => {
     const root = { id: "root", rootId: "root", agentId: "lead", agentName: "Lead", status: "waiting", userRequest: "Review implementation", prompt: "Coordinate the review" } as CollaborationWorkItem;
     const child = { ...root, id: "child", parentId: "root", agentId: "reviewer", agentName: "Reviewer", status: "failed", prompt: "Review changes", reason: "Reconnect provider" } as CollaborationWorkItem;
     render(<CoordinationActivity work={[root, child]} agents={[{ id: "lead", name: "Lead" } as MivletAgentProfile, { id: "reviewer", name: "Reviewer" } as MivletAgentProfile]} onStop={onStop} onInspect={onInspect} onFollowUp={onFollowUp} />);
-    fireEvent.click(screen.getByText("Activity · 1 active"));
+    expect(screen.getByText("1 active")).toBeVisible();
     expect(screen.getByText("Reconnect provider")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Stop effort" }));
     expect(onStop).toHaveBeenLastCalledWith("root");
@@ -24,7 +24,7 @@ describe("conversation coordination activity", () => {
     const onStop = vi.fn();
     const work = { id: "failed", rootId: "failed", agentId: "lead", agentName: "Lead", status: "failed", userRequest: "Update report", prompt: "Update report", resourceClaims: ["connector:drive"] } as CollaborationWorkItem;
     render(<CoordinationActivity work={[work]} agents={[]} onStop={onStop} onInspect={vi.fn()} onFollowUp={vi.fn()} />);
-    fireEvent.click(screen.getByText("Activity · 1 assignments"));
+    expect(screen.getByText("1 assignment")).toBeVisible();
     fireEvent.click(screen.getByRole("button", { name: "Stop effort" }));
     expect(onStop).toHaveBeenCalledWith("failed");
   });

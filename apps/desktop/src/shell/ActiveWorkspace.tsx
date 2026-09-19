@@ -1,10 +1,6 @@
 import "../styles/agent-settings.css";
 import { AgentNotifications } from "../components/agents/AgentNotifications";
-import type {
-  CollaborationWorkItem,
-  MivletAgentProfile,
-  WorkOutput,
-} from "@mivlet/protocol";
+import type { MivletAgentProfile } from "@mivlet/protocol";
 import {
   Suspense,
   useEffect,
@@ -26,7 +22,6 @@ import {
 } from "../hooks/useLocalScheduleDispatcher";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import { ExecutionApprovalRouter } from "../lib/execution-approvals";
-import { promoteWorkOutputToMemory } from "../lib/work-memory";
 import {
   enqueueWorkspaceDispose,
   WorkspaceExecution,
@@ -121,6 +116,9 @@ export function ActiveWorkspace({
     onNavigate: () => setMarketplace(null),
     onSearch: () => setSearchOpen(true),
   });
+  useEffect(() => {
+    if (nav.projectDetailsId) setAgentEditor(null);
+  }, [nav.projectDetailsId]);
   const appendDraft = useRef<(text: string) => void>(() => undefined);
   const seen = useRef(new Map<string, string>());
   const profileName = workspaceProfileName(runtime.identityStatus);
@@ -346,30 +344,6 @@ export function ActiveWorkspace({
         draft: projectEditorDraft(nav.activeProfile),
       }),
   });
-  const stopWork = (id: string) => service.stop(id);
-  const continueWork = (id: string, generation: number) =>
-    service
-      .command({
-        action: "continue-work",
-        id,
-        expectedGeneration: generation,
-        reconcile: true,
-      })
-      .then(() => undefined);
-  const steerWork = (id: string, generation: number, text: string) =>
-    service.steer(id, generation, text).then(() => undefined);
-  const promoteWorkOutput = async (
-    output: WorkOutput,
-    workItem: CollaborationWorkItem,
-    value: string,
-  ) => {
-    await promoteWorkOutputToMemory(
-      workItem,
-      output,
-      value,
-      runtime.memoryState,
-    );
-  };
   const renderConversation = buildConversationRenderer({
     nav,
     runtime,
@@ -381,7 +355,7 @@ export function ActiveWorkspace({
     onOpenMarketplace: setMarketplace,
     onSetSettingsTab: setSettingsTab,
     onOpenSettings: () => setSettings(true),
-    onAgentSettings: (id) => { nav.setPanelFocused(false); setAgentEditor({ id }); },
+    onAgentSettings: (id) => { nav.setPanelFocused(false); nav.setProjectDetailsId(null); setAgentEditor({ id }); },
     onEditConversation: (roomId) =>
       setConversationDialog({ kind: "edit", roomId }),
     onPlaceConversation: (id) =>
@@ -394,7 +368,7 @@ export function ActiveWorkspace({
     <OpenWebPreview.Provider value={nav.openPanelWeb}>
       <main
         onPointerDownCapture={nav.onConversationPointerDown}
-        className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${nav.contextOpen || nav.computer || agentEditor?.id ? " teammates-workspace--history" : ""}`}
+        className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${nav.contextOpen || nav.computer || agentEditor?.id || nav.projectDetailsId ? " teammates-workspace--history" : ""}`}
         data-theme={theme}
         data-mobile-navigation={nav.mobileNavigation}
       >
@@ -431,8 +405,7 @@ export function ActiveWorkspace({
           onSelectAgent={(agent) =>
             void selectAgent(agent).catch((error) => service.report(error))
           }
-          onCreateAgent={() => setAgentEditor({})}
-          onEditAgent={(agent) => setAgentEditor({ id: agent.id })}
+          onCreateAgent={() => { nav.setProjectDetailsId(null); setAgentEditor({}); }}
           onOpenMarketplace={() => setMarketplace({})}
           onOpenSettings={() => setSettings(true)}
           onOpenUsage={() => setAccountDialog("usage")}
@@ -446,9 +419,9 @@ export function ActiveWorkspace({
           projects={projects}
           profileName={profileName}
           marketplace={marketplace}
-          panelOpen={nav.contextOpen || Boolean(nav.computer) || Boolean(agentEditor?.id)}
-          onTogglePanel={() => { nav.setComputer(null); nav.setContextOpen(!(nav.contextOpen || nav.computer || agentEditor?.id)); setAgentEditor(null); }}
-          onAgentSettings={(id) => { nav.setPanelFocused(false); setAgentEditor({ id }); }}
+          panelOpen={nav.contextOpen || Boolean(nav.computer) || Boolean(agentEditor?.id) || Boolean(nav.projectDetailsId)}
+          onTogglePanel={() => { nav.setComputer(null); nav.setContextOpen(!(nav.contextOpen || nav.computer || agentEditor?.id || nav.projectDetailsId)); setAgentEditor(null); nav.setProjectDetailsId(null); }}
+          onAgentSettings={(id) => { nav.setPanelFocused(false); nav.setProjectDetailsId(null); setAgentEditor({ id }); }}
           indicators={indicators}
           tabMeta={conversationTabMeta(
             state.data.conversations,
@@ -473,10 +446,6 @@ export function ActiveWorkspace({
             setConversationDialog({ kind: "migrate", id })
           }
           onProjectUpdate={updateProject}
-          onStopWork={stopWork}
-          onContinueWork={continueWork}
-          onSteerWork={steerWork}
-          onPromoteWorkOutput={promoteWorkOutput}
         />
         <Suspense fallback={null}>
           {state.sessions.map((session) => (
@@ -490,7 +459,7 @@ export function ActiveWorkspace({
           ))}
         </Suspense>
         <WorkspaceContextPanel
-          hidden={Boolean(agentEditor?.id)}
+          hidden={Boolean(agentEditor?.id) || Boolean(nav.projectDetailsId)}
           nav={nav}
           runtime={runtime}
           service={service}

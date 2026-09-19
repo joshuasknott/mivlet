@@ -24,8 +24,9 @@ describe("quiet agent surface", () => {
     render(<AgentSidebar agents={[agent, ...members]} activeAgentId={agent.id} profileName="Local" connectors={[]}
       previews={{}} marketplaceActive={false} projects={[{ id: "project", name: "Launch", threadId: "main" }, { id: "empty", name: "Empty" }]}
       conversations={[{ id: "main", title: "Launch", kind: "group", participants: [...members.map(member => ({ agentId: member.id })), { agentId: members[0].id }, { agentId: "deleted" }] }]}
-      onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} onEditAgent={vi.fn()} onOpenMarketplace={vi.fn()}
+      onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} onOpenMarketplace={vi.fn()}
       onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: "Edit Mira" })).not.toBeInTheDocument();
     const project = screen.getByRole("button", { name: "Launch" });
     expect(project.querySelectorAll(".agent-avatar")).toHaveLength(3);
     expect(project.querySelector("img")).toHaveAttribute("src", members[0].iconImageDataUrl);
@@ -72,7 +73,7 @@ describe("quiet agent surface", () => {
         onCreateProject={vi.fn()}
         onSelectAgent={onSelectAgent}
         onCreateAgent={vi.fn()}
-        onEditAgent={vi.fn()}
+
         onOpenMarketplace={vi.fn()}
         onOpenSettings={vi.fn()}
         onOpenUsage={vi.fn()}
@@ -103,7 +104,7 @@ describe("quiet agent surface", () => {
       <AgentSidebar agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]}
         marketplaceActive={false} previews={{ [agent.id]: { message: "Draft", time: "", presence,
           status: presence === "working" || presence === "service" ? "running" : "idle", completionId } }}
-        onSelectAgent={onSelectAgent} onCreateAgent={vi.fn()} onEditAgent={vi.fn()}
+        onSelectAgent={onSelectAgent} onCreateAgent={vi.fn()}
         onOpenMarketplace={vi.fn()} onOpenSettings={vi.fn()} onOpenUsage={vi.fn()} onSignOut={vi.fn()} />
     );
     const { rerender } = render(sidebar("idle"));
@@ -157,7 +158,7 @@ describe("quiet agent surface", () => {
         marketplaceActive={false}
         onSelectAgent={vi.fn()}
         onCreateAgent={onCreateAgent}
-        onEditAgent={vi.fn()}
+
         onOpenMarketplace={onOpenMarketplace}
         onOpenSettings={onOpenSettings}
         onOpenUsage={vi.fn()}
@@ -171,6 +172,7 @@ describe("quiet agent surface", () => {
       screen.queryByRole("button", { name: "Search" }),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Plugins/i }));
+    fireEvent.click(screen.getByRole("button", { name: "Create or message" }));
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
     fireEvent.click(screen.getByRole("button", { name: /Local workspace/i }));
     expect(onOpenSettings).not.toHaveBeenCalled();

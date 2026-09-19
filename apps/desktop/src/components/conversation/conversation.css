@@ -128,12 +128,6 @@
 .side-chat-dialog textarea { resize: vertical; line-height: 1.6; }
 .side-chat-dialog__owner { margin: 0; color: var(--ink-muted); font-size: 12px; }
 .side-chat-dialog footer { display: flex; justify-content: flex-end; gap: 10px; }
-.conversation-memory-promotion p { margin: 0; color: var(--ink-muted); font-size: 13px; line-height: 1.6; }
-.conversation-memory-promotion__scopes label { display: flex; align-items: flex-start; gap: 9px; min-height: 40px; padding: 6px 4px; border-radius: 8px; cursor: pointer; }
-.conversation-memory-promotion__scopes label:hover { background: var(--surface-hover); }
-.conversation-memory-promotion__scopes input { flex: none; margin-top: 4px; }
-.conversation-memory-promotion__scopes span { display: grid; gap: 2px; }
-.conversation-memory-promotion__scopes small { color: var(--ink-muted); font-size: 11px; line-height: 1.5; }
 .side-chats :focus-visible, .side-chat-dialog :focus-visible { outline: 2px solid var(--ink-soft); outline-offset: 2px; }
 @media (max-width: 700px) {
   .side-chats__new, .side-chats__views button, .side-chats__actions button, .side-chat-dialog button { min-height: 44px; }

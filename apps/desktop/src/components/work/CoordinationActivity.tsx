@@ -4,7 +4,7 @@ import { WorkStatusBadge } from "./WorkStatusBadge";
 import "./work.css";
 import { displayWorkspaceMentions } from "../../lib/collaboration-mentions";
 
-/** Small, conversation-owned disclosure over the durable execution records. */
+/** Conversation history backed by durable execution records. */
 export function CoordinationActivity({ work, agents, onInspect, onStop, onFollowUp }: {
   work: CollaborationWorkItem[];
   agents: MivletAgentProfile[];
@@ -12,11 +12,11 @@ export function CoordinationActivity({ work, agents, onInspect, onStop, onFollow
   onStop: (id: string) => void;
   onFollowUp: (agentId: string, name: string, workId: string) => void;
 }) {
-  if (!work.length) return null;
+  if (!work.length) return <p className="right-panel__empty">No history for this conversation yet.</p>;
   const unfinished = work.filter(item => !["completed", "failed", "cancelled"].includes(item.status));
   const roots = work.filter(item => !item.parentId);
-  return <details className="coordination-activity">
-    <summary>Activity · {unfinished.length ? `${unfinished.length} active` : `${work.length} assignments`}</summary>
+  return <div className="coordination-activity">
+    <p>{unfinished.length ? `${unfinished.length} active` : `${work.length} ${work.length === 1 ? "assignment" : "assignments"}`}</p>
     <p className="coordination-runtime-note">Work continues while Mivlet is running and Windows is awake. Interrupted work needs review after restart.</p>
     {roots.map(root => <section key={root.id} className="coordination-effort" aria-label={`Request: ${root.userRequest}`}>
       <header><span>{displayWorkspaceMentions(root.userRequest)}</span>{work.some(item => item.rootId === root.id && !["completed", "cancelled"].includes(item.status)) ? <button type="button" onClick={() => onStop(root.id)}>Stop effort</button> : null}</header>
@@ -38,5 +38,5 @@ export function CoordinationActivity({ work, agents, onInspect, onStop, onFollow
         </li>;
       })}</ul>
     </section>)}
-  </details>;
+  </div>;
 }

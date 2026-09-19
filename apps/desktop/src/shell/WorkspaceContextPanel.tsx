@@ -1,3 +1,4 @@
+import { WorkspaceHistory } from "./WorkspaceHistory";
 import { WorkspaceLibrary } from "../components/navigation/WorkspaceLibrary";
 import { Suspense } from "react";
 import {
@@ -111,6 +112,8 @@ export function WorkspaceContextPanel({
           </p>
         );
       }}
+      historyRequestId={nav.navWorkId}
+      history={<WorkspaceHistory key={nav.activeRoom?.id ?? "empty"} room={nav.activeRoom} runtime={runtime} service={service} state={state} selectedWorkId={nav.navWorkId} onOpenConversation={nav.open} />}
       library={<WorkspaceLibrary key={workspaceId} workspaceId={workspaceId} agents={runtime.agents} onOpen={nav.setPanelRequest} />}
       sideChats={
         navContext && navContext.kind !== "work" ? (
