@@ -81,40 +81,6 @@ const item = (
 });
 const runtime = {
   agents: [agent],
-  managedMemoryRecords: [
-    {
-      id: "mine",
-      kind: "fact",
-      title: "Writing",
-      value: "Short replies",
-      source: "You",
-      freshness: "Today",
-      approved: true,
-      pinned: false,
-      scope: { level: "agent", agentId: "agent" },
-    },
-    {
-      id: "theirs",
-      kind: "fact",
-      title: "Other",
-      value: "Other value",
-      source: "You",
-      freshness: "Today",
-      approved: true,
-      pinned: false,
-      scope: { level: "agent", agentId: "other" },
-    },
-    {
-      id: "global",
-      kind: "fact",
-      title: "Global",
-      value: "Global value",
-      source: "You",
-      freshness: "Today",
-      approved: true,
-      pinned: false,
-    },
-  ],
   connectorManifests: [],
 } as unknown as ShellRuntime;
 const base = {
@@ -155,15 +121,26 @@ const base = {
   onOpenConversation: vi.fn(),
   onNewSideChat: vi.fn(),
   onSchedules: vi.fn(),
-  onOpenComputer: vi.fn(),
-  onManageMemory: vi.fn(),
-  onStopWork: vi.fn(),
-  onContinueWork: vi.fn(),
-  onSteerWork: vi.fn(),
 };
 const context = (value: NavContext) => ({ ...base, context: value });
 
 describe("multifunctional right panel", () => {
+  it("opens History from navigation and restores focus on Back", () => {
+    render(<WorkspaceRightNav {...context(null)} history={<p>Conversation assignments</p>} />);
+    fireEvent.click(screen.getByRole("button", { name: "History" }));
+    expect(screen.getByRole("heading", { name: "History" })).toBeVisible();
+    expect(screen.getByText("Conversation assignments")).toBeVisible();
+    expect(screen.queryByRole("navigation")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("button", { name: "History" })).toHaveFocus();
+  });
+
+  it("opens History for a requested work item", () => {
+    render(<WorkspaceRightNav {...context(null)} historyRequestId="work-1" history={<p>Selected assignment</p>} />);
+    expect(screen.getByRole("heading", { name: "History" })).toBeVisible();
+    expect(screen.getByText("Selected assignment")).toBeVisible();
+  });
+
   it("replaces navigation with Library and restores focus on Back", () => {
     render(<WorkspaceRightNav {...context(null)} library={<p>Saved files</p>} />);
     expect(screen.getAllByRole("button").slice(0, 4).map(button => button.textContent)).toEqual(["Library", "Browser", "Side chat", "Schedules"]);
@@ -262,7 +239,6 @@ describe("multifunctional right panel", () => {
       screen.getByRole("button", { name: "Close workspace panel" }),
     );
     expect(onClose).toHaveBeenCalledOnce();
-    expect(base.onStopWork).not.toHaveBeenCalled();
   });
   it("opens a validated website and rejects unsafe schemes", () => {
     render(<WorkspaceRightNav {...context(null)} renderTab={(tab) => <p>{tab.kind === "web" ? tab.url : tab.title}</p>} />);

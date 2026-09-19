@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { ConnectorManifest, MivletAgentProfile } from "@mivlet/protocol";
-import { NotePencil } from "@phosphor-icons/react/dist/csr/NotePencil";
-import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
+import { SidebarCreateMenu } from "./SidebarCreateMenu";
 import { PluginsIcon } from "../PluginsIcon";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { Users } from "@phosphor-icons/react/dist/csr/Users";
@@ -41,7 +40,6 @@ export function AgentSidebar({
   marketplaceActive,
   onSelectAgent,
   onCreateAgent,
-  onEditAgent,
   onOpenMarketplace,
   onOpenSettings,
   onOpenUsage,
@@ -64,7 +62,6 @@ export function AgentSidebar({
   marketplaceActive: boolean;
   onSelectAgent: (agent: MivletAgentProfile) => void;
   onCreateAgent: () => void;
-  onEditAgent: (agent: MivletAgentProfile) => void;
   onOpenMarketplace: () => void;
   onOpenSettings: () => void;
   onOpenUsage: () => void;
@@ -138,7 +135,7 @@ export function AgentSidebar({
     >
       <div className="agent-sidebar__topline">
         <Brand className="agent-sidebar__brand" />
-
+        <SidebarCreateMenu agents={agents} onCreateAgent={onCreateAgent} onCreateProject={onCreateProject} onSelectAgent={onSelectAgent} />
       </div>
       {onSearch ? <button type="button" className="agent-search" onClick={onSearch} aria-label="Search workspace"><MagnifyingGlass size={16} /><span>Search</span></button> : <label className="agent-search">
         <MagnifyingGlass size={16} aria-hidden="true" />
@@ -158,16 +155,6 @@ export function AgentSidebar({
           >
             <header>
               <span id="project-sidebar-title">Projects</span>
-              {onCreateProject ? (
-                <button
-                  type="button"
-                  onClick={onCreateProject}
-                  aria-label="Create project"
-                  title="Create project"
-                >
-                  <Plus size={15} />
-                </button>
-              ) : null}
             </header>
             <div className="project-sidebar-list">
               {visibleProjects.map((project) => {
@@ -236,17 +223,6 @@ export function AgentSidebar({
         ) : null}
         {!search || visibleAgents.length ? <div className="agent-sidebar__agents-heading">
           <span>Agents</span>
-          <div>
-            <button
-              className="agent-sidebar__new"
-              type="button"
-              onClick={onCreateAgent}
-              aria-label="Create agent"
-              title="Create agent"
-            >
-              <Plus size={17} />
-            </button>
-          </div>
         </div> : null}
         <div className="agent-list" role="list">
           {visibleAgents.map((agent) => {
@@ -325,14 +301,6 @@ export function AgentSidebar({
                       {preview?.status === "attention" ? "!" : null}
                     </span>
                   ) : null}
-                </button>
-                <button
-                  className="agent-row__edit"
-                  type="button"
-                  onClick={() => onEditAgent(agent)}
-                  aria-label={`Edit ${agent.name}`}
-                >
-                  <NotePencil size={14} />
                 </button>
               </div>
             );

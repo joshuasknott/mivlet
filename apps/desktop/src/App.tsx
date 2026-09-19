@@ -1,4 +1,5 @@
 import { WindowControls } from "./components/WindowControls";
+import { WorkspaceErrorBoundary } from "./components/WorkspaceErrorBoundary";
 import { MivletQueryProvider } from "./lib/query-client";
 import { DesktopShell } from "./shell/DesktopShell";
 
@@ -7,7 +8,9 @@ export function App() {
   return (
     <MivletQueryProvider>
       <WindowControls />
-      <DesktopShell />
+      <WorkspaceErrorBoundary>
+        <DesktopShell />
+      </WorkspaceErrorBoundary>
     </MivletQueryProvider>
   );
 }

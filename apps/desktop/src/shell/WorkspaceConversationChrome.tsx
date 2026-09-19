@@ -1,10 +1,4 @@
-import type {
-  CollaborationWorkItem,
-  ConversationRoom,
-  LocalProject,
-  WorkOutput,
-  WorkspaceView,
-} from "@mivlet/protocol";
+import type { ConversationRoom, LocalProject, WorkspaceView } from "@mivlet/protocol";
 import { Suspense, type MutableRefObject, type ReactNode } from "react";
 import { ConversationGrid } from "../components/conversation/ConversationGrid";
 interface NewAction { id: string; label: string; run: () => void; }
@@ -32,8 +26,6 @@ function WorkspaceConversationView({
   active,
   profileName,
   onAgentSettings,
-  selectedWorkId,
-  onOpenWork,
   onClose,
   onArtifact,
   onEdit,
@@ -53,8 +45,6 @@ function WorkspaceConversationView({
   active: boolean;
   profileName: string;
   onAgentSettings: (id: string) => void;
-  selectedWorkId: string | null;
-  onOpenWork: (id: string | null) => void;
   onClose: () => void;
   onArtifact: (output: string, agentId: string) => void;
   onEdit: () => void;
@@ -80,8 +70,6 @@ function WorkspaceConversationView({
       active={active}
       profileName={profileName}
       onAgentSettings={onAgentSettings}
-      selectedWorkId={selectedWorkId}
-      onOpenWork={onOpenWork}
       onClose={onClose}
       onArtifact={onArtifact}
       onEdit={onEdit}
@@ -138,12 +126,10 @@ export function buildConversationRenderer(input: {
       active={active}
       profileName={input.profileName}
       onAgentSettings={input.onAgentSettings}
-      selectedWorkId={input.nav.navWorkId}
-      onOpenWork={input.nav.selectNavWork}
       onClose={onClose}
       onArtifact={input.nav.openPanelArtifact}
       onEdit={() => {
-        if (project) input.nav.setProjectDetailsId(project.id);
+        if (project) { input.nav.setPanelFocused(false); input.nav.setProjectDetailsId(project.id); }
         else input.onEditConversation(room.id);
       }}
       onComputer={(agentId) => {
@@ -197,10 +183,6 @@ export function WorkspaceConversationChrome({
   onPlaceConversation,
   onMigrateConversation,
   onProjectUpdate,
-  onStopWork,
-  onContinueWork,
-  onSteerWork,
-  onPromoteWorkOutput,
 }: {
   nav: WorkspaceNavigation;
   runtime: ShellRuntime;
@@ -236,18 +218,6 @@ export function WorkspaceConversationChrome({
   onProjectUpdate: (
     project: LocalProject,
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
-  ) => Promise<void>;
-  onStopWork: (id: string) => void;
-  onContinueWork: (id: string, generation: number) => Promise<void>;
-  onSteerWork: (
-    id: string,
-    generation: number,
-    text: string,
-  ) => Promise<void>;
-  onPromoteWorkOutput: (
-    output: WorkOutput,
-    workItem: CollaborationWorkItem,
-    value: string,
   ) => Promise<void>;
 }) {
   const renderConversation = buildConversationRenderer({

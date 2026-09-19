@@ -13,7 +13,11 @@
   overflow: hidden;
 }
 .teammates-workspace--history {
-  grid-template-columns: 280px minmax(0, 1fr) 380px !important;
+  grid-template-columns: 280px minmax(0, 1fr) 280px !important;
+}
+.teammates-workspace,
+.teammates-workspace * {
+  scrollbar-color: color-mix(in srgb, var(--ink, #292724) 18%, transparent) transparent;
 }
 .team-loading {
   display: grid;
@@ -115,6 +119,37 @@
   margin: 0 auto;
   padding: 8px clamp(14px, 3vw, 42px) 14px;
   position: relative;
+}
+.conversation-jump {
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin-bottom: 8px;
+  border: 1px solid var(--line, #e8e8e8);
+  border-radius: 50%;
+  background: var(--surface, #fff);
+  color: var(--ink, #252525);
+  cursor: pointer;
+}
+.conversation-jump:hover {
+  background: var(--surface-hover, #f6f6f6);
+}
+.conversation-jump:focus-visible {
+  outline: 2px solid var(--ink-muted);
+  outline-offset: 3px;
+}
+@media (pointer: coarse) {
+  .conversation-jump {
+    width: 44px;
+    height: 44px;
+  }
 }
 .conversation-pane-composer .composer-glow {
   margin: 0;
@@ -521,7 +556,7 @@
 }
 @media (max-width: 1300px) {
   .teammates-workspace--history {
-    grid-template-columns: 280px minmax(0, 1fr) 360px !important;
+    grid-template-columns: 280px minmax(0, 1fr) 280px !important;
   }
   .team-conversation-header {
     padding-inline: 15px;
@@ -532,7 +567,7 @@
     grid-template-columns: 260px minmax(0, 1fr) !important;
   }
   .teammates-workspace--history {
-    grid-template-columns: 260px minmax(0, 1fr) 360px !important;
+    grid-template-columns: 260px minmax(0, 1fr) 260px !important;
   }
   .conversation-pane-messages {
     padding-inline: 22px;
@@ -862,7 +897,6 @@
 
 /* The title owns conversation actions, leaving a single workspace panel toggle. */
 
-.team-conversation-title { min-width: 0; }
 
 /* Keep the first request and its greeting together without remounting the editor. */
 .conversation-pane-content--empty .conversation-pane-scroll { flex: 1 1 0; }
@@ -870,7 +904,6 @@
 .conversation-pane-content--empty .conversation-pane-composer { flex: 0 0 auto; }
 .conversation-pane-content--empty::after { content: ""; flex: 1.25 1 0; }
 .team-conversation-header .team-conversation-identity { flex: 1; overflow: visible; }
-.team-conversation-title { min-width: 0; }
 .teammates-workspace .agent-row__copy strong { display: block; }
 @media (max-height: 520px) {
   .conversation-pane-content--empty::after { flex: 0; }

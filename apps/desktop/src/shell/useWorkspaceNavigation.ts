@@ -221,6 +221,7 @@ export function useWorkspaceNavigation(options: {
       open(item.conversationId);
     }
     setNavWorkId(id);
+    if (id) { setComputer(null); setContextOpen(true); }
   };
 
   return {
