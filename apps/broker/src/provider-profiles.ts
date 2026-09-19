@@ -9,9 +9,9 @@
 
 import type { BrokerProviderId } from "@mivlet/connectors";
 
-// These scopes belong to the broker's confidential OAuth profiles. Keep them
-// here rather than coupling the secret-owning boundary to the retired client
-// adapter implementations.
+// Confidential OAuth profiles own these grant scopes. GitHub's classic repo
+// scope grants writes, so its read-only product route requests identity/org only.
+// Vercel, Linear and Slack write scopes support their approved product actions.
 const GITHUB_OAUTH_SCOPES = ["read:user", "read:org"] as const;
 const VERCEL_OAUTH_SCOPES = [
   "user:read",
