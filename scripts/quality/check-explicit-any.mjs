@@ -6,7 +6,9 @@ const excludedDirectories = new Set([
   "_generated",
   "dist",
   "node_modules",
+  "output",
   "target",
+  ".wrangler",
 ]);
 const sourcePattern = /\.(?:ts|tsx)$/u;
 const excludedFilePattern = /\.(?:test|spec)\.(?:ts|tsx)$/u;
