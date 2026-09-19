@@ -568,7 +568,7 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 @keyframes model-picker-enter { from { opacity: 0; transform: translateY(5px) scale(.97); } to { opacity: 1; transform: none; } }
 @keyframes model-picker-content { from { opacity: .4; transform: translateY(3px); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: reduce) { .composer-menu.model-picker, .model-picker__effort-view, .model-picker__browse { animation: none; } .model-picker button, .model-picker__slider input::-webkit-slider-thumb { transition: none; } }
-.composer-model__effort { color: var(--ink-muted); font-size: inherit; font-weight: 400; white-space: nowrap; }
+.composer-model__effort { display: inline-block; width: 9ch; flex: 0 0 9ch; text-align: left; color: var(--ink-muted); font-size: inherit; font-weight: 400; white-space: nowrap; }
 .composer-model > svg { flex-shrink: 0; color: var(--ink-muted); }
 .agent-editor__model .composer-model { justify-content: space-between; width: 100%; max-width: none; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line); border-radius: 9px; }
 .agent-editor__model .composer-control-anchor { width: 100%; max-width: none; }

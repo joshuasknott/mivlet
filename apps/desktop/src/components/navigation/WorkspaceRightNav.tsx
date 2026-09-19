@@ -9,6 +9,8 @@ import { ChatCircle } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { CalendarBlank } from "@phosphor-icons/react/dist/csr/CalendarBlank";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
+import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
+import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -35,6 +37,7 @@ export function WorkspaceRightNav({
   onNewSideChat,
   sideChats,
   schedules,
+  library,
   onSchedules,
   request,
   renderTab,
@@ -53,6 +56,7 @@ export function WorkspaceRightNav({
   onNewSideChat?: () => void;
   sideChats?: ReactNode;
   schedules?: ReactNode;
+  library?: ReactNode;
   onSchedules?: () => void;
   request?: RightPanelTab | null;
   renderTab?: (tab: RightPanelTab, close: () => void) => ReactNode;
@@ -74,6 +78,8 @@ export function WorkspaceRightNav({
   useEffect(() => {
     if (request) dispatch({ type: "open", tab: request });
   }, [request]);
+  const lastUtility = useRef("library");
+  const navigationOnly = !computerAgentId && state.selected === "navigation";
   const lastSelection = useRef(state.selected);
   useEffect(() => {
     if (lastSelection.current === state.selected) return;
@@ -81,9 +87,9 @@ export function WorkspaceRightNav({
     if (open)
       (
         (panel.current?.querySelector('[role="tab"][aria-selected="true"]') ??
-          panel.current?.querySelector('nav [aria-pressed="true"]')) as HTMLElement | null
+          panel.current?.querySelector(navigationOnly ? `[data-utility="${lastUtility.current}"]` : '.right-panel__back')) as HTMLElement | null
       )?.focus();
-  }, [state.selected, open]);
+  }, [state.selected, open, navigationOnly]);
   const agentId =
     context?.kind === "agent"
       ? context.agent.id
@@ -109,6 +115,7 @@ export function WorkspaceRightNav({
   };
   const closeTab = (id: string) => dispatch({ type: "close", id });
   const utilities = [
+    { id: "library", label: "Library", Icon: FileText },
     { id: "browser", label: "Browser", Icon: Globe },
     { id: "chats", label: "Side chat", Icon: ChatCircle },
     { id: "schedules", label: "Schedules", Icon: CalendarBlank },
@@ -117,29 +124,31 @@ export function WorkspaceRightNav({
     <aside
       ref={panel}
       className="workspace-context right-panel"
-      data-navigation-only={!computerAgentId && state.selected === "navigation"}
+      data-navigation-only={navigationOnly}
       aria-label="Workspace panel"
       role={compact ? "dialog" : undefined}
       aria-modal={(compact && open) || undefined}
       hidden={!open}
     >
-      <header className="right-panel__navigation">
-        <nav aria-label="Panel views">
+      <header className={navigationOnly ? "right-panel__navigation" : "right-panel__destination"}>
+        {navigationOnly ? <nav aria-label="Panel views">
           {utilities.map(({ id, label, Icon }) => (
             <button
               key={id}
               type="button"
-              aria-pressed={!computerAgentId && (state.selected === id || (id === "browser" && selected?.kind === "web") || (id === "chats" && selected?.kind === "chat"))}
+              data-utility={id}
               onClick={() => {
+                lastUtility.current = id;
                 select(id);
                 if (id === "schedules" && !schedules) onSchedules?.();
               }}
             >
               <Icon size={17} />
               <span>{label}</span>
+              <CaretRight size={14} aria-hidden="true" />
             </button>
           ))}
-        </nav>
+        </nav> : <button type="button" className="right-panel__back" onClick={() => select("navigation")}><ArrowLeft size={18} aria-hidden="true" />Back</button>}
         <button
           type="button"
           className="right-panel__close"
@@ -149,7 +158,7 @@ export function WorkspaceRightNav({
           <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="1" /><path d="M9 4.5v15" /></svg>
         </button>
       </header>
-      {state.tabs.length && state.selected !== "navigation" ? (
+      {state.tabs.length && selected && !computerAgentId ? (
         <div
           className="right-panel__tabs"
           role="tablist"
@@ -237,6 +246,8 @@ export function WorkspaceRightNav({
           computer
         ) : selected ? (
           renderTab?.(selected, () => closeTab(selected.id))
+        ) : state.selected === "library" ? (
+          library ?? <p className="right-panel__empty">Saved files will appear here.</p>
         ) : state.selected === "chats" ? (
           <div className="right-panel__library">
             {sideChats ?? (

@@ -64,7 +64,6 @@ export function Composer({
   modelControl,
   secondaryControlsInMenu = false,
   onConnectProvider,
-  onSaveConclusion,
   compactAgentSurface = false,
   agentMentions = [],
 }: {
@@ -113,7 +112,6 @@ export function Composer({
   modelControl?: ReactNode;
   secondaryControlsInMenu?: boolean;
   onConnectProvider?: () => void;
-  onSaveConclusion?: () => void;
   compactAgentSurface?: boolean;
   /** Existing workspace agents available to the @ picker. */
   agentMentions?: readonly WorkspaceMentionAgent[];
@@ -450,9 +448,7 @@ export function Composer({
                   </button>
                   {secondaryControlsInMenu ? <>
                     <button type="button" role="menuitem" onClick={() => { closeExternalMenus(); setModelOpen(true); }}>Model and reasoning…</button>
-                    {onSaveConclusion ? <button type="button" role="menuitem" onClick={() => { closeExternalMenus(); onSaveConclusion(); }}>Save conclusion to Memory…</button> : null}
                   </> : null}
-                  {!secondaryControlsInMenu && onSaveConclusion ? <button type="button" role="menuitem" onClick={() => { closeExternalMenus(); onSaveConclusion(); }}>Save conclusion to Memory…</button> : null}
                   <ComposerPluginsMenu connectors={connectedConnectors} onMention={(id) => {
                     const prompt = composerValue + (composerValue && !/\s$/.test(composerValue) ? " " : "") + "@" + id + " ";
                     onComposerChange(prompt); closeExternalMenus(); composerRef.current?.focus();
