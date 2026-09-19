@@ -64,6 +64,12 @@ a deployed or production-validated service.
   wire route; other provider-specific wire adapters remain separate. Every route remains unavailable until its
   executable and account or credential are validated; catalogue presence is
   never presented as a live connection.
+- An experimental [Grok Bot connection](docs/development/grok-bot.md) opens a
+  dedicated remote-Bot conversation under Grok's connection options. It requires
+  WSL, a pinned community bridge, a private relay and a companion in Grok Bot's
+  VM. Bots retain their remote history and controls. Local Stop ends observation;
+  remote execution may continue. Account allowance and promotional balance use
+  have not been verified live.
 - Encrypted SQLite persistence for conversations, attached files, memory,
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.

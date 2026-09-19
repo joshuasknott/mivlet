@@ -43,6 +43,7 @@ mod execution_approvals;
 mod execution_attempts;
 mod execution_control;
 mod google;
+mod grok_bot;
 mod hosted_computer;
 mod knowledge;
 mod local_computer;
@@ -141,6 +142,10 @@ pub fn run() {
             }
         })
         .invoke_handler(account_session::guard(tauri::generate_handler![
+            grok_bot::grok_bot_setup_scope,
+            grok_bot::grok_bot_connect,
+            grok_bot::grok_bot_call,
+            grok_bot::grok_bot_disconnect,
             account_session::account_theme,
             local_computer::control::local_app_stop,
             local_computer::artifacts::local_computer_open_artifact,
