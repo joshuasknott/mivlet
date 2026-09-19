@@ -3,6 +3,7 @@ import type { IdentityStatus } from "@mivlet/protocol";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { useEffect, useRef, useState } from "react";
 import { Brand } from "../Brand";
+import { LegalFooter } from "./LegalFooter";
 
 import "../../styles/routes/onboarding.css";
 
@@ -17,12 +18,13 @@ export function OnboardingPage({
   identityStatus: IdentityStatus;
   identityPending: boolean;
   workspaceMessage: string;
-  onSignIn: () => void | Promise<void>;
+  onSignIn: (mode: "sign-in" | "sign-up") => void | Promise<void>;
   onOpenWorkspace: () => Promise<void>;
 }) {
   const [pending, setPending] = useState(false);
   const [attempted, setAttempted] = useState(false);
   const [error, setError] = useState("");
+  const [entryMode, setEntryMode] = useState<"sign-in" | "sign-up">("sign-in");
 
   const headingRef = useRef<HTMLHeadingElement>(null);
   const actionPending = useRef(false);
@@ -36,15 +38,16 @@ export function OnboardingPage({
     headingRef.current?.focus();
   }, [signedIn]);
 
-  const enter = async () => {
+  const enter = async (mode: "sign-in" | "sign-up" = "sign-in") => {
     if (identityPending || actionPending.current) return;
     actionPending.current = true;
+    setEntryMode(mode);
     setPending(true);
     setAttempted(true);
     setError("");
     try {
       if (signedIn) await onOpenWorkspace();
-      else await onSignIn();
+      else await onSignIn(mode);
     } catch (cause) {
       setError(
         cause instanceof Error
@@ -67,9 +70,9 @@ export function OnboardingPage({
         >
           <div className="og-heading">
             <h1 ref={headingRef} tabIndex={-1} id="onboarding-title">
-              {signedIn ? "Open your workspace" : "Welcome to Mivlet"}
+              {signedIn ? "Open your workspace" : "Start using Mivlet"}
             </h1>
-            <p>{signedIn ? workspaceMessage : "Your personal AI workspace"}</p>
+            {signedIn && <p>{workspaceMessage}</p>}
           </div>
           <div className="og-account-actions">
             {signedIn ? (
@@ -96,7 +99,7 @@ export function OnboardingPage({
                   disabled={busy}
                   onClick={() => void enter()}
                 >
-                  {busy ? (
+                  {busy && entryMode === "sign-in" ? (
                     <>
                       <Spinner size={17} className="og-spinner" /> Opening sign
                       in
@@ -109,9 +112,16 @@ export function OnboardingPage({
                   type="button"
                   className="og-secondary-button"
                   disabled={busy}
-                  onClick={() => void enter()}
+                  onClick={() => void enter("sign-up")}
                 >
-                  Sign up
+                  {busy && entryMode === "sign-up" ? (
+                    <>
+                      <Spinner size={17} className="og-spinner" /> Opening sign
+                      up
+                    </>
+                  ) : (
+                    "Create an account"
+                  )}
                 </button>
               </>
             )}
@@ -135,6 +145,7 @@ export function OnboardingPage({
           ) : null}
         </section>
       </div>
+      {!signedIn && <LegalFooter />}
     </main>
   );
 }
