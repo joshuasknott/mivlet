@@ -74,6 +74,41 @@ fn resumed_assignment_rechecks_resource_ownership() {
 }
 
 #[test]
+fn json_start_work_routes_nonmember_reviewer_without_changing_main_chat_membership() {
+    fixture(&store(), |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        let before = ctx.room(&room.id)?;
+        let command: Command = serde_json::from_value(json!({
+            "action": "start-work",
+            "id": "json-reviewer-work",
+            "conversationId": room.id,
+            "agentId": "reviewer",
+            "prompt": "Review the implementation",
+            "discussion": false,
+            "recipientIds": ["reviewer"]
+        }))
+        .expect("valid start-work command JSON");
+
+        commands::apply(ctx, command)?;
+
+        let work = ctx.item("json-reviewer-work")?;
+        assert_eq!(work.agent_id, "reviewer");
+        assert_eq!(work.recipient_ids, vec!["reviewer"]);
+        assert!(work.workspace_recipient);
+        assert_eq!(work.conversation_id, room.id);
+
+        let after = ctx.room(&room.id)?;
+        assert_eq!(after.participants, before.participants);
+        assert_eq!(after.facilitator_id, before.facilitator_id);
+        assert!(!after
+            .participants
+            .iter()
+            .any(|participant| participant.agent_id == "reviewer"));
+        Ok(())
+    });
+}
+
+#[test]
 fn workspace_recipients_share_a_frozen_request_without_membership_or_private_context_leak() {
     let profiles = [
         ("lead", "Lead private instructions"),

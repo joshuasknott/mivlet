@@ -167,9 +167,9 @@
 .connector-mention { display: inline; white-space: nowrap; font-weight: 550; line-height: inherit; color: var(--ink); }
 .connector-mention > span { display: inline; }
 .connector-mention svg, .connector-mention img { display: inline-block; width: 15px; height: 15px; margin-right: 5px; vertical-align: -2px; object-fit: contain; }
-.agent-mention { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; font-weight: 550; line-height: inherit; color: var(--ink); }
-.agent-mention__avatar { display: inline-grid; place-items: center; width: 15px; height: 15px; color: var(--surface); background: var(--accent); border-radius: 50%; font-size: 9px; font-weight: 700; line-height: 1; }
-.agent-mention__avatar::before { content: attr(data-initial); }
+.agent-mention { display: inline-flex; align-items: center; gap: 3px; max-width: 100%; padding: 1px 6px; border-radius: 5px; background: var(--accent-subtle); vertical-align: baseline; font-weight: 550; line-height: inherit; color: var(--ink); }
+.agent-mention__avatar { flex: 0 0 auto; color: var(--ink-soft); font-size: inherit; line-height: 1; }
+img.agent-mention__avatar { width: 18px; height: 18px; margin-right: 2px; border-radius: 50%; object-fit: cover; }
 
 
 .composer-input:focus-visible {
