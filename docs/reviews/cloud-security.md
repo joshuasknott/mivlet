@@ -211,8 +211,8 @@ production still require durable storage, encryption key, and DO bindings.
 `apps/desktop/src-tauri/src/connectors.rs` (`GITHUB_SCOPES` labels `repo` as
 `"read"`),
 `packages/connectors/src/native-api/tools.ts` (GitHub tools are reads only),
-`packages/connectors/src/providers/developer-connectors.test.ts` (writes
-rejected)
+`apps/desktop/src-tauri/src/connectors.rs` and
+`apps/desktop/src-tauri/src/connector_api.rs` (native scope and write checks)
 
 **What the code does.** The broker requests `read:user`, `read:org`, and
 `repo`. GitHub’s `repo` scope is full private-repository access, including

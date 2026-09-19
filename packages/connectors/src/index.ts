@@ -40,45 +40,8 @@ export {
   SUPPORTED_CONNECTOR_IDS
 } from "./catalog";
 
-// Provider adapters are pure: no network and no credential access.
-export {
-  classifyConnectorError,
-  importConnectorSearchItem,
-  prepareConnectorAction,
-  shapeConnectorSearchRequest,
-  type ProviderErrorLike
-} from "./providers/shared";
-export * from "./providers/github";
-export * from "./providers/vercel";
-export * from "./providers/linear";
-export * from "./providers/linear-actions";
-export * from "./providers/linear-items";
-export * from "./providers/google-drive";
-export * from "./providers/google-shared";
-export * from "./providers/notion";
-export * from "./providers/gmail";
-export * from "./providers/slack";
-export * from "./providers/notion-api";
-export * from "./providers/slack-api";
-export * from "./providers/http";
 export * from "./providers/broker-contract";
-export * from "./providers/google-calendar";
 export * from "./providers/routing";
-export {
-  ConnectorRuntime,
-  normalizeConnectorError,
-  tokenExpiresSoon,
-  type ConnectorAccountSession,
-  type ConnectorAdapter,
-  type ConnectorApprovalBoundary,
-  type ConnectorAuthCallback,
-  type ConnectorAuthContext,
-  type ConnectorAuthResult as SdkConnectorAuthResult,
-  type ConnectorAuthStart,
-  type ConnectorRequest,
-  type ConnectorRuntimeOptions,
-  type ConnectorWriteRequest
-} from "./sdk";
 
 export * from "./sync";
 
@@ -200,7 +163,3 @@ export * from "./voice";
 export * from "./mcp/client";
 export * from "./mcp/protocol";
 export * from "./mcp/connected-source-search";
-
-// Browser automation stays internal until a native transport exists.
-// Tests import `./browser-automation` directly; do not re-export it from the
-// public barrel so the renderer cannot treat the fixture as a live capability.
