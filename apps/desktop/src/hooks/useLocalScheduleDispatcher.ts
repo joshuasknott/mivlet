@@ -108,10 +108,20 @@ export function useLocalScheduleDispatcher(
         return;
       const workspaceId = currentOptions.workspaceId;
       let stopped = false;
+      let finalized = false;
+      let runCancel: (() => Promise<void>) | undefined;
+      let cancelRequested = false;
+      const cancelRun = () => {
+        cancelRequested = true;
+        return runCancel?.() ?? Promise.resolve();
+      };
       const isCurrent = () =>
-        !disposed && !stopped &&
+        !disposed &&
+        !stopped &&
+        !finalized &&
         optionsRef.current.runtimeReady &&
         optionsRef.current.workspaceId === workspaceId;
+      activeCancel = cancelRun;
       polling = true;
       let claim: Awaited<ReturnType<typeof claimLocalScheduleDispatch>> | null =
         null;
@@ -208,11 +218,18 @@ export function useLocalScheduleDispatcher(
           onQueued: async () => {
             await bindLocalScheduleDispatch(identity);
             bound = true;
-            if (claim?.projectId) release = await currentOptions.onBound?.(immutableAttemptId, async () => { stopped = true; await activeCancel?.(); });
-            leaseTimer = setInterval(() => {
-              void renewLocalScheduleDispatch(identity).catch(() =>
-                activeCancel?.(),
+            if (claim?.projectId)
+              release = await currentOptions.onBound?.(
+                immutableAttemptId,
+                async () => {
+                  stopped = true;
+                  await cancelRun();
+                },
               );
+            leaseTimer = setInterval(() => {
+              void renewLocalScheduleDispatch(identity).catch(() => {
+                if (isCurrent()) void cancelRun().catch(() => undefined);
+              });
             }, 60_000);
             statusTimer = setInterval(() => {
               void listLocalSchedules(workspaceId)
@@ -220,14 +237,19 @@ export function useLocalScheduleDispatcher(
                   const current = latest.find(
                     (schedule) => schedule.id === claim?.scheduleId,
                   );
-                  if (current && current.status !== "enabled")
-                    void activeCancel?.();
+                  if (
+                    current &&
+                    current.status !== "enabled" &&
+                    isCurrent()
+                  )
+                    void cancelRun().catch(() => undefined);
                 })
                 .catch(() => undefined);
             }, 5_000);
           },
           onBackendReady: (cancel) => {
-            activeCancel = cancel;
+            runCancel = cancel;
+            if (cancelRequested) void cancelRun().catch(() => undefined);
           },
           onProgress: ({ threadId, activity }) => {
             publish({
@@ -286,9 +308,10 @@ export function useLocalScheduleDispatcher(
           message,
         });
       } finally {
+        finalized = true;
         if (leaseTimer) clearInterval(leaseTimer);
         if (statusTimer) clearInterval(statusTimer);
-        activeCancel = undefined;
+        if (activeCancel === cancelRun) activeCancel = undefined;
         release?.();
         if (claim) await currentOptions.onFinished?.().catch(() => undefined);
         polling = false;
@@ -300,7 +323,7 @@ export function useLocalScheduleDispatcher(
     return () => {
       disposed = true;
       clearInterval(timer);
-      void activeCancel?.();
+      void activeCancel?.().catch(() => undefined);
     };
   }, [options.runtimeReady, options.workspaceId]);
 }
