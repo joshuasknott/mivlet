@@ -1,4 +1,4 @@
-import { ArrowDown } from "@phosphor-icons/react";
+import { ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type {
   ConversationRoom,

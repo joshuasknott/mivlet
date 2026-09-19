@@ -1,6 +1,5 @@
-import { WorkspaceHistory } from "./WorkspaceHistory";
 import { WorkspaceLibrary } from "../components/navigation/WorkspaceLibrary";
-import { Suspense } from "react";
+import { lazy, Suspense } from "react";
 import {
   PanelArtifact,
   PanelWebPreview,
@@ -23,6 +22,12 @@ import type {
 import { ComputerInspector, LocalSchedules } from "./workspace-lazy";
 import type { RenderWorkspaceConversation } from "./WorkspaceConversationChrome";
 import type { WorkspaceNavigation } from "./useWorkspaceNavigation";
+
+const WorkspaceHistory = lazy(() =>
+  import("./WorkspaceHistory").then(({ WorkspaceHistory: Component }) => ({
+    default: Component,
+  })),
+);
 
 export function WorkspaceContextPanel({
   hidden,
@@ -113,7 +118,11 @@ export function WorkspaceContextPanel({
         );
       }}
       historyRequestId={nav.navWorkId}
-      history={<WorkspaceHistory key={nav.activeRoom?.id ?? "empty"} room={nav.activeRoom} runtime={runtime} service={service} state={state} selectedWorkId={nav.navWorkId} onOpenConversation={nav.open} />}
+      history={
+        <Suspense fallback={<p role="status">Loading history…</p>}>
+          <WorkspaceHistory key={nav.activeRoom?.id ?? "empty"} room={nav.activeRoom} runtime={runtime} service={service} state={state} selectedWorkId={nav.navWorkId} onOpenConversation={nav.open} />
+        </Suspense>
+      }
       library={<WorkspaceLibrary key={workspaceId} workspaceId={workspaceId} agents={runtime.agents} onOpen={nav.setPanelRequest} />}
       sideChats={
         navContext && navContext.kind !== "work" ? (
