@@ -97,7 +97,7 @@ describe("tauri csp config (production)", () => {
     expect(cspObj["object-src"]).toBeDefined();
   });
 
-  it("keeps connect-src limited to Tauri IPC (no webview network for providers/models/convex)", () => {
+  it("keeps connect-src limited to packaged assets and Tauri IPC", () => {
     const { csp } = loadCsp(prodConfigPath);
     const cspObj = csp as Record<string, string | string[]>;
     const connect = String(cspObj["connect-src"] || "").trim();
@@ -105,7 +105,7 @@ describe("tauri csp config (production)", () => {
     expect(connect).toContain("http://ipc.localhost");
     // Deterministic: the value must be exactly the evidenced tokens (prevents suffix / extra)
     const tokens = connect.split(/\s+/).filter(Boolean);
-    expect(tokens).toEqual(["ipc:", "http://ipc.localhost"]);
+    expect(tokens).toEqual(["'self'", "ipc:", "http://ipc.localhost"]);
     // Must not include external services or broad ws or http in prod
     expect(connect).not.toMatch(/https?:\/\/(?!ipc\.localhost(?:[\s;"\']|$))/);
     expect(connect).not.toMatch(/\bws:/);

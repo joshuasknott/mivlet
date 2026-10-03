@@ -75,6 +75,14 @@ Require the aggregate CI check before merging and rerun affected checks after co
 | Hosted runner | `pnpm --filter @mivlet/hosted-runner test`, `pnpm --filter @mivlet/hosted-runner build`, `pnpm --filter @mivlet/hosted-runner worker:deploy:dry-run` |
 | Full repository gate | `pnpm check` |
 
+The PDF viewer is an optional island. Performance accounting includes its
+`.mjs` worker and applies separate ceilings to ordinary workspace code and
+PDF code, as well as the total. The Vite manifest must place both viewer and
+renderer outside every static startup dependency; worker assets cannot appear
+on that graph. The October allowance records the measured pre-PDF `main`
+baseline and preserves the original baseline for comparison. Font and character
+map assets are packaged locally and loaded as needed; they are not JS/CSS.
+
 `pnpm test` still runs every workspace test, including `@mivlet/agent-host`. Host
 fixture tests skip unless they are on Windows with the bundled executable present,
 so the chain no longer aborts on Linux.

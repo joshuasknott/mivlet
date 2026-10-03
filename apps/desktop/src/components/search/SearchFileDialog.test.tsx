@@ -4,8 +4,14 @@ import { SearchFileDialog } from "./SearchFileDialog";
 import { previewRuntimeLocalComputerFile } from "../../runtime/domains/local-computer";
 
 vi.mock("../../runtime/domains/local-computer", () => ({ previewRuntimeLocalComputerFile: vi.fn() }));
+vi.mock("../conversation/PdfPreview", () => ({ PdfPreview: ({ base64 }: { base64: string }) => <section aria-label="PDF pages">{base64}</section> }));
 const target = { type: "artifact" as const, workspaceId: "workspace", agentId: "agent", relativePath: "Attachments/budget.xlsx", title: "Budget" };
 describe("uploaded Office preview", () => {
+  it("routes original PDF bytes to the lazy page viewer", async () => {
+    vi.mocked(previewRuntimeLocalComputerFile).mockResolvedValue({ computerId: "computer", path: "Attachments/report.pdf", content: "PDF page preview", sizeBytes: 10, updatedAt: "now", truncated: false, pdfBase64: "native-pdf-bytes" });
+    render(<SearchFileDialog target={{ ...target, relativePath: "Attachments/report.pdf" }} title="Report" onClose={() => {}} />);
+    expect(await screen.findByRole("region", { name: "PDF pages" })).toHaveTextContent("native-pdf-bytes");
+  });
   it("shows bounded Office content without rendering binary text or untrusted HTML", async () => {
     vi.mocked(previewRuntimeLocalComputerFile).mockResolvedValue({ computerId: "computer", path: target.relativePath, content: "Cached values may be stale.", sizeBytes: 10, updatedAt: "now", truncated: true,
       office: { kind: "spreadsheet", sections: [{ name: "Budget", blocks: [{ type: "table", rows: [["<script>attack</script>", "26"]] }] }] } });

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { collectAssets, logicalChunkId, summarizeBundle } from "./assets.mjs";
-import { checkBudget, loadBudget } from "./budget-check.mjs";
+import { checkBudget, checkDeferredPdf, loadBudget } from "./budget-check.mjs";
 
 /**
  * Tests for deterministic performance budgets.
@@ -51,6 +51,69 @@ test("summarizeBundle groups totals and route chunks", async () => {
   assert.equal(summary.css.rawBytes, 20);
   assert.equal(summary.initialEntryJs.rawBytes, 100);
   assert.equal(summary.routeChunks.SettingsPage.rawBytes, 40);
+});
+
+test("counts .mjs workers and caps PDF growth separately from the workspace", async () => {
+  const root = await mkdtemp(join(tmpdir(), "mivlet-pdf-perf-"));
+  await writeFile(join(root, "index-a.js"), "a".repeat(100));
+  await writeFile(join(root, "pdf-renderer-b.js"), "b".repeat(200));
+  await writeFile(join(root, "pdf.worker.min-c.mjs"), "c".repeat(300));
+  const summary = summarizeBundle(await collectAssets(root, root));
+  assert.equal(summary.totalJsCss.rawBytes, 600);
+  assert.equal(summary.commonJsCss.rawBytes, 100);
+  assert.equal(summary.pdfPreview.rawBytes, 500);
+  const budget = await loadBudget();
+  summary.commonJsCss.rawBytes = budget.ceilings.commonJsCss.rawBytes + 1;
+  assert.ok(
+    checkBudget(summary, budget).some((v) => v.label === "commonJsCss.raw"),
+  );
+  summary.commonJsCss.rawBytes = 100;
+  summary.pdfPreview.rawBytes = budget.ceilings.pdfPreview.rawBytes + 1;
+  assert.ok(
+    checkBudget(summary, budget).some((v) => v.label === "pdfPreview.raw"),
+  );
+});
+
+test("PDF engine, viewer and worker stay outside the actual static startup graph", () => {
+  const manifest = {
+    "index.html": {
+      isEntry: true,
+      file: "assets/index-a.js",
+      imports: ["shared"],
+      dynamicImports: ["viewer"],
+    },
+    shared: { file: "assets/shared-b.js" },
+    viewer: {
+      file: "assets/PdfPreview-c.js",
+      dynamicImports: ["engine"],
+      assets: ["assets/pdf.worker.min-d.mjs"],
+    },
+    engine: { file: "assets/pdf-renderer-e.js" },
+  };
+  assert.deepEqual(checkDeferredPdf(manifest), []);
+  manifest.shared.imports = ["viewer"];
+  assert.ok(
+    checkDeferredPdf(manifest).some((v) => v.label === "deferred.PdfPreview-"),
+  );
+  assert.ok(
+    checkDeferredPdf(manifest).some((v) => v.label === "deferred.pdf-worker"),
+  );
+  manifest.shared.imports = ["engine"];
+  assert.ok(
+    checkDeferredPdf(manifest).some(
+      (v) => v.label === "deferred.pdf-renderer-",
+    ),
+  );
+  delete manifest.engine;
+  assert.ok(
+    checkDeferredPdf(manifest).some(
+      (v) => v.label === "deferred.pdf-renderer-",
+    ),
+  );
+  assert.ok(
+    checkDeferredPdf(manifest).some((v) => v.label === "deferred.import"),
+  );
+  assert.ok(checkDeferredPdf({}).some((v) => v.label === "deferred.entry"));
 });
 
 test("checkBudget passes within ceilings", async () => {

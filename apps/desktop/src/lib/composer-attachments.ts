@@ -6,7 +6,7 @@ import type { ExecutionExchange } from "@mivlet/protocol";
 import type { ComposerAttachment } from "./types";
 
 const readableExtensions = new Set<string>(SUPPORTED_LOCAL_FILE_EXTENSIONS);
-const officeExtensions = new Set(["docx", "xlsx", "pptx"]);
+const binaryExtensions = new Set(["docx", "xlsx", "pptx", "pdf"]);
 
 export function composerSubmissionText(
   text: string,
@@ -34,8 +34,8 @@ export async function prepareReadableComposerAttachment(
   ) => Promise<string | null>,
 ): Promise<PreparedReadableComposerAttachment> {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
-  if (!readableExtensions.has(extension) && !officeExtensions.has(extension)) {
-    return { status: "Choose a text, Markdown, JSON, CSV, YAML, DOCX, XLSX, or PPTX file" };
+  if (!readableExtensions.has(extension) && !binaryExtensions.has(extension)) {
+    return { status: "Choose a text, Markdown, JSON, CSV, YAML, DOCX, XLSX, PPTX or PDF file" };
   }
   if (file.size === 0) return { status: "Choose a non-empty file" };
   if (file.size > MAX_LOCAL_FILE_BYTES) {
@@ -56,9 +56,9 @@ export async function prepareReadableComposerAttachment(
         "The selected file changed while Mivlet was reading it. Choose it again.",
     };
   }
-  if (officeExtensions.has(extension)) {
+  if (binaryExtensions.has(extension)) {
     // Native staging validates the ZIP and bounded XML. Never decode binary
-    // Office data or import it as fabricated UTF-8 knowledge context.
+    // Office/PDF data or import it as fabricated UTF-8 knowledge context.
     return { transientBytes: new Uint8Array(buffer), status: "Attached to this message" };
   }
   let content: string;

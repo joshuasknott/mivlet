@@ -22,7 +22,7 @@ export const ACCEPTED_LOCAL_KNOWLEDGE_FILES = SUPPORTED_LOCAL_FILE_EXTENSIONS.ma
 
 export const ACCEPTED_COMPOSER_ATTACHMENTS = [
   ACCEPTED_LOCAL_KNOWLEDGE_FILES,
-  ".docx", ".xlsx", ".pptx",
+  ".docx", ".xlsx", ".pptx", ".pdf",
   "image/png",
   "image/jpeg",
   "image/webp"

@@ -476,7 +476,7 @@ fn check_pdf_object(object: &lopdf::Object, nodes: &mut usize, depth: usize) -> 
     }
 }
 
-fn check_pdf_document(bytes: &[u8]) -> Result<bool, String> {
+fn check_pdf_document(bytes: &[u8]) -> Result<lopdf::Document, String> {
     if bytes.len() as u64 > MAX_BYTES {
         return Err("Artifacts must be at most 25 MB.".into());
     }
@@ -526,12 +526,16 @@ fn check_pdf_document(bytes: &[u8]) -> Result<bool, String> {
     for object in document.objects.values() {
         check_pdf_object(object, &mut nodes, 0)?;
     }
-    Ok(true)
+    Ok(document)
+}
+
+pub(super) fn checked_pdf(bytes: &[u8]) -> Result<lopdf::Document, String> {
+    catch_unwind(AssertUnwindSafe(|| check_pdf_document(bytes)))
+        .map_err(|_| "The PDF structure could not be checked.".to_string())?
 }
 
 fn check_pdf(bytes: &[u8]) -> Result<bool, String> {
-    catch_unwind(AssertUnwindSafe(|| check_pdf_document(bytes)))
-        .map_err(|_| "The PDF structure could not be checked.".to_string())?
+    checked_pdf(bytes).map(|_| true)
 }
 
 fn check_content(bytes: &[u8], extension: &str) -> Result<(), String> {
@@ -1008,6 +1012,7 @@ pub struct ArtifactPreview {
     mime_type: String,
     text: Option<String>,
     image_data_url: Option<String>,
+    pdf_base64: Option<String>,
     office: Option<super::office_preview::OfficePreview>,
     truncated: bool,
 }
@@ -1019,6 +1024,7 @@ fn preview_bytes(artifact: &LocalComputerArtifact, bytes: &[u8]) -> ArtifactPrev
         mime_type: artifact.mime_type.clone(),
         text: None,
         image_data_url: None,
+        pdf_base64: None,
         office: None,
         truncated: false,
     };
@@ -1036,6 +1042,8 @@ fn preview_bytes(artifact: &LocalComputerArtifact, bytes: &[u8]) -> ArtifactPrev
             artifact.mime_type,
             base64::engine::general_purpose::STANDARD.encode(bytes)
         ));
+    } else if artifact.mime_type == "application/pdf" && bytes.len() <= 8 * 1024 * 1024 {
+        preview.pdf_base64 = Some(base64::engine::general_purpose::STANDARD.encode(bytes));
     } else if let Ok(extension @ ("docx" | "xlsx" | "pptx")) = allowed_path(&artifact.relative_path)
     {
         if let Some((office, truncated)) = super::office_preview::preview(bytes, extension) {

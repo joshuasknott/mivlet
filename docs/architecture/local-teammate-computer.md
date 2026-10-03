@@ -269,7 +269,18 @@ and one-million-node package budget. Non-XML parts must be verified raster
 images; embedded fonts, binary printer settings and vector assets currently
 require a passive export without those parts. This is deliberately a bounded
 publication contract, not arbitrary Office-file compatibility.
-PDF authoring/preview, charts and arbitrary Office editing remain separate gaps.
+PDF uploads retain exact original bytes in native custody, with the existing
+scope, generation and receipt fences. `read-file` extracts up to 50 pages and
+128 KB of untrusted text, and reports incomplete or truncated extraction;
+scans and unsupported font encodings require visual inspection. PDFs pass the
+same strict passive publication checks before upload/preview: no scripts,
+interactive form actions, external links, encryption or embedded files.
+The existing artifact and private-file previews render PDFs up to 8 MB with
+PDF.js, page navigation, zoom and bounded page text. Renderer fonts and character
+maps are packaged, with their notices; its asset factory accepts only exact
+packaged names. No document URL is fetched and no annotation/form layer runs.
+The lazy renderer has its own bundle chunk. PDF authoring, generated charts and
+arbitrary Office editing remain separate gaps.
 
 Composer attachments also accept DOCX, XLSX and PPTX up to the existing 2 MB
 upload limit. Original bytes are staged under the exact agent/workspace/generation
