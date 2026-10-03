@@ -21,7 +21,7 @@ closed. Windows-only builds are unsupported by this execution lane. Submodules,
 Git LFS materialization and borrowed Git object stores are not supported.
 
 Repository tools require Computer Use to be enabled and a provider route that
-bridges Mivlet tools: ChatGPT/Codex or supported direct API routes. This does not
+bridges Mivlet tools: ChatGPT/Codex, Claude SDK or supported direct API routes. This does not
 enable a provider's own shell. Other account routes do not receive these tools.
 There is no Windows host-shell fallback and no new app/window control grant.
 

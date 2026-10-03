@@ -17,8 +17,9 @@ describe("computer route availability", () => {
   it("audits every registered route without confusing provider-owned tools with Mivlet tools", () => {
     const providers = listBackendProviders().map(provider => ({ ...provider, authState: "connected", capabilities: ["tool-requests"] } as BackendProvider));
     const vision = { id: "vision", label: "Vision", available: true, capabilities: { vision: true, tools: true } };
-    expect(providers.filter(supportsSharedComputerTools).map(p => p.id)).toEqual(["codex", "openai", "anthropic", "gemini", "xai", "deepseek", "alibaba", "moonshot", "zai", "groq", "together", "fireworks", "cerebras", "mistral", "openrouter", "nvidia", "siliconflow", "cohere", "custom"]);
-    for (const id of ["claude", "cursor", "grok", "opencode", "antigravity"]) {
+    expect(providers.filter(supportsSharedComputerTools).map(p => p.id)).toEqual(["codex", "openai", "claude", "anthropic", "gemini", "xai", "deepseek", "alibaba", "moonshot", "zai", "groq", "together", "fireworks", "cerebras", "mistral", "openrouter", "nvidia", "siliconflow", "cohere", "custom"]);
+    expect(computerVisionUnavailableReason(providers.find(p => p.id === "claude"), vision)).toMatch(/no audited native screenshot/);
+    for (const id of ["cursor", "grok", "opencode", "antigravity"]) {
       expect(computerVisionUnavailableReason(providers.find(p => p.id === id), vision)).toMatch(/no Mivlet computer-tool response bridge/);
     }
     expect(computerVisionUnavailableReason(providers.find(p => p.id === "custom"), vision)).toMatch(/metadata alone/);

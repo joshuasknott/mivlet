@@ -239,6 +239,8 @@ pub fn run() {
             managed_runtime::list_managed_runtime_models,
             managed_runtime::start_managed_runtime_turn,
             managed_runtime::respond_managed_runtime_approval,
+            managed_runtime::respond_managed_runtime_tool,
+            managed_runtime::check_managed_runtime_tool,
             managed_runtime::interrupt_managed_runtime_turn,
             managed_runtime::shutdown_managed_runtime_turn,
             managed_runtime::logout_managed_runtime,

@@ -458,7 +458,16 @@ export interface RuntimeManagedStatus {
   message?: string;
 }
 
-export type RuntimeManagedEvent = RuntimeCodexEvent;
+export type RuntimeManagedEvent =
+  | RuntimeCodexEvent
+  | {
+      type: "tool-request";
+      requestId: string;
+      callId: string;
+      approvalId: string;
+      tool: string;
+      arguments: string;
+    };
 
 export async function getRuntimeManagedStatus(
   providerId: ManagedRuntimeProviderId,
@@ -525,6 +534,31 @@ export async function respondRuntimeManagedApproval(request: {
 
 export async function interruptRuntimeManagedTurn(requestId: string) {
   return invokeNative<null>("interrupt_managed_runtime_turn", { requestId });
+}
+
+export async function respondRuntimeManagedTool(request: {
+  requestId: string;
+  toolRequestId: string;
+  callId: string;
+  ok: boolean;
+  output: string;
+}) {
+  return invokeNative<null>("respond_managed_runtime_tool", { request });
+}
+
+export async function checkRuntimeManagedTool(
+  approvalId: string,
+  tool: string,
+  argumentsJson: string,
+): Promise<void> {
+  if (!approvalId.startsWith("mivlet-shared-")) return;
+  if (!hasTauriRuntime())
+    throw new Error("Mivlet tool calls require the desktop runtime.");
+  await invoke<null>("check_managed_runtime_tool", {
+    approvalId,
+    tool,
+    arguments: JSON.parse(argumentsJson),
+  });
 }
 
 export async function shutdownRuntimeManagedTurn(requestId: string) {

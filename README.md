@@ -37,7 +37,7 @@ a deployed or production-validated service.
   the actual diff, commit an approved snapshot and optionally open a GitHub PR.
   Requires Windows, Git, WSL Ubuntu with Bubblewrap/Python and project build
   tools; publication additionally requires GitHub CLI login. Available through
-  Codex and direct API routes that bridge Mivlet tools. See the
+  Codex, Claude SDK and direct API routes that bridge Mivlet tools. See the
   [coding workflow and its limits](docs/architecture/coding-workflow.md).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
@@ -103,7 +103,7 @@ a deployed or production-validated service.
   participant; Mivlet never fans out automatically. Legacy standalone groups
   convert into projects without losing history or authorship, and explicit shares
   record recipient, owner and snapshot/live-reference semantics. Delegation uses
-  the Codex and native API routes that bridge Mivlet tools; provider-owned routes
+  the Codex, Claude SDK and native API routes that bridge Mivlet tools; provider-owned routes
   without that bridge cannot coordinate agents and show that prerequisite.
 - A collapsible right panel starts with centred Library, Browser, Side chat and
   Schedules navigation. Each destination replaces the menu; Back returns to it.

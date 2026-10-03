@@ -23,8 +23,7 @@ import type {
 import type { ModelDiscoveryResult } from "../../native-api/discovery";
 import { backendErrorEvent, normalizeBackendErrorEvent } from "../utils/errors";
 import { redactSecretsFromString } from "../utils/redact";
-import { buildToolApproval } from "../../native-api/approvals";
-import { effectForTool, evaluatePermissionPolicy } from "../../permission-policy";
+import { executeSharedToolCall } from "./shared-tools";
 
 function requestedThreadId(request: AgentTurnRequest): string | null {
   const candidate = (request as AgentTurnRequest & { threadId?: unknown; codexThreadId?: unknown })
@@ -84,39 +83,21 @@ async function* mapCodexEvents(
         yield { type: "done", finishReason: "error" };
         return;
       }
-      const dynamicTool = advertisedTools.some((tool) => tool.name === event.tool);
-      const approval = dynamicTool ? { ...buildToolApproval("Codex", event.tool, event.arguments), id: event.approval.id } : event.approval;
       if (!capabilities.includes("tool-requests") || !capabilities.includes("approvals")) {
         yield { type: "error", message: "Tool calls/approvals are not supported by this backend's capabilities." };
         yield { type: "done", finishReason: "error" };
         return;
       }
+      const result = yield* executeSharedToolCall("Codex", {
+        ...event, approvalId: event.approval.id,
+      }, advertisedTools, options);
       try {
-        if (!dynamicTool) {
-          throw new Error("Use only the Mivlet tools supplied for this turn. Host commands, files, and inherited provider tools are unavailable.");
-        }
-        if (dynamicTool) {
-          const effect = effectForTool(event.tool);
-          if (!effect || !evaluatePermissionPolicy({ mode: options.permissionMode ?? "read-only", effect, riskLevel: approval.riskLevel }).allowed) {
-            throw new Error(`Blocked by Mivlet's ${options.permissionMode ?? "read-only"} permission mode.`);
-          }
-        }
-        yield { type: "tool-call", callId: event.callId, tool: event.tool, arguments: event.arguments, approval };
-        const output = await options.execute(approval, event.arguments);
-        await handle.respondApproval(event.requestId, {
-          callId: event.callId,
-          ok: true,
-          output
-        });
-        yield { type: "tool-result", callId: event.callId, ok: true, output };
-      } catch (error) {
-        const output = error instanceof Error ? redactSecretsFromString(error.message) : "Codex approval was not granted.";
-        await handle.respondApproval(event.requestId, {
-          callId: event.callId,
-          ok: false,
-          output
-        });
-        yield { type: "tool-result", callId: event.callId, ok: false, output };
+        await handle.respondApproval(event.requestId, result);
+      } catch {
+        await handle.cancel(threadId).catch(() => undefined);
+        yield { type: "error", message: "The tool response could not reach Codex. Review the current outcome before continuing." };
+        yield { type: "done", finishReason: "error" };
+        return;
       }
     } else if (event.type === "approval-result") {
       yield {

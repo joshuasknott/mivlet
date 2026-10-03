@@ -26,6 +26,8 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
 use crate::models::{BackendModel, BackendVerifyResult};
+mod shared_tools;
+use shared_tools::{Dispatch, ToolBridge, ToolSpec};
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(12);
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(5 * 60);
@@ -64,6 +66,8 @@ pub struct ManagedTurnRequest {
 struct ManagedAgentRequest {
     model: String,
     messages: Vec<ManagedMessage>,
+    #[serde(default)]
+    tools: Vec<ToolSpec>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -95,10 +99,6 @@ enum PendingPermission {
         allow_option: String,
         reject_option: String,
     },
-    Claude {
-        tool_use_id: String,
-        input: Value,
-    },
     OpenCode,
 }
 
@@ -110,12 +110,14 @@ struct OpenCodeControl {
 }
 
 struct ActiveRun {
+    owner: String,
     provider_id: String,
     stdin: Option<Arc<Mutex<ChildStdin>>>,
     child: Arc<Mutex<crate::provider_process::SupervisedChild>>,
     session_id: Arc<Mutex<Option<String>>>,
     permissions: Arc<Mutex<HashMap<String, PendingPermission>>>,
     opencode: Option<OpenCodeControl>,
+    tool_bridge: Arc<Mutex<ToolBridge>>,
 }
 
 static ACTIVE_RUNS: OnceLock<Mutex<HashMap<String, ActiveRun>>> = OnceLock::new();
@@ -1194,12 +1196,14 @@ fn start_acp_turn(
         .insert(
             request.request_id.clone(),
             ActiveRun {
+                owner: user_id.clone(),
                 provider_id: provider_id.clone(),
                 stdin: Some(stdin.clone()),
                 child: child.clone(),
                 session_id: session_id.clone(),
                 permissions: permissions.clone(),
                 opencode: None,
+                tool_bridge: Arc::new(Mutex::new(ToolBridge::default())),
             },
         );
     let request_id = request.request_id.clone();
@@ -1340,39 +1344,6 @@ fn provider_tool_kind(tool_name: &str) -> &'static str {
     }
 }
 
-fn claude_approval_payload(
-    run_id: &str,
-    request_id: &str,
-    value: &Value,
-    mode: &str,
-) -> Option<(Value, PendingPermission)> {
-    let request = value.get("request")?;
-    let tool_name = request.get("tool_name")?.as_str()?.trim();
-    let tool_use_id = request.get("tool_use_id")?.as_str()?.trim().to_string();
-    if tool_name.is_empty() || tool_use_id.is_empty() {
-        return None;
-    }
-    let input = request.get("input").cloned().unwrap_or_else(|| json!({}));
-    let title = request
-        .get("title")
-        .or_else(|| request.get("display_name"))
-        .and_then(Value::as_str)
-        .filter(|value| !value.trim().is_empty())
-        .map(str::to_string)
-        .unwrap_or_else(|| format!("use {tool_name}"));
-    let payload = managed_approval_payload(
-        "claude",
-        run_id,
-        request_id,
-        &tool_use_id,
-        provider_tool_kind(tool_name),
-        &title,
-        &input,
-        mode,
-    );
-    Some((payload, PendingPermission::Claude { tool_use_id, input }))
-}
-
 fn respond_to_unsupported_claude_control(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) {
     let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
         return;
@@ -1394,11 +1365,9 @@ fn respond_to_unsupported_claude_control(stdin: &Arc<Mutex<ChildStdin>>, value: 
 fn handle_claude_line(
     app: &AppHandle,
     channel: &str,
-    run_id: &str,
     stdin: &Arc<Mutex<ChildStdin>>,
-    permissions: &Arc<Mutex<HashMap<String, PendingPermission>>>,
     value: &Value,
-    permission_mode: &str,
+    tool_bridge: &Arc<Mutex<ToolBridge>>,
     emitted_text: &mut bool,
 ) -> bool {
     if value.get("type").and_then(Value::as_str) == Some("control_request") {
@@ -1407,17 +1376,44 @@ fn handle_claude_line(
             .and_then(Value::as_str)
             .unwrap_or("permission")
             .to_string();
-        if value.pointer("/request/subtype").and_then(Value::as_str) == Some("can_use_tool") {
-            if let Some((payload, pending)) =
-                claude_approval_payload(run_id, &request_id, value, permission_mode)
-            {
-                if let Ok(mut map) = permissions.lock() {
-                    map.insert(request_id, pending);
+        let subtype = value.pointer("/request/subtype").and_then(Value::as_str);
+        if subtype == Some("mcp_message")
+            && value
+                .pointer("/request/server_name")
+                .and_then(Value::as_str)
+                == Some("mivlet")
+        {
+            let dispatched = tool_bridge
+                .lock()
+                .map_err(|_| "Mivlet tools are unavailable.".to_string())
+                .and_then(|mut bridge| bridge.dispatch(&request_id, &value["request"]["message"]));
+            match dispatched {
+                Ok(Dispatch::Reply(response)) => {
+                    let _ = write_json(
+                        stdin,
+                        "claude",
+                        &shared_tool_response(&request_id, response),
+                    );
                 }
-                let _ = app.emit(channel, payload);
-            } else {
-                respond_to_unsupported_claude_control(stdin, value);
+                Ok(Dispatch::Call(event)) => {
+                    let _ = app.emit(channel, event);
+                }
+                Err(_) => respond_to_unsupported_claude_control(stdin, value),
             }
+        } else if subtype == Some("can_use_tool")
+            && tool_bridge.lock().ok().is_some_and(|bridge| {
+                bridge.owns(value["request"]["tool_name"].as_str().unwrap_or(""))
+            })
+        {
+            // This admits only SDK dispatch. The actual MCP call still goes
+            // through Mivlet's exact approval and scoped native executor.
+            let _ = write_json(
+                stdin,
+                "claude",
+                &json!({"type":"control_response",
+                "response":{"subtype":"success","request_id":request_id,"response":{
+                    "behavior":"allow","updatedInput":value["request"]["input"]}}}),
+            );
         } else {
             respond_to_unsupported_claude_control(stdin, value);
         }
@@ -1425,8 +1421,8 @@ fn handle_claude_line(
     }
     if value.get("type").and_then(Value::as_str) == Some("control_cancel_request") {
         if let Some(request_id) = value.get("request_id").and_then(Value::as_str) {
-            if let Ok(mut map) = permissions.lock() {
-                map.remove(request_id);
+            if let Ok(mut bridge) = tool_bridge.lock() {
+                bridge.cancel(request_id);
             }
         }
         return false;
@@ -1490,6 +1486,7 @@ fn start_claude_turn(
         .ok_or_else(|| "Install the official Claude runtime first.".to_string())?;
     let workspace = workspace_dir(&app, &user_id, &provider_id)?;
     let prompt = prompt_text(&request.request, &request.options);
+    let tool_bridge = Arc::new(Mutex::new(ToolBridge::new(&request.request.tools)?));
     let mut command = command_for_provider(&app, &user_id, &provider_id, &path)?;
     command.args([
         "--output-format",
@@ -1505,7 +1502,8 @@ fn start_claude_turn(
         "--setting-sources=",
         "--strict-mcp-config",
         "--mcp-config",
-        "{}",
+        r#"{"mcpServers":{"mivlet":{"type":"sdk","name":"mivlet"}}}"#,
+        "--tools=",
     ]);
     let model = request.request.model.trim();
     if !model.is_empty() {
@@ -1540,12 +1538,14 @@ fn start_claude_turn(
         .insert(
             request.request_id.clone(),
             ActiveRun {
+                owner: user_id.clone(),
                 provider_id: provider_id.clone(),
                 stdin: Some(stdin.clone()),
                 child: child.clone(),
                 session_id: Arc::new(Mutex::new(None)),
                 permissions: permissions.clone(),
                 opencode: None,
+                tool_bridge: tool_bridge.clone(),
             },
         );
     let request_id = request.request_id.clone();
@@ -1565,6 +1565,13 @@ fn start_claude_turn(
             let _ = app.emit(&channel, json!({"type":"error","message":message}));
         }
         for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+            if crate::backends::require_current_internal_user()
+                .ok()
+                .as_ref()
+                != Some(&user_id)
+            {
+                break;
+            }
             let Ok(value) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
@@ -1597,15 +1604,9 @@ fn start_claude_turn(
             if handle_claude_line(
                 &app,
                 &channel,
-                &request_id,
                 &stdin,
-                &permissions,
                 &value,
-                request
-                    .options
-                    .permission_mode
-                    .as_deref()
-                    .unwrap_or("trusted-scope"),
+                &tool_bridge,
                 &mut emitted_text,
             ) {
                 completed = true;
@@ -2007,12 +2008,14 @@ fn start_opencode_turn(
         .insert(
             request.request_id.clone(),
             ActiveRun {
+                owner: user_id.clone(),
                 provider_id: "opencode".to_string(),
                 stdin: None,
                 child: child.clone(),
                 session_id: session_id.clone(),
                 permissions: permissions.clone(),
                 opencode: Some(control.clone()),
+                tool_bridge: Arc::new(Mutex::new(ToolBridge::default())),
             },
         );
     let request_id = request.request_id.clone();
@@ -2162,6 +2165,83 @@ pub fn start_managed_runtime_turn(
     }
 }
 
+fn shared_tool_response(request_id: &str, response: Value) -> Value {
+    json!({"type":"control_response","response":{"subtype":"success",
+        "request_id":request_id,"response":{"mcp_response":response}}})
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ManagedToolResponse {
+    request_id: String,
+    tool_request_id: String,
+    call_id: String,
+    ok: bool,
+    output: String,
+}
+
+#[tauri::command]
+pub fn respond_managed_runtime_tool(request: ManagedToolResponse) -> Result<(), String> {
+    let owner = crate::backends::require_current_internal_user()?;
+    let runs = active_runs()
+        .lock()
+        .map_err(|_| "The provider tool turn is unavailable.")?;
+    let run = runs
+        .get(&request.request_id)
+        .ok_or("The provider tool turn has ended.")?;
+    if run.owner != owner || run.provider_id != "claude" {
+        return Err("The Mivlet tool response belongs to another provider turn.".into());
+    }
+    let response = run
+        .tool_bridge
+        .lock()
+        .map_err(|_| "Mivlet tool responses are unavailable.")?
+        .respond(
+            &request.tool_request_id,
+            &request.call_id,
+            request.ok,
+            &request.output,
+        )?;
+    let stdin = run
+        .stdin
+        .as_ref()
+        .ok_or("The provider tool transport has closed.")?;
+    write_json(
+        stdin,
+        "claude",
+        &shared_tool_response(&request.tool_request_id, response),
+    )
+}
+
+/// Check a shared call again after waiting for approval. This grants no authority.
+#[tauri::command]
+pub fn check_managed_runtime_tool(
+    approval_id: String,
+    tool: String,
+    arguments: Value,
+) -> Result<(), String> {
+    if !approval_id.starts_with("mivlet-shared-") {
+        return Ok(());
+    }
+    let owner = crate::backends::require_current_internal_user()?;
+    let runs = active_runs()
+        .lock()
+        .map_err(|_| "The provider tool turn is unavailable.")?;
+    if runs.values().any(|run| {
+        run.owner == owner
+            && run.provider_id == "claude"
+            && run
+                .tool_bridge
+                .lock()
+                .ok()
+                .is_some_and(|bridge| bridge.current(&approval_id, &tool, &arguments))
+    }) {
+        Ok(())
+    } else {
+        Err("This Mivlet tool call was cancelled or its provider turn ended.".into())
+    }
+}
+
 #[tauri::command]
 pub async fn respond_managed_runtime_approval(
     request: ManagedApprovalResponse,
@@ -2210,28 +2290,6 @@ pub async fn respond_managed_runtime_approval(
                 &json!({"jsonrpc":"2.0","id":id,"result":{"outcome":{"outcome":"selected","optionId":option_id}}}),
             )
         }
-        PendingPermission::Claude { tool_use_id, input } => {
-            let stdin = stdin
-                .as_ref()
-                .ok_or_else(|| "This Claude run no longer accepts approvals.".to_string())?;
-            let response = if request.approved {
-                json!({"behavior":"allow","updatedInput":input,"toolUseID":tool_use_id})
-            } else {
-                json!({"behavior":"deny","message":"Denied in Mivlet.","interrupt":false,"toolUseID":tool_use_id})
-            };
-            write_json(
-                stdin,
-                "claude",
-                &json!({
-                    "type":"control_response",
-                    "response":{
-                        "subtype":"success",
-                        "request_id":request.approval_request_id,
-                        "response":response
-                    }
-                }),
-            )
-        }
         PendingPermission::OpenCode => {
             let control = opencode
                 .as_ref()
@@ -2266,6 +2324,9 @@ pub async fn interrupt_managed_runtime_turn(request_id: String) -> Result<(), St
             .lock()
             .map_err(|_| "Managed provider turn state is unavailable.".to_string())?;
         runs.get(&request_id).map(|run| {
+            if let Ok(mut bridge) = run.tool_bridge.lock() {
+                bridge.stop();
+            }
             (
                 run.provider_id.clone(),
                 run.stdin.clone(),
@@ -2421,30 +2482,13 @@ mod tests {
     }
 
     #[test]
-    fn claude_permission_payload_preserves_native_reply_without_exposing_secrets() {
-        let request = json!({
-            "type":"control_request",
-            "request_id":"permission-1",
-            "request":{
-                "subtype":"can_use_tool",
-                "tool_name":"Bash",
-                "tool_use_id":"tool-1",
-                "input":{"command":"status","api_key":"super-secret-value"}
-            }
-        });
-        let (payload, pending) =
-            claude_approval_payload("run-1", "permission-1", &request, "trusted-scope")
-                .expect("valid Claude permission");
-        assert_eq!(
-            payload.get("tool").and_then(Value::as_str),
-            Some("claude:execute")
+    fn claude_sdk_response_binds_control_and_mcp_ids() {
+        let response = shared_tool_response(
+            "control-1",
+            json!({"jsonrpc":"2.0","id":7,"result":{"content":[]}}),
         );
-        assert!(!payload.to_string().contains("super-secret-value"));
-        assert!(matches!(
-            pending,
-            PendingPermission::Claude { tool_use_id, input }
-                if tool_use_id == "tool-1" && input["api_key"] == "super-secret-value"
-        ));
+        assert_eq!(response["response"]["request_id"], "control-1");
+        assert_eq!(response["response"]["response"]["mcp_response"]["id"], 7);
     }
 
     #[test]

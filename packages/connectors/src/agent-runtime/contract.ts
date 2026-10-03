@@ -255,7 +255,14 @@ export interface ManagedRuntimeHandlers {
   onRequestStarted: (requestId: string) => void;
 }
 
-export type ManagedRuntimeEvent = CodexAppServerEvent;
+export type ManagedRuntimeEvent = CodexAppServerEvent | {
+  type: "tool-request";
+  requestId: string;
+  callId: string;
+  approvalId: string;
+  tool: string;
+  arguments: string;
+};
 
 /**
  * Supervised provider-owned execution process. ACP, Claude stdio, and OpenCode
@@ -271,6 +278,7 @@ export interface ManagedRuntimeHandle {
     >,
   ): AsyncIterable<ManagedRuntimeEvent>;
   respondApproval(requestId: string, approved: boolean): Promise<void>;
+  respondTool?(requestId: string, result: { callId: string; ok: boolean; output: string }): Promise<void>;
   cancel(): Promise<void>;
   shutdown(): Promise<void>;
   listModels?(): Promise<ModelDiscoveryResult>;
