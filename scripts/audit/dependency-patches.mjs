@@ -7,6 +7,14 @@ import { fileURLToPath } from "node:url";
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
 const require = createRequire(import.meta.url);
 
+export function dependencyDirectory(snapshot, maxLength) {
+  // pnpm 10 shortens virtual-store names using the first 32 SHA-256 digits.
+  const name = snapshot.replace(/\)$/, "").replace(/\)\(|\(|\)/g, "_");
+  if (name.length <= maxLength) return name;
+  const hash = createHash("sha256").update(name).digest("hex").slice(0, 32);
+  return `${name.slice(0, maxLength - 33)}_${hash}`;
+}
+
 export function verifyDependencyPatches(
   repositoryRoot = root,
   now = Date.now(),
@@ -25,6 +33,16 @@ export function verifyDependencyPatches(
     throw new Error("Invalid dependency patch policy");
   }
   const store = join(repositoryRoot, "node_modules/.pnpm");
+  const modules = readFileSync(
+    join(repositoryRoot, "node_modules/.modules.yaml"),
+    "utf8",
+  );
+  const maxLength = Number(
+    modules.match(/^virtualStoreDirMaxLength: (\d+)$/m)?.[1],
+  );
+  if (!Number.isInteger(maxLength) || maxLength < 40) {
+    throw new Error("Missing or invalid pnpm virtual store directory limit");
+  }
   // pnpm retains obsolete store directories after updates. Inspect only the
   // snapshots in the installed graph, including every active package version.
   const installedLock = readFileSync(join(store, "lock.yaml"), "utf8");
@@ -34,9 +52,7 @@ export function verifyDependencyPatches(
     ...snapshots.matchAll(
       /^  (braces@[^\n:]+|http-cache-semantics@[^\n:]+):/gm,
     ),
-  ].map((match) =>
-    match[1].replace(/\(patch_hash=([^)]*)\)/g, "_patch_hash=$1"),
-  );
+  ].map((match) => match[1]);
   return policy.patches.map((patch) => {
     const expiry = Date.parse(`${patch.expiresOn}T23:59:59Z`);
     if (!Number.isFinite(expiry) || now > expiry) {
@@ -50,7 +66,12 @@ export function verifyDependencyPatches(
     if (copies.length === 0)
       throw new Error(`Missing installed ${patch.package} patch`);
     const directories = copies.map((entry) => {
-      const directory = join(store, entry, "node_modules", patch.package);
+      const directory = join(
+        store,
+        dependencyDirectory(entry, maxLength),
+        "node_modules",
+        patch.package,
+      );
       const pkg = JSON.parse(
         readFileSync(join(directory, "package.json"), "utf8"),
       );

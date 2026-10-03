@@ -11,6 +11,7 @@ import { basename, dirname, join } from "node:path";
 import test from "node:test";
 import {
   classifyAdvisories,
+  dependencyDirectory,
   loadPatchedPackage,
   verifyDependencyPatches,
 } from "./dependency-patches.mjs";
@@ -169,6 +170,11 @@ test("patch verification rejects missing/tampered sources and expired review", (
     );
     assert.throws(() => verifyDependencyPatches(fixture), /ENOENT/);
     cpSync(
+      new URL("node_modules/.modules.yaml", sourceRoot),
+      join(fixture, "node_modules/.modules.yaml"),
+      { recursive: true },
+    );
+    cpSync(
       new URL("node_modules/.pnpm/lock.yaml", sourceRoot),
       join(fixture, "node_modules/.pnpm/lock.yaml"),
       { recursive: true },
@@ -184,6 +190,32 @@ test("patch verification rejects missing/tampered sources and expired review", (
       );
     }
     assert.doesNotThrow(() => verifyDependencyPatches(fixture));
+    // Reproduce Windows' default 60-character virtual-store directory limit.
+    for (const patch of patches) {
+      const shortName = dependencyDirectory(
+        basename(dirname(dirname(patch.directories[0]))),
+        60,
+      );
+      cpSync(
+        patch.directories[0],
+        join(
+          fixture,
+          `node_modules/.pnpm/${shortName}/node_modules/${patch.package}`,
+        ),
+        { recursive: true },
+      );
+    }
+    const modulesFile = join(fixture, "node_modules/.modules.yaml");
+    const modules = readFileSync(modulesFile, "utf8");
+    writeFileSync(
+      modulesFile,
+      modules.replace(
+        /^virtualStoreDirMaxLength: \d+$/m,
+        "virtualStoreDirMaxLength: 60",
+      ),
+    );
+    assert.doesNotThrow(() => verifyDependencyPatches(fixture));
+    writeFileSync(modulesFile, modules);
     const file = join(
       fixture,
       `node_modules/.pnpm/${basename(dirname(dirname(patches[0].directories[0])))}/node_modules/braces/lib/parse.js`,
