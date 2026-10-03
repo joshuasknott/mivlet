@@ -8,6 +8,8 @@
 // until the dispatcher can reserve capacity and revalidate all prerequisites.
 #![allow(dead_code)]
 
+pub(crate) mod automation;
+
 use chrono::{
     DateTime, Datelike, Days, Duration, LocalResult, NaiveDateTime, NaiveTime, SecondsFormat,
     TimeZone, Utc, Weekday,
@@ -21,6 +23,13 @@ use crate::authorized_scope::{self, AuthorizedCommandScope, ScopeAccess};
 use crate::store::repos::local_schedule::{self as repo, OccurrenceRow, ScheduleRow};
 use crate::store::repos::scope::PrivateDataScope;
 use crate::store::{Store, StoreError};
+
+fn research_kind() -> String {
+    "research".into()
+}
+fn read_only_permission() -> String {
+    "read-only".into()
+}
 
 const MAX_SCHEDULES: i64 = 128;
 const MAX_PROMPT_CHARACTERS: usize = 32_000;
@@ -93,6 +102,10 @@ impl LocalScheduleTrigger {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateLocalScheduleRequest {
+    #[serde(default = "research_kind")]
+    pub execution_kind: String,
+    #[serde(default = "read_only_permission")]
+    pub permission_mode: String,
     pub workspace_id: String,
     pub id: String,
     pub project_id: Option<String>,
@@ -109,6 +122,10 @@ pub struct CreateLocalScheduleRequest {
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateLocalScheduleRequest {
+    #[serde(default = "research_kind")]
+    pub execution_kind: String,
+    #[serde(default = "read_only_permission")]
+    pub permission_mode: String,
     pub workspace_id: String,
     pub id: String,
     pub expected_revision: i64,
@@ -149,6 +166,10 @@ pub struct ListLocalScheduleOccurrencesRequest {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct SchedulePayload {
+    #[serde(default = "research_kind")]
+    pub execution_kind: String,
+    #[serde(default = "read_only_permission")]
+    pub permission_mode: String,
     prompt: String,
     prompt_fingerprint: String,
     prompt_revision: i64,
@@ -165,6 +186,12 @@ struct SchedulePayload {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct OccurrencePayload {
+    #[serde(default = "research_kind")]
+    pub execution_kind: String,
+    #[serde(default = "read_only_permission")]
+    pub permission_mode: String,
+    #[serde(default)]
+    work_id: Option<String>,
     prompt: String,
     prompt_fingerprint: String,
     prompt_revision: i64,
@@ -184,6 +211,10 @@ struct OccurrencePayload {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalSchedule {
+    #[serde(default = "research_kind")]
+    pub execution_kind: String,
+    #[serde(default = "read_only_permission")]
+    pub permission_mode: String,
     pub id: String,
     pub project_id: Option<String>,
     pub agent_id: String,
@@ -244,6 +275,10 @@ impl LocalScheduleCapacityReservation {
 #[derive(Clone, Debug, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct LocalScheduleClaim {
+    #[serde(default = "research_kind")]
+    pub execution_kind: String,
+    #[serde(default = "read_only_permission")]
+    pub permission_mode: String,
     pub occurrence_id: String,
     pub schedule_id: String,
     pub schedule_revision: i64,
@@ -704,6 +739,9 @@ fn record_project_occurrence(
                 .ok_or_else(|| StoreError::Invalid("The occurrence is unavailable.".into()))?;
             let payload: OccurrencePayload = serde_json::from_value(row.payload)
                 .map_err(|_| StoreError::Invalid("The occurrence context is invalid.".into()))?;
+            if payload.work_id.is_some() {
+                return Ok(());
+            }
             if let Some(project) = payload.project_id {
                 let time = timestamp(Utc::now());
                 if finished {
@@ -779,6 +817,7 @@ fn create_at(
     now: DateTime<Utc>,
 ) -> crate::store::Result<LocalSchedule> {
     validate_bounded_id_store(&request.id, "Schedule", MAX_ID_CHARACTERS)?;
+    validate_execution_kind(&request.execution_kind, &request.permission_mode)?;
     validate_route_and_agent(&request.agent_id, &request.provider_id, &request.model)?;
     validate_reasoning_effort(request.reasoning_effort.as_deref())?;
     validate_prompt(&request.prompt)?;
@@ -808,6 +847,8 @@ fn create_at(
     };
     let now_text = timestamp(now);
     let payload = SchedulePayload {
+        execution_kind: request.execution_kind,
+        permission_mode: request.permission_mode,
         prompt_fingerprint: fingerprint(&request.prompt),
         prompt: request.prompt,
         prompt_revision: 1,
@@ -844,6 +885,7 @@ fn update_at(
     now: DateTime<Utc>,
 ) -> crate::store::Result<LocalSchedule> {
     validate_bounded_id_store(&request.id, "Schedule", MAX_ID_CHARACTERS)?;
+    validate_execution_kind(&request.execution_kind, &request.permission_mode)?;
     validate_route_and_agent(&request.agent_id, &request.provider_id, &request.model)?;
     validate_reasoning_effort(request.reasoning_effort.as_deref())?;
     validate_prompt(&request.prompt)?;
@@ -878,6 +920,8 @@ fn update_at(
     };
     let revision = checked_revision(row.revision)?;
     let payload = SchedulePayload {
+        execution_kind: request.execution_kind,
+        permission_mode: request.permission_mode,
         prompt_fingerprint: fingerprint(&request.prompt),
         prompt: request.prompt,
         prompt_revision,
@@ -969,7 +1013,18 @@ fn claim_due_after_capacity_matching(
     store.transaction(|tx| {
         let now_text = timestamp(now);
         repo::interrupt_expired(tx, store, scope, &now_text)?;
-        let Some(mut schedule_row) = repo::first_due_schedule(tx, store, scope, &now_text)? else {
+        let selected = if let Some((id, _)) = expected {
+            repo::get_schedule(tx, store, scope, id)?.filter(|row| {
+                row.status == "enabled"
+                    && row
+                        .next_run_at
+                        .as_deref()
+                        .is_some_and(|next| next <= now_text.as_str())
+            })
+        } else {
+            repo::first_due_schedule(tx, store, scope, &now_text)?
+        };
+        let Some(mut schedule_row) = selected else {
             return Ok(None);
         };
         if expected.is_some_and(|(id, revision)| {
@@ -1001,6 +1056,9 @@ fn claim_due_after_capacity_matching(
         let occurrence_id = random_token("occurrence")?;
         let lease_expires_at = timestamp(now + Duration::minutes(CLAIM_LEASE_MINUTES));
         let occurrence_payload = OccurrencePayload {
+            execution_kind: schedule.execution_kind.clone(),
+            permission_mode: schedule.permission_mode.clone(),
+            work_id: None,
             prompt: schedule.prompt.clone(),
             prompt_fingerprint: fingerprint(&schedule.prompt),
             prompt_revision: schedule.prompt_revision,
@@ -1045,6 +1103,8 @@ fn claim_due_after_capacity_matching(
         schedule_row.updated_at = now_text;
         repo::replace_schedule(tx, store, scope, schedule_row.revision, &schedule_row)?;
         Ok(Some(LocalScheduleClaim {
+            execution_kind: schedule.execution_kind,
+            permission_mode: schedule.permission_mode,
             occurrence_id,
             schedule_id: schedule.id,
             schedule_revision: schedule.revision,
@@ -1152,6 +1212,8 @@ pub(crate) fn finish_bound_occurrence(
 fn schedule_from_row(row: ScheduleRow) -> crate::store::Result<LocalSchedule> {
     let payload = decode_schedule_payload(&row)?;
     Ok(LocalSchedule {
+        execution_kind: payload.execution_kind,
+        permission_mode: payload.permission_mode,
         id: row.id,
         project_id: payload.project_id,
         agent_id: row.agent_id,
@@ -1207,6 +1269,7 @@ fn decode_schedule_payload(row: &ScheduleRow) -> crate::store::Result<SchedulePa
             "The encrypted local schedule does not match its index.".into(),
         ));
     }
+    validate_execution_kind(&payload.execution_kind, &payload.permission_mode)?;
     validate_route_and_agent(&payload.agent_id, &payload.provider_id, &payload.model)?;
     validate_prompt(&payload.prompt)?;
     validate_trigger(&payload.trigger)?;
@@ -1217,6 +1280,18 @@ fn decode_schedule_payload(row: &ScheduleRow) -> crate::store::Result<SchedulePa
 fn encode<T: Serialize>(value: &T) -> crate::store::Result<serde_json::Value> {
     serde_json::to_value(value)
         .map_err(|_| StoreError::Invalid("The local schedule could not be encoded.".into()))
+}
+
+fn validate_execution_kind(kind: &str, permission: &str) -> crate::store::Result<()> {
+    if !["research", "agent"].contains(&kind)
+        || !["read-only", "trusted-scope", "full-access"].contains(&permission)
+        || (kind == "research" && permission != "read-only")
+    {
+        return Err(StoreError::Invalid(
+            "Choose a valid schedule workflow and permission mode.".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn validate_route_and_agent(
@@ -1538,7 +1613,7 @@ mod tests {
     use crate::store::vault::{MasterKey, Vault};
     use chrono::NaiveDate;
 
-    fn store_and_scope() -> (Store, AuthorizedCommandScope) {
+    pub(super) fn store_and_scope() -> (Store, AuthorizedCommandScope) {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         let data = DataScope::workspace("workspace-1").unwrap();
@@ -1565,8 +1640,10 @@ mod tests {
         )
     }
 
-    fn daily_request(status: LocalScheduleStatus) -> CreateLocalScheduleRequest {
+    pub(super) fn daily_request(status: LocalScheduleStatus) -> CreateLocalScheduleRequest {
         CreateLocalScheduleRequest {
+            execution_kind: research_kind(),
+            permission_mode: read_only_permission(),
             workspace_id: "workspace-1".into(),
             id: "schedule-1".into(),
             project_id: None,
@@ -1583,7 +1660,7 @@ mod tests {
         }
     }
 
-    fn at(value: &str) -> DateTime<Utc> {
+    pub(super) fn at(value: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(value)
             .unwrap()
             .with_timezone(&Utc)
@@ -2292,6 +2369,8 @@ mod tests {
             })
             .unwrap();
         let update = UpdateLocalScheduleRequest {
+            execution_kind: research_kind(),
+            permission_mode: read_only_permission(),
             workspace_id: "workspace-1".into(),
             id: created.id.clone(),
             expected_revision: created.revision,

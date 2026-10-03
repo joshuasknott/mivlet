@@ -92,6 +92,8 @@ export interface WorkAttachment {
   sha256?: string;
 }
 export interface CollaborationWorkItem {
+  /** Frozen occurrence metadata; carries no claim token or execution authority. */
+  schedule?: { occurrenceId: string; reasoningEffort?: string };
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
   capturedContext?: CapturedWorkContext;
   steering?: WorkSteering[];

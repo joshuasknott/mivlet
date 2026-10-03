@@ -1,5 +1,126 @@
 use super::*;
 
+/// The occurrence lease fences every automation descendant before provider
+/// dispatch and every tool effect, including approval resumes.
+pub(crate) fn check_schedule(
+    conn: &Connection,
+    store: &Store,
+    scope: &crate::store::repos::scope::PrivateDataScope,
+    root: &Work,
+    time: &str,
+    running: bool,
+) -> Result<()> {
+    let Some(context) = &root.schedule else {
+        return Ok(());
+    };
+    let occurrence = crate::store::repos::local_schedule::get_occurrence(
+        conn,
+        store,
+        scope,
+        &context.occurrence_id,
+    )?
+    .ok_or_else(|| invalid("This automation occurrence is unavailable."))?;
+    let schedule = crate::store::repos::local_schedule::get_schedule(
+        conn,
+        store,
+        scope,
+        &occurrence.schedule_id,
+    )?
+    .ok_or_else(|| invalid("This automation schedule is unavailable."))?;
+    if occurrence.payload["workId"].as_str() != Some(root.id.as_str())
+        || occurrence.lease_expires_at.as_str() <= time
+        || schedule.status != "enabled"
+        || (running && occurrence.state != "running")
+        || !matches!(occurrence.state.as_str(), "claimed" | "running")
+    {
+        return Err(invalid("This automation was paused, stopped or its claim expired. Review saved results before continuing."));
+    }
+    Ok(())
+}
+
+/// Stage a frozen occurrence through the ordinary Work executor. The claim is
+/// supplied only by native schedule orchestration and grants no tool permit.
+pub(crate) fn stage_schedule(
+    conn: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    profiles: &[MivletAgentProfile],
+    claim: &crate::local_schedules::LocalScheduleClaim,
+    time: &str,
+) -> Result<Work> {
+    let mut captured_profiles = profiles.to_vec();
+    let agent = captured_profiles
+        .iter_mut()
+        .find(|p| p.id == claim.agent_id)
+        .ok_or_else(|| invalid("This schedule's named agent is unavailable."))?;
+    agent.model_id = format!("{}::{}", claim.provider_id, claim.model);
+    agent.reasoning_effort = claim.reasoning_effort.clone();
+    let ctx = Context {
+        conn,
+        store,
+        scope,
+        profiles: &captured_profiles,
+        time,
+    };
+    validate_schedule_project(
+        conn,
+        store,
+        scope,
+        claim.project_id.as_deref(),
+        &claim.agent_id,
+    )?;
+    let key = format!("work-schedule-{}", claim.occurrence_id);
+    if let Some(item) = repo::get::<Work>(conn, store, &scope.private, Kind::Work, &key)? {
+        if item.status != WorkStatus::Queued || !item.run_ids.is_empty() {
+            return Err(invalid(
+                "This schedule occurrence has already started or stopped.",
+            ));
+        }
+        return Ok(item);
+    }
+    let room = ctx.create_room(
+        &format!("schedule-chat-{}", claim.occurrence_id),
+        "Scheduled task",
+        if claim.project_id.is_some() {
+            "group"
+        } else {
+            "direct"
+        },
+        participants(
+            &captured_profiles,
+            std::slice::from_ref(&claim.agent_id),
+            Some(&claim.agent_id),
+        )?,
+        Some(claim.agent_id.clone()),
+        claim.project_id.clone(),
+    )?;
+    work::start(
+        &ctx,
+        key.clone(),
+        room.id,
+        claim.agent_id.clone(),
+        claim.prompt.clone(),
+        false,
+        Some("schedule"),
+        None,
+    )?;
+    let mut item = ctx.item(&key)?;
+    let rank = |mode: &str| match mode {
+        "full-access" => 2,
+        "trusted-scope" => 1,
+        _ => 0,
+    };
+    if rank(&claim.permission_mode) < rank(&item.permission_mode) {
+        item.permission_mode = claim.permission_mode.clone();
+    }
+    item.schedule = Some(ScheduledWorkContext {
+        occurrence_id: claim.occurrence_id.clone(),
+        reasoning_effort: claim.reasoning_effort.clone(),
+    });
+    ctx.work(&item)?;
+    Ok(item)
+}
+
 pub(crate) fn validate_schedule_project(
     conn: &Connection,
     store: &Store,

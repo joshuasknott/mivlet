@@ -118,7 +118,7 @@ a deployed or production-validated service.
 - Conversation split panes arrange durable conversations and
   supported artifacts. Closing a pane leaves work running and discoverable in
   Activity. Projects contain focused chats, shared files and occurrence-tracked
-  local research schedules. Work runs while the app is open and Windows is awake;
+  local agent automations and research-only schedules. Work runs while the app is open and Windows is awake;
   interrupted work requires review before continuation. Steering and explicit
   continuation are recorded at safe boundaries without replaying external
   effects, request files keep durable references with accurate reattachment

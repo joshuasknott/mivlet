@@ -250,6 +250,7 @@ fn new_work(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        schedule: None,
         steering: vec![],
         messages: vec![],
         delivered_message_count: 0,
@@ -322,7 +323,7 @@ pub(super) fn current(
         ));
     }
     let agent = profile(ctx.profiles, &item.agent_id)?;
-    if agent.model_id != item.model_option_id {
+    if item.schedule.is_none() && agent.model_id != item.model_option_id {
         return Err(invalid(
             "The agent's model changed. Continue using its current model.",
         ));
@@ -343,6 +344,14 @@ pub(super) fn current(
         }
     }
     let root = ctx.item(&item.root_id)?;
+    super::schedules::check_schedule(
+        ctx.conn,
+        ctx.store,
+        &ctx.scope.private,
+        &root,
+        ctx.time,
+        run.is_some(),
+    )?;
     let independent_recipient = item.workspace_recipient
         && item.parent_id.as_deref() == Some(root.id.as_str())
         && root
@@ -1086,7 +1095,8 @@ pub(super) fn reconcile_profiles(ctx: &Context<'_>) -> Result<()> {
     for item in ctx.all_work()? {
         if item.status.active()
             && (profile(ctx.profiles, &item.agent_id).is_err()
-                || profile(ctx.profiles, &item.agent_id)?.model_id != item.model_option_id)
+                || (item.schedule.is_none()
+                    && profile(ctx.profiles, &item.agent_id)?.model_id != item.model_option_id))
         {
             invalidate_descendants(ctx, &item.id, "The agent was removed or its model changed. Inspect prior results before continuing with a current teammate.", WorkStatus::AwaitingUser)?;
         }

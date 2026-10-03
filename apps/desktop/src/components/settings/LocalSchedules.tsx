@@ -2,6 +2,8 @@ import { useId, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SettingsRuntime } from "./settings-runtime";
 import { resolveProviderModelOption } from "../../lib/provider-models";
+import { permissionModeFor } from "../../lib/agent-run";
+import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
 import {
   createLocalSchedule, listLocalSchedules, listLocalScheduleOccurrences,
   setLocalScheduleStatus, updateLocalSchedule, previewLocalSchedule,
@@ -34,9 +36,9 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
     finally { setPending(false); }
   };
   return <div className="settings-page__body local-schedules">
-    <div className="settings-section-heading"><p>Run web research with a named agent at a set time. Keep Mivlet open, online, and this computer awake. Missed recurring times coalesce to one run after reopening; interrupted runs require review.</p></div>
-    {project ? <p>Research for <strong>{project.name}</strong>. Each result becomes a shared project conversation and a recorded work item.</p> : null}
-    <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Scheduled runs use the saved Codex provider and model. They cannot use your apps or computer tools. Anything requiring permission stops for your attention.</p></details>
+    <div className="settings-section-heading"><p>Run a task with a named agent at a set time. Keep Mivlet open, online, and this computer awake. Missed recurring times coalesce to one run after reopening; interrupted runs require review.</p></div>
+    {project ? <p>Tasks for <strong>{project.name}</strong>. Each result becomes a shared project conversation and a recorded work item.</p> : null}
+    <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Agent workflows use the same tools and approval controls as chat. The saved permission level is a ceiling; reducing the agent's access also limits future runs. Approvals appear in Activity, and Stop ends the current task. Research-only schedules use Codex web search.</p></details>
     <div className="schedules-toolbar"><label className="settings-field"><span>Show schedules for</span><select aria-label="Filter schedules by agent" value={filterAgentId} onChange={(event) => { setFilterAgentId(event.target.value); setCreating(false); setEditing(null); }}><option value="">All agents</option>{runtime.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
     <button type="button" className="button button--primary" disabled={pending || schedules.isPending || !!schedules.error} onClick={() => { setEditing(null); setCreating(true); }}>New schedule</button></div>
     {schedules.isPending ? <p role="status">Loading schedules…</p> : null}
@@ -53,6 +55,7 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
       <p className="local-schedules__prompt">{schedule.prompt}</p>
       <small>{describeTrigger(schedule.trigger)} · {schedule.timezone} · {schedule.status === "paused" ? "Paused" : schedule.nextRunAt ? `Next: ${new Date(schedule.nextRunAt).toLocaleString()}` : "No future run"}</small>
       <small>{schedule.providerId} · {schedule.model} · Reasoning: {schedule.reasoningEffort ?? "provider default"}</small>
+      <small>{schedule.executionKind === "agent" ? "Agent workflow" : "Research only"}</small>
       <div className="profile-action-row">
         <button type="button" className="button button--secondary" disabled={pending} onClick={() => { setCreating(false); setEditing(schedule); }}>Edit</button>
         <button type="button" className="button button--secondary" disabled={pending} onClick={() => void act(() => setLocalScheduleStatus({ workspaceId, id: schedule.id, expectedRevision: schedule.revision, status: schedule.status === "paused" ? "enabled" : "paused" }), schedule.status === "paused" ? "Schedule resumed." : "Schedule paused.")}>{schedule.status === "paused" ? "Resume" : "Pause"}</button>
@@ -78,9 +81,10 @@ function ScheduleResults({ workspaceId, scheduleId, onOpenResult }: { workspaceI
   </details>;
 }
 
-type EditorInput = Pick<LocalSchedule, "agentId" | "providerId" | "model" | "reasoningEffort" | "prompt" | "timezone" | "trigger">;
+type EditorInput = Pick<LocalSchedule, "agentId" | "providerId" | "model" | "reasoningEffort" | "prompt" | "timezone" | "trigger" | "executionKind" | "permissionMode">;
 export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, initialAgentId }: { runtime: SettingsRuntime; project?: { id: string; name: string; participantIds: string[] }; initialAgentId?: string; schedule: LocalSchedule | null; pending: boolean; onSave: (input: EditorInput) => void; onCancel: () => void }) {
   const [agentId, setAgentId] = useState(schedule?.agentId ?? initialAgentId ?? "");
+  const [executionKind, setExecutionKind] = useState<"research" | "agent">(schedule ? schedule.executionKind ?? "research" : "agent");
   const [prompt, setPrompt] = useState(schedule?.prompt ?? "");
   const [kind, setKind] = useState<LocalScheduleTrigger["kind"]>(schedule?.trigger.kind ?? "daily");
   const [time, setTime] = useState(schedule?.trigger.kind !== "once" ? schedule?.trigger.localTime ?? "09:00" : "09:00");
@@ -95,7 +99,7 @@ export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, i
     ? runtime.allModelOptions.find((model) => model.providerId === schedule.providerId && model.modelId === schedule.model && model.available)
     : agent ? resolveProviderModelOption(runtime.allModelOptions, agent.modelId) : undefined;
   const provider = runtime.backendProviders.find((item) => item.id === route?.providerId);
-  const supported = route && provider?.backendType === "codex-app-server" && provider.authState === "connected";
+  const supported = route && route.capabilities?.streaming !== false && provider?.authState === "connected" && (executionKind === "agent" ? supportsSharedComputerTools(provider) && route.capabilities?.tools !== false : provider.backendType === "codex-app-server");
   const levels = route?.reasoning?.supportedEfforts ?? [];
   const reasoningEffort = effort ?? (schedule && agentId === schedule.agentId ? undefined : levels.includes(agent?.reasoningEffort ?? "") ? agent?.reasoningEffort : route?.reasoning?.defaultEffort);
   const effortValid = !reasoningEffort || levels.includes(reasoningEffort);
@@ -106,12 +110,15 @@ export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, i
     event.preventDefault();
     if (!route || !supported || !agent || !effortValid || !preview.data || preview.error) return;
     try { new Intl.DateTimeFormat("en", { timeZone: timezone }).format(); } catch { setInvalid("Enter a valid time zone, such as Europe/London."); return; }
-    onSave({ agentId, providerId: route.providerId, model: route.modelId, reasoningEffort: reasoningEffort || undefined, prompt: prompt.trim(), timezone, trigger });
+    onSave({ agentId, providerId: route.providerId, model: route.modelId, reasoningEffort: reasoningEffort || undefined, prompt: prompt.trim(), timezone, trigger,
+      executionKind, permissionMode: executionKind === "research" ? "read-only" : schedule && agentId === schedule.agentId && schedule.executionKind === "agent" ? schedule.permissionMode ?? "read-only" : permissionModeFor(agent.permissionLabel) });
   }}>
     <label>Agent<select className="input" required value={agentId} onChange={(event) => { setAgentId(event.target.value); setEffort(undefined); }}><option value="">Choose an agent</option>{runtime.agents.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label>
-    {agent ? <small>{supported ? `Uses ${provider.label} · ${route.modelId}` : "This agent needs an available model from a connected Codex provider."}</small> : null}
+    <label>Workflow<select className="input" value={executionKind} onChange={event => setExecutionKind(event.target.value as "research" | "agent")}><option value="agent">Agent workflow</option><option value="research">Research only</option></select></label>
+    {agent ? <small>{supported ? `Uses ${provider.label} · ${route.modelId}` : executionKind === "research" ? "Research only needs an available Codex model." : "Choose a connected model that supports Mivlet tools."}</small> : null}
+    {executionKind === "agent" && agent ? <small>Uses this agent's connections and enabled tools. {schedule?.executionKind === "agent" ? "Keeps the saved permission ceiling." : `Permission level: ${agent.permissionLabel}.`} Any required approval waits in Activity.</small> : null}
     {supported ? <><label>Reasoning effort<select className="input" value={reasoningEffort ?? ""} onChange={(event) => setEffort(event.target.value)}><option value="">Provider default</option>{levels.map(level => <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>)}{!effortValid ? <option value={reasoningEffort}>{reasoningEffort} — unavailable</option> : null}</select></label><small>Saved with this schedule. Later agent settings do not change it.</small></> : null}
-    <label>Research task<textarea className="input" required maxLength={32000} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should the agent research?" /></label>
+    <label>Task<textarea className="input" required maxLength={32000} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should the agent do?" /></label>
     <label>Repeat<select className="input" value={kind} onChange={(event) => setKind(event.target.value as LocalScheduleTrigger["kind"])}><option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
     {kind === "weekly" ? <label>Day<select className="input" value={weekday} onChange={(event) => setWeekday(event.target.value)}>{weekdays.map((day) => <option key={day} value={day}>{day}</option>)}</select></label> : null}
     {kind === "once" ? <label>Date and time<input className="input" type="datetime-local" required value={dateTime} onChange={(event) => setDateTime(event.target.value)} /></label> : <label>Time<input className="input" type="time" required value={time} onChange={(event) => setTime(event.target.value)} /></label>}

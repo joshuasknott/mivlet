@@ -389,6 +389,9 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 item.permission_mode = current_permission.into();
             }
             item.model_option_id = agent.model_id.clone();
+            // An explicit, reconciled continuation is ordinary user Work. The
+            // completed occurrence must never grant a fresh automation claim.
+            item.schedule = None;
             item.conversation_generation = room.generation;
             item.context_revision = room
                 .project_id

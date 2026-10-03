@@ -160,6 +160,7 @@ pub fn run() {
             local_schedules::local_schedule_occurrence_list,
             local_schedules::local_schedule_dispatch_claim,
             local_schedules::local_schedule_dispatch_bind,
+            local_schedules::automation::local_schedule_dispatch_stage,
             local_schedules::local_schedule_dispatch_renew,
             local_schedules::local_schedule_dispatch_finish,
             local_schedules::local_schedule_dispatch_abandon,
