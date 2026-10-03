@@ -43,14 +43,14 @@ export async function collectAssets(distDir, repoRoot) {
   const assets = [];
   for (const file of files) {
     const extension = extname(file).toLowerCase();
-    if (extension !== ".js" && extension !== ".css") continue;
+    if (![".js", ".mjs", ".css"].includes(extension)) continue;
     const data = await readFile(file);
     assets.push({
       path: relative(repoRoot, file).replaceAll("\\", "/"),
       fileName: file.split(/[/\\]/).at(-1),
-      type: extension.slice(1),
+      type: extension === ".mjs" ? "js" : extension.slice(1),
       bytes: data.byteLength,
-      gzipBytes: gzipSync(data).byteLength
+      gzipBytes: gzipSync(data).byteLength,
     });
   }
   return assets.sort((left, right) => right.bytes - left.bytes);
@@ -71,12 +71,12 @@ export function logicalChunkId(fileName) {
   if (!match) return undefined;
   const name = match[1];
   // Preserve the one known hyphenated vendor chunk name produced by manualChunks in vite.config.
-  if (name === 'react-vendor' || name.endsWith('-vendor')) {
+  if (name === "react-vendor" || name.endsWith("-vendor")) {
     return name;
   }
   // For everything else (routes like *Page, index, vendor, icon chunks), the logical id is the
   // segment before the first '-'. This correctly drops embedded '-' in hash portions.
-  const firstDash = name.indexOf('-');
+  const firstDash = name.indexOf("-");
   if (firstDash > 0) {
     return name.slice(0, firstDash);
   }
@@ -86,37 +86,65 @@ export function logicalChunkId(fileName) {
 export function summarizeBundle(assets) {
   const jsAssets = assets.filter((asset) => asset.type === "js");
   const cssAssets = assets.filter((asset) => asset.type === "css");
-  const sum = (items, key) => items.reduce((total, item) => total + item[key], 0);
+  const sum = (items, key) =>
+    items.reduce((total, item) => total + item[key], 0);
 
   const totalJs = sum(jsAssets, "bytes");
   const totalCss = sum(cssAssets, "bytes");
   const totalJsGzip = sum(jsAssets, "gzipBytes");
   const totalCssGzip = sum(cssAssets, "gzipBytes");
+  const pdfAssets = jsAssets.filter((asset) =>
+    /^(PdfPreview-|pdf-renderer-|pdf\.worker\.min-)/.test(asset.fileName),
+  );
+  const pdfPreview = {
+    rawBytes: sum(pdfAssets, "bytes"),
+    gzipBytes: sum(pdfAssets, "gzipBytes"),
+  };
 
-  const initialEntryJs = jsAssets.find((asset) => logicalChunkId(asset.fileName) === "index");
+  const initialEntryJs = jsAssets.find(
+    (asset) => logicalChunkId(asset.fileName) === "index",
+  );
   const routeChunks = {};
   for (const asset of jsAssets) {
     const chunkId = logicalChunkId(asset.fileName);
-    if (!chunkId || chunkId === "index" || chunkId === "react-vendor" || chunkId === "vendor") {
+    if (
+      !chunkId ||
+      chunkId === "index" ||
+      chunkId === "react-vendor" ||
+      chunkId === "vendor"
+    ) {
       continue;
     }
     if (chunkId.endsWith("Page") || chunkId === "ApprovalPanel") {
-      routeChunks[chunkId] = { rawBytes: asset.bytes, gzipBytes: asset.gzipBytes, path: asset.path };
+      routeChunks[chunkId] = {
+        rawBytes: asset.bytes,
+        gzipBytes: asset.gzipBytes,
+        path: asset.path,
+      };
     }
   }
 
   return {
+    pdfPreview,
+    commonJsCss: {
+      rawBytes: totalJs + totalCss - pdfPreview.rawBytes,
+      gzipBytes: totalJsGzip + totalCssGzip - pdfPreview.gzipBytes,
+    },
     totalJsCss: {
       rawBytes: totalJs + totalCss,
-      gzipBytes: totalJsGzip + totalCssGzip
+      gzipBytes: totalJsGzip + totalCssGzip,
     },
     css: {
       rawBytes: totalCss,
-      gzipBytes: totalCssGzip
+      gzipBytes: totalCssGzip,
     },
     initialEntryJs: initialEntryJs
-      ? { rawBytes: initialEntryJs.bytes, gzipBytes: initialEntryJs.gzipBytes, path: initialEntryJs.path }
+      ? {
+          rawBytes: initialEntryJs.bytes,
+          gzipBytes: initialEntryJs.gzipBytes,
+          path: initialEntryJs.path,
+        }
       : undefined,
-    routeChunks
+    routeChunks,
   };
 }

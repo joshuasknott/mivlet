@@ -928,7 +928,7 @@ pub(crate) fn run_read_file(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
-    if crate::local_computer::office_inspection::is_office(&extension) {
+    if crate::local_computer::office_inspection::is_office(&extension) || extension == "pdf" {
         let file = std::fs::File::open(&confined).map_err(|_| format!("File not found: {path}"))?;
         let mut bytes = Vec::new();
         std::io::Read::read_to_end(
@@ -937,11 +937,15 @@ pub(crate) fn run_read_file(
         )
         .map_err(|_| "Mivlet could not read the Office file.")?;
         if bytes.len() > MAX_TOOL_INPUT_BYTES {
-            return Err("Office inspection supports files up to 8 MB.".into());
+            return Err("Office and PDF inspection support files up to 8 MB.".into());
         }
         return Ok(ToolResult {
             ok: true,
-            output: crate::local_computer::office_inspection::inspect(&bytes, &extension)?,
+            output: if extension == "pdf" {
+                crate::local_computer::pdf_inspection::inspect(&bytes)?
+            } else {
+                crate::local_computer::office_inspection::inspect(&bytes, &extension)?
+            },
         });
     }
     // Read raw bytes and bound the result so a very large file cannot OOM the

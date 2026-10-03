@@ -202,7 +202,7 @@ export async function prepareExecutionAttachments(
   );
   const requireStaging = () => {
     if (stageable.some((attachment) => !attachment.sourceId)) {
-      throw new Error("Mivlet could not prepare the attached file for this agent. Choose a readable DOCX, XLSX or PPTX up to 2 MB, or export text/CSV, then try again in the desktop app.");
+      throw new Error("Mivlet could not prepare the attached file for this agent. Choose a readable DOCX, XLSX, PPTX or passive PDF up to 2 MB, or export text/CSV, then try again in the desktop app.");
     }
   };
   if (!stageable.length) {

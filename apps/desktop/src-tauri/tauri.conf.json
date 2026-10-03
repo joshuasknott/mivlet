@@ -26,7 +26,7 @@
         "default-src": "'self'",
         "frame-src": "https:",
         "script-src": "'self'",
-        "connect-src": "ipc: http://ipc.localhost",
+        "connect-src": "'self' ipc: http://ipc.localhost",
         "font-src": "'self'",
         "img-src": "'self' data:",
         "media-src": "'self' blob:",
@@ -49,7 +49,8 @@
     },
     "resources": [
       "resources/cua-driver/**/*",
-      "resources/agent-host/**/*"
+      "resources/agent-host/**/*",
+      "resources/pdfjs-notices/**/*"
     ],
     "icon": [
       "icons/icon.ico"

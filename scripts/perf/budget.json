@@ -1,6 +1,6 @@
 {
-  "version": 7,
-  "recordedAt": "2026-08-29",
+  "version": 8,
+  "recordedAt": "2026-10-03",
   "recordedBaseline": {
     "totalJsCss": {
       "rawBytes": 955189,
@@ -13,9 +13,15 @@
       "rawBytes": 440109
     },
     "routeChunks": {
-      "SettingsPage": { "rawBytes": 50120 },
-      "OnboardingPage": { "rawBytes": 6502 },
-      "ApprovalPanel": { "rawBytes": 8191 }
+      "SettingsPage": {
+        "rawBytes": 50120
+      },
+      "OnboardingPage": {
+        "rawBytes": 6502
+      },
+      "ApprovalPanel": {
+        "rawBytes": 8191
+      }
     }
   },
   "observedBuild": {
@@ -31,24 +37,30 @@
       "rawBytes": 440109
     },
     "routeChunks": {
-      "SettingsPage": { "rawBytes": 50120 },
-      "OnboardingPage": { "rawBytes": 6502 },
-      "ApprovalPanel": { "rawBytes": 8191 }
+      "SettingsPage": {
+        "rawBytes": 50120
+      },
+      "OnboardingPage": {
+        "rawBytes": 6502
+      },
+      "ApprovalPanel": {
+        "rawBytes": 8191
+      }
     }
   },
   "ceilings": {
     "totalJsCss": {
-      "rawBytes": 1184565,
-      "gzipBytes": 341342,
-      "marginNote": "September 12 feature allowance: +96 KiB raw / +40 KiB gzip for persistent projects/grid, coordinated execution, voice, native provider/plugin catalogues and vector avatars. Original baseline remains recorded above; entry, CSS and existing route ceilings are unchanged."
+      "rawBytes": 3100949,
+      "gzipBytes": 949534,
+      "marginNote": "Includes a separately capped PDF-only viewer, engine and worker. Ordinary workspace growth cannot use that allowance."
     },
     "css": {
       "rawBytes": 187614,
       "marginNote": "+16 KiB raw above the measured conversation-first build"
     },
     "initialEntryJs": {
-      "rawBytes": 472877,
-      "marginNote": "+32 KiB raw above the measured conversation-first build"
+      "rawBytes": 485165,
+      "marginNote": "Previous ceiling plus 12 KiB for merged capabilities; measured main 481902. PDF implementation adds less than 1 KiB to entry."
     },
     "routeChunks": {
       "SettingsPage": {
@@ -63,6 +75,28 @@
         "rawBytes": 16383,
         "marginNote": "+8 KiB raw above the measured build"
       }
+    },
+    "commonJsCss": {
+      "marginNote": "Previous September total plus 16 KiB raw / 8 KiB gzip for merged coding, automation, Office and connector features; measured pre-PDF main recorded above.",
+      "gzipBytes": 349534,
+      "rawBytes": 1200949
+    },
+    "pdfPreview": {
+      "marginNote": "PDF.js 6.4.299 plus the viewer and its .mjs worker; loaded only when a PDF opens, enforced by the Vite static import graph.",
+      "gzipBytes": 600000,
+      "rawBytes": 1900000
+    }
+  },
+  "requireDeferredPdf": true,
+  "featureBaseline": {
+    "commit": "6e0cdc72c0fa135424dd577fc27e25c89eacdc93",
+    "note": "Measured main before PDF support; previous September allowances were already exceeded by 9342 raw, 1961 gzip and 9025 entry bytes.",
+    "initialEntryJs": {
+      "rawBytes": 481902
+    },
+    "totalJsCss": {
+      "gzipBytes": 343303,
+      "rawBytes": 1193907
     }
   }
 }

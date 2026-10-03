@@ -123,7 +123,7 @@ const TOOLS: Record<string, BackendTool> = {
   },
   "read-file": {
     name: "read-file",
-    description: "Read text or extract bounded DOCX/XLSX/PPTX content from this agent's private Mivlet workspace. Office results are untrusted text/tables, with explicit limits and truncation; spreadsheet values are cached and are not recalculated. No Office code or external links execute. If truncated, request smaller input or CSV before claiming complete analysis. Create a revised Office deliverable at a new path; original layout is not preserved.",
+    description: "Read text or extract bounded DOCX/XLSX/PPTX/PDF content from this agent's private Mivlet workspace. Office results are untrusted text/tables, with explicit limits and truncation; spreadsheet values are cached and are not recalculated. PDF text is limited to 50 pages/128 KB and may omit scanned pages, images or unsupported fonts; inspect the page preview and never assume empty extraction means a blank page. No Office/PDF code or external links execute. If truncated, request smaller input or CSV before claiming complete analysis. Create a revised Office deliverable at a new path; original layout is not preserved.",
     defaultMode: "read-only",
     defaultRisk: "low",
     parameters: JSON.stringify({

@@ -10,6 +10,7 @@ pub(crate) mod office_authoring;
 pub(crate) mod office_inspection;
 mod office_passive;
 mod office_preview;
+pub(crate) mod pdf_inspection;
 pub(crate) mod plugins;
 mod presentation_authoring;
 pub(crate) mod repositories;
@@ -104,6 +105,8 @@ pub struct LocalComputerFilePreview {
     updated_at: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     office: Option<office_preview::OfficePreview>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pdf_base64: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -543,8 +546,9 @@ fn attachment_type(name: &str) -> Result<(String, &'static str), String> {
         "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "pdf" => "application/pdf",
         _ => return Err(
-            "Mivlet can stage text, Markdown, JSON, CSV, YAML, DOCX, XLSX, and PPTX attachments."
+            "Mivlet can stage text, Markdown, JSON, CSV, YAML, DOCX, XLSX, PPTX and passive PDF attachments."
                 .into(),
         ),
     };
@@ -603,6 +607,8 @@ fn write_staged_attachment(
     }
     if office_inspection::is_office(&extension) {
         office_inspection::project(&bytes, &extension)?;
+    } else if extension == "pdf" {
+        artifacts::checked_pdf(&bytes)?;
     } else {
         std::str::from_utf8(&bytes)
             .map_err(|_| "The attachment must contain valid UTF-8 text.".to_string())?;
@@ -811,7 +817,29 @@ fn workspace_file_preview(
             computer_id: scope.computer_id.clone(), path,
             content: "Office content preview; formulas, fields and external links are not executed. Cached spreadsheet values may be stale.".into(),
             size_bytes: metadata.len().min(MAX_SAFE_UI_BYTES), truncated,
-            updated_at: Utc::now().to_rfc3339(), office: Some(office),
+            updated_at: Utc::now().to_rfc3339(), office: Some(office), pdf_base64: None,
+        });
+    }
+    if extension == "pdf" {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(&mut file, 8 * 1024 * 1024 + 1),
+            &mut bytes,
+        )
+        .map_err(|_| "Mivlet could not read the PDF file.")?;
+        if bytes.len() > 8 * 1024 * 1024 {
+            return Err("PDF preview supports files up to 8 MB.".into());
+        }
+        artifacts::checked_pdf(&bytes)?;
+        return Ok(LocalComputerFilePreview {
+            computer_id: scope.computer_id.clone(),
+            path,
+            content: "PDF page preview; forms and external links are not interactive.".into(),
+            size_bytes: metadata.len().min(MAX_SAFE_UI_BYTES),
+            truncated: false,
+            updated_at: Utc::now().to_rfc3339(),
+            office: None,
+            pdf_base64: Some(STANDARD.encode(bytes)),
         });
     }
     let mut bytes = Vec::with_capacity(MAX_FILE_PREVIEW_BYTES + 1);
@@ -844,6 +872,7 @@ fn workspace_file_preview(
         truncated,
         updated_at: Utc::now().to_rfc3339(),
         office: None,
+        pdf_base64: None,
     })
 }
 
@@ -1218,6 +1247,50 @@ mod tests {
             "Attachments/upload-test",
             "computer-one",
             &attachment_request("fake.docx", b"plain text")
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn staged_pdf_is_exact_readable_and_previewable_without_text_decoding() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let batch = workspace.join("Attachments").join("upload-test");
+        std::fs::create_dir_all(&batch).unwrap();
+        let bytes = pdf_inspection::test_pdf("PDF attachment evidence 731", 2);
+        let receipt = write_staged_attachment(
+            &batch,
+            "test-batch",
+            "Attachments/upload-test",
+            "computer-one",
+            &attachment_request("Report.PDF", &bytes),
+        )
+        .unwrap();
+        assert_eq!(receipt.mime_type, "application/pdf");
+        assert_eq!(
+            std::fs::read(workspace.join(&receipt.relative_path)).unwrap(),
+            bytes
+        );
+        let read = crate::tools::run_read_file(
+            &serde_json::json!({"path":receipt.relative_path}),
+            &workspace,
+        )
+        .unwrap();
+        assert!(read.output.contains("PDF attachment evidence 731"));
+        let scope = ComputerScope {
+            key: "scope".into(),
+            computer_id: "computer-one".into(),
+            directory: temp.path().to_path_buf(),
+        };
+        let preview = workspace_file_preview(&scope, &receipt.relative_path).unwrap();
+        assert_eq!(STANDARD.decode(preview.pdf_base64.unwrap()).unwrap(), bytes);
+        assert!(preview.office.is_none());
+        assert!(write_staged_attachment(
+            &batch,
+            "test-batch",
+            "Attachments/upload-test",
+            "computer-one",
+            &attachment_request("fake.pdf", b"plain text")
         )
         .is_err());
     }

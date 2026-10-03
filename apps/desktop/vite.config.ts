@@ -53,6 +53,7 @@ export default defineConfig({
   // changes. A shared icon wrapper and cached SVG artwork avoid repeated
   // glyph allocations while retaining the library's presentation contract.
   build: {
+    manifest: true,
     target: "esnext",
     // Keep the expanded connector flow inside the existing download budgets.
     minify: "terser",
@@ -63,6 +64,8 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks(id) {
+          // The PDF engine is loaded only when a verified PDF preview opens.
+          if (/[/\\]node_modules[/\\]pdfjs-dist[/\\]/.test(id)) return "pdf-renderer";
           if (id.includes("@phosphor-icons")) return "icons";
           if (id.includes("node_modules")) {
             if (

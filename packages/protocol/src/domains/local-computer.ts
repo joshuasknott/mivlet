@@ -105,6 +105,7 @@ export interface LocalComputerAttachmentDiscardRequest extends LocalComputerTarg
  * The content must not enter model context, logs, or persisted runtime state.
  */
 export interface LocalComputerFilePreview {
+  pdfBase64?: string | null;
   office?: LocalComputerOfficePreview | null;
   computerId: string;
   path: string;
@@ -129,6 +130,7 @@ export interface LocalComputerArtifact {
 }
 
 export interface LocalComputerArtifactPreview {
+  pdfBase64?: string | null;
   artifactId: string;
   mimeType: string;
   text: string | null;

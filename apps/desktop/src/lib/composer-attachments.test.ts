@@ -7,7 +7,7 @@ import {
 } from "./composer-attachments";
 
 describe("readable composer attachments", () => {
-  it.each(["DOCX", "xlsx", "pptx"])("retains %s bytes without decoding or importing them as knowledge", async (extension) => {
+  it.each(["DOCX", "xlsx", "pptx", "PDF"])("retains %s bytes without decoding or importing them as knowledge", async (extension) => {
     const bytes = new Uint8Array([80, 75, 3, 4, 255, 0]);
     const file = { name: `input.${extension}`, size: bytes.length, arrayBuffer: vi.fn(async () => bytes.buffer) } as unknown as File;
     const importKnowledgeFile = vi.fn();
