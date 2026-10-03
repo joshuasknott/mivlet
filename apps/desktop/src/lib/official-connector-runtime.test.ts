@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest } from "@mivlet/protocol";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 const open = vi.hoisted(() => vi.fn());
+const providerCheck = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("./connector-mcp", () => ({ openConnectorTools: open }));
+vi.mock("../runtime/domains/providers", () => ({ checkRuntimeManagedTool: providerCheck }));
 const approval = { id: "source", action: "connector-call", riskLevel: "critical" } as ApprovalRequest;
 const input = JSON.stringify({ connectorId: "notion", toolName: "search", input: { query: "test" } });
 const options = { workspaceId: "workspace-1", connectorIds: ["notion"], queueApproval: vi.fn() };
@@ -40,6 +42,16 @@ describe("official connector agent tools", () => {
     const executor = createDesktopToolExecutor({ waitForDecision: vi.fn(async () => { cancelled = true; return "granted" as const; }) }, { ...options, shouldCancel: () => cancelled });
     await expect(executor(approval, input)).rejects.toThrow("connector access changed");
     expect(connection.transport.authorizeToolCall).not.toHaveBeenCalled();
+  });
+  it("blocks Stop during the final provider check before external dispatch", async () => {
+    const connection = fixture(); open.mockResolvedValue(connection);
+    let cancelled = false;
+    providerCheck.mockResolvedValueOnce(undefined).mockImplementationOnce(async () => { cancelled = true; });
+    const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, { ...options, shouldCancel: () => cancelled });
+    await expect(executor({ ...approval, id: "mivlet-shared-test" }, input)).rejects.toThrow("connector access changed");
+    expect(connection.transport.authorizeToolCall).toHaveBeenCalledOnce();
+    expect(connection.transport.executeAuthorizedToolCall).not.toHaveBeenCalled();
+    expect(connection.client.close).toHaveBeenCalledOnce();
   });
   it("propagates provider isError as failure and closes the connection", async () => {
     const connection = fixture(); connection.client.close.mockResolvedValue(undefined);

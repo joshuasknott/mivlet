@@ -261,6 +261,7 @@ async function runOfficialConnector(
     const permit = await connection.transport.authorizeToolCall(proposal, resolutionFor(prepared.approval));
     if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
     await checkProviderCall();
+    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
     const result = await connection.transport.executeAuthorizedToolCall(proposal, permit.permitId);
     if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
     assertConnectorToolSucceeded(result);
