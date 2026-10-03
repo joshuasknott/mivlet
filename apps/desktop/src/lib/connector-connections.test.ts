@@ -6,6 +6,15 @@ import { mergeConnectorConnections, remoteConnectionReady } from "./connector-co
 
 const remote = { connectionId: "remote", launchReference: "marketplace-notion", authorizationState: "authorized", credentialState: "available", healthState: "healthy", discoveryState: "discovered", discoveredTools: ["search"], enabledTools: ["search"] } as RuntimeMcpConnectionDetails;
 describe("canonical connector projection", () => {
+  it("admits enabled discovered resources without tools and rejects stale or disabled resources", () => {
+    const resource = { ...remote, discoveredTools: [], enabledTools: [], discoveredResources: ["note://brief"], enabledResources: ["note://brief"] };
+    expect(remoteConnectionReady(resource)).toBe(true);
+    expect(mergeConnectorConnections([], [resource])[0]).toMatchObject({ status: "connected", connectionRoute: "remote" });
+    expect(remoteConnectionReady({ ...resource, enabledResources: ["note://other"] })).toBe(false);
+    expect(remoteConnectionReady({ ...resource, enabledResources: [] })).toBe(false);
+    expect(remoteConnectionReady({ ...resource, credentialState: "missing" })).toBe(false);
+    expect(remoteConnectionReady({ ...resource, authorizationState: "revoked" })).toBe(false);
+  });
   it("uses the same verified remote route for Installed and chat", () => {
     const [manifest] = mergeConnectorConnections([{ id: "notion", status: "connected" } as ConnectorManifest], [remote]);
     expect(manifest).toMatchObject({ id: "notion", connectionRoute: "remote", status: "connected" });

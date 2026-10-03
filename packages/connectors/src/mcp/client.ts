@@ -154,3 +154,12 @@ export function normalizeMcpToolResult(value: unknown): McpUntrustedToolResult {
   deepFreezeJson(result);
   return result;
 }
+
+/** Resources are evidence with the same bounds as tool results. Binary blobs
+ * require a separate native artifact import; never return raw base64 to a model. */
+export function normalizeMcpResourceResult(value: unknown): McpUntrustedToolResult {
+  if (!isObject(value) || !Array.isArray(value.contents) || value.contents.length > MAX_TOOL_CONTENT_ITEMS) {
+    throw new Error("MCP resource returned invalid content.");
+  }
+  return normalizeMcpToolResult({ content: value.contents.map(resource => ({ type: "resource", resource })) });
+}

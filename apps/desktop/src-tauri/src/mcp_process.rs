@@ -175,6 +175,7 @@ fn oauth_authorization_lock() -> &'static tokio::sync::Mutex<()> {
 }
 
 struct McpToolPermit {
+    operation: McpOperation,
     session_id: String,
     connection_id: String,
     connection_revision: i64,
@@ -413,12 +414,22 @@ pub struct ResolvedMcpCapabilityRoute {
 }
 
 #[derive(Clone, serde::Deserialize, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct McpToolProposal {
+    #[serde(default)]
+    operation: McpOperation,
     workspace_id: String,
     session_id: String,
     tool_name: String,
     arguments: Value,
+}
+
+#[derive(Clone, Copy, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+#[serde(rename_all = "lowercase")]
+enum McpOperation {
+    #[default]
+    Tool,
+    Resource,
 }
 
 #[derive(Clone, serde::Serialize)]

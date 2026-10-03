@@ -43,10 +43,11 @@ async function finishConnection(workspaceId: string, preset: RemoteConnector, en
     if (connection.discovery.authorizationState !== "authorized" || connection.discovery.credentialState !== "available") {
       throw new Error("Sign-in did not finish. Connect again to restore access.");
     }
-    if (!connection.tools.length) throw new Error(`${preset.name} did not make any tools available to this account. Connect again with access enabled.`);
+    if (!connection.tools.length && !connection.resources.length) throw new Error(`${preset.name} did not make any tools or resources available to this account. Connect again with access enabled.`);
     const current = connection.discovery;
     const result = await setRuntimeMcpEnablement(workspaceId, current.connectionId, current.connectionRevision,
-      connection.tools.map((tool) => tool.name), current.enabledResources, current.capabilityBindings);
+      existing ? current.enabledTools : connection.tools.map((tool) => tool.name),
+      existing ? current.enabledResources : connection.resources.map(resource => resource.uri), current.capabilityBindings);
     if (!result) throw new Error("Could not finish connecting. Try again.");
     enabled = result;
   } finally { await connection.client.close().catch(() => undefined); }
@@ -65,6 +66,6 @@ async function finishConnection(workspaceId: string, preset: RemoteConnector, en
       throw error;
     } finally { await verified?.client.close().catch(() => undefined); }
   }
-  if (!remoteConnectionReady(enabled)) throw new Error("Sign-in is incomplete. Connect again to restore access.");
+  if (!remoteConnectionReady(enabled)) throw new Error("This app has no usable enabled access. Check its tool and resource access in Settings before reconnecting.");
   return enabled;
 }

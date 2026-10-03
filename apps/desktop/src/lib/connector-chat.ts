@@ -28,7 +28,7 @@ export function chatConnectorTools(ids: readonly string[], manifests?: readonly 
     const connectorId = CONNECTOR_READ_TOOLS[tool.name];
     return connectorId
       ? nativeIds.includes(connectorId)
-      : (tool.name === "connector-tools" || tool.name === "connector-call") &&
+      : (tool.name === "connector-tools" || tool.name === "connector-call" || tool.name === "connector-resource") &&
           ids.some((id) => remoteConnectorFor(id) && !nativeIds.includes(id));
   }).map((tool) => tool.name === "connector-action" ? { ...tool, description: `${tool.description} Available actions: ${manifests?.filter((manifest) => nativeIds.includes(manifest.id)).flatMap((manifest) => manifest.supportedActions ?? []).join(", ")}.` } : tool.name === "connector-tools" ? { ...tool, description: `${tool.description} Workspace app IDs: ${ids.filter((id) => remoteConnectorFor(id) && !nativeIds.includes(id)).join(", ")}.` } : tool);
 }

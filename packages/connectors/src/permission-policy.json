@@ -104,6 +104,7 @@
     "cloud-browser-action": "browser-state-mutation",
     "connection-read": "connector-read",
     "connector-tools": "connector-read",
+    "connector-resource": "connector-read",
     "github-read": "connector-read",
     "vercel-read": "connector-read",
     "linear-read": "connector-read",

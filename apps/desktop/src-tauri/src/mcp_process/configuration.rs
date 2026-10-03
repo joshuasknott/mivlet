@@ -871,6 +871,7 @@ pub fn authorize_mcp_tool_call(
     }
     let permit_id = random_session_id()?.replacen("mcp-", "mcp-permit-", 1);
     let permit = McpToolPermit {
+        operation: request.proposal.operation,
         session_id: request.proposal.session_id,
         connection_id: current.connection_id,
         connection_revision: current.connection_revision,
@@ -906,7 +907,7 @@ pub async fn execute_approved_mcp_tool_call(
         return Err("The MCP execution permit expired.".into());
     }
     let context = validate_tool_proposal(&request.proposal)?;
-    if permit.session_id != request.proposal.session_id
+    if permit.operation != request.proposal.operation || permit.session_id != request.proposal.session_id
         || permit.connection_id != context.connection_id
         || permit.connection_revision != context.connection_revision
         || permit.tool_name != request.proposal.tool_name
@@ -919,14 +920,16 @@ pub async fn execute_approved_mcp_tool_call(
         None,
         crate::authorized_scope::ScopeAccess::Write,
     )?;
+    let (method, params) = if request.proposal.operation == McpOperation::Resource {
+        ("resources/read", request.proposal.arguments.clone())
+    } else {
+        ("tools/call", serde_json::json!({"name":request.proposal.tool_name,"arguments":request.proposal.arguments}))
+    };
     let frame = serde_json::json!({
         "jsonrpc": "2.0",
         "id": request.request_id,
-        "method": "tools/call",
-        "params": {
-            "name": request.proposal.tool_name,
-            "arguments": request.proposal.arguments
-        }
+        "method": method,
+        "params": params
     })
     .to_string();
     if frame.len() > MAX_MCP_FRAME_BYTES || !valid_mcp_frame(&frame) {

@@ -21,6 +21,7 @@ vi.mock("../../lib/connector-mcp", () => ({ openConnectorTools: api.open }));
 const approval = { id: "approval-1", confirmationPhrase: "approve", consequence: "Connect to this provider." };
 const discovery = { connectionId: "connection-1", connectionRevision: 2, authorizationState: "authorized", credentialState: "available", healthState: "healthy", discoveryState: "discovered", discoveredTools: ["search", "update"], enabledTools: [], enabledResources: [], capabilityBindings: [] };
 const fixture = () => ({
+  resources: [],
   tools: [{ name: "search", inputSchema: { type: "object" } }, { name: "update", inputSchema: { type: "object" } }], discovery,
   client: { close: vi.fn().mockResolvedValue(undefined) },
 });
@@ -39,6 +40,21 @@ const connect = async () => {
   fireEvent.click(screen.getByRole("button", { name: "Connect" }));
 };
 describe("official connector setup", () => {
+  it("connects an authenticated resource-only app and enables its exact discovered resources", async () => {
+    api.open.mockResolvedValue({ ...fixture(), tools: [], resources: [{ uri: "note://brief", name: "Brief" }] });
+    api.enable.mockResolvedValue({ ...discovery, discoveredResources: ["note://brief"], enabledResources: ["note://brief"] });
+    show(); await connect(); await screen.findByText("Connected");
+    expect(api.enable).toHaveBeenCalledWith("workspace-1", "connection-1", 2, [], ["note://brief"], []);
+  });
+  it("preserves restricted access when explicitly reconnecting an existing app", async () => {
+    api.list.mockResolvedValue([{ id: "marketplace-notion" }]);
+    api.open.mockResolvedValueOnce({ ...fixture(), discovery: { ...discovery, healthState: "unknown", enabledTools: ["search"] } })
+      .mockResolvedValue({ ...fixture(), discovery: { ...discovery, enabledTools: ["search"] } });
+    api.enable.mockResolvedValue({ ...discovery, enabledTools: ["search"] });
+    show(); fireEvent.click(await screen.findByRole("button", { name: "Reconnect" }));
+    await screen.findByText("Connected");
+    expect(api.enable).toHaveBeenCalledWith("workspace-1", "connection-1", 2, ["search"], [], []);
+  });
   it("preserves the cause when a saved connection cannot restore access", async () => {
     api.list.mockResolvedValue([{ id: "marketplace-notion" }]);
     api.open.mockRejectedValue(new Error("Authorization expired. Sign in again."));

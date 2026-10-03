@@ -7,6 +7,11 @@ vi.mock("./native-mcp-client", () => ({ McpClient: class {
 } }));
 beforeEach(() => { vi.resetAllMocks(); mocks.initialize.mockResolvedValue({ capabilities: { tools: true } }); mocks.tools.mockResolvedValue([{ name: "list_teams" }]); mocks.close.mockResolvedValue(undefined); });
 describe("automatic Vercel account verification", () => {
+  it("requires authenticated account access even when only resources are enabled", async () => {
+    mocks.create.mockResolvedValue({ recordDiscovery: vi.fn().mockResolvedValue({ enabledTools: [], enabledResources: ["vercel://public"] }) });
+    await expect(openConnectorTools("workspace", "marketplace-vercel")).rejects.toThrow("Reconnect Vercel");
+    expect(mocks.close).toHaveBeenCalledOnce();
+  });
   it.each([false, true])("requires a successful authenticated read after public discovery (error=%s)", async (isError) => {
     const approval = { id: "exact-read", confirmationPhrase: "read" };
     const transport = {

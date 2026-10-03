@@ -917,17 +917,59 @@ pub(crate) fn require_enabled_mcp_tool(
     expected_revision: i64,
     tool_name: &str,
 ) -> Result<()> {
+    require_enabled_mcp_item(
+        tx,
+        store,
+        scope,
+        connection_id,
+        expected_revision,
+        tool_name,
+        false,
+    )
+}
+
+pub(crate) fn require_enabled_mcp_resource(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    connection_id: &str,
+    expected_revision: i64,
+    uri: &str,
+) -> Result<()> {
+    require_enabled_mcp_item(
+        tx,
+        store,
+        scope,
+        connection_id,
+        expected_revision,
+        uri,
+        true,
+    )
+}
+
+fn require_enabled_mcp_item(
+    tx: &Connection,
+    store: &Store,
+    scope: &AuthorizedCommandScope,
+    connection_id: &str,
+    expected_revision: i64,
+    target: &str,
+    resource: bool,
+) -> Result<()> {
     require_current_scope(tx, scope, ScopeAccess::Read)?;
     let details = mcp_details_for_id(tx, store, scope, connection_id)?;
     if details.connection_revision != expected_revision
         || details.discovery_state != "discovered"
-        || details
-            .enabled_tools
-            .binary_search_by(|candidate| candidate.as_str().cmp(tool_name))
-            .is_err()
+        || (if resource {
+            &details.enabled_resources
+        } else {
+            &details.enabled_tools
+        })
+        .binary_search_by(|candidate| candidate.as_str().cmp(target))
+        .is_err()
     {
         return Err(StoreError::Invalid(
-            "This MCP tool is not enabled on the current Connection revision.".into(),
+            "This MCP tool or resource is not enabled on the current Connection revision.".into(),
         ));
     }
     Ok(())
@@ -1772,6 +1814,46 @@ mod tests {
         assert_eq!(enabled.connection_revision, 3);
         assert_eq!(enabled.enabled_tools, ["read"]);
         assert_eq!(enabled.enabled_resources, ["file:///safe"]);
+        store
+            .with_conn(|tx| {
+                require_enabled_mcp_resource(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    enabled.connection_revision,
+                    "file:///safe",
+                )?;
+                assert!(require_enabled_mcp_resource(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    enabled.connection_revision - 1,
+                    "file:///safe"
+                )
+                .is_err());
+                assert!(require_enabled_mcp_resource(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    enabled.connection_revision,
+                    "file:///private"
+                )
+                .is_err());
+                assert!(require_enabled_mcp_tool(
+                    tx,
+                    &store,
+                    &scope,
+                    &created.id,
+                    enabled.connection_revision,
+                    "file:///safe"
+                )
+                .is_err());
+                Ok(())
+            })
+            .unwrap();
         assert_eq!(enabled.capability_bindings.len(), 1);
         assert_eq!(
             enabled.capability_bindings[0],

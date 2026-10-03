@@ -47,11 +47,12 @@ and verifies the downloaded agent, strips ambient Google credentials, and
 mediates every ACP permission request. Cursor and Grok likewise own their
 sessions and expose turns through ACP. Claude runs Anthropic's Agent SDK
 protocol, and OpenCode connects through a Mivlet-owned authenticated loopback
-server with a session event stream. These four runtimes are installed
-separately from their official sources and must be signed in; Mivlet routes
-their tool permission requests through the same exact-approval boundary and
-advertises tool, approval, and file-change capabilities only when the runtime
-and account are connected. Direct API text and tool turns run on the embedded
+server with a session event stream. Provider-owned runtimes are installed
+separately from their official sources and must be signed in. The verified
+Mivlet-owned tool bridges are Codex, Claude SDK and direct APIs. Other runtimes
+fail closed for Mivlet tool execution until their authority and response bridges
+are verified; account sign-in alone does not establish these capabilities.
+Direct API text and tool turns run on the embedded
 OpenCode host bundled with the desktop app; user-image turns keep the audited
 native adapter. API credentials stay in the operating-system credential store
 and enter outbound requests only inside Rust. Mivlet does not accept browser
@@ -156,7 +157,7 @@ Reopening the detail view checks existing access without restarting OAuth or
 expanding a previously restricted tool list. Tools are used in conversations;
 manual server configuration remains in advanced Settings.
 
-Direct API and ChatGPT/Codex agents receive native reads and supported write
+Tools-capable direct API, ChatGPT/Codex and Claude SDK agents receive native reads and supported write
 actions for connected workspace apps. Connector mentions identify the app the
 person wants to use; connected apps remain available on follow-up turns. Access is
 rechecked after approval and on result delivery. Native reads use the connected
@@ -168,7 +169,7 @@ in stored messages. Codex and embedded OpenCode turns disable host shell tools
 and provider memories; unadvertised tool requests are declined without opening
 an approval card.
 
-Direct API and ChatGPT/Codex agents can use `connector-tools` to discover enabled tool schemas
+Tools-capable direct API, ChatGPT/Codex and Claude SDK agents can use `connector-tools` to discover enabled tool schemas
 and `connector-call` to invoke them. Verified official remote connections are available
 across workspace conversations without individual agent assignment. Each call rediscovers the current Connection.
 Native policy recognizes fixed lists of Vercel, Notion, Figma and Canva reads at
@@ -272,6 +273,27 @@ grants. Vercel integrations must be created with read and write access so
 `deployment:write` can be granted.
 
 ## MCP
+
+The shared `connector-tools` tool lists enabled tools and exact resource URIs for
+connected official app routes. `connector-resource` reads bounded text through
+the same native MCP session, discovery proof, Connection revision and single-use
+permit as tool calls. It never opens a resource URI as a host path or directly
+fetches it. Each resource read requires an exact approval; untrusted annotations
+cannot remove that requirement. Returned text has no instruction authority;
+binary blobs, resource templates and subscriptions are not supported by this route.
+Enable only the needed resources in Settings' MCP access controls. New app setup
+enables discovered access; explicit reconnect preserves disabled tools/resources.
+Resource-only connections can be ready when their account, health, discovery and
+exact enabled resource are verified. Vercel retains its authenticated account-read
+check even when resources are enabled. Stop and access removal are checked before
+authorization, before execution and after the response. Source references:
+[MCP resource protocol](https://modelcontextprotocol.io/specification/2025-06-18/server/resources)
+and [Codex resource handler at the researched revision](https://github.com/openai/codex/blob/b172810921f89847cd310ecc496f9c901760e933/codex-rs/core/src/tools/handlers/mcp_resource.rs).
+
+Mivlet's registered tools are shared by Codex, tools-capable direct API routes,
+and the Claude SDK bridge. Claude's text bridge does not yet deliver screenshots;
+provider-owned runtimes without a verified Mivlet tool bridge fail closed. These
+tools remain Mivlet-owned services, rather than separate per-provider integrations.
 
 MCP servers are optional Connections behind the same credential and approval
 rules. A server must be explicitly configured and must complete capability

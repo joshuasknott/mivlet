@@ -84,6 +84,9 @@ fn is_official_read(endpoint: &Url, configuration: &str, tool: &str) -> bool {
 }
 
 fn routine_official_read(proposal: &McpToolProposal) -> Result<bool, String> {
+    if proposal.operation == McpOperation::Resource {
+        return Ok(false);
+    }
     let sessions = remote_sessions()
         .lock()
         .map_err(|_| "Mivlet could not access MCP sessions.".to_string())?;
@@ -236,6 +239,7 @@ pub(crate) fn prepare_semantic_capability_call(
         arguments.insert("cursor".into(), Value::String(cursor));
     }
     let proposal = McpToolProposal {
+        operation: McpOperation::Tool,
         workspace_id: workspace_id.clone(),
         session_id,
         tool_name: binding.tool_name,
@@ -282,6 +286,7 @@ pub(crate) fn prepare_semantic_capability_call(
         .insert(
             permit_id.clone(),
             McpToolPermit {
+                operation: proposal.operation,
                 session_id: proposal.session_id.clone(),
                 connection_id: context.connection_id,
                 connection_revision: context.connection_revision,
@@ -311,7 +316,10 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
     if !valid_session_id(&proposal.session_id) {
         return Err("The MCP session id is invalid.".into());
     }
-    validate_mcp_tool_name(&proposal.tool_name)?;
+    let resource_uri = resource_uri_for_proposal(proposal)?;
+    if resource_uri.is_none() {
+        validate_mcp_tool_name(&proposal.tool_name)?;
+    }
     validate_mcp_arguments(&proposal.arguments)?;
     let scope = crate::authorized_scope::command_scope(
         Some(proposal.workspace_id.clone()),
@@ -356,20 +364,18 @@ fn validate_tool_proposal(proposal: &McpToolProposal) -> Result<ToolProposalCont
         .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
     store
         .with_conn(|tx| {
-            crate::store::repos::connection_record::require_enabled_mcp_tool(
-                tx,
-                store,
-                &scope,
-                &connection_id,
-                connection_revision,
-                &proposal.tool_name,
-            )
+            if let Some(uri) = resource_uri {
+                crate::store::repos::connection_record::require_enabled_mcp_resource(tx, store, &scope, &connection_id, connection_revision, uri)
+            } else {
+                crate::store::repos::connection_record::require_enabled_mcp_tool(tx, store, &scope, &connection_id, connection_revision, &proposal.tool_name)
+            }
         })
         .map_err(|error| error.to_string())?;
     let arguments = serde_json::to_vec(&proposal.arguments)
         .map_err(|_| "The MCP tool arguments are invalid.".to_string())?;
     let arguments_fingerprint = format!("{:x}", Sha256::digest(&arguments));
     let proposal_value = serde_json::json!({
+        "operation": proposal.operation,
         "sessionId": proposal.session_id,
         "connectionId": connection_id,
         "connectionRevision": connection_revision,
@@ -834,15 +840,15 @@ fn approval_for_tool_proposal(
     }
     crate::models::ApprovalRequest {
         id,
-        service: "MCP tools".into(),
-        action: format!("run MCP tool {}", proposal.tool_name),
-        mode: "full-access".into(),
-        risk_level: "critical".into(),
+        service: if proposal.operation == McpOperation::Resource { "MCP resources" } else { "MCP tools" }.into(),
+        action: if proposal.operation == McpOperation::Resource { "read enabled MCP resource".into() } else { format!("run MCP tool {}", proposal.tool_name) },
+        mode: if proposal.operation == McpOperation::Resource { "read-only" } else { "full-access" }.into(),
+        risk_level: if proposal.operation == McpOperation::Resource { "medium" } else { "critical" }.into(),
         data_used,
-        consequence: "Runs an enabled tool in a user-managed MCP server.".into(),
+        consequence: if proposal.operation == McpOperation::Resource { "Reads the exact enabled resource through the selected MCP connection; its URI is not opened as a local file or fetched directly." } else { "Runs an enabled tool in a user-managed MCP server." }.into(),
         requested_at,
         decisions: vec!["once".into(), "deny".into()],
-        confirmation_phrase: Some(format!("run {}", proposal.tool_name)),
+        confirmation_phrase: (proposal.operation == McpOperation::Tool).then(|| format!("run {}", proposal.tool_name)),
     }
 }
 
@@ -917,6 +923,25 @@ fn validate_mcp_tool_name(value: &str) -> Result<(), String> {
         return Err("The MCP tool name is invalid.".into());
     }
     Ok(())
+}
+
+/// A resource operation has one fixed method and exactly one enabled URI. It
+/// never turns into a direct HTTP fetch, local file read or arbitrary MCP call.
+fn resource_uri_for_proposal(proposal: &McpToolProposal) -> Result<Option<&str>, String> {
+    if proposal.operation == McpOperation::Tool {
+        return Ok(None);
+    }
+    let uri = proposal.arguments.get("uri").and_then(Value::as_str)
+        .filter(|uri| !uri.is_empty() && uri.len() <= 2_048 && !uri.chars().any(char::is_control));
+    if proposal.tool_name != "resources/read" || proposal.arguments.as_object().map(|o| o.len()) != Some(1) || uri.is_none() {
+        return Err("Resource reads require exactly resources/read and one resource URI.".into());
+    }
+    let uri = uri.unwrap();
+    let parsed = Url::parse(uri).map_err(|_| "The MCP resource URI is invalid.")?;
+    if !parsed.username().is_empty() || parsed.password().is_some() {
+        return Err("Credentials cannot appear in a resource URI.".into());
+    }
+    Ok(Some(uri))
 }
 
 fn validate_mcp_arguments(value: &Value) -> Result<(), String> {
