@@ -53,7 +53,7 @@ pub(crate) struct VerifiedImageArtifact {
     pub(crate) mime_type: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OpenArtifactRequest {
     workspace_id: String,
@@ -235,6 +235,7 @@ pub(crate) fn check_office(bytes: &[u8], extension: &str) -> Result<bool, String
     let mut content_types = false;
     let mut root_relationships = false;
     let mut main_document = false;
+    let mut remaining_xml_nodes = 1_000_000;
     for index in 0..archive.len() {
         let mut entry = archive
             .by_index(index)
@@ -285,6 +286,7 @@ pub(crate) fn check_office(bytes: &[u8], extension: &str) -> Result<bool, String
                     b"activex".as_slice(),
                     b"oleobject".as_slice(),
                     b"application/vnd.ms-package".as_slice(),
+                    b"macrosheet".as_slice(),
                 ]
                 .iter()
                 .any(|blocked| contains_ascii_case_insensitive(&xml, blocked))
@@ -305,6 +307,42 @@ pub(crate) fn check_office(bytes: &[u8], extension: &str) -> Result<bool, String
             check_office_metadata_xml(&xml, "relationship")?;
             root_relationships |=
                 check_office_relationships(&xml, name == "_rels/.rels", main_part)?;
+        } else if name.ends_with(".xml") {
+            if entry.size() > 16 * 1024 * 1024 {
+                return Err("An Office content part exceeds the passive validation limit.".into());
+            }
+            let mut xml = Vec::new();
+            entry
+                .by_ref()
+                .take(16 * 1024 * 1024 + 1)
+                .read_to_end(&mut xml)
+                .map_err(|_| "The Office content is invalid.")?;
+            if xml.len() > 16 * 1024 * 1024 {
+                return Err("An Office content part exceeds the passive validation limit.".into());
+            }
+            super::office_passive::check(&xml, name.starts_with("xl/"), &mut remaining_xml_nodes)?;
+        } else if !entry.is_dir() {
+            // Do not let XML actions evade inspection by using an arbitrary
+            // part extension. Accepted non-XML parts must be actual raster data.
+            let asset_extension = name
+                .rsplit_once('.')
+                .map(|(_, extension)| extension)
+                .unwrap_or("");
+            if !matches!(asset_extension, "png" | "jpg" | "jpeg" | "gif" | "webp")
+                || entry.size() > MAX_BYTES
+            {
+                return Err("This Office file contains unsupported binary or vector parts. Publish a passive copy with XML and raster images.".into());
+            }
+            let mut raster = Vec::new();
+            entry
+                .by_ref()
+                .take(MAX_BYTES + 1)
+                .read_to_end(&mut raster)
+                .map_err(|_| "The Office image is invalid.")?;
+            if raster.len() as u64 > MAX_BYTES {
+                return Err("The Office image is too large.".into());
+            }
+            check_content(&raster, asset_extension)?;
         }
         main_document |= name == main_part;
     }
@@ -1051,7 +1089,14 @@ pub async fn local_computer_save_artifact(
     let ticket = computers
         .authority_for(&request.workspace_id, &request.agent_id)?
         .begin_viewer(request.expected_generation)?;
-    let (receipt, _) = verified_artifact(&computers, &request)?;
+    let verification = computers.clone();
+    let captured = request.clone();
+    let receipt = tauri::async_runtime::spawn_blocking(move || {
+        verified_artifact(&verification, &captured).map(|(receipt, _)| receipt)
+    })
+    .await
+    .map_err(|_| "Mivlet could not prepare the artifact for saving.".to_string())??;
+    ticket.check()?;
     let extension = allowed_path(&receipt.artifact.relative_path)?;
     // The native dialog exclusively owns the host destination. No model or
     // renderer argument can supply a path or authorize a silent host write.
@@ -1457,6 +1502,28 @@ mod tests {
         assert!(check_content(&office_fixture("docx", None, false), "docx").is_ok());
         assert!(check_content(&office_fixture("xlsx", None, false), "xlsx").is_ok());
         assert!(check_content(&office_fixture("pptx", None, false), "pptx").is_ok());
+        assert!(check_content(
+            &office_fixture("docx", Some("word/hidden.part"), false),
+            "docx"
+        )
+        .is_err());
+        assert!(check_content(
+            &office_fixture("docx", Some("word/hidden.png"), false),
+            "docx"
+        )
+        .is_err());
+        for (extension, part, content_type, xml) in [
+            ("docx", "word/document.xml", "wordprocessingml.document", "<document><fldSimple instr='DDEAUTO example'/></document>"),
+            ("xlsx", "xl/workbook.xml", "spreadsheetml.sheet", "<workbook><definedName>WEBSERVICE(&quot;https://example.test&quot;)</definedName></workbook>"),
+            ("pptx", "ppt/presentation.xml", "presentationml.presentation", "<presentation><hlinkClick action='ppaction://program'/></presentation>"),
+        ] {
+            let bytes = super::super::office_authoring::zip_files(vec![
+                ("[Content_Types].xml".into(), format!("<Types><Override ContentType='application/vnd.openxmlformats-officedocument.{content_type}.main+xml'/></Types>")),
+                ("_rels/.rels".into(), super::super::office_authoring::root_relationships(part)),
+                (part.into(), xml.into()),
+            ]).unwrap();
+            assert!(check_content(&bytes, extension).is_err(), "{extension}");
+        }
         assert!(check_content(
             &office_fixture("pptx", Some("ppt/embeddings/"), false),
             "pptx"

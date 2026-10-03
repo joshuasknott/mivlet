@@ -7,6 +7,7 @@ pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;
 pub(crate) mod office_authoring;
+mod office_passive;
 mod office_preview;
 pub(crate) mod plugins;
 mod presentation_authoring;

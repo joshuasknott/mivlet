@@ -255,6 +255,13 @@ file dialog rather than a model/renderer-selected host path, re-verifies the
 receipt after selection, stages exact bytes and commits under the current
 generation. Cancellation and revocation prevent placement, and existing files
 are never overwritten. Open creates a fresh copy for normal Office editing.
+Office publication also checks content XML, rejecting dynamic Word fields,
+slide actions, external references and unknown/network-capable Excel functions.
+Known local calculations remain supported. XML inspection has a 16 MB per-part
+and one-million-node package budget. Non-XML parts must be verified raster
+images; embedded fonts, binary printer settings and vector assets currently
+require a passive export without those parts. This is deliberately a bounded
+publication contract, not arbitrary Office-file compatibility.
 PDF authoring/preview, charts and arbitrary Office editing remain separate gaps.
 
 Repository ZIP import has a different boundary. It creates a sanitized private

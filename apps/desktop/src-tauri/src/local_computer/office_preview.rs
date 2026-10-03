@@ -238,7 +238,9 @@ fn document(root: &Node, budget: &mut Budget) -> Option<Vec<Section>> {
                 }
                 blocks.push(Block::Table { rows });
             }
-            _ => {}
+            _ => {
+                budget.truncated |= !node.find("t").is_empty();
+            }
         }
     }
     budget.truncated |= body.children.len() > 500;
