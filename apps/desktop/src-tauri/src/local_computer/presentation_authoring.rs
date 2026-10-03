@@ -262,6 +262,16 @@ mod tests {
         assert!(slide.contains("<a:buChar char=\"•\"/>"));
         assert!(slide.contains("<a:br/>"));
         assert!(slide.contains("17212E"));
+        let (projection, truncated) =
+            super::super::office_preview::preview(&bytes, "pptx").unwrap();
+        let projection = serde_json::to_value(projection).unwrap();
+        assert!(!truncated);
+        assert_eq!(projection["sections"][0]["blocks"][0]["style"], "title");
+        assert_eq!(
+            projection["sections"][0]["blocks"][1]["text"],
+            "<untrusted>\nSecond line"
+        );
+        assert_eq!(projection["sections"][0]["blocks"][2]["text"], "• One");
         // Optional local QA handoff to an independent Office reader. The
         // runner selects the output path; this branch is compiled only in tests.
         if let Ok(directory) = std::env::var("MIVLET_OFFICE_QA_OUTPUT") {

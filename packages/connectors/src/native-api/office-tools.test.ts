@@ -5,13 +5,27 @@ import { lookupTool } from "./tools";
 describe("bounded Office tool contracts", () => {
   it("shares slide authoring with exact content approvals", () => {
     const tool = lookupTool("create-presentation")!;
-    expect(tool).toMatchObject({ defaultMode: "full-access", defaultRisk: "high" });
+    expect(tool).toMatchObject({
+      defaultMode: "full-access",
+      defaultRisk: "high",
+    });
     const schema = JSON.parse(tool.parameters);
     expect(schema.properties.slides.maxItems).toBe(30);
     expect(schema.properties.slides.items.additionalProperties).toBe(false);
-    const args = { path: "slides/review.pptx", title: "Review", slides: [{ title: "Results", bullets: ["One"] }] };
-    const approval = buildToolApproval("luna", "create-presentation", JSON.stringify(args));
-    expect(approval).toMatchObject({ mode: "full-access", confirmationPhrase: "approve create-presentation" });
+    const args = {
+      path: "slides/review.pptx",
+      title: "Review",
+      slides: [{ title: "Results", bullets: ["One"] }],
+    };
+    const approval = buildToolApproval(
+      "luna",
+      "create-presentation",
+      JSON.stringify(args),
+    );
+    expect(approval).toMatchObject({
+      mode: "full-access",
+      confirmationPhrase: "approve create-presentation",
+    });
     expect(JSON.stringify(approval.dataUsed)).toContain("One");
   });
   it("advertises formula-bearing XLSX input without arbitrary expressions", () => {

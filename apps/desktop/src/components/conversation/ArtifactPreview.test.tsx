@@ -22,6 +22,15 @@ describe("verified artifact previews", () => {
     expect(await screen.findByText("This file is ready to open.")).toBeVisible();
     expect(screen.getByRole("button", { name: "Open Notes" })).toBeVisible();
   });
+  it("routes the verified Office projection to the viewer and preserves save/open actions", async () => {
+    vi.mocked(previewComputerArtifact).mockResolvedValue({ artifactId: `artifact-${"a".repeat(64)}`, mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", text: null, imageDataUrl: null, truncated: false,
+      office: { kind: "spreadsheet", sections: [{ name: "Totals", blocks: [{ type: "table", rows: [["26"]] }] }] } });
+    const xlsx = JSON.stringify({ ...JSON.parse(output), mimeType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", relativePath: "notes.xlsx" });
+    render(<ArtifactPreview output={xlsx} workspaceId="workspace" agentId="agent" generation={7} onClose={() => {}} />);
+    expect(await screen.findByRole("cell", { name: "26" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Save Notes" })).toBeVisible();
+    expect(screen.getByRole("button", { name: "Open Notes" })).toBeVisible();
+  });
   it("discards an old preview after a generation change", async () => {
     let finish!: (value: Awaited<ReturnType<typeof previewComputerArtifact>>) => void;
     vi.mocked(previewComputerArtifact).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; })).mockRejectedValueOnce(new Error("Computer changed"));

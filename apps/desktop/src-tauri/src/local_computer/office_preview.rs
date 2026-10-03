@@ -164,6 +164,11 @@ impl Budget {
 
 fn paragraph(node: &Node, budget: &mut Budget) -> Block {
     let text = paragraph_text(node);
+    let text = if node.find("buChar").is_empty() {
+        text
+    } else {
+        format!("• {text}")
+    };
     let style = node
         .find("pStyle")
         .first()
@@ -313,9 +318,7 @@ fn workbook(
         let root = part(archive, rels.get(sheet.attribute("id"))?)?;
         let mut rows: Vec<Vec<String>> = Vec::new();
         for cell in root.find("c") {
-            let Some((row, column)) = coordinates(cell.attribute("r")) else {
-                return None;
-            };
+            let (row, column) = coordinates(cell.attribute("r"))?;
             if row >= 100 || column >= 26 {
                 budget.truncated = true;
                 continue;
@@ -370,7 +373,17 @@ fn presentation(
         let blocks = source
             .iter()
             .take(100)
-            .map(|p| paragraph(p, budget))
+            .enumerate()
+            .map(|(index, p)| {
+                let mut block = paragraph(p, budget);
+                if index == 0 {
+                    let Block::Paragraph { style, .. } = &mut block else {
+                        unreachable!()
+                    };
+                    *style = "title";
+                }
+                block
+            })
             .collect();
         sections.push(Section {
             name: format!("Slide {}", index + 1),

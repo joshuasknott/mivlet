@@ -33,23 +33,34 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
     parameters: JSON.stringify({
       type: "object",
       properties: {
-        path: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9 _./-]{0,240}\\.pptx$" },
+        path: {
+          type: "string",
+          pattern: "^[A-Za-z0-9][A-Za-z0-9 _./-]{0,240}\\.pptx$",
+        },
         title: { type: "string", minLength: 1, maxLength: 160 },
         theme: { type: "string", enum: ["light", "dark"] },
         slides: {
-          type: "array", minItems: 1, maxItems: 30,
+          type: "array",
+          minItems: 1,
+          maxItems: 30,
           items: {
             type: "object",
             properties: {
               title: { type: "string", minLength: 1, maxLength: 120 },
               body: { type: "string", minLength: 1, maxLength: 600 },
-              bullets: { type: "array", maxItems: 5, items: { type: "string", minLength: 1, maxLength: 120 } },
+              bullets: {
+                type: "array",
+                maxItems: 5,
+                items: { type: "string", minLength: 1, maxLength: 120 },
+              },
             },
-            required: ["title"], additionalProperties: false,
+            required: ["title"],
+            additionalProperties: false,
           },
         },
       },
-      required: ["path", "title", "slides"], additionalProperties: false,
+      required: ["path", "title", "slides"],
+      additionalProperties: false,
     }),
   },
   "create-spreadsheet": {
