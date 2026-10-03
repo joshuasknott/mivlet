@@ -7,6 +7,8 @@ export type LocalScheduleTrigger =
   | { kind: "weekly"; weekday: string; localTime: string };
 export type LocalScheduleStatus = "enabled" | "paused" | "cancelled";
 export interface LocalScheduleInput {
+  executionKind?: "research" | "agent";
+  permissionMode?: import("@mivlet/protocol").PermissionMode;
   workspaceId: string;
   id: string;
   projectId?: string;
@@ -44,6 +46,8 @@ export interface LocalScheduleOccurrence {
 }
 
 export interface LocalScheduleDispatchClaim {
+  executionKind?: "research" | "agent";
+  permissionMode?: import("@mivlet/protocol").PermissionMode;
   projectId?: string;
   occurrenceId: string;
   scheduleId: string;
@@ -117,6 +121,16 @@ export const bindLocalScheduleDispatch = (request: {
   claimToken: string;
   attemptId: string;
 }) => invoke<string>("local_schedule_dispatch_bind", request);
+
+export const stageLocalScheduleDispatch = (request: {
+  workspaceId: string;
+  occurrenceId: string;
+  claimToken: string;
+}) =>
+  invoke<{ workId: string; threadId: string }>(
+    "local_schedule_dispatch_stage",
+    request,
+  );
 
 export const renewLocalScheduleDispatch = (request: {
   workspaceId: string;

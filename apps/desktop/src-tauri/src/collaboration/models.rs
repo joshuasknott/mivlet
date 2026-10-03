@@ -122,6 +122,8 @@ pub struct WorkAttachment {
 #[serde(rename_all = "camelCase")]
 pub struct Work {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<ScheduledWorkContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured_context: Option<CapturedWorkContext>,
     #[serde(default)]
     pub steering: Vec<WorkSteering>,
@@ -190,6 +192,13 @@ pub struct Work {
     pub outputs: Vec<Output>,
     pub created_at: String,
     pub updated_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ScheduledWorkContext {
+    pub occurrence_id: String,
+    pub reasoning_effort: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]

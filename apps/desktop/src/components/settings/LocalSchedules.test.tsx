@@ -15,9 +15,9 @@ const schedule: LocalSchedule = { id: "schedule", agentId: "agent", providerId: 
 function runtime(): SettingsRuntime {
   return {
     accountWorkspaceStatus: { activeWorkspace: { localWorkspaceId: "workspace" } },
-    agents: [{ id: "agent", name: "Researcher", modelId: "codex::new-model" }],
+    agents: [{ id: "agent", name: "Researcher", modelId: "codex::new-model", permissionLabel: "Ask Me" }],
     allModelOptions: ["original", "new-model"].map((modelId) => ({ id: `codex::${modelId}`, modelId, providerId: "codex", available: true })),
-    backendProviders: [{ id: "codex", label: "ChatGPT", backendType: "codex-app-server", authState: "connected" }],
+    backendProviders: [{ id: "codex", label: "ChatGPT", backendType: "codex-app-server", authState: "connected", capabilities: ["streaming", "tool-requests", "approvals"] }],
   } as unknown as SettingsRuntime;
 }
 function mount(value = runtime(), initialAgentId?: string) {
@@ -34,6 +34,20 @@ beforeEach(() => {
   vi.mocked(updateLocalSchedule).mockResolvedValue(schedule);
 });
 describe("Local schedules", () => {
+  it("offers ordinary agent automations on a connected API route with the saved permission ceiling", async () => {
+    const value = runtime();
+    value.agents[0].modelId = "openai::model";
+    value.allModelOptions = [{ id: "openai::model", modelId: "model", providerId: "openai", available: true }] as SettingsRuntime["allModelOptions"];
+    value.backendProviders = [{ id: "openai", label: "OpenAI", backendType: "native-api", authState: "connected", capabilities: ["streaming", "tool-requests", "approvals"] }] as SettingsRuntime["backendProviders"];
+    mount(value, "agent");
+    await waitFor(() => expect(screen.getByRole("button", { name: "New schedule" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "New schedule" }));
+    expect(screen.getByLabelText("Workflow")).toHaveValue("agent");
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Prepare a weekly report" } });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save schedule" })).toBeEnabled());
+    fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
+    await waitFor(() => expect(createLocalSchedule).toHaveBeenCalledWith(expect.objectContaining({ executionKind: "agent", permissionMode: "trusted-scope", providerId: "openai", prompt: "Prepare a weekly report" })));
+  });
   it("saves the displayed effort and previews the selected timezone through the native scheduler", async () => {
     const value = runtime();
     value.agents[0].reasoningEffort = "low";
@@ -44,7 +58,7 @@ describe("Local schedules", () => {
     expect(screen.getByLabelText("Reasoning effort")).toHaveValue("low");
     fireEvent.change(screen.getByLabelText("Time zone"), { target: { value: "Europe/London" } });
     fireEvent.change(screen.getByLabelText("Reasoning effort"), { target: { value: "medium" } });
-    fireEvent.change(screen.getByLabelText("Research task"), { target: { value: "Research fixture" } });
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Research fixture" } });
     await screen.findByText(/Next run:/);
     expect(previewLocalSchedule).toHaveBeenCalledWith({ timezone: "Europe/London", trigger: { kind: "daily", localTime: "09:00" } });
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
@@ -67,22 +81,23 @@ describe("Local schedules", () => {
     await waitFor(() => expect((screen.getByRole("button", { name: "New schedule" }) as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(screen.getByRole("button", { name: "New schedule" }));
     fireEvent.change(screen.getByLabelText("Agent"), { target: { value: "agent" } });
-    fireEvent.change(screen.getByLabelText("Research task"), { target: { value: "Find primary sources on rainfall" } });
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Find primary sources on rainfall" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Save schedule" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
     await waitFor(() => expect(createLocalSchedule).toHaveBeenCalledWith(expect.objectContaining({ workspaceId: "workspace", agentId: "agent", providerId: "codex", model: "new-model", prompt: "Find primary sources on rainfall", status: "enabled" })));
     await screen.findByText("The schedule changed. Refresh and try again.");
-    expect((screen.getByLabelText("Research task") as HTMLTextAreaElement).value).toBe("Find primary sources on rainfall");
+    expect((screen.getByLabelText("Task") as HTMLTextAreaElement).value).toBe("Find primary sources on rainfall");
   });
   it("retains the saved model after the agent model changes and includes the displayed revision", async () => {
     vi.mocked(listLocalSchedules).mockResolvedValue([schedule]);
     mount();
     fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
-    fireEvent.change(screen.getByLabelText("Research task"), { target: { value: "Updated research" } });
+    expect(screen.getByLabelText("Workflow")).toHaveValue("research");
+    fireEvent.change(screen.getByLabelText("Task"), { target: { value: "Updated research" } });
     await waitFor(() => expect(screen.getByRole("button", { name: "Save schedule" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "Save schedule" }));
-    await waitFor(() => expect(updateLocalSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: "schedule", expectedRevision: 4, model: "original", prompt: "Updated research" })));
-    await waitFor(() => expect(screen.queryByLabelText("Research task")).toBeNull());
+    await waitFor(() => expect(updateLocalSchedule).toHaveBeenCalledWith(expect.objectContaining({ id: "schedule", expectedRevision: 4, model: "original", prompt: "Updated research", executionKind: "research", permissionMode: "read-only" })));
+    await waitFor(() => expect(screen.queryByLabelText("Task")).toBeNull());
     fireEvent.click(screen.getByRole("button", { name: "Pause" }));
     await waitFor(() => expect(setLocalScheduleStatus).toHaveBeenCalledWith({ workspaceId: "workspace", id: "schedule", expectedRevision: 4, status: "paused" }));
   });

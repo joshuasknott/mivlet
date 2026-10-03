@@ -1,4 +1,6 @@
 import { useEffect, useRef, useSyncExternalStore } from "react";
+import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
+import type { ScheduledWorkResult } from "../lib/workspace-execution";
 import type { BackendProvider, MivletAgentProfile } from "@mivlet/protocol";
 import {
   abandonLocalScheduleDispatch,
@@ -7,6 +9,7 @@ import {
   finishLocalScheduleDispatch,
   listLocalSchedules,
   renewLocalScheduleDispatch,
+  stageLocalScheduleDispatch,
   type LocalSchedule,
 } from "../runtime/domains/local-schedules";
 import { AgentRunService } from "../lib/agent-run-service";
@@ -31,8 +34,17 @@ export interface UseLocalScheduleDispatcherOptions {
   onThreadCreated?: (agentId: string, threadId: string) => void;
   canStart?: (agentId: string, providerId: string) => boolean;
   projectContext?: (projectId: string, prompt: string) => Promise<string>;
-  onBound?: (attemptId: string, cancel: () => Promise<void>) => Promise<() => void>;
+  onBound?: (
+    attemptId: string,
+    cancel: () => Promise<void>,
+  ) => Promise<() => void>;
   onFinished?: () => Promise<void>;
+  runWork?: (input: {
+    workId: string;
+    threadId: string;
+    onQueued: (attemptId: string) => Promise<void>;
+    onReady: (cancel: () => Promise<void>) => void;
+  }) => Promise<ScheduledWorkResult>;
 }
 
 const listeners = new Set<() => void>();
@@ -64,11 +76,16 @@ export function useLocalScheduleDispatchStatus() {
   );
 }
 
-function firstDue(schedules: LocalSchedule[], now = Date.now()) {
+function firstDue(
+  schedules: LocalSchedule[],
+  now = Date.now(),
+  eligible = (_schedule: LocalSchedule) => true,
+) {
   return schedules
     .filter(
       (schedule) =>
         schedule.status === "enabled" &&
+        eligible(schedule) &&
         Boolean(schedule.nextRunAt) &&
         Number.isFinite(Date.parse(schedule.nextRunAt!)) &&
         Date.parse(schedule.nextRunAt!) <= now,
@@ -83,8 +100,8 @@ function firstDue(schedules: LocalSchedule[], now = Date.now()) {
 /**
  * Mount once with the shell runtime. The dispatcher is independent of the
  * selected conversation and uses a Rust-owned serial capacity slot. Its route
- * is deliberately limited to Codex provider-owned web research with no Mivlet
- * tools, Computer access, connector access, or standing approvals.
+ * dispatches claimed automations through ordinary Work. Legacy research-only
+ * schedules retain their restricted Codex runner.
  */
 export function useLocalScheduleDispatcher(
   options: UseLocalScheduleDispatcherOptions,
@@ -132,10 +149,42 @@ export function useLocalScheduleDispatcher(
       try {
         const schedules = await listLocalSchedules(workspaceId);
         if (!isCurrent()) return;
-        const due = firstDue(schedules);
+        const due =
+          firstDue(schedules, Date.now(), (schedule) => {
+            const provider = currentOptions.providers.find(
+              (provider) => provider.id === schedule.providerId,
+            );
+            const model = provider?.models.find(
+              (model) => model.id === schedule.model,
+            );
+            return (
+              currentOptions.agents.some(
+                (agent) => agent.id === schedule.agentId,
+              ) &&
+              (!currentOptions.canStart ||
+                currentOptions.canStart(
+                  schedule.agentId,
+                  schedule.providerId,
+                )) &&
+              provider?.authState === "connected" &&
+              (schedule.executionKind === "agent"
+                ? supportsSharedComputerTools(provider) &&
+                  model?.capabilities?.tools !== false
+                : provider.backendType === "codex-app-server") &&
+              model?.available === true &&
+              model.capabilities?.streaming !== false
+            );
+          }) ?? firstDue(schedules);
         if (!due) return;
-        if (currentOptions.canStart && !currentOptions.canStart(due.agentId, due.providerId)) {
-          publish({ phase: "claiming", scheduleId: due.id, message: "Scheduled research is queued while its teammate or provider is busy." });
+        if (
+          currentOptions.canStart &&
+          !currentOptions.canStart(due.agentId, due.providerId)
+        ) {
+          publish({
+            phase: "claiming",
+            scheduleId: due.id,
+            message: "This task is queued while its agent or provider is busy.",
+          });
           return;
         }
         const agent = currentOptions.agents.find(
@@ -146,7 +195,7 @@ export function useLocalScheduleDispatcher(
             phase: "failed",
             scheduleId: due.id,
             message:
-              "Scheduled research is waiting for its named agent to be available.",
+              "This task is waiting for its named agent to be available.",
           });
           return;
         }
@@ -155,14 +204,17 @@ export function useLocalScheduleDispatcher(
         );
         if (
           !provider ||
-          provider.backendType !== "codex-app-server" ||
+          (due.executionKind !== "agent" &&
+            provider.backendType !== "codex-app-server") ||
+          (due.executionKind === "agent" &&
+            !supportsSharedComputerTools(provider)) ||
           provider.authState !== "connected"
         ) {
           publish({
             phase: "failed",
             scheduleId: due.id,
             message:
-              "Scheduled research currently supports its original connected Codex provider only.",
+              "Reconnect this task's saved provider with support for its workflow.",
           });
           return;
         }
@@ -171,13 +223,15 @@ export function useLocalScheduleDispatcher(
         );
         if (
           !modelDefinition?.available ||
-          modelDefinition.capabilities?.streaming === false
+          modelDefinition.capabilities?.streaming === false ||
+          (due.executionKind === "agent" &&
+            modelDefinition.capabilities?.tools === false)
         ) {
           publish({
             phase: "failed",
             scheduleId: due.id,
             message:
-              "Scheduled research is waiting for its original Codex model to be available.",
+              "Scheduled work is waiting for its saved model to be available.",
           });
           return;
         }
@@ -198,70 +252,107 @@ export function useLocalScheduleDispatcher(
           claimToken: claim.claimToken,
           attemptId: immutableAttemptId,
         };
-        const result = await service.runScheduledResearch({
-          attemptId: immutableAttemptId,
-          workspaceId,
-          scheduleId: claim.scheduleId,
-          occurrenceId: immutableOccurrenceId,
-          prompt: claim.prompt,
-          projectContext: claim.projectId ? await currentOptions.projectContext?.(claim.projectId, claim.prompt) : undefined,
-          providerId: claim.providerId,
-          model: claim.model,
-          agent: { ...agent, reasoningEffort: claim.reasoningEffort },
-          provider,
-          modelDefinition,
-          isCurrent,
-          onThreadCreated: (threadId) => {
-            if (isCurrent())
-              currentOptions.onThreadCreated?.(agent.id, threadId);
-          },
-          onQueued: async () => {
-            await bindLocalScheduleDispatch(identity);
-            bound = true;
-            if (claim?.projectId)
-              release = await currentOptions.onBound?.(
-                immutableAttemptId,
-                async () => {
-                  stopped = true;
-                  await cancelRun();
-                },
-              );
-            leaseTimer = setInterval(() => {
-              void renewLocalScheduleDispatch(identity).catch(() => {
-                if (isCurrent()) void cancelRun().catch(() => undefined);
-              });
-            }, 60_000);
-            statusTimer = setInterval(() => {
-              void listLocalSchedules(workspaceId)
-                .then((latest) => {
-                  const current = latest.find(
-                    (schedule) => schedule.id === claim?.scheduleId,
-                  );
-                  if (
-                    current &&
-                    current.status !== "enabled" &&
-                    isCurrent()
-                  )
-                    void cancelRun().catch(() => undefined);
-                })
-                .catch(() => undefined);
-            }, 5_000);
-          },
-          onBackendReady: (cancel) => {
-            runCancel = cancel;
-            if (cancelRequested) void cancelRun().catch(() => undefined);
-          },
-          onProgress: ({ threadId, activity }) => {
-            publish({
-              phase: "running",
-              scheduleId: claim!.scheduleId,
-              occurrenceId: immutableOccurrenceId,
-              threadId,
-              ...(activity ? { message: activity } : {}),
+        const onQueued = async (attemptId = immutableAttemptId) => {
+          if (!isCurrent())
+            throw new Error("This automation was stopped before dispatch.");
+          if (bound) return;
+          identity.attemptId = attemptId;
+          await bindLocalScheduleDispatch(identity);
+          bound = true;
+          if (claim?.projectId && claim.executionKind !== "agent")
+            release = await currentOptions.onBound?.(
+              identity.attemptId,
+              async () => {
+                stopped = true;
+                await cancelRun();
+              },
+            );
+          leaseTimer = setInterval(() => {
+            void renewLocalScheduleDispatch(identity).catch(() => {
+              if (isCurrent()) void cancelRun().catch(() => undefined);
             });
-          },
-        });
+          }, 60_000);
+          statusTimer = setInterval(() => {
+            void listLocalSchedules(workspaceId)
+              .then((latest) => {
+                const current = latest.find(
+                  (schedule) => schedule.id === claim?.scheduleId,
+                );
+                if (isCurrent() && (!current || current.status !== "enabled"))
+                  void cancelRun().catch(() => undefined);
+              })
+              .catch(() => undefined);
+          }, 5_000);
+        };
+        const onReady = (cancel: () => Promise<void>) => {
+          runCancel = cancel;
+          if (cancelRequested) void cancelRun().catch(() => undefined);
+        };
+        const result =
+          claim.executionKind === "agent"
+            ? await (async () => {
+                if (!currentOptions.runWork)
+                  throw new Error(
+                    "Scheduled agent execution is unavailable in this workspace.",
+                  );
+                const staged = await stageLocalScheduleDispatch({
+                  workspaceId,
+                  occurrenceId: immutableOccurrenceId,
+                  claimToken: claim!.claimToken,
+                });
+                if (!isCurrent())
+                  throw new Error(
+                    "The workspace changed before the automation could start.",
+                  );
+                currentOptions.onThreadCreated?.(agent.id, staged.threadId);
+                publish({
+                  phase: "running",
+                  scheduleId: claim!.scheduleId,
+                  occurrenceId: immutableOccurrenceId,
+                  threadId: staged.threadId,
+                });
+                return currentOptions.runWork({ ...staged, onQueued, onReady });
+              })()
+            : await service.runScheduledResearch({
+                attemptId: immutableAttemptId,
+                workspaceId,
+                scheduleId: claim.scheduleId,
+                occurrenceId: immutableOccurrenceId,
+                prompt: claim.prompt,
+                projectContext: claim.projectId
+                  ? await currentOptions.projectContext?.(
+                      claim.projectId,
+                      claim.prompt,
+                    )
+                  : undefined,
+                providerId: claim.providerId,
+                model: claim.model,
+                agent: { ...agent, reasoningEffort: claim.reasoningEffort },
+                provider,
+                modelDefinition,
+                isCurrent,
+                onThreadCreated: (threadId) => {
+                  if (isCurrent())
+                    currentOptions.onThreadCreated?.(agent.id, threadId);
+                },
+                onQueued: () => onQueued(),
+                onBackendReady: onReady,
+                onProgress: ({ threadId, activity }) => {
+                  publish({
+                    phase: "running",
+                    scheduleId: claim!.scheduleId,
+                    occurrenceId: immutableOccurrenceId,
+                    threadId,
+                    ...(activity ? { message: activity } : {}),
+                  });
+                },
+              });
         if (!isCurrent()) return;
+        if (!bound)
+          throw new Error(
+            result.message ??
+              "This automation ended before an execution attempt could start.",
+          );
         const occurrenceOutcome =
           result.terminal === "completed"
             ? "completed"

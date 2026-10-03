@@ -354,6 +354,7 @@ export function ExecutionWorker({
                 !service.current(session)
               )
                 throw new Error("This assignment was stopped before dispatch.");
+              if (session.work.schedule) await service.bindScheduledWork(session, attemptId);
               await service.command({
                 action: "bind-work",
                 ...scope,

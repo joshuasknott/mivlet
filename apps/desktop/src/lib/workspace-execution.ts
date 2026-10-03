@@ -151,6 +151,27 @@ export interface WorkspaceExecutionState {
   revision: number;
 }
 
+export interface ScheduledWorkResult {
+  terminal: "completed" | "failed" | "interrupted" | "needs-user";
+  threadId: string;
+  message?: string;
+}
+
+function scheduledResult(work: CollaborationWorkItem): ScheduledWorkResult {
+  return {
+    terminal:
+      work.status === "completed"
+        ? "completed"
+        : work.status === "failed"
+          ? "failed"
+          : work.status === "awaiting-user" || work.status === "blocked"
+            ? "needs-user"
+            : "interrupted",
+    threadId: work.conversationId,
+    message: work.reason,
+  };
+}
+
 /** App-lifetime owner. Views subscribe; only admitted sessions can dispatch. */
 export class WorkspaceExecution {
   private state: WorkspaceExecutionState = {
@@ -168,6 +189,14 @@ export class WorkspaceExecution {
   private effortAttachments = new Map<string, ComposerAttachment[]>();
   private stopping = new Set<string>();
   private external = new Map<string, () => Promise<void>>();
+  private scheduled = new Map<
+    string,
+    {
+      threadId: string;
+      bind: (attemptId: string) => Promise<void>;
+      finish: (result: ScheduledWorkResult) => void;
+    }
+  >();
   private disposed = false;
   private closing: Promise<void> | null = null;
   constructor(
@@ -202,6 +231,41 @@ export class WorkspaceExecution {
       this.external.delete(id);
     };
   }
+  /** Occurrence claims stay in memory; the ordinary worker owns all execution. */
+  async runScheduledWork(
+    workId: string,
+    threadId: string,
+    bind: (attemptId: string) => Promise<void>,
+    onReady: (cancel: () => Promise<void>) => void,
+  ) {
+    if (this.disposed) throw new Error("This workspace has closed.");
+    if (this.scheduled.has(workId))
+      throw new Error("This schedule occurrence is already admitted.");
+    let finish!: (result: ScheduledWorkResult) => void;
+    const completed = new Promise<Parameters<typeof finish>[0]>((resolve) => {
+      finish = resolve;
+    });
+    this.scheduled.set(workId, { threadId, bind, finish });
+    try {
+      onReady(() => this.stop(workId));
+      await this.refresh();
+      if (
+        this.state.data.work.find((work) => work.id === workId)
+          ?.conversationId !== threadId
+      )
+        throw new Error("This scheduled Work is unavailable or changed.");
+      return await completed;
+    } finally {
+      this.scheduled.delete(workId);
+    }
+  }
+  async bindScheduledWork(session: ExecutionSession, attemptId: string) {
+    if (!session.work.schedule) return;
+    const schedule = this.scheduled.get(session.work.id);
+    if (!schedule || !this.current(session))
+      throw new Error("This schedule no longer owns its execution claim.");
+    await schedule.bind(attemptId);
+  }
   canSchedule(agentId: string, providerId: string) {
     const active = this.state.data.work.filter(
       (work) =>
@@ -235,14 +299,31 @@ export class WorkspaceExecution {
   }
   private executingWork() {
     return this.state.data.work.filter(
-      (work) => work.status === "running" || work.status === "awaiting-approval",
+      (work) =>
+        work.status === "running" || work.status === "awaiting-approval",
     );
   }
   private accept(data: CollaborationSnapshot) {
     if (this.disposed) return;
+    for (const [id, scheduled] of this.scheduled) {
+      const work = data.work.find((work) => work.id === id);
+      if (!work || !activeWork(work))
+        scheduled.finish(
+          work
+            ? scheduledResult(work)
+            : {
+                terminal: "interrupted",
+                threadId: scheduled.threadId,
+                message: "The automation Work is no longer available.",
+              },
+        );
+    }
     for (const rootId of this.effortAttachments.keys()) {
-      const effort = data.work.filter(work => work.rootId === rootId);
-      if (effort.length && effort.every(work => ["completed", "cancelled"].includes(work.status))) {
+      const effort = data.work.filter((work) => work.rootId === rootId);
+      if (
+        effort.length &&
+        effort.every((work) => ["completed", "cancelled"].includes(work.status))
+      ) {
         this.effortAttachments.delete(rootId);
       }
     }
@@ -289,10 +370,22 @@ export class WorkspaceExecution {
       return data;
     });
   steer(id: string, expectedGeneration: number, text: string) {
-    return this.command({ action: "steer-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
+    return this.command({
+      action: "steer-work",
+      id,
+      expectedGeneration,
+      eventId: crypto.randomUUID(),
+      text,
+    });
   }
   reply(id: string, expectedGeneration: number, text: string) {
-    return this.command({ action: "reply-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
+    return this.command({
+      action: "reply-work",
+      id,
+      expectedGeneration,
+      eventId: crypto.randomUUID(),
+      text,
+    });
   }
   async submit(
     conversationId: string,
@@ -336,6 +429,7 @@ export class WorkspaceExecution {
     for (const work of this.state.data.work.filter(
       (work) => work.status === "queued",
     )) {
+      if (work.schedule && !this.scheduled.has(work.id)) continue;
       const external = this.state.data.work.filter(
         (work) =>
           ["running", "awaiting-approval"].includes(work.status) &&
@@ -421,14 +515,24 @@ export class WorkspaceExecution {
       sessions.push({
         key: workKey(work),
         work,
-        profile: { ...profile },
+        profile: {
+          ...profile,
+          ...(work.schedule
+            ? { reasoningEffort: work.schedule.reasoningEffort }
+            : {}),
+        },
         model,
         permissionMode: restrictedPermission(
           permissionMode,
           work.permissionMode,
           permissionModeFor(profile.permissionLabel),
         ),
-        attachments: this.attachments.get(work.id) ?? (work.parentId ? this.effortAttachments.get(work.rootId) : undefined) ?? [],
+        attachments:
+          this.attachments.get(work.id) ??
+          (work.parentId
+            ? this.effortAttachments.get(work.rootId)
+            : undefined) ??
+          [],
         cancelled: false,
         started: false,
         approvalIds: new Set(),
@@ -461,9 +565,29 @@ export class WorkspaceExecution {
   }
   async released(session: ExecutionSession) {
     this.approvals.release(session.key);
+    const scheduled = this.scheduled.get(session.work.id);
+    if (scheduled) {
+      const work = this.state.data.work.find(
+        (work) => work.id === session.work.id,
+      );
+      if (!work || !activeWork(work))
+        scheduled.finish(
+          scheduledResult(
+            work ?? {
+              ...session.work,
+              status: "cancelled",
+              reason: "The automation Work is no longer available.",
+            },
+          ),
+        );
+    }
     // Keep inputs for a same-session retry that failed before a durable run.
     // A bound run has already persisted its attachment metadata and context.
-    if (this.state.data.work.find(work => work.id === session.work.id)?.runIds.length) this.attachments.delete(session.work.id);
+    if (
+      this.state.data.work.find((work) => work.id === session.work.id)?.runIds
+        .length
+    )
+      this.attachments.delete(session.work.id);
     this.emit({
       sessions: this.state.sessions.filter((current) => current !== session),
     });
@@ -559,6 +683,16 @@ export class WorkspaceExecution {
     await this.tail.catch(() => undefined);
     await nativeStop;
     this.external.clear();
+    for (const [id, scheduled] of this.scheduled)
+      scheduled.finish({
+        terminal: "interrupted",
+        threadId:
+          this.state.data.work.find((work) => work.id === id)?.conversationId ??
+          "",
+        message:
+          "The workspace closed. Review saved outcomes before continuing.",
+      });
+    this.scheduled.clear();
     this.approvals.cancelPending();
     this.listeners.clear();
     this.attachments.clear();

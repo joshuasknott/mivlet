@@ -2,8 +2,8 @@
 
 The local Work surface owns Chat-to-Work handoff, execution ownership, safe
 recovery, and reusable presentation components. This is local behavior only;
-hosted execution, general scheduled execution and new providers are out of
-scope. See the [parallel roadmap contract](../development/roadmap-parallel-contract.md)
+hosted execution is out of scope. Local automations share the ordinary Work
+executor. See the [parallel roadmap contract](../development/roadmap-parallel-contract.md)
 for the account and collaboration contracts.
 
 ## Handoff: explicit Chat-to-Work
@@ -89,9 +89,9 @@ rejected (`ensure_run_current`, `work::current`).
 
 Schedule-derived Work carries `origin: "schedule"` and is labelled Scheduled
 only while queued. Running and terminal occurrences show their actual state,
-with schedule provenance as secondary detail. Schedule occurrences
-integrate into the unified Work list and details without claiming general
-scheduled execution.
+with schedule provenance as secondary detail. Agent automation occurrences
+integrate into the unified Work list and details with their captured schedule
+context and ordinary execution controls.
 
 Richer internal recovery reasons and uncertain external outcomes are preserved:
 `reason`, `runIds`/`currentRunId`, `outputs` with agent-report evidence, and
@@ -143,9 +143,26 @@ Attachment recovery distinguishes durable references from in-memory inputs:
 
 ## Schedules and Memory promotion
 
-Project schedule occurrences become read-only Work through
-`bind_schedule`/`finish_schedule` with the frozen prompt and exact attempt;
-occurrences without a project never enter the Work surface.
+New schedules default to agent workflows on connected shared-tool routes
+(Codex, Claude SDK and direct APIs). A native occurrence stages private Work
+with its frozen prompt, provider, model and reasoning effort. The permission
+ceiling is the lower of the saved schedule and current agent levels; the global
+mode and each exact tool approval still apply. The existing executor owns
+tools, connectors, delegation, deliverables, Activity approvals and Stop.
+
+Before provider egress the dispatcher binds the exact durable queued attempt
+to its claimed occurrence. Every descendant checks the root occurrence lease
+and enabled schedule before tool effects. Completion must match durable Work,
+including fresh turns after delegation. Paused, expired or abandoned claims
+cannot resume automatically; explicit continuation after reconciliation removes
+the schedule claim and uses current user Work authority. Claim tokens remain
+ephemeral and are never recorded in Work or model context.
+
+Schedules run while Mivlet is open, online and the computer is awake. The native
+lease and occurrence ledger coalesce missed recurring slots and prevent replay;
+this does not provide an offline or hosted worker. Existing schedules without an
+execution kind default to read-only research and retain their restricted Codex
+runner. Their project occurrences continue using `bind_schedule`/`finish_schedule`.
 
 Saved results can be promoted into Memory through the baseline Memory
 interface (`save_memory_state`) with explicit user-confirmed conclusion text,

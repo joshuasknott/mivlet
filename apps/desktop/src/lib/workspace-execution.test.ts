@@ -114,6 +114,50 @@ function fixture(work: CollaborationWorkItem[]) {
 }
 
 describe("workspace execution (deterministic fixtures, no live provider)", () => {
+  it("admits only a claimed automation, preserves its effort and waits across fresh turns", async () => {
+    const work = fixtureWork("automation", "a", { schedule: { occurrenceId: "occurrence", reasoningEffort: "low" } });
+    const { service, update } = fixture([work]);
+    await service.refresh();
+    service.admit(agents, models, [provider], "full-access");
+    expect(service.getSnapshot().sessions).toEqual([]);
+    const bind = vi.fn(async () => undefined);
+    const onReady = vi.fn();
+    const result = service.runScheduledWork(work.id, work.conversationId, bind, onReady);
+    await service.refresh();
+    service.admit(agents, models, [provider], "full-access");
+    const first = service.getSnapshot().sessions[0];
+    expect(first.profile.reasoningEffort).toBe("low");
+    expect(first.permissionMode).toBe("trusted-scope");
+    await service.bindScheduledWork(first, "first-run");
+    expect(bind).toHaveBeenCalledWith("first-run");
+    update([{ ...work, status: "waiting", runIds: ["first-run"] }]);
+    await service.refresh(); await service.released(first);
+    expect(service.getSnapshot().sessions).toEqual([]);
+    update([{ ...work, runIds: ["first-run"] }]);
+    await service.refresh(); service.admit(agents, models, [provider], "full-access");
+    const second = service.getSnapshot().sessions[0];
+    await service.bindScheduledWork(second, "final-run");
+    update([{ ...work, status: "completed", runIds: ["first-run", "final-run"] }]);
+    await service.refresh();
+    expect(await result).toEqual(expect.objectContaining({ terminal: "completed", threadId: work.conversationId }));
+    await service.dispose();
+  });
+
+  it("stops scheduled Work while waiting for approval and rejects later binding", async () => {
+    const work = fixtureWork("automation", "a", { schedule: { occurrenceId: "occurrence" } });
+    const { service, update } = fixture([work]);
+    let cancel!: () => Promise<void>;
+    const result = service.runScheduledWork(work.id, work.conversationId, async () => undefined, next => { cancel = next; });
+    await service.refresh(); service.admit(agents, models, [provider], "trusted-scope");
+    const session = service.getSnapshot().sessions[0];
+    session.cancel = vi.fn(async () => undefined);
+    update([{ ...work, status: "awaiting-approval" }]); await service.refresh();
+    await cancel();
+    expect(session.cancel).toHaveBeenCalled();
+    expect((await result).terminal).toBe("interrupted");
+    await expect(service.bindScheduledWork(session, "late-run")).rejects.toThrow("claim");
+    await service.dispose();
+  });
   it("persists explicit recipient IDs and shares request attachments only within their effort", async () => {
     const { service, command, update } = fixture([]);
     await service.refresh();

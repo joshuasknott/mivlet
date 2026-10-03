@@ -818,6 +818,45 @@ fn generation_fenced_stop_work_does_not_cancel_a_continued_assignment() {
 }
 
 #[test]
+fn reconciled_schedule_continuation_uses_fresh_user_work_authority() {
+    fixture(&store(), |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "scheduled".into(),
+            "group".into(),
+            "lead".into(),
+            "Fixture task".into(),
+            false,
+            Some("schedule"),
+            None,
+        )?;
+        let mut item = ctx.item("scheduled")?;
+        item.status = WorkStatus::AwaitingUser;
+        item.schedule = Some(ScheduledWorkContext {
+            occurrence_id: "closed-occurrence".into(),
+            reasoning_effort: Some("low".into()),
+        });
+        ctx.work(&item)?;
+        commands::apply(
+            ctx,
+            Command::ContinueWork {
+                id: item.id,
+                expected_generation: 1,
+                reconcile: true,
+            },
+        )?;
+        let continued = ctx.item("scheduled")?;
+        assert!(continued.schedule.is_none());
+        assert_eq!(continued.model_option_id, "openai::fixture-model");
+        assert_eq!(continued.generation, 2);
+        bind(ctx, "scheduled", "fresh-user-attempt")?;
+        assert_eq!(ctx.item("scheduled")?.status, WorkStatus::Running);
+        Ok(())
+    });
+}
+
+#[test]
 fn generation_fenced_stop_work_still_cancels_the_captured_generation() {
     let store = store();
     fixture(&store, |ctx| {

@@ -149,7 +149,7 @@ export function ActiveWorkspace({
       const profile = runtime.agents.find(
         (entry) => entry.id === session.work.agentId,
       );
-      if (!profile || profile.modelId !== session.work.modelOptionId) {
+      if (!profile || (!session.work.schedule && profile.modelId !== session.work.modelOptionId)) {
         session.cancelled = true;
         void session.cancel?.().catch((error) => service.report(error));
       }
@@ -207,6 +207,7 @@ export function ActiveWorkspace({
     providers: runtime.backendProviders,
     runtimeReady: runtime.runtimeSnapshotReady && !runtime.runtimeSnapshotError,
     canStart: (agentId, providerId) => service.canSchedule(agentId, providerId),
+    runWork: ({ workId, threadId, onQueued, onReady }) => service.runScheduledWork(workId, threadId, onQueued, onReady),
     onBound: async (attemptId, cancel) => {
       const release = service.registerScheduled(`work-${attemptId}`, cancel);
       await service.refresh();

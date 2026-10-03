@@ -463,6 +463,7 @@ pub fn interrupt_expired(
             object.insert("outcome".into(), Value::String("lease-expired".into()));
         }
         replace_occurrence(tx, store, scope, &occurrence, Some("claimed|running"))?;
+        interrupt_work(tx, store, scope, &occurrence, now)?;
     }
     Ok(ids.len())
 }
@@ -501,7 +502,22 @@ pub fn bind_pending_attempt(
         ));
     }
     let expected_attempt_id = format!("schedule-run-{occurrence_id}");
-    if attempt_id != expected_attempt_id {
+    let staged_work = occurrence
+        .payload
+        .get("workId")
+        .and_then(Value::as_str)
+        .map(|id| {
+            super::collaboration::get::<crate::collaboration::models::Work>(
+                tx,
+                store,
+                scope,
+                super::collaboration::Kind::Work,
+                id,
+            )
+        })
+        .transpose()?
+        .flatten();
+    if staged_work.is_none() && attempt_id != expected_attempt_id {
         return Err(StoreError::Invalid(
             "The execution attempt does not belong to this schedule occurrence.".into(),
         ));
@@ -516,6 +532,24 @@ pub fn bind_pending_attempt(
         return Err(StoreError::Invalid(
             "The schedule occurrence requires an exact durable queued execution attempt.".into(),
         ));
+    }
+    if let Some(work) = staged_work {
+        let route = format!("{}::{}", attempt.provider_id, attempt.model);
+        if work.status != crate::collaboration::models::WorkStatus::Queued
+            || !work.run_ids.is_empty()
+            || work.conversation_id != attempt.thread_id.clone().unwrap_or_default()
+            || work.model_option_id != route
+            || work.user_request != occurrence.payload["prompt"].as_str().unwrap_or("")
+            || work
+                .schedule
+                .as_ref()
+                .map(|context| context.occurrence_id.as_str())
+                != Some(occurrence_id)
+        {
+            return Err(StoreError::Invalid(
+                "The queued automation Work no longer matches its frozen occurrence.".into(),
+            ));
+        }
     }
     let expected_provider = occurrence.payload.get("providerId").and_then(Value::as_str);
     let expected_model = occurrence.payload.get("model").and_then(Value::as_str);
@@ -565,6 +599,51 @@ pub fn bind_pending_attempt(
     occurrence.lease_expires_at = lease_expires_at.into();
     replace_occurrence(tx, store, scope, &occurrence, Some("claimed"))?;
     Ok(occurrence)
+}
+
+fn interrupt_work(
+    tx: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    occurrence: &OccurrenceRow,
+    now: &str,
+) -> Result<()> {
+    use super::collaboration::{self, Kind};
+    use crate::collaboration::models::{Work, WorkStatus};
+    let Some(work_id) = occurrence.payload["workId"].as_str() else {
+        return Ok(());
+    };
+    let root = collaboration::get::<Work>(tx, store, scope, Kind::Work, work_id)?;
+    if root
+        .as_ref()
+        .and_then(|work| work.schedule.as_ref())
+        .map(|context| context.occurrence_id.as_str())
+        != Some(occurrence.id.as_str())
+    {
+        // Explicit reconciled continuation owns fresh user authority. A late
+        // expiry of its original occurrence cannot stop that fresh request.
+        return Ok(());
+    }
+    for mut work in collaboration::list::<Work>(tx, store, scope, Kind::Work)? {
+        if work.root_id == work_id && work.status.active() {
+            work.generation += 1;
+            work.status = WorkStatus::AwaitingUser;
+            work.awaiting_user = true;
+            work.reason = Some("This automation claim ended. Inspect saved outcomes and reconcile external effects before continuing.".into());
+            work.updated_at = now.into();
+            collaboration::put(
+                tx,
+                store,
+                scope,
+                Kind::Work,
+                &work.id,
+                Some(&work.conversation_id),
+                work.project_id.as_deref(),
+                &work,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 pub fn renew_running_lease(
@@ -627,6 +706,7 @@ pub fn interrupt_claimed(
         object.insert("detail".into(), Value::String(detail.into()));
     }
     replace_occurrence(tx, store, scope, &occurrence, Some("claimed"))?;
+    interrupt_work(tx, store, scope, &occurrence, now)?;
     Ok(occurrence)
 }
 
@@ -669,11 +749,37 @@ pub fn finish_occurrence(
             |row| row.get::<_, String>(0),
         )
         .optional()?;
-    let matches_attempt = match outcome {
-        "completed" => attempt_status.as_deref() == Some("completed"),
-        "failed" => attempt_status.as_deref() == Some("failed"),
-        "interrupted" => matches!(attempt_status.as_deref(), Some("cancelled" | "interrupted")),
-        _ => false,
+    let matches_attempt = if let Some(work_id) = occurrence.payload["workId"].as_str() {
+        use crate::collaboration::models::{Work, WorkStatus};
+        let work = super::collaboration::get::<Work>(
+            tx,
+            store,
+            scope,
+            super::collaboration::Kind::Work,
+            work_id,
+        )?
+        .ok_or_else(|| StoreError::Invalid("The automation Work is unavailable.".into()))?;
+        work.schedule
+            .as_ref()
+            .map(|context| context.occurrence_id.as_str())
+            == Some(occurrence_id)
+            && work.run_ids.iter().any(|id| id == attempt_id)
+            && match outcome {
+                "completed" => work.status == WorkStatus::Completed,
+                "failed" => work.status == WorkStatus::Failed,
+                "interrupted" => matches!(
+                    work.status,
+                    WorkStatus::Cancelled | WorkStatus::AwaitingUser | WorkStatus::Blocked
+                ),
+                _ => false,
+            }
+    } else {
+        match outcome {
+            "completed" => attempt_status.as_deref() == Some("completed"),
+            "failed" => attempt_status.as_deref() == Some("failed"),
+            "interrupted" => matches!(attempt_status.as_deref(), Some("cancelled" | "interrupted")),
+            _ => false,
+        }
     };
     if !matches_attempt {
         return Err(StoreError::Invalid(
@@ -693,7 +799,7 @@ pub fn finish_occurrence(
     Ok(occurrence)
 }
 
-fn replace_occurrence(
+pub(crate) fn replace_occurrence(
     tx: &Connection,
     store: &Store,
     scope: &PrivateDataScope,

@@ -5,11 +5,12 @@ import type { ScheduledResearchRunInput } from "../lib/agent-run-service";
 import type { LocalSchedule, LocalScheduleDispatchClaim } from "../runtime/domains/local-schedules";
 import { useLocalScheduleDispatcher } from "./useLocalScheduleDispatcher";
 
-const mocks = vi.hoisted(() => ({ list: vi.fn(), claim: vi.fn(), run: vi.fn(), bind: vi.fn(), finish: vi.fn(), renew: vi.fn(), abandon: vi.fn() }));
+const mocks = vi.hoisted(() => ({ list: vi.fn(), claim: vi.fn(), stage: vi.fn(), run: vi.fn(), bind: vi.fn(), finish: vi.fn(), renew: vi.fn(), abandon: vi.fn() }));
 vi.mock("../runtime/domains/local-schedules", () => ({
   listLocalSchedules: mocks.list, claimLocalScheduleDispatch: mocks.claim,
   bindLocalScheduleDispatch: mocks.bind, finishLocalScheduleDispatch: mocks.finish,
   renewLocalScheduleDispatch: mocks.renew, abandonLocalScheduleDispatch: mocks.abandon,
+  stageLocalScheduleDispatch: mocks.stage,
 }));
 vi.mock("../lib/agent-run-service", () => ({ AgentRunService: class { runScheduledResearch = mocks.run; } }));
 
@@ -37,6 +38,7 @@ async function flush() {
 beforeEach(() => {
   vi.resetAllMocks();
   mocks.list.mockResolvedValue([schedule]); mocks.claim.mockResolvedValue(claim);
+  mocks.abandon.mockResolvedValue(undefined);
   mocks.run.mockImplementation(async (input: ScheduledResearchRunInput) => {
     await input.onQueued({} as Parameters<ScheduledResearchRunInput["onQueued"]>[0]);
     return { terminal: "completed", threadId: "result" };
@@ -48,6 +50,42 @@ afterEach(() => {
 });
 
 describe("scheduled reasoning selection", () => {
+  it("lets another due task run when the oldest task's provider is disconnected", async () => {
+    mocks.list.mockResolvedValue([{ ...schedule, id: "blocked", providerId: "disconnected", nextRunAt: "2019-01-01T09:00:00Z" }, schedule]);
+    renderHook(() => useLocalScheduleDispatcher({ workspaceId: "workspace", agents: [agent], providers: [provider], runtimeReady: true }));
+    await waitFor(() => expect(mocks.finish).toHaveBeenCalled());
+    expect(mocks.claim).toHaveBeenCalledWith(expect.objectContaining({ expectedScheduleId: schedule.id }));
+    expect(mocks.run).toHaveBeenCalledOnce();
+  });
+  it("routes API automations through ordinary Work and binds the actual durable attempt", async () => {
+    const api = { ...provider, id: "openai", backendType: "native-api", capabilities: ["streaming", "tool-requests", "approvals"] } as BackendProvider;
+    mocks.list.mockResolvedValue([{ ...schedule, providerId: api.id, executionKind: "agent" }]);
+    mocks.claim.mockResolvedValue({ ...claim, providerId: api.id, executionKind: "agent" });
+    mocks.stage.mockResolvedValue({ workId: "work-occurrence", threadId: "automation-chat" });
+    const runWork = vi.fn(async (input: { onQueued: (id: string) => Promise<void> }) => {
+      await input.onQueued("actual-attempt");
+      await input.onQueued("fresh-final-turn");
+      return { terminal: "completed" as const, threadId: "automation-chat" };
+    });
+    renderHook(() => useLocalScheduleDispatcher({ workspaceId: "workspace", agents: [agent], providers: [api], runtimeReady: true, runWork }));
+    await waitFor(() => expect(mocks.finish).toHaveBeenCalled());
+    expect(mocks.stage).toHaveBeenCalledWith({ workspaceId: "workspace", occurrenceId: "occurrence", claimToken: "fixture-token" });
+    expect(mocks.bind).toHaveBeenCalledOnce();
+    expect(mocks.finish).toHaveBeenCalledWith(expect.objectContaining({ attemptId: "actual-attempt", outcome: "completed" }));
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
+
+  it("abandons an automation that fails before a durable attempt and never claims success", async () => {
+    const capable = { ...provider, capabilities: ["streaming", "tool-requests", "approvals"] } as BackendProvider;
+    mocks.list.mockResolvedValue([{ ...schedule, executionKind: "agent" }]);
+    mocks.claim.mockResolvedValue({ ...claim, executionKind: "agent" });
+    mocks.stage.mockResolvedValue({ workId: "work-occurrence", threadId: "automation-chat" });
+    renderHook(() => useLocalScheduleDispatcher({ workspaceId: "workspace", agents: [agent], providers: [capable], runtimeReady: true,
+      runWork: async () => ({ terminal: "failed", threadId: "automation-chat", message: "Model disconnected" }) }));
+    await waitFor(() => expect(mocks.abandon).toHaveBeenCalledWith(expect.objectContaining({ detail: "Model disconnected" })));
+    expect(mocks.finish).not.toHaveBeenCalled();
+    expect(mocks.run).not.toHaveBeenCalled();
+  });
   it.each(["low", undefined])("dispatches the saved %s effort independently of later agent changes", async effort => {
     mocks.claim.mockResolvedValue({ ...claim, reasoningEffort: effort });
     renderHook(() => useLocalScheduleDispatcher({ workspaceId: "workspace", agents: [agent], providers: [provider], runtimeReady: true }));

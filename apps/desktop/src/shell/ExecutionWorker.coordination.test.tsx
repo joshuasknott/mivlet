@@ -299,6 +299,19 @@ describe("ExecutionWorker coordination reachability", () => {
     cleanup();
   });
 
+  it("fails closed before Work binding when the automation occurrence claim is rejected", async () => {
+    const setup = makeHarness();
+    setup.session.work.schedule = { occurrenceId: "occurrence", reasoningEffort: "low" };
+    const gated = { ...setup.service, bindScheduledWork: vi.fn(async () => { throw new Error("This occurrence expired."); }) };
+    await act(async () => {
+      render(<ExecutionWorker session={setup.session as never} service={gated as never} runtime={runtime()} projects={[]} />);
+    });
+    await waitFor(() => expect(gated.released).toHaveBeenCalled());
+    expect(gated.bindScheduledWork).toHaveBeenCalledWith(setup.session, "attempt-lead");
+    expect(setup.commands).not.toContainEqual(expect.objectContaining({ action: "bind-work" }));
+    expect(setup.commands).toContainEqual(expect.objectContaining({ action: "work-status", status: "failed", reason: "This occurrence expired." }));
+  });
+
   it("advertises collaboration tools in an ordinary direct conversation and scopes the recipient run", async () => {
     const setup = await renderWorker();
     const request = harness.run.mock.calls[0]?.[0] as { model: string; instructions: string; tools: Array<{ name: string }> };

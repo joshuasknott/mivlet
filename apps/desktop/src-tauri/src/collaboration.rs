@@ -8,7 +8,9 @@ mod exchanges;
 pub(crate) mod models;
 mod schedules;
 mod work;
-pub(crate) use schedules::{bind_schedule, finish_schedule, validate_schedule_project};
+pub(crate) use schedules::{
+    bind_schedule, check_schedule, finish_schedule, stage_schedule, validate_schedule_project,
+};
 #[cfg(test)]
 mod tests;
 
@@ -715,5 +717,8 @@ pub(crate) fn ensure_run_current(
             "A stopped or superseded assignment cannot write a late result.",
         ));
     }
+    let root = repo::get::<Work>(conn, store, &scope.private, Kind::Work, &item.root_id)?
+        .ok_or_else(|| invalid("The parent request is unavailable."))?;
+    check_schedule(conn, store, &scope.private, &root, &now(), true)?;
     Ok(())
 }
