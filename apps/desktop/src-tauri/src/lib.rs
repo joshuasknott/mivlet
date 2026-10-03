@@ -309,6 +309,8 @@ pub fn run() {
             local_computer::plugins::builtin_plugin_set,
             local_computer::plugins::builtin_plugin_prepare_computer,
             local_computer::repositories::local_computer_import_repository,
+            local_computer::coding::coding_repository_attach,
+            local_computer::coding::coding_repository_status,
             local_computer::local_computer_status,
             local_computer::local_computer_files,
             local_computer::local_computer_file_preview,

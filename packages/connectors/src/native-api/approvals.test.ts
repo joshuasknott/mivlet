@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { buildToolApproval } from "./approvals";
 
 describe("buildToolApproval", () => {
+  it("binds complete repository commands and publication destinations", () => {
+    const args = { repositoryId: "repo", command: `${"echo x; ".repeat(60)}true`, network: false, timeoutSeconds: 30 };
+    const approval = buildToolApproval("codex", "repository-run", JSON.stringify(args));
+    const changed = buildToolApproval("codex", "repository-run", JSON.stringify({ ...args, command: `${args.command}; false` }));
+    const digest = (value: typeof approval) => value.dataUsed.find(item => item.startsWith("Arguments SHA-256:"));
+    expect(digest(approval)).toMatch(/[a-f0-9]{64}$/);
+    expect(digest(changed)).not.toBe(digest(approval));
+    expect(approval.consequence).toContain("Network: disabled");
+    expect(buildToolApproval("codex", "repository-run", JSON.stringify({ ...args, network: true })).consequence).toContain("LAN access");
+    expect(buildToolApproval("codex", "repository-publish", JSON.stringify({ repositoryId: "repo", remote: "https://github.com/example/test.git", baseBranch: "main" })).dataUsed).toContain("remote: https://github.com/example/test.git");
+  });
   it("matches native canonical JSON for nested input independent of provider key order", () => {
     const first = buildToolApproval("Codex", "github-read", '{"input":{"repository":"owner/repo","path":"README.md"},"capability":"files.read"}');
     const second = buildToolApproval("Codex", "github-read", '{"capability":"files.read","input":{"path":"README.md","repository":"owner/repo"}}');

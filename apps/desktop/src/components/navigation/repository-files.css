@@ -1,0 +1,62 @@
+.repository-files {
+  margin: 12px 0;
+  padding: 12px 0;
+  border-block: 1px solid var(--line, #ddd);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.repository-files summary {
+  cursor: pointer;
+  min-height: 32px;
+  align-content: center;
+}
+.repository-files p {
+  line-height: 1.5;
+  color: var(--ink-muted);
+}
+.repository-files label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.repository-files select {
+  min-width: 0;
+  max-width: 100%;
+  min-height: 36px;
+}
+.repository-files__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.repository-files button {
+  min-height: 36px;
+  padding: 6px 10px;
+  font: inherit;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+  color: var(--ink);
+  background: transparent;
+  cursor: pointer;
+}
+.repository-files button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+.repository-files button:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+.repository-files pre {
+  max-height: 320px;
+  overflow: auto;
+  padding: 10px;
+  background: var(--surface-hover);
+  color: var(--ink);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.repository-files :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}

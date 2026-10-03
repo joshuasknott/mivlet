@@ -172,12 +172,16 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document") {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName.startsWith("repository-")) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 
   const actionCore = `${toolName} ${dataUsed.join(" ")}`.trim().slice(0, 80);
-  const consequence = toolName === "local-app-select" && isRegistered
+  const consequence = toolName === "repository-run" && isRegistered
+    ? `Run this exact Linux command in the attached repository sandbox. Windows and home files are unavailable. Network: ${parsed.network === true ? "enabled, including LAN access" : "disabled"}. Stop may leave partial files.`
+    : toolName === "repository-publish" && isRegistered
+    ? "Push the reviewed commit to the attached GitHub origin and create a pull request. This publishes code and the PR description using your native GitHub CLI account."
+    : toolName === "local-app-select" && isRegistered
     ? parsed.deliveryMode === "foreground"
       ? "Bring the selected Windows app forward and allow approved actions to use its foreground window. This may interrupt your work."
       : "Select the Windows app for supported background controls without bringing it forward. Each action still follows your approval settings."

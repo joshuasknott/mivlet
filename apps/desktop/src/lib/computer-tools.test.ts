@@ -3,6 +3,15 @@ import { conversationComputerTools, conversationToolsForModel, supportsComputerV
 import type { BackendProvider, LocalComputerSnapshot } from "@mivlet/protocol";
 
 describe("conversation computer tools", () => {
+  it("offers repository tools only on routes with the Mivlet tool bridge", () => {
+    const model = { id: "model", label: "model", available: true };
+    const provider = { backendType: "codex-app-server", authState: "connected", capabilities: ["tool-requests"] } as BackendProvider;
+    const names = (route: BackendProvider) => conversationToolsForModel([], true, route, model, { computer: true }).map(tool => tool.name);
+    expect(names(provider)).toContain("repository-run");
+    expect(names({ ...provider, backendType: "native-api" })).toContain("repository-publish");
+    expect(names({ ...provider, driverKind: "claude-agent" })).not.toContain("repository-run");
+    expect(names({ ...provider, authState: "sign-in-required" })).not.toContain("repository-run");
+  });
   const enabled = { computer: true };
   const connector = { name: "gmail-read", description: "Read Gmail", parameters: "{}" };
   it("hides native app tools when the bundled runtime is missing while preserving scoped files", () => {
