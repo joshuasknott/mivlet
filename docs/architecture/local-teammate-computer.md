@@ -162,6 +162,13 @@ raw accessibility tokens or screenshots. Native code only exposes:
 - `local-app-action`: click, bounded non-secret text, scrolling and navigation keys
   tied to one fresh observation. Results report input dispatch and require a new
   observation to confirm the actual effect.
+  Named shortcuts provide select-all/find in the selected app and address-bar,
+  browser-back, browser-forward and browser-reload in recognized browser processes.
+  Native process discovery determines browser recognition, never window titles
+  or caller labels. Every shortcut requires foreground selection and consumes a
+  fresh observation; background refusal sends no input. Arbitrary key combinations
+  are not accepted. After selecting all, observe before typing into the same field;
+  foreground typing replaces the selection where the app supports it.
 - `local-desktop-observe/action`: the same target and authority with a bounded
   window PNG, delivered natively by a supported provider adapter.
 
