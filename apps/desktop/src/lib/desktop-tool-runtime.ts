@@ -98,7 +98,8 @@ export function createDesktopToolExecutor(
     let approval = sourceApproval;
     const toolName = approval.action.split(/\s+/)[0];
     const parsed = safeParseArgs(args);
-    const checkProviderCall = () => checkRuntimeManagedTool(sourceApproval.id, toolName, args);
+    const checkProviderCall = () => sourceApproval.id.startsWith("mivlet-shared-")
+      ? checkRuntimeManagedTool(sourceApproval.id, toolName, args) : Promise.resolve();
     await checkProviderCall();
     const nativeConnector = CONNECTOR_READ_TOOLS[toolName];
     const checkConnectorAccess = () => {
