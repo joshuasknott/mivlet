@@ -18,7 +18,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 serde = { version = "1", features = ["derive"] }
-serde_json = "1"
+# Exact approval digests must preserve JSON's decimal -> IEEE-754 round trip.
+serde_json = { version = "1", features = ["float_roundtrip"] }
 # Compiles the shared TypeScript/Rust secret-redaction patterns from
 # packages/protocol/src/secret-redaction.json (already in the lockfile).
 regex = "1.12.4"
@@ -75,6 +76,9 @@ zip = { version = "6", default-features = false, features = ["deflate-flate2-zli
 # avoid unrelated date, image and parallel-processing dependencies; strict load
 # options and Mivlet-owned bounds are applied before a PDF can reach a host app.
 lopdf = { version = "0.44.0", default-features = false }
+ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"] }
+# Approval fingerprints must use the renderer's ECMAScript number spelling.
+ryu-js = "=1.0.3"
 png = "=0.17.16"
 crc32fast = "=1.5.0"
 # Relationship attributes must be decoded before deciding whether an OOXML

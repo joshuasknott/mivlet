@@ -50,7 +50,8 @@
     "resources": [
       "resources/cua-driver/**/*",
       "resources/agent-host/**/*",
-      "resources/pdfjs-notices/**/*"
+      "resources/pdfjs-notices/**/*",
+      "resources/pdf-fonts/README.md"
     ],
     "icon": [
       "icons/icon.ico"
