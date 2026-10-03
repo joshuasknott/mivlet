@@ -923,6 +923,27 @@ pub(crate) fn run_read_file(
 ) -> Result<ToolResult, String> {
     let path = require_string_argument(arguments, "path")?;
     let confined = confine_path(&path, workspace_root)?;
+    let extension = confined
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if crate::local_computer::office_inspection::is_office(&extension) {
+        let file = std::fs::File::open(&confined).map_err(|_| format!("File not found: {path}"))?;
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(file, (MAX_TOOL_INPUT_BYTES + 1) as u64),
+            &mut bytes,
+        )
+        .map_err(|_| "Mivlet could not read the Office file.")?;
+        if bytes.len() > MAX_TOOL_INPUT_BYTES {
+            return Err("Office inspection supports files up to 8 MB.".into());
+        }
+        return Ok(ToolResult {
+            ok: true,
+            output: crate::local_computer::office_inspection::inspect(&bytes, &extension)?,
+        });
+    }
     // Read raw bytes and bound the result so a very large file cannot OOM the
     // process. Reading one extra byte lets us detect truncation precisely.
     let mut file = std::fs::File::open(&confined).map_err(|_| format!("File not found: {path}"))?;

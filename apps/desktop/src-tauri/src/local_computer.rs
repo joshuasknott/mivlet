@@ -7,6 +7,7 @@ pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;
 pub(crate) mod office_authoring;
+pub(crate) mod office_inspection;
 mod office_passive;
 mod office_preview;
 pub(crate) mod plugins;
@@ -101,6 +102,8 @@ pub struct LocalComputerFilePreview {
     size_bytes: u64,
     truncated: bool,
     updated_at: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    office: Option<office_preview::OfficePreview>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -537,9 +540,13 @@ fn attachment_type(name: &str) -> Result<(String, &'static str), String> {
         "json" => "application/json",
         "csv" => "text/csv",
         "yaml" | "yml" => "application/yaml",
-        _ => {
-            return Err("Mivlet can stage text, Markdown, JSON, CSV, and YAML attachments.".into())
-        }
+        "docx" => "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        _ => return Err(
+            "Mivlet can stage text, Markdown, JSON, CSV, YAML, DOCX, XLSX, and PPTX attachments."
+                .into(),
+        ),
     };
     Ok((extension, mime_type))
 }
@@ -586,16 +593,20 @@ fn write_staged_attachment(
     }
     let max_encoded = MAX_ATTACHMENT_BYTES.div_ceil(3) * 4;
     if request.content_base64.is_empty() || request.content_base64.len() > max_encoded {
-        return Err("Choose a non-empty text attachment smaller than 2 MB.".into());
+        return Err("Choose a non-empty attachment smaller than 2 MB.".into());
     }
     let bytes = STANDARD
         .decode(&request.content_base64)
         .map_err(|_| "The attachment bytes are malformed.".to_string())?;
     if bytes.is_empty() || bytes.len() > MAX_ATTACHMENT_BYTES {
-        return Err("Choose a non-empty text attachment smaller than 2 MB.".into());
+        return Err("Choose a non-empty attachment smaller than 2 MB.".into());
     }
-    std::str::from_utf8(&bytes)
-        .map_err(|_| "The attachment must contain valid UTF-8 text.".to_string())?;
+    if office_inspection::is_office(&extension) {
+        office_inspection::project(&bytes, &extension)?;
+    } else {
+        std::str::from_utf8(&bytes)
+            .map_err(|_| "The attachment must contain valid UTF-8 text.".to_string())?;
+    }
     let opaque = desktop_tools::opaque_id()?;
     let file_name = format!(
         "{}-{}.{}",
@@ -783,6 +794,26 @@ fn workspace_file_preview(
         .ok_or_else(|| "That private file name cannot be displayed safely.".to_string())?;
     let mut file = std::fs::File::open(&canonical_file)
         .map_err(|_| "Mivlet could not open that private file.".to_string())?;
+    let extension = canonical_file
+        .extension()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if office_inspection::is_office(&extension) {
+        let mut bytes = Vec::new();
+        std::io::Read::read_to_end(
+            &mut std::io::Read::take(&mut file, 8 * 1024 * 1024 + 1),
+            &mut bytes,
+        )
+        .map_err(|_| "Mivlet could not read the Office file.")?;
+        let (office, truncated) = office_inspection::project(&bytes, &extension)?;
+        return Ok(LocalComputerFilePreview {
+            computer_id: scope.computer_id.clone(), path,
+            content: "Office content preview; formulas, fields and external links are not executed. Cached spreadsheet values may be stale.".into(),
+            size_bytes: metadata.len().min(MAX_SAFE_UI_BYTES), truncated,
+            updated_at: Utc::now().to_rfc3339(), office: Some(office),
+        });
+    }
     let mut bytes = Vec::with_capacity(MAX_FILE_PREVIEW_BYTES + 1);
     std::io::Read::read_to_end(
         &mut std::io::Read::take(&mut file, (MAX_FILE_PREVIEW_BYTES + 1) as u64),
@@ -812,6 +843,7 @@ fn workspace_file_preview(
         size_bytes: metadata.len().min(MAX_SAFE_UI_BYTES),
         truncated,
         updated_at: Utc::now().to_rfc3339(),
+        office: None,
     })
 }
 
@@ -1139,6 +1171,55 @@ mod tests {
             std::fs::read(workspace.join(first.relative_path.replace('/', "\\"))).unwrap(),
             b"name,value\r\nalpha,6\r\n"
         );
+    }
+
+    #[test]
+    fn staged_office_attachment_is_exact_readable_and_previewable() {
+        let temp = tempfile::tempdir().unwrap();
+        let workspace = temp.path().join("workspace");
+        let batch = workspace.join("Attachments").join("upload-test");
+        std::fs::create_dir_all(&batch).unwrap();
+        let bytes = office_authoring::zip_files(vec![(
+            "word/document.xml".into(),
+            "<document><body><p><r><t>Original brief</t></r></p></body></document>".into(),
+        )])
+        .unwrap();
+        let request = attachment_request("Original brief.DOCX", &bytes);
+        let receipt = write_staged_attachment(
+            &batch,
+            "test-batch",
+            "Attachments/upload-test",
+            "computer-one",
+            &request,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(workspace.join(&receipt.relative_path)).unwrap(),
+            bytes
+        );
+        assert!(receipt.mime_type.contains("wordprocessingml"));
+        let read = crate::tools::run_read_file(
+            &serde_json::json!({"path":receipt.relative_path}),
+            &workspace,
+        )
+        .unwrap();
+        assert!(read.output.contains("Original brief"));
+        let scope = ComputerScope {
+            key: "scope".into(),
+            computer_id: "computer-one".into(),
+            directory: temp.path().to_path_buf(),
+        };
+        let preview = workspace_file_preview(&scope, &receipt.relative_path).unwrap();
+        assert!(preview.office.is_some());
+        assert!(!preview.truncated);
+        assert!(write_staged_attachment(
+            &batch,
+            "test-batch",
+            "Attachments/upload-test",
+            "computer-one",
+            &attachment_request("fake.docx", b"plain text")
+        )
+        .is_err());
     }
 
     #[test]

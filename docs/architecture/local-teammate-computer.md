@@ -264,6 +264,21 @@ require a passive export without those parts. This is deliberately a bounded
 publication contract, not arbitrary Office-file compatibility.
 PDF authoring/preview, charts and arbitrary Office editing remain separate gaps.
 
+Composer attachments also accept DOCX, XLSX and PPTX up to the existing 2 MB
+upload limit. Original bytes are staged under the exact agent/workspace/generation
+and are not decoded or imported as text knowledge. Invalid archives fail admission
+before the agent runs. `read-file` extracts bounded Office content (up to 8 MB on
+disk) through the shared native tool, including generated files, and the attachment
+viewer uses the same content projection. ZIP entry, expansion, duplicate-name,
+encryption, XML depth/node and output limits apply. Input is untrusted evidence;
+no fields, macros, formulas, links or embedded programs execute. Cached sheet values
+may be stale. The result states extraction limits and truncation; complete analysis
+of a larger file requires smaller input or CSV. Agents can inspect supported input
+and author a new revised Office deliverable, but original formatting, arbitrary
+formulas and unknown structures are not preserved. Read-only extraction does not
+grant permission to publish or externally open an active Office input; publication
+retains the separate stricter passive-content gate.
+
 Repository ZIP import has a different boundary. It creates a sanitized private
 snapshot for bounded file reads and explicit text edits. It does not initialize
 Git or connect that snapshot to the hosted process workspace. Build, test and diff

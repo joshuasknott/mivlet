@@ -200,6 +200,11 @@ export async function prepareExecutionAttachments(
     (attachment) =>
       attachment.transientBytes && !attachment.type.startsWith("image/"),
   );
+  const requireStaging = () => {
+    if (stageable.some((attachment) => !attachment.sourceId)) {
+      throw new Error("Mivlet could not prepare the attached file for this agent. Choose a readable DOCX, XLSX or PPTX up to 2 MB, or export text/CSV, then try again in the desktop app.");
+    }
+  };
   if (!stageable.length) {
     // Headless workers mount immediately before dispatch. The hook's first
     // render may still be loading, so resolve capabilities for this execution.
@@ -218,10 +223,12 @@ export async function prepareExecutionAttachments(
   try {
     node = await localComputer.prepareForTool("read-file");
   } catch {
+    requireStaging();
     return { attachments: [...attachments], node: null };
   }
   if (!isCurrent()) return { attachments: [...attachments], node };
   if (node.workspaceId !== workspaceId || node.agentId !== agentId) {
+    requireStaging();
     return { attachments: [...attachments], node: null };
   }
   try {
@@ -287,6 +294,7 @@ export async function prepareExecutionAttachments(
     return { attachments: staged, node, batch };
   } catch {
     if (!isCurrent()) return { attachments: [...attachments], node };
+    requireStaging();
     return {
       attachments: attachments.map((attachment) =>
         attachment.transientBytes && !attachment.type.startsWith("image/")
