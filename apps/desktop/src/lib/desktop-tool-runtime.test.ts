@@ -182,6 +182,9 @@ vi.mock("./mcp-transport", () => ({
   createDesktopRemoteMcpTransport: mcpFactory
 }));
 
+const providerCallCheck = vi.hoisted(() => vi.fn(async () => {}));
+vi.mock("../runtime/domains/providers", () => ({ checkRuntimeManagedTool: providerCallCheck }));
+
 class SemanticMcpTransport {
   readonly sessionId = "mcp-session-1";
   private handler?: (frame: McpFrame) => void;
@@ -325,6 +328,20 @@ describe("hosted computer shell execution", () => {
 
 describe("local computer tool isolation", () => {
   beforeEach(() => vi.clearAllMocks());
+
+  it("rejects a shared provider call cancelled while its approval was pending", async () => {
+    const approval: ApprovalRequest = { id: "mivlet-shared-cancelled", service: "Claude",
+      action: "read-file path: notes.txt", mode: "read-only", riskLevel: "low", dataUsed: ["path: notes.txt"],
+      consequence: "Read a scoped file.", requestedAt: new Date(0).toISOString(), decisions: ["once", "deny"] };
+    providerCallCheck.mockResolvedValueOnce(undefined).mockRejectedValueOnce(new Error("provider call cancelled"));
+    const gate = { waitForDecision: vi.fn(async () => "granted" as const) };
+    const executor = createDesktopToolExecutor(gate, { workspaceId: "workspace-local",
+      localComputer: { workspaceId: "workspace-local", agentId: "agent-research", ready: true, generation: 1, controller: "agent" } });
+    await expect(executor(approval, '{"path":"notes.txt"}')).rejects.toThrow("provider call cancelled");
+    expect(gate.waitForDecision).toHaveBeenCalledOnce();
+    expect(providerCallCheck).toHaveBeenCalledTimes(2);
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
 
   it("rejects local shell execution before approval or native dispatch", async () => {
     const shellApproval: ApprovalRequest = {

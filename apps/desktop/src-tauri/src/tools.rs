@@ -319,6 +319,11 @@ fn routine_connector_read(tool: &str) -> bool {
 }
 
 fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<(), String> {
+    crate::managed_runtime::check_managed_runtime_tool(
+        request.approval.request.id.clone(),
+        request.tool.clone(),
+        request.arguments.clone(),
+    )?;
     if is_computer_tool(&request.tool) {
         validate_computer_approval_binding(request)?;
     } else {

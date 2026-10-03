@@ -1,12 +1,13 @@
 import type { BackendModel, BackendProvider } from "@mivlet/protocol";
 import { catalogueCapabilities, resolveModelCapabilities } from "./model-catalogue";
 
-/** Image input and Mivlet tool execution must both exist on the actual route. */
+/** Shared tools are implemented once; adapters only transport calls/results. */
 export function supportsSharedComputerTools(provider: BackendProvider | undefined): boolean {
   if (provider?.authState !== "connected" || !provider.capabilities.includes("tool-requests")) return false;
   const driver = provider.driverKind;
   return (provider.backendType === "codex-app-server" && (!driver || driver === "codex"))
-    || (provider.backendType === "native-api" && (!driver || driver === "native-api"));
+    || (provider.backendType === "native-api" && (!driver || driver === "native-api"))
+    || (provider.backendType === "claude-agent" && driver === "claude-agent");
 }
 
 /** Matches the audited native egress profiles, not arbitrary compatible hosts. */
@@ -25,6 +26,7 @@ export function computerVisionUnavailableReason(provider: BackendProvider | unde
   if (provider.backendType === "codex-app-server") {
     return model.capabilities?.vision === true ? null : "This Codex model has not advertised image input. Screenshot control is unavailable.";
   }
+  if (provider.backendType === "claude-agent") return "This Claude route supports Mivlet tools, but has no audited native screenshot delivery bridge.";
   return supportsNativeComputerVision(provider.id, model) ? null
     : "This API route and model have no verified screenshot-and-tool protocol in Mivlet. Vision metadata alone does not enable screenshot control.";
 }

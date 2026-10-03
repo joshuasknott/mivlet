@@ -176,13 +176,24 @@ tool execution support. Image input metadata alone cannot enable screenshots.
 | Direct xAI API | OpenAI-compatible Chat Completions image message after all tool results | `grok-4` with current tool/vision capability and route checks |
 | Direct OpenRouter API | Text/tool transport over the OpenAI-compatible chat route; the model id selects the exact OpenRouter route and Mivlet adds no fallback | Unavailable pending route-specific verification, even when model metadata lists image input |
 | Custom API endpoint | Text/tool transport; endpoint configuration establishes neither image support nor an audited image profile | Unavailable, even when model metadata claims vision |
-| Managed Claude, Cursor ACP, Grok ACP, OpenCode | Provider-owned execution and yes/no permission responses; current Mivlet handles have no shared tool-result/image channel | Unavailable; requires a native Mivlet tool bridge, not a vision flag |
+| Managed Claude SDK | Turn-scoped Mivlet MCP tools and text results through the native SDK control channel; built-in Claude tools are disabled | Unavailable; requires audited native image custody and delivery |
+| Cursor ACP, Grok ACP, OpenCode | Provider-owned execution and yes/no permission responses; current Mivlet handles have no shared tool-result/image channel | Unavailable; requires a native Mivlet tool bridge, not a vision flag |
 | Antigravity ACP | Text prompts and provider-owned permission decisions; sessions currently register no Mivlet MCP servers | Unavailable for the same bridge reason |
 | Direct Gemini API | Text and tool turns exchange `functionCall`/`functionResponse` parts inside Gemini `contents`; the API key stays in the Rust egress header. Local wire loop, not the embedded host ([Gemini provider](gemini-provider.md)). | Unavailable; no audited native screenshot bridge exists for this route, and vision metadata alone never enables one |
 
 The managed/ACP restriction describes Mivlet's current adapters, not an upstream
 claim that ACP, MCP or those models cannot carry images. Current ACP content
 supports images and MCP forwarding, but no such native bridge is configured here.
+
+Claude's bridge follows the [upstream SDK control transport](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py)
+and SDK MCP server configuration. Adapters transport calls; the shared Mivlet
+registry, permission policy and existing native executors implement their behavior.
+There is no second provider-specific tool implementation. The native bridge binds
+each result to its account, active turn and opaque single-use call identity, limits
+calls and frame sizes, and rejects cancelled, stopped or replayed calls. Calls are
+checked again after waiting for approval. Ambient tools, MCP configuration and
+settings are disabled. Protocol fixtures establish framing and authority behavior;
+they do not establish a live Claude subscription run or screenshot delivery.
 
 Direct API sessions bind the installation identity, persisted provider route,
 model, workspace, agent and computer generation. Rust reconstructs completed

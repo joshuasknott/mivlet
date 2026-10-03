@@ -28,6 +28,7 @@ import {
 import { builtinPluginInstructions } from "../lib/builtin-plugins";
 import { composerImageInputs } from "../lib/composer-images";
 import { modelsForProvider } from "../lib/provider-models";
+import { checkRuntimeManagedTool } from "../runtime/domains/providers";
 import {
   prepareExecutionAttachments,
   attachmentMessageMetadata,
@@ -83,6 +84,7 @@ export function ExecutionWorker({
       if (!service.current(session) || latest.current.runtime.accountWorkspacePending)
         throw new Error("The workspace changed before the tool could run.");
       const name = approval.action.split(/\s+/)[0];
+      if (approval.id.startsWith("mivlet-shared-")) await checkRuntimeManagedTool(approval.id, name, args);
       if (isCollaborationTool(name)) {
         const raw: Record<string, unknown> = JSON.parse(args);
         if (name === "workspace-agents") {

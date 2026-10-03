@@ -4,7 +4,7 @@ import type {
   ManagedRuntimeHandlers,
 } from "@mivlet/connectors";
 import type { AgentTurnRequest, BackendProvider } from "@mivlet/protocol";
-import { getRuntimeManagedStatus, interruptRuntimeManagedTurn, listenRuntimeManagedEvents, respondRuntimeManagedApproval, shutdownRuntimeManagedTurn, startRuntimeManagedTurn, type ManagedRuntimeProviderId } from "../runtime/domains/providers";
+import { getRuntimeManagedStatus, interruptRuntimeManagedTurn, listenRuntimeManagedEvents, respondRuntimeManagedApproval, respondRuntimeManagedTool, shutdownRuntimeManagedTurn, startRuntimeManagedTurn, type ManagedRuntimeProviderId } from "../runtime/domains/providers";
 
 const MANAGED_PROVIDER_IDS = new Set<ManagedRuntimeProviderId>([
   "claude",
@@ -34,6 +34,7 @@ function isManagedRuntimeEvent(value: unknown): value is ManagedRuntimeEvent {
   const type = (value as { type: unknown }).type;
   return (
     type === "text-delta" ||
+    type === "tool-request" ||
     type === "approval-request" ||
     type === "approval-result" ||
     type === "usage" ||
@@ -132,6 +133,9 @@ export function createDesktopManagedRuntime(
         approvalRequestId,
         approved,
       });
+    },
+    async respondTool(toolRequestId, result) {
+      await respondRuntimeManagedTool({ requestId, toolRequestId, ...result });
     },
     async cancel() {
       await interruptRuntimeManagedTurn(requestId);

@@ -38,6 +38,7 @@ import {
 import { actRuntimeHostedBrowser, inspectRuntimeHostedProcess, launchRuntimeHostedProcess, navigateRuntimeHostedBrowser, prepareRuntimeHostedBrowser, prepareRuntimeHostedBrowserAction, prepareRuntimeHostedProcess, toPublicHostedBrowserSnapshot } from "../runtime/domains/hosted-computer";
 import { commitRuntimeCapabilityGrant, prepareRuntimeCapabilityGrant, resolveRuntimeMcpCapabilityRoute, type RuntimeCapabilityGrantProposal } from "../runtime/domains/mcp";
 import { executeRuntimeToolCall } from "../runtime/domains/tools";
+import { checkRuntimeManagedTool } from "../runtime/domains/providers";
 import { executeRuntimeConnectorAction, prepareRuntimeConnectorToolAction } from "../runtime/domains/connectors";
 import type { RuntimeResolvedMcpCapabilityRoute, RuntimeMcpToolProposal } from "../runtime/domains/mcp";
 import { openConnectorTools } from "./connector-mcp";
@@ -97,6 +98,9 @@ export function createDesktopToolExecutor(
     let approval = sourceApproval;
     const toolName = approval.action.split(/\s+/)[0];
     const parsed = safeParseArgs(args);
+    const checkProviderCall = () => sourceApproval.id.startsWith("mivlet-shared-")
+      ? checkRuntimeManagedTool(sourceApproval.id, toolName, args) : Promise.resolve();
+    await checkProviderCall();
     const nativeConnector = CONNECTOR_READ_TOOLS[toolName];
     const checkConnectorAccess = () => {
       if (nativeConnector && (options.connectorAccessCurrent ? !options.connectorAccessCurrent(nativeConnector) : !options.connectorIds?.includes(nativeConnector))) {
@@ -125,6 +129,7 @@ export function createDesktopToolExecutor(
       if (await gate.waitForDecision(prepared.action.approval) !== "granted") throw new Error("Connector action was denied.");
       if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
       if (!accountUnchanged()) throw new Error("The connected account changed.");
+      await checkProviderCall();
       const result = await executeRuntimeConnectorAction({ action: prepared.action, approval: resolutionFor(prepared.action.approval) });
       if (!result) throw new Error("Connector execution is unavailable.");
       if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
@@ -133,7 +138,7 @@ export function createDesktopToolExecutor(
     // Remote calls first prepare the exact native action. Only that preview is
     // approved; the generic dispatch wrapper is not a second user decision.
     if (toolName === "connector-tools" || toolName === "connector-call") {
-      return runOfficialConnector(gate, toolName, parsed, options);
+      return runOfficialConnector(gate, toolName, parsed, options, checkProviderCall);
     }
     if (
       (toolName === "cloud-browser"
@@ -197,6 +202,7 @@ export function createDesktopToolExecutor(
     }
     checkConnectorAccess();
     checkComputerAuthority();
+    await checkProviderCall();
     if (mcpRoute) {
       return runMcpSemanticRead(approval, parsed, options, mcpRoute);
     }
@@ -218,6 +224,7 @@ export function createDesktopToolExecutor(
 
 async function runOfficialConnector(
   gate: ApprovalGate, operation: string, parsed: Record<string, unknown>, options: DesktopToolExecutorOptions,
+  checkProviderCall: () => Promise<void>,
 ): Promise<string> {
   const connectorId = typeof parsed.connectorId === "string" ? parsed.connectorId : "";
   const accessCurrent = () => options.connectorAccessCurrent
@@ -248,6 +255,7 @@ async function runOfficialConnector(
     if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
     const permit = await connection.transport.authorizeToolCall(proposal, resolutionFor(prepared.approval));
     if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+    await checkProviderCall();
     const result = await connection.transport.executeAuthorizedToolCall(proposal, permit.permitId);
     if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
     assertConnectorToolSucceeded(result);

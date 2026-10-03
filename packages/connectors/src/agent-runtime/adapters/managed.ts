@@ -12,6 +12,7 @@ import type {
 import { backendErrorEvent } from "../utils/errors";
 import { redactSecretsFromString } from "../utils/redact";
 import { computerVisionUnavailableReason } from "../../native-api/computer-vision";
+import { executeSharedToolCall } from "./shared-tools";
 
 const PROVIDER_OWNED_DRIVERS = new Set([
   "claude-agent",
@@ -53,7 +54,19 @@ export function createManagedRuntimeBackend(
             yield { type: "cancelled" };
             return;
           }
-          if (event.type === "usage") {
+          if (event.type === "tool-request") {
+            if (!liveHandle.respondTool || !provider.capabilities.includes("approvals")) {
+              throw new Error("This provider has no Mivlet tool response bridge.");
+            }
+            const result = yield* executeSharedToolCall(provider.label, event, request.tools, options);
+            // A failed delivery must never execute again or issue a second reply.
+            try {
+              await liveHandle.respondTool(event.requestId, result);
+            } catch {
+              await liveHandle.cancel().catch(() => undefined);
+              throw new Error("The tool ran but its response could not reach the provider. Review the current outcome before continuing.");
+            }
+          } else if (event.type === "usage") {
             yield {
               ...event,
               costUsd: event.costUsd ?? 0,
