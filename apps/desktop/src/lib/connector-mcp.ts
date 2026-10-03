@@ -1,10 +1,20 @@
 import { McpClient } from "./native-mcp-client";
-import { createDesktopRemoteMcpTransport } from "./mcp-transport";
+import { createDesktopMcpTransport, createDesktopRemoteMcpTransport } from "./mcp-transport";
 import { assertConnectorToolSucceeded } from "./connector-errors";
+import { listRuntimeMcpServerConfigurations } from "../runtime/domains/mcp";
+import { customMcpConnectorId } from "./custom-mcp";
 
 /** Each use rediscovers against the current native Connection revision. */
 export async function openConnectorTools(workspaceId: string, serverId: string) {
-  const transport = await createDesktopRemoteMcpTransport(workspaceId, serverId);
+  let stdio = false;
+  if (customMcpConnectorId(serverId)) {
+    const server = (await listRuntimeMcpServerConfigurations(workspaceId))?.find(server => server.id === serverId && server.workspaceId === workspaceId && !server.disabled);
+    if (!server) throw new Error("This custom tool server is unavailable. Check it in Plugins.");
+    stdio = server.transport === "stdio";
+  } else if (!serverId.startsWith("marketplace-")) {
+    throw new Error("The tool server reference is invalid.");
+  }
+  const transport = stdio ? await createDesktopMcpTransport(workspaceId, serverId) : await createDesktopRemoteMcpTransport(workspaceId, serverId);
   if (!transport) throw new Error("Plugins require the desktop app.");
   const client = new McpClient(transport);
   try {

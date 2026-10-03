@@ -1,8 +1,10 @@
 import type { ConnectorManifest } from "@mivlet/protocol";
 import { remoteConnectors, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
+import { customMcpConnectorId } from "./custom-mcp";
 
 export const CONNECTOR_CONNECTIONS_CHANGED = "mivlet:connector-connections-changed";
 interface RemoteConnectionState {
+  displayName?: string;
   launchReference: string;
   authorizationState?: string;
   credentialState?: string;
@@ -51,6 +53,20 @@ export function mergeConnectorConnections(native: readonly ConnectorManifest[], 
       lastCheckedAt: connection.discoveredAt ?? "", supportsSearch: ready,
       supportedActions: [], health: { state: ready ? "healthy" : "unknown", summary, checkedAt: connection.discoveredAt ?? "" },
     });
+  }
+  for (const connection of remote) {
+    const id = customMcpConnectorId(connection.launchReference);
+    if (!id) continue;
+    const access = connection.enabledTools.some(tool => connection.discoveredTools.includes(tool))
+      || (connection.enabledResources ?? []).some(uri => connection.discoveredResources?.includes(uri));
+    const authorized = (connection.authorizationState === "authorized" && connection.credentialState === "available")
+      || (connection.authorizationState === "not-required" && connection.credentialState === "not-required");
+    const ready = authorized && connection.healthState === "healthy" && connection.discoveryState === "discovered" && access;
+    const name = connection.displayName || "Custom tool server";
+    const summary = ready ? `${name} is connected.` : `Check ${name} and enable its access in Plugins.`;
+    manifests.set(id, { id, name, connectionRoute: "mcp", status: ready ? "connected" : "needs-auth",
+      permissions: [], scopes: [], healthSummary: summary, lastCheckedAt: connection.discoveredAt ?? "",
+      supportsSearch: false, supportedActions: [], health: { state: ready ? "healthy" : "unknown", summary, checkedAt: connection.discoveredAt ?? "" } });
   }
   return [...manifests.values()];
 }

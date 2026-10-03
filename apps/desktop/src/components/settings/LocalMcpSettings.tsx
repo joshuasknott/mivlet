@@ -9,6 +9,7 @@ import {
   createDesktopRemoteMcpTransport
 } from "../../lib/mcp-transport";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
+import { connectorConnectionsChanged } from "../../lib/connector-connections";
 
 interface PendingConfiguration {
   configuration: RuntimeMcpServerConfiguration;
@@ -140,6 +141,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
       if (decision === "once") {
         await commitRuntimeMcpServerConfiguration(pending.configuration, resolution);
         await refresh();
+        connectorConnectionsChanged(workspaceId);
         setName("");
         setCommand("");
         setArgsText("");
@@ -176,6 +178,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
         resources.map((resource) => resource.uri)
       );
       setDiscoveries((current) => ({ ...current, [server.id]: discovery }));
+      connectorConnectionsChanged(workspaceId);
       setEnablementDrafts((current) => ({
         ...current,
         [server.id]: {
@@ -257,6 +260,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
     try {
       const result = await disconnectRuntimeRemoteMcpAuthorization(workspaceId, server.id);
       if (!result) throw new Error("Remote tool-server sign-out requires the desktop app.");
+      connectorConnectionsChanged(workspaceId);
       setDiscoveries((current) => {
         const next = { ...current };
         delete next[server.id];
@@ -288,7 +292,8 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
       );
       if (!saved) throw new Error("Local tool access requires the desktop app.");
       setDiscoveries((current) => ({ ...current, [server.id]: saved }));
-      onStatus(`Access saved for ${server.displayName}. Tool calls still require Mivlet permission.`);
+      connectorConnectionsChanged(workspaceId);
+      onStatus(`Access saved for ${server.displayName}. Select it from Plugins in chat. Tool calls still require Mivlet permission.`);
     } catch (error) {
       onStatus(error instanceof Error ? error.message : "Local tool access couldn’t be saved.");
     } finally {

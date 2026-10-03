@@ -14,6 +14,7 @@ import type { ProviderModelOption } from "../lib/provider-models";
 import type { VoiceStatus } from "../hooks/useVoice";
 import type { ComposerAttachment } from "../lib/types";
 import { ConnectorIcon } from "./ConnectorIcon";
+import { customMcpServerReference } from "../lib/custom-mcp";
 import { ModelPicker } from "./ModelPicker";
 import { RecordingReview } from "./RecordingReview";
 import type { SpeechRecordingReview } from "@mivlet/connectors/voice";
@@ -58,6 +59,7 @@ export function Composer({
   allowQueue = false,
   onStop,
   connectedConnectors = [],
+  knownConnectors,
   attachments = [],
   onRemoveAttachment,
   recipientControl,
@@ -106,6 +108,8 @@ export function Composer({
   allowQueue?: boolean;
   onStop?: () => void;
   connectedConnectors?: { id: string; name: string; status: string }[];
+  /** Labels only; available suggestions and execution still use connectedConnectors. */
+  knownConnectors?: readonly { id: string; name: string }[];
   attachments?: ComposerAttachment[];
   onRemoveAttachment?: (attachmentId: string) => void;
   recipientControl?: ReactNode;
@@ -202,9 +206,10 @@ export function Composer({
       return connectedConnectors
         .map((connector) => {
           const mention = `@${connector.id}`;
+          const custom = Boolean(customMcpServerReference(connector.id));
           return {
             id: connector.id,
-            label: mention,
+            label: custom ? `@${connector.name}` : mention,
             description: connector.name,
             value: mention
           };
@@ -331,7 +336,7 @@ export function Composer({
             inputRef={composerRef}
             value={composerValue}
             onChange={onComposerChange}
-            connectors={connectedConnectors}
+            connectors={knownConnectors ?? connectedConnectors}
             agentMentions={agentMentions}
             mentionPickerOpen={mentionPickerOpen}
             mentionPickerId={mentionPickerId}

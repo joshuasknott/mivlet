@@ -116,7 +116,7 @@ pub fn list_mcp_server_configurations(
 }
 
 #[tauri::command]
-pub fn list_remote_mcp_connections(
+pub fn list_mcp_connections(
     workspace_id: String,
 ) -> Result<Vec<crate::store::repos::connection_record::SafeMcpConnectionDetails>, String> {
     let scope = crate::authorized_scope::command_scope(
@@ -130,11 +130,17 @@ pub fn list_remote_mcp_connections(
         .with_conn(|tx| {
             crate::store::repos::mcp_local_server::list(tx, store, &scope)?
                 .into_iter()
-                .filter(|server| !server.disabled && server.transport == "streamable-http")
+                .filter(|server| !server.disabled)
                 .map(|server| {
-                    crate::store::repos::connection_record::mcp_details_for_remote(
-                        tx, store, &scope, &server.id,
-                    )
+                    if server.transport == "stdio" {
+                        crate::store::repos::connection_record::mcp_details_for_launch(
+                            tx, store, &scope, &server.id,
+                        )
+                    } else {
+                        crate::store::repos::connection_record::mcp_details_for_remote(
+                            tx, store, &scope, &server.id,
+                        )
+                    }
                 })
                 .collect()
         })
