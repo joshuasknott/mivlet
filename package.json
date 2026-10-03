@@ -20,7 +20,7 @@
     "dead-code": "knip --no-config-hints --include files,dependencies,devDependencies,unlisted,binaries,exports,types",
     "cycles": "node scripts/quality/check-cycles.mjs",
     "quality": "pnpm lint && pnpm format:check && pnpm dead-code && pnpm cycles && node --test scripts/quality/check-explicit-any.test.mjs",
-    "audit:pnpm": "pnpm audit --prod --audit-level=low",
+    "audit:pnpm": "node --test scripts/audit/dependency-patches.test.mjs && node scripts/audit/pnpm-audit.mjs",
     "audit:cargo": "node scripts/audit/cargo-audit.mjs",
     "audit:all": "pnpm audit:pnpm && pnpm audit:cargo",
     "perf:baseline": "node scripts/perf/baseline.mjs",

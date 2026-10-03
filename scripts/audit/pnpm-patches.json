@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "patches": [
+    {
+      "package": "braces",
+      "version": "3.0.3",
+      "advisory": "GHSA-vfj7-8cjw-p6xm",
+      "expiresOn": "2026-10-31",
+      "sha256": {
+        "lib/parse.js": "4e02977a812be67315989a37389abebf0a540c6c91848aae472abbba524eebb4",
+        "lib/compile.js": "3f6a91acf2a1a6735ea65962e7185e00c341145422d879409f1b4d9c4e592311",
+        "lib/expand.js": "d8b302c5909adcb8344bd348d76ba973d53be13ce190a1d3b7935cbc9a9f29a2",
+        "lib/stringify.js": "c49e0dbf79e9e3b7827ccc19c7ed28624c3000818bb76b4182771b9212c4be08"
+      }
+    },
+    {
+      "package": "http-cache-semantics",
+      "version": "4.2.0",
+      "advisory": "GHSA-ch52-4w7c-c8xp",
+      "expiresOn": "2026-10-31",
+      "sha256": {
+        "index.js": "1dc9afb94c7bbbd8c9dee5e96d5732b1a90a01c33eaa272a01c8f358ad461137"
+      }
+    }
+  ]
+}
