@@ -476,12 +476,18 @@ mod tests {
             None
         );
         assert!(
-            recovered_publication(&[valid.clone()], "head", "main", "owner/repo")
+            recovered_publication(std::slice::from_ref(&valid), "head", "main", "owner/repo")
                 .unwrap()
                 .is_some()
         );
-        assert!(recovered_publication(&[valid.clone()], "other", "main", "owner/repo").is_err());
-        assert!(recovered_publication(&[valid.clone()], "head", "other", "owner/repo").is_err());
+        assert!(
+            recovered_publication(std::slice::from_ref(&valid), "other", "main", "owner/repo")
+                .is_err()
+        );
+        assert!(
+            recovered_publication(std::slice::from_ref(&valid), "head", "other", "owner/repo")
+                .is_err()
+        );
         assert!(recovered_publication(
             &[valid.clone(), valid.clone()],
             "head",

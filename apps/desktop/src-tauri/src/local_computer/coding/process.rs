@@ -199,7 +199,10 @@ pub fn sandbox(
     if !cfg!(windows) {
         return Err("Repository execution currently requires Windows with WSL Ubuntu, Bubblewrap and Python 3.".into());
     }
-    let mut convert = command("wsl.exe", root)?;
+    // Native launchers also stay outside the project cwd (including Windows
+    // DLL search); only the Linux sandbox changes directory into /repo.
+    let native_cwd = root.parent().ok_or("Invalid managed checkout path.")?;
+    let mut convert = command("wsl.exe", native_cwd)?;
     let windows_path = root.to_string_lossy();
     convert
         .args([
@@ -215,7 +218,7 @@ pub fn sandbox(
                 .unwrap_or(&windows_path),
         );
     let linux = checked(convert, ticket).map_err(|_| "Install WSL Ubuntu with bubblewrap, python3 and your project's Linux build tools. No Windows shell fallback is available.")?;
-    let mut cmd = command("wsl.exe", root)?;
+    let mut cmd = command("wsl.exe", native_cwd)?;
     cmd.args([
         "--distribution",
         "Ubuntu",

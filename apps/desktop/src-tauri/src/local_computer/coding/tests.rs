@@ -31,6 +31,15 @@ fn fixture() -> (
         process::checked(command, &ticket).unwrap();
     }
     fs::write(source.join("unrelated.txt"), "preserve me").unwrap();
+    fs::write(
+        source.join("sum.js"),
+        "module.exports = (a, b) => a - b;\n// Uncommitted source edit\n",
+    )
+    .unwrap();
+    fs::write(source.join("staged.txt"), "staged source work").unwrap();
+    let mut stage = process::command("git", &source).unwrap();
+    stage.args(["add", "staged.txt"]);
+    process::checked(stage, &ticket).unwrap();
     let repo = git::attach(&directory, &source, &ticket).unwrap();
     save(&directory, &repo).unwrap();
     (temp, directory, authority, repo)
@@ -65,13 +74,32 @@ fn real_checkout_diff_commit_preserves_original_and_rejects_changed_review() {
     assert_eq!(commit["commit"].as_str().unwrap().len(), 40);
     assert_eq!(
         fs::read_to_string(temp.path().join("source/sum.js")).unwrap(),
-        "module.exports = (a, b) => a - b;\n"
+        "module.exports = (a, b) => a - b;\n// Uncommitted source edit\n"
     );
     assert_eq!(
         fs::read_to_string(temp.path().join("source/unrelated.txt")).unwrap(),
         "preserve me"
     );
     assert!(execute_in(&directory, &ticket, "repository-publish", json!({"repositoryId": repo.id, "expectedHead": commit["commit"], "title": "Test", "body": "Test"})).unwrap_err().contains("github.com origin"));
+    assert!(!checkout(&directory, &repo)
+        .unwrap()
+        .join("staged.txt")
+        .exists());
+    let mut source_index = process::command("git", &temp.path().join("source")).unwrap();
+    source_index.args(["diff", "--cached", "--name-only"]);
+    assert_eq!(
+        process::checked(source_index, &ticket).unwrap(),
+        "staged.txt"
+    );
+    let mut bound = load(&directory).unwrap().unwrap();
+    bound.remote = Some("https://github.com/example/repository.git".into());
+    save(&directory, &bound).unwrap();
+    for (remote, base) in [
+        ("https://github.com/other/repository.git", "main"),
+        ("https://github.com/example/repository.git", "other"),
+    ] {
+        assert!(execute_in(&directory, &ticket, "repository-publish", json!({"repositoryId": repo.id, "remote": remote, "baseBranch": base, "expectedHead": commit["commit"], "title": "Test", "body": "Test"})).unwrap_err().contains("exact attached remote"));
+    }
 }
 #[test]
 fn scope_paths_empty_files_and_generation_fail_closed() {
@@ -116,6 +144,26 @@ fn scope_paths_empty_files_and_generation_fail_closed() {
     );
     authority.revoke(1).unwrap();
     assert!(execute_in(&directory, &ticket, "repository-status", json!({})).is_err());
+}
+#[test]
+fn escaped_command_receipt_survives_reload() {
+    let (_temp, directory, _authority, mut repo) = fixture();
+    repo.last_result = Some(process::CommandResult {
+        output: "\0".repeat(65536),
+        exit_code: Some(0),
+        ..Default::default()
+    });
+    save(&directory, &repo).unwrap();
+    assert_eq!(
+        load(&directory)
+            .unwrap()
+            .unwrap()
+            .last_result
+            .unwrap()
+            .output
+            .len(),
+        65536
+    );
 }
 #[test]
 fn recovery_and_repository_lock_are_visible() {

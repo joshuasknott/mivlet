@@ -15,6 +15,9 @@ use std::{
 };
 use tauri::State;
 
+// JSON escaping may expand a 64 KiB command receipt by up to six times.
+const STATE_LIMIT: usize = 512 * 1024;
+
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct Repository {
@@ -48,9 +51,14 @@ fn directory(state: &LocalComputerState, workspace: &str, agent: &str) -> Result
         .map_err(|_| "Repository storage failed validation.".into())
 }
 fn save(directory: &Path, repo: &Repository) -> Result<(), String> {
+    let bytes = serde_json::to_vec(repo).map_err(|_| "Repository state could not be saved.")?;
+    if bytes.len() > STATE_LIMIT {
+        return Err("Repository state exceeds its storage limit.".into());
+    }
     let mut file = tempfile::NamedTempFile::new_in(directory)
         .map_err(|_| "Repository state is unavailable.")?;
-    serde_json::to_writer(&mut file, repo).map_err(|_| "Repository state could not be saved.")?;
+    file.write_all(&bytes)
+        .map_err(|_| "Repository state could not be saved.")?;
     file.flush()
         .and_then(|_| file.as_file().sync_all())
         .map_err(|_| "Repository state could not be saved.")?;
@@ -67,9 +75,12 @@ fn load(directory: &Path) -> Result<Option<Repository>, String> {
     let mut bytes = Vec::new();
     fs::File::open(path)
         .map_err(|_| "Repository state is unavailable.")?
-        .take(128 * 1024)
+        .take((STATE_LIMIT + 1) as u64)
         .read_to_end(&mut bytes)
         .map_err(|_| "Repository state is unreadable.")?;
+    if bytes.len() > STATE_LIMIT {
+        return Err("Repository state exceeds its storage limit.".into());
+    }
     let repo: Repository =
         serde_json::from_slice(&bytes).map_err(|_| "Repository state needs recovery.")?;
     if repo.id.len() != 48 || !repo.id.bytes().all(|b| b.is_ascii_hexdigit()) {
