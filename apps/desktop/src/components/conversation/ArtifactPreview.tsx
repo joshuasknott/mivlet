@@ -4,6 +4,7 @@ import { parseComputerArtifact, previewComputerArtifact } from "../../lib/comput
 import { ComputerArtifacts } from "../ComputerArtifacts";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
+import { OfficePreview } from "./OfficePreview";
 
 export function ArtifactPreview({ output, workspaceId, agentId, generation, onClose, embedded = false }: {
   output: string; workspaceId: string; agentId: string; generation?: number; onClose: () => void; embedded?: boolean;
@@ -38,7 +39,7 @@ export function ArtifactPreview({ output, workspaceId, agentId, generation, onCl
     aria-modal={narrow && !embedded || undefined} aria-label={`${artifact.title} preview`} onKeyDown={(event) => { if (event.key === "Escape") onClose(); }}>
     <header><div><h2>{artifact.title}</h2></div><button type="button" ref={close} onClick={onClose} aria-label="Close file preview">×</button></header>
     <div className="artifact-preview__body">
-      {loading ? <p role="status">Loading your file…</p> : error ? <p role="alert">{error}</p> : preview?.text !== null && preview?.text !== undefined ? <>
+      {loading ? <p role="status">Loading your file…</p> : error ? <p role="alert">{error}</p> : preview?.office ? <OfficePreview key={artifact.id} office={preview.office} truncated={preview.truncated} /> : preview?.text !== null && preview?.text !== undefined ? <>
         {artifact.mimeType === "text/markdown" ? <MessageMarkdown content={preview.text} /> : <pre tabIndex={0}>{preview.text || "This file is empty."}</pre>}
         {preview.truncated ? <p className="turn-notice">Showing the first 256 KB. Open the file to see the rest.</p> : null}
       </> : preview?.imageDataUrl ? <img src={preview.imageDataUrl} alt={artifact.title} /> : <div className="artifact-preview__unsupported"><p>This file is ready to open.</p><p>Open it in your document or image app to view its contents.</p></div>}

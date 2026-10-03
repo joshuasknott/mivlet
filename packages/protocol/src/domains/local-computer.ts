@@ -132,7 +132,20 @@ export interface LocalComputerArtifactPreview {
   mimeType: string;
   text: string | null;
   imageDataUrl: string | null;
+  office?: LocalComputerOfficePreview | null;
   truncated: boolean;
+}
+
+/** Content preview; Office remains responsible for exact layout and editing. */
+export interface LocalComputerOfficePreview {
+  kind: "document" | "spreadsheet" | "presentation";
+  sections: readonly {
+    name: string;
+    blocks: readonly (
+      | { type: "paragraph"; text: string; style: "title" | "heading" | "paragraph" }
+      | { type: "table"; rows: readonly (readonly string[])[] }
+    )[];
+  }[];
 }
 
 export interface LocalComputerOpenArtifactRequest extends LocalComputerTarget {

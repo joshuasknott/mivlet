@@ -12,6 +12,14 @@
 .computer-artifact__title { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-14); font-weight: 500; }
 .computer-artifact__meta { display: block; margin-top: 3px; color: var(--ink-muted); font-size: var(--text-12); }
 .computer-artifact__error { margin: 6px 0 0; color: var(--destructive); font-size: var(--text-12); }
+.computer-artifact--compact { display: flex; flex-wrap: wrap; align-items: stretch; gap: 8px; width: 100%; }
+.computer-artifact--compact .computer-artifact__open { flex: 1; min-width: 155px; }
+.computer-artifact__save { min-height: 44px; padding: 10px 14px; border: 1px solid var(--line); border-radius: var(--radius-3); color: var(--ink); background: var(--surface-raised); cursor: pointer; }
+.computer-artifact__save:hover:not(:disabled) { background: var(--surface-hover); }
+.computer-artifact__save:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.computer-artifact__save:disabled { opacity: .6; cursor: default; }
+.computer-artifact__saved { width: 100%; margin: 0; font-size: var(--text-12); color: var(--ink-muted); }
+.computer-artifact--compact .computer-artifact__error { width: 100%; }
 .computer-artifact--image { width: min(100%, 440px); }
 .computer-artifact--image .computer-artifact__open { flex-direction: column; align-items: stretch; gap: 0; padding: 0; overflow: hidden; }
 .computer-artifact--image .computer-artifact__copy { padding: 10px 12px; }

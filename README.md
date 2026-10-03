@@ -76,8 +76,11 @@ a deployed or production-validated service.
   attempt used for safe interruption and retry.
 - Published images appear directly in chat and open the existing file viewer;
   documents, spreadsheets and other published files use clickable file cards.
-  Text and Markdown render in the viewer; PDF and Office files retain the
-  existing default-app fallback. Uploaded images and text can be previewed
+  Text, Markdown and bounded Office content render in the viewer, with sheet
+  and slide selection. Open preserves full Office layout/editing; Save uses a
+  native file dialog and keeps existing files intact. PDF retains the default-app
+  fallback. Shared tools create passive DOCX, formula-bearing XLSX and editable
+  16:9 PPTX with light/dark themes and bounded text. Uploaded images and text can be previewed
   during the current session (bounded to 32 MB of preview memory). Upload pixels
   are not added to saved conversations; unavailable originals ask for reattachment.
   Saved workspace text files remain previewable through their scoped file path.

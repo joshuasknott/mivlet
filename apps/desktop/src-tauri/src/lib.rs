@@ -144,6 +144,7 @@ pub fn run() {
             account_session::account_theme,
             local_computer::control::local_app_stop,
             local_computer::artifacts::local_computer_open_artifact,
+            local_computer::artifacts::local_computer_save_artifact,
             local_computer::artifacts::local_computer_preview_artifact,
             conversation_links::open_conversation_link,
             local_computer::local_computer_cancel,

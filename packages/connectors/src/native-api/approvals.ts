@@ -168,11 +168,11 @@ export function buildToolApproval(
         if (norm) vstr = norm;
       }
       const preview = `${key}: ${vstr}`;
-      return toolName === "create-spreadsheet" || toolName === "create-document"
+      return toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation"
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName.startsWith("repository-")) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName.startsWith("repository-")) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 

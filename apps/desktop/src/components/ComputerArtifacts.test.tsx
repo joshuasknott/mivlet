@@ -17,6 +17,31 @@ const props = { output: JSON.stringify(artifact), workspaceId: "local", agentId:
 describe("computer artifacts", () => {
   beforeEach(() => { native.available = true; native.invoke.mockReset().mockResolvedValue(undefined); });
 
+  it("saves only a captured receipt and generation through the native dialog", async () => {
+    native.invoke.mockResolvedValue(true);
+    render(<ComputerArtifacts {...props} compact />);
+    fireEvent.click(screen.getByRole("button", { name: "Save Research report" }));
+    await screen.findByText("File saved.");
+    expect(native.invoke).toHaveBeenCalledWith("local_computer_save_artifact", { request: {
+      workspaceId: "local", agentId: "agent-a", expectedGeneration: 7, artifactId: artifact.id,
+    } });
+  });
+
+  it("does not report cancellation or a stale save as completion", async () => {
+    native.invoke.mockResolvedValueOnce(false);
+    const view = render(<ComputerArtifacts {...props} compact />);
+    fireEvent.click(screen.getByRole("button", { name: "Save Research report" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Save Research report" })).not.toBeDisabled());
+    expect(screen.queryByText("File saved.")).toBeNull();
+    let finish!: (saved: boolean) => void;
+    native.invoke.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    fireEvent.click(screen.getByRole("button", { name: "Save Research report" }));
+    expect(screen.getByRole("button", { name: "Open Research report" })).toBeDisabled();
+    view.rerender(<ComputerArtifacts {...props} expectedGeneration={8} compact />);
+    await act(async () => finish(true));
+    expect(screen.queryByText("File saved.")).toBeNull();
+  });
+
   it("decodes persisted receipts and rejects unsafe output", () => {
     expect(parseComputerArtifact(props.output)).toEqual(artifact);
     for (const overrides of [{ relativePath: "../private.docx" }, { relativePath: "report.html" }, { relativePath: "a\\report.docx" }, { relativePath: "report.pdf", mimeType: "text/html" }, { mimeType: "text/html" }, { id: "some-path" }, { sizeBytes: 30 * 1024 * 1024 }, { title: "bad\u202eexe" }]) {

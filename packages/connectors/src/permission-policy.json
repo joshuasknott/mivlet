@@ -89,6 +89,7 @@
     "write-file": "local-write",
     "create-spreadsheet": "local-write",
     "create-document": "local-write",
+    "create-presentation": "local-write",
     "generate-image": "local-write",
     "edit-image": "local-write",
     "run-shell": "shell-execution",

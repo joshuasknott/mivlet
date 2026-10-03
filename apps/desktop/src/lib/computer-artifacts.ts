@@ -58,3 +58,9 @@ export async function previewComputerArtifact(request: LocalComputerOpenArtifact
   if (!Number.isSafeInteger(request.expectedGeneration) || request.expectedGeneration < 0) throw new Error("Refresh the computer before previewing this file.");
   return getRuntimeAdapter().invoke<LocalComputerArtifactPreview>("local_computer_preview_artifact", { request });
 }
+
+export async function saveComputerArtifact(request: LocalComputerOpenArtifactRequest): Promise<boolean> {
+  if (!hasNativeRuntimeAdapter()) throw new Error("Save this file in the Mivlet desktop app.");
+  if (!Number.isSafeInteger(request.expectedGeneration) || request.expectedGeneration < 0) throw new Error("Refresh the computer before saving this file.");
+  return getRuntimeAdapter().invoke<boolean>("local_computer_save_artifact", { request });
+}
