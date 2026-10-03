@@ -620,6 +620,7 @@ export function ConversationPane({
                 .catch((error) => service.report(error));
           }}
           connectedConnectors={connected}
+          knownConnectors={runtime.connectorManifests}
           attachments={composer.attachments}
           onRemoveAttachment={(id) =>
             composer.setAttachments((current) =>

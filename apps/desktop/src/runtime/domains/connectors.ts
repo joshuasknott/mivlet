@@ -32,10 +32,7 @@ export async function listRuntimeConnectorStatuses() {
   try {
     const [native, remote] = await Promise.all([
       invoke<ConnectorManifest[]>("list_connector_statuses", scope),
-      invoke<RuntimeMcpConnectionDetails[]>(
-        "list_remote_mcp_connections",
-        scope,
-      ),
+      invoke<RuntimeMcpConnectionDetails[]>("list_mcp_connections", scope),
     ]);
     // Finish verification automatically for accounts connected by an older
     // build. A user never needs to find or press a separate test button.

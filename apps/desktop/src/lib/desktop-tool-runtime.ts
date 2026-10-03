@@ -45,6 +45,7 @@ import { openConnectorTools } from "./connector-mcp";
 import { isLocalComputerTool } from "./computer-tools";
 import { CONNECTOR_READ_TOOLS } from "./connector-chat";
 import { remoteConnectorFor, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
+import { customMcpServerReference } from "./custom-mcp";
 import {
   createDesktopMcpTransport,
   createDesktopRemoteMcpTransport,
@@ -227,12 +228,13 @@ async function runOfficialConnector(
   checkProviderCall: () => Promise<void>,
 ): Promise<string> {
   const connectorId = typeof parsed.connectorId === "string" ? parsed.connectorId : "";
+  const serverId = remoteConnectorFor(connectorId) ? remoteConnectorServerId(connectorId) : customMcpServerReference(connectorId);
   const accessCurrent = () => !options.shouldCancel?.() && (options.connectorAccessCurrent
     ? options.connectorAccessCurrent(connectorId) : options.connectorIds?.includes(connectorId));
-  if (!options.workspaceId || !remoteConnectorFor(connectorId) || !accessCurrent()) {
+  if (!options.workspaceId || !serverId || !accessCurrent()) {
     throw new Error("Connect this app in the workspace's Plugins page first.");
   }
-  const connection = await openConnectorTools(options.workspaceId, remoteConnectorServerId(connectorId));
+  const connection = await openConnectorTools(options.workspaceId, serverId);
   try {
     if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
     const enabledTools = connection.tools.filter((tool) => connection.discovery.enabledTools.includes(tool.name));

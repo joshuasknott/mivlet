@@ -1,9 +1,21 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ComposerPluginsMenu } from "./ComposerPluginsMenu";
+import { customMcpConnectorId } from "../lib/custom-mcp";
 afterEach(() => vi.unstubAllGlobals());
 
 describe("composer plugin flyout", () => {
+  it("selects a named custom server using its opaque workspace identity", async () => {
+    const id = customMcpConnectorId("local-brief")!;
+    const mention = vi.fn();
+    render(<ComposerPluginsMenu connectors={[{ id, name: "Brief server" }]} onMention={mention} onAdd={vi.fn()} />);
+    fireEvent.click(screen.getByRole("menuitem", { name: "Plugins" }));
+    const server = screen.getByRole("menuitem", { name: "Brief server" });
+    await vi.waitFor(() => expect(server).toHaveFocus());
+    fireEvent.click(server);
+    expect(mention).toHaveBeenCalledWith(id);
+    expect(screen.queryByText(id)).toBeNull();
+  });
   it("opens on hover and inserts only a connected plugin chosen by the user", () => {
     const mention = vi.fn();
     render(<ComposerPluginsMenu connectors={[{ id: "github", name: "GitHub" }]} onMention={mention} onAdd={vi.fn()} />);

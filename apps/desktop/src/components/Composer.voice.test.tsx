@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Composer } from "./Composer";
 import type { VoiceStatus } from "../hooks/useVoice";
+import { customMcpConnectorId } from "../lib/custom-mcp";
 
 function propsFor(
   voiceStatus: VoiceStatus,
@@ -52,6 +53,20 @@ function propsFor(
 }
 
 describe("Composer dictation controls", () => {
+  it("finds a custom plugin by name and inserts its canonical token without showing the internal ID", () => {
+    const id = customMcpConnectorId("local-research")!;
+    const props = propsFor("idle", { composerValue: "@Research", connectedConnectors: [{ id, name: "Research documents", status: "connected" }] });
+    render(<Composer {...props} />);
+    fireEvent.click(screen.getByRole("option", { name: "Research documents" }));
+    expect(props.onComposerChange).toHaveBeenCalledWith(`@${id} `);
+    expect(screen.queryByText(`@${id}`)).toBeNull();
+  });
+  it("retains a known custom mention label after disconnect without offering unavailable access", () => {
+    const id = customMcpConnectorId("local-research")!;
+    render(<Composer {...propsFor("idle", { composerValue: `@${id} Review`, connectedConnectors: [], knownConnectors: [{ id, name: "Research documents" }] })} />);
+    expect(screen.getByRole("textbox")).toHaveTextContent("Research documents Review");
+    expect(screen.queryByRole("option", { name: "Research documents" })).toBeNull();
+  });
   it("keeps provider setup reachable beside the plus button when no model is available", () => {
     const onConnectProvider = vi.fn();
     render(<Composer {...propsFor("idle", { models: [], onConnectProvider })} />);

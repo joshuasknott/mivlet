@@ -275,7 +275,7 @@ grants. Vercel integrations must be created with read and write access so
 ## MCP
 
 The shared `connector-tools` tool lists enabled tools and exact resource URIs for
-connected official app routes. `connector-resource` reads bounded text through
+connected official apps and approved custom tool servers. `connector-resource` reads bounded text through
 the same native MCP session, discovery proof, Connection revision and single-use
 permit as tool calls. It never opens a resource URI as a host path or directly
 fetches it. Each resource read requires an exact approval; untrusted annotations
@@ -300,6 +300,18 @@ rules. A server must be explicitly configured and must complete capability
 discovery before its tools can appear. Unknown tools, untrusted metadata,
 oversized payloads, missing authorization, and consequential calls without an
 exact approval fail closed.
+
+Custom STDIO and Streamable HTTP servers use the same `connector-tools`,
+`connector-call` and `connector-resource` services as official apps. After
+checking a server and saving explicit access in Plugins, select its name from
+the chat's Plugins menu. Its opaque chat ID refers to a saved native
+configuration; models never supply executable paths, arguments or endpoints.
+Native configuration ownership, enabled access and fresh discovery remain
+required at execution. Public servers can be ready with native `not-required`
+authorization and credentials; this does not bypass official app account checks.
+Revoked, disabled, unhealthy and undiscovered access stays unavailable. Custom
+calls retain exact native approvals and user-managed host consequences; tool
+names or advertised read annotations do not grant routine official-read status.
 
 ## Evidence boundary
 

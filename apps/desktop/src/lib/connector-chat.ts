@@ -1,6 +1,7 @@
 import type { ConnectorManifest, NativeToolSpec } from "@mivlet/protocol";
 import { registeredToolSpecs } from "@mivlet/connectors/native-api/tools";
 import { remoteConnectorFor } from "../components/marketplace/remote-connectors";
+import { customMcpServerReference } from "./custom-mcp";
 
 export const CONNECTOR_READ_TOOLS: Record<string, string> = {
   "google-drive-read": "google-drive",
@@ -21,6 +22,9 @@ export function chatConnectorIds(
 }
 
 export function chatConnectorTools(ids: readonly string[], manifests?: readonly ConnectorManifest[]): NativeToolSpec[] {
+  const mcpIds = ids.filter(id => (remoteConnectorFor(id) || customMcpServerReference(id))
+    && ((!manifests && remoteConnectorFor(id)) || manifests?.some(manifest => manifest.id === id && manifest.status === "connected"
+      && (manifest.connectionRoute === "remote" || manifest.connectionRoute === "mcp"))));
   const nativeIds = ids.filter((id) => Object.values(CONNECTOR_READ_TOOLS).includes(id)
     && (!manifests || manifests.some((manifest) => manifest.id === id && manifest.status === "connected" && manifest.connectionRoute !== "remote")));
   return registeredToolSpecs().filter((tool) => {
@@ -29,6 +33,6 @@ export function chatConnectorTools(ids: readonly string[], manifests?: readonly 
     return connectorId
       ? nativeIds.includes(connectorId)
       : (tool.name === "connector-tools" || tool.name === "connector-call" || tool.name === "connector-resource") &&
-          ids.some((id) => remoteConnectorFor(id) && !nativeIds.includes(id));
-  }).map((tool) => tool.name === "connector-action" ? { ...tool, description: `${tool.description} Available actions: ${manifests?.filter((manifest) => nativeIds.includes(manifest.id)).flatMap((manifest) => manifest.supportedActions ?? []).join(", ")}.` } : tool.name === "connector-tools" ? { ...tool, description: `${tool.description} Workspace app IDs: ${ids.filter((id) => remoteConnectorFor(id) && !nativeIds.includes(id)).join(", ")}.` } : tool);
+          mcpIds.some(id => !nativeIds.includes(id));
+  }).map((tool) => tool.name === "connector-action" ? { ...tool, description: `${tool.description} Available actions: ${manifests?.filter((manifest) => nativeIds.includes(manifest.id)).flatMap((manifest) => manifest.supportedActions ?? []).join(", ")}.` } : tool.name === "connector-tools" ? { ...tool, description: `${tool.description} Workspace app IDs: ${mcpIds.filter(id => !nativeIds.includes(id)).join(", ")}.` } : tool);
 }

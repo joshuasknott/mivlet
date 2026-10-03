@@ -288,7 +288,7 @@ export interface ConnectorAccountOption {
 
 export interface ConnectorManifest {
   /** The selected execution route; remote and native accounts never mix. */
-  connectionRoute?: "native" | "remote";
+  connectionRoute?: "native" | "remote" | "mcp";
   id: ConnectorId;
   name: string;
   status: ConnectorStatus;

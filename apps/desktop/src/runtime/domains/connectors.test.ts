@@ -20,7 +20,7 @@ beforeEach(() => {
   bridge.invoke.mockReset();
   bridge.invoke.mockImplementation(async (command: string) => {
     if (command === "list_connector_statuses") return [native];
-    if (command === "list_remote_mcp_connections")
+    if (command === "list_mcp_connections")
       return [
         {
           launchReference: "marketplace-notion",

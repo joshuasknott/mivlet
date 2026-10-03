@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ApprovalRequest } from "@mivlet/protocol";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
+import { customMcpConnectorId } from "./custom-mcp";
 const open = vi.hoisted(() => vi.fn());
 const providerCheck = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
 vi.mock("./connector-mcp", () => ({ openConnectorTools: open }));
@@ -21,6 +22,14 @@ const fixture = () => ({
 });
 beforeEach(() => vi.clearAllMocks());
 describe("official connector agent tools", () => {
+  it("uses an admitted custom server through the same exact native tool permit", async () => {
+    const connection = fixture(); open.mockResolvedValue(connection);
+    const connectorId = customMcpConnectorId("local-brief")!;
+    const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, { ...options, connectorIds: [connectorId] });
+    await executor(approval, JSON.stringify({ connectorId, toolName: "search", input: { query: "test" } }));
+    expect(open).toHaveBeenCalledWith("workspace-1", "local-brief");
+    expect(connection.transport.executeAuthorizedToolCall).toHaveBeenCalledWith({ toolName: "search" }, "permit");
+  });
   it("reads only an enabled resource through its exact native proposal and closes the session", async () => {
     const connection = fixture(); open.mockResolvedValue(connection);
     const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, options);
