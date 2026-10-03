@@ -2,6 +2,7 @@
 pub(crate) mod activity;
 pub(crate) mod artifacts;
 pub(crate) mod authority;
+pub(crate) mod coding;
 pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;

@@ -10,6 +10,7 @@
 
 import type { BackendTool, NativeToolSpec } from "@mivlet/protocol";
 import { OFFICE_TOOLS } from "./office-tools";
+import { REPOSITORY_TOOLS } from "./repository-tools";
 import { COLLABORATION_TOOLS, isCollaborationTool } from "./collaboration-tools";
 export { collaborationToolSpecs, isCollaborationTool } from "./collaboration-tools";
 
@@ -51,6 +52,7 @@ function appActionSchema(visual: boolean): string {
 }
 
 const TOOLS: Record<string, BackendTool> = {
+  ...REPOSITORY_TOOLS,
   ...COLLABORATION_TOOLS,
   ...OFFICE_TOOLS,
   "computer-artifact": {

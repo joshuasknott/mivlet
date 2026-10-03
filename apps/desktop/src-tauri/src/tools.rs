@@ -83,7 +83,14 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 24] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 31] = [
+    "repository-recover",
+    "repository-status",
+    "repository-read",
+    "repository-write",
+    "repository-run",
+    "repository-commit",
+    "repository-publish",
     "read-file",
     "write-file",
     "create-spreadsheet",
@@ -268,6 +275,10 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
 
 pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
+        "repository-status" | "repository-read" => Some(("read-only", "low")),
+        "repository-write" | "repository-commit" => Some(("full-access", "high")),
+        "repository-run" | "repository-publish" => Some(("full-access", "critical")),
+        "repository-recover" => Some(("full-access", "high")),
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
         "create-spreadsheet" | "create-document" => Some(("full-access", "high")),
@@ -337,6 +348,9 @@ fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<
 }
 
 fn is_computer_tool(tool: &str) -> bool {
+    if tool.starts_with("repository-") {
+        return true;
+    }
     matches!(
         tool,
         "run-shell"
@@ -417,7 +431,7 @@ pub(crate) fn validate_tool_approval_binding(
         .iter()
         .map(|value| truncate_characters(&normalize_spaces(value), 240))
         .collect::<std::collections::BTreeSet<_>>();
-    if matches!(tool, "create-spreadsheet" | "create-document") {
+    if matches!(tool, "create-spreadsheet" | "create-document") || tool.starts_with("repository-") {
         let digest_entries = approved
             .iter()
             .filter(|value| value.starts_with(ARGUMENT_DIGEST_PREFIX))
@@ -1277,6 +1291,51 @@ pub async fn execute_tool_call(
     } else {
         0
     };
+    if tool.starts_with("repository-") {
+        let workspace = request
+            .workspace_id
+            .clone()
+            .ok_or("Repository tools require a workspace.")?;
+        let agent = request
+            .agent_id
+            .clone()
+            .ok_or("Repository tools require a saved agent.")?;
+        let computers = local_computers.inner().clone();
+        let operation_tool = tool.clone();
+        let result = tauri::async_runtime::spawn_blocking(move || {
+            crate::local_computer::coding::execute(
+                &computers,
+                &workspace,
+                &agent,
+                computer_generation,
+                &operation_tool,
+                arguments,
+            )
+        })
+        .await
+        .map_err(|_| {
+            "Repository operation stopped unexpectedly. Inspect status before retrying.".to_string()
+        })
+        .and_then(|result| result);
+        audit_tool_outcome(
+            ToolOutcomeAudit {
+                tool: &tool,
+                request_id: &request_id,
+                mode,
+                risk,
+                status: if result.is_ok() { "ok" } else { "failed" },
+                error_code: if result.is_ok() {
+                    ""
+                } else {
+                    "repository-operation"
+                },
+                message:
+                    "Repository operation completed; inspect its receipt for command exit status",
+            },
+            None,
+        );
+        return result.map(|output| ToolResult { ok: true, output });
+    }
     if matches!(tool.as_str(), "generate-image" | "edit-image") {
         let workspace_id = request
             .workspace_id
@@ -2084,6 +2143,41 @@ mod connector_authority_tests {
             },
         )
         .unwrap();
+    }
+
+    #[test]
+    fn repository_permits_bind_full_payload_scope_generation_and_consume_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("permits.json");
+        let mut approved = request("repository-run");
+        approved.arguments = json!({"repositoryId":"repo", "command":format!("{}true", "echo x; ".repeat(60)), "network":false, "timeoutSeconds":30});
+        approved.workspace_id = Some("workspace".into());
+        approved.agent_id = Some("agent".into());
+        approved.computer_generation = Some(7);
+        approved.approval.request.data_used =
+            approval_argument_previews("repository-run", &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved.approval.request.data_used.extend([
+            argument_digest(&approved.arguments).unwrap(),
+            "Computer workspace: workspace".into(),
+            "Computer agent: agent".into(),
+            "Computer generation: 7".into(),
+        ]);
+        persist_permit(&path, &approved);
+        let original = approved.arguments.clone();
+        approved.arguments["command"] = json!(format!("{}false", "echo x; ".repeat(60)));
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.arguments = original;
+        approved.computer_generation = Some(8);
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.computer_generation = Some(7);
+        approved.agent_id = Some("different-agent".into());
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.agent_id = Some("agent".into());
+        verify_tool_authority(&path, &approved).unwrap();
+        assert!(verify_tool_authority(&path, &approved).is_err());
     }
 
     fn decided_at_offset(seconds: i64) -> String {

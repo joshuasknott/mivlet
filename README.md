@@ -32,6 +32,13 @@ a deployed or production-validated service.
 
 ### Implemented locally
 
+- Managed coding repositories for named agents: attach a local Git repository,
+  edit a separate copy, run Linux checks in a WSL/Bubblewrap sandbox, review
+  the actual diff, commit an approved snapshot and optionally open a GitHub PR.
+  Requires Windows, Git, WSL Ubuntu with Bubblewrap/Python and project build
+  tools; publication additionally requires GitHub CLI login. Available through
+  Codex and direct API routes that bridge Mivlet tools. See the
+  [coding workflow and its limits](docs/architecture/coding-workflow.md).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens

@@ -221,6 +221,13 @@ impl OperationTicket {
         self,
         operation: impl FnOnce() -> Result<T, String>,
     ) -> Result<T, String> {
+        self.with_current(operation)
+    }
+    /// Protect one bounded side effect while retaining the operation ticket.
+    pub(crate) fn with_current<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
         {
             let inner = self.authority.inner.lock().map_err(|_| STALE)?;
             if self.cancellation.load(Ordering::Acquire)
