@@ -3,6 +3,11 @@ import { attachmentPreview, retainAttachmentPreviews } from "./attachment-previe
 import { clearActiveRuntimeDataScope, setActiveRuntimeDataScope } from "../runtime-scope";
 
 describe("transient attachment previews", () => {
+  it("does not decode Office binary uploads into text previews", () => {
+    setActiveRuntimeDataScope("workspace");
+    retainAttachmentPreviews("workspace", "thread", [{ ...file, id: "office", name: "budget.XLSX" }]);
+    expect(attachmentPreview("workspace", "thread", "office")).toBeUndefined();
+  });
   beforeEach(() => setActiveRuntimeDataScope("workspace"));
   const file = { id: "upload", name: "notes.txt", type: "text/plain", sizeBytes: 5, transientBytes: new TextEncoder().encode("hello") };
   it("retains exact uploaded text only in its workspace and conversation", () => {

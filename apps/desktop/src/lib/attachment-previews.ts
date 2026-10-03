@@ -19,6 +19,7 @@ const bytes = (value: AttachmentPreviewContent) => (value.imageDataUrl?.length ?
 export function retainAttachmentPreviews(workspaceId: string, threadId: string, attachments: readonly ComposerAttachment[]) {
   if (!current(workspaceId)) return;
   for (const attachment of attachments) {
+    if (/\.(docx|xlsx|pptx)$/i.test(attachment.name)) continue;
     const value: AttachmentPreviewContent = attachment.imageInput
       ? { imageDataUrl: attachment.imageInput.dataUrl }
       : attachment.transientBytes ? { text: new TextDecoder().decode(attachment.transientBytes.subarray(0, 256 * 1024)) + (attachment.transientBytes.length > 256 * 1024 ? "\n[Preview truncated]" : "") } : {};

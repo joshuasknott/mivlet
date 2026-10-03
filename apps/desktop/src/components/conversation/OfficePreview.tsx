@@ -5,9 +5,11 @@ import "./OfficePreview.css";
 export function OfficePreview({
   office,
   truncated,
+  notice = "Content preview · Open the file for full formatting and editing.",
 }: {
   office: LocalComputerOfficePreview;
   truncated: boolean;
+  notice?: string;
 }) {
   const [selected, setSelected] = useState(0);
   const section =
@@ -22,7 +24,7 @@ export function OfficePreview({
   return (
     <div className={`office-preview office-preview--${office.kind}`}>
       <p className="office-preview__notice">
-        Content preview · Open the file for full formatting and editing.
+        {notice}
       </p>
       {office.sections.length > 1 && (
         <div

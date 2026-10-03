@@ -7,20 +7,20 @@ use std::{
     io::{Cursor, Read},
 };
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct OfficePreview {
     kind: &'static str,
     sections: Vec<Section>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub(super) struct Section {
     name: String,
     blocks: Vec<Block>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Block {
     Paragraph { text: String, style: &'static str },

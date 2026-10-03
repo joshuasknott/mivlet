@@ -7,6 +7,16 @@ import {
 } from "./composer-attachments";
 
 describe("readable composer attachments", () => {
+  it.each(["DOCX", "xlsx", "pptx"])("retains %s bytes without decoding or importing them as knowledge", async (extension) => {
+    const bytes = new Uint8Array([80, 75, 3, 4, 255, 0]);
+    const file = { name: `input.${extension}`, size: bytes.length, arrayBuffer: vi.fn(async () => bytes.buffer) } as unknown as File;
+    const importKnowledgeFile = vi.fn();
+    const result = await prepareReadableComposerAttachment(file, importKnowledgeFile);
+    expect(result.transientBytes).toEqual(bytes);
+    expect(result.sourceId).toBeUndefined();
+    expect(result.status).toBe("Attached to this message");
+    expect(importKnowledgeFile).not.toHaveBeenCalled();
+  });
   it.each([
     ["archive.zip", 4, "Choose a text"],
     ["empty.txt", 0, "non-empty"],

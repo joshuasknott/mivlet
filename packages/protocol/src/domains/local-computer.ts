@@ -105,6 +105,7 @@ export interface LocalComputerAttachmentDiscardRequest extends LocalComputerTarg
  * The content must not enter model context, logs, or persisted runtime state.
  */
 export interface LocalComputerFilePreview {
+  office?: LocalComputerOfficePreview | null;
   computerId: string;
   path: string;
   content: string;
