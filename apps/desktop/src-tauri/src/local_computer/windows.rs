@@ -28,6 +28,16 @@ pub(super) struct WindowBinding {
     original_no_activate: bool,
     originally_enabled: bool,
     background_disable_shield: bool,
+    browser_window: bool,
+}
+
+// This label comes from the native process image, never a title or model input.
+// Recognition narrows the browser shortcuts; it does not sandbox the selected app.
+fn browser_application(application: &str) -> bool {
+    matches!(
+        application.to_ascii_lowercase().as_str(),
+        "chrome" | "msedge" | "chromium" | "brave" | "firefox" | "vivaldi" | "opera"
+    )
 }
 
 pub(super) fn safe_label(value: &str, limit: usize) -> String {
@@ -66,6 +76,25 @@ fn background_disable_shield(class: &str, application: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn browser_shortcuts_use_process_names_not_titles_or_browser_embedded_apps() {
+        for name in [
+            "chrome", "msedge", "CHROMIUM", "Brave", "firefox", "vivaldi", "opera",
+        ] {
+            assert!(browser_application(name));
+        }
+        for name in [
+            "notepad",
+            "cmd",
+            "powershell",
+            "Mivlet",
+            "Chrome browser",
+            "chrome.exe",
+            "Chrome_WidgetWin_1",
+        ] {
+            assert!(!browser_application(name));
+        }
+    }
     #[test]
     fn cleanup_only_enables_windows_the_pinned_driver_can_shield() {
         assert!(background_disable_shield("Chrome_WidgetWin_1", "chrome"));
@@ -219,6 +248,7 @@ mod platform {
         }
         let binding = WindowBinding {
             background_disable_shield: background_disable_shield(&expected.class, application),
+            browser_window: browser_application(application),
             original_no_activate: unsafe { GetWindowLongPtrW(hwnd(expected.hwnd), GWL_EXSTYLE) }
                 & WS_EX_NOACTIVATE as isize
                 != 0,
@@ -341,6 +371,9 @@ mod platform {
 }
 
 impl WindowBinding {
+    pub(super) fn is_browser(&self) -> bool {
+        self.browser_window
+    }
     #[cfg(all(test, windows))]
     pub(super) fn invalidate_marker_for_test(&self) {
         platform::release(self);

@@ -307,6 +307,7 @@ fn live_background_actions_stop_and_refusals() {
     assert!(state.native.active());
     for value in [
         json!({"action":"key", "key":"Enter", "modifiers":[]}),
+        json!({"action":"shortcut", "shortcut":"select-all"}),
         json!({"action":"click", "x":10, "y":10}),
     ] {
         let observed = read(&state, generation);
@@ -441,6 +442,102 @@ fn live_background_actions_stop_and_refusals() {
         1
     );
     eprintln!("LIVE background: covered UIA read/append/click/scroll preserved focus; covering text unchanged; image/key/pixel refusal sent zero input; user-target callback/minimise revoked; real in-progress input Stop <500ms, queue fenced, driver killed, window restored, fresh generation recovered without replay");
+}
+
+#[test]
+#[ignore = "requires MIVLET_NATIVE_LIVE_FIXTURE_PID for the disposable acceptance app in an interactive Windows session"]
+fn live_named_shortcut_replaces_text_and_rejects_replay() {
+    let pid = std::env::var("MIVLET_NATIVE_LIVE_FIXTURE_PID")
+        .unwrap()
+        .parse::<u32>()
+        .unwrap();
+    let root = tempfile::tempdir().unwrap();
+    let state = Arc::new(LocalComputerState::for_test(root.path().into()));
+    struct Stop(Arc<LocalComputerState>);
+    impl Drop for Stop {
+        fn drop(&mut self) {
+            self.0.native.stop("Shortcut acceptance ended");
+        }
+    }
+    let _stop = Stop(state.clone());
+    let generation = selected(&state, "agent-a", pid).generation.unwrap();
+    let observed = read(&state, generation);
+    action(
+        &state,
+        generation,
+        json!({"observationId":observed["observationId"],"input":{
+            "action":"click","elementRef":reference(&observed,"Note")
+        }}),
+    );
+    let observed = read(&state, generation);
+    action(
+        &state,
+        generation,
+        json!({"observationId":observed["observationId"],"input":{
+            "action":"type","elementRef":reference(&observed,"Note"),"text":"Replace this entire field"
+        }}),
+    );
+    let observed = read(&state, generation);
+    let value = json!({"observationId":observed["observationId"],"input":{
+        "action":"shortcut","shortcut":"select-all"
+    }});
+    action(&state, generation, value.clone());
+    let observed = read(&state, generation);
+    action(
+        &state,
+        generation,
+        json!({"observationId":observed["observationId"],"input":{
+            "action":"type","elementRef":reference(&observed,"Note"),"text":"Replacement verified 731"
+        }}),
+    );
+    let observed = read(&state, generation);
+    let note = observed["controls"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["name"] == "Note")
+        .unwrap();
+    assert_eq!(note["value"], "Replacement verified 731");
+    let grant = state.native.inner.lock().unwrap().active.clone().unwrap();
+    let sent = grant.driver.dispatched();
+    assert!(desktop_tools::act(
+        &state,
+        "native-test",
+        "agent-a",
+        generation,
+        desktop_tools::parse_action(value, false).unwrap()
+    )
+    .is_err());
+    assert_eq!(
+        grant.driver.dispatched(),
+        sent,
+        "stale shortcut reached driver"
+    );
+    assert!(!state.native.active());
+    let generation = selected(&state, "agent-a", pid).generation.unwrap();
+    let observed = read(&state, generation);
+    let grant = state.native.inner.lock().unwrap().active.clone().unwrap();
+    let sent = grant.driver.dispatched();
+    assert!(desktop_tools::act(
+        &state,
+        "native-test",
+        "agent-a",
+        generation,
+        desktop_tools::parse_action(
+            json!({"observationId":observed["observationId"],"input":{
+                "action":"shortcut","shortcut":"address-bar"
+            }}),
+            false
+        )
+        .unwrap()
+    )
+    .is_err());
+    assert_eq!(
+        grant.driver.dispatched(),
+        sent,
+        "browser shortcut reached non-browser app"
+    );
+    eprintln!("LIVE shortcut: real foreground select-all/type replaced full field; stale replay and non-browser address shortcut dispatched zero input");
 }
 
 #[test]

@@ -46,6 +46,7 @@ function appActionSchema(visual: boolean): string {
         key: { type: "string", enum: ["Enter", "Backspace", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "PageUp", "PageDown", "Tab", "Escape", "Delete", "Home", "End"] },
         modifiers: { type: "array", items: { type: "string", enum: ["Shift"] }, maxItems: 1, description: "Use [] for no modifier, or [\"Shift\"]." }
       }),
+      variant("shortcut", { shortcut: { type: "string", enum: ["select-all", "find", "address-bar", "browser-back", "browser-forward", "browser-reload"], description: "Foreground only. Address bar, back, forward and reload require a native-recognized browser window. Observe after every shortcut." } }),
       ...(visual ? [variant("click", pixels), variant("scroll", { ...pixels, ...delta })] : [])
     ] }
   }, required: ["observationId", "input"], additionalProperties: false });
@@ -184,7 +185,7 @@ const TOOLS: Record<string, BackendTool> = {
   },
   "local-app-action": {
     name: "local-app-action",
-    description: "Use a fresh selected-window element ref to click, append text or scroll without taking focus where supported. Background typing appends to the current field value; caret editing and keyboard actions require explicit foreground selection. A foreground-required result means no input was sent; request a new approved foreground selection and observe before choosing an action. Driver failures can have unknown effects: never replay them. Observe after every action. User interaction with the selected app stops control. Never enter secrets.",
+    description: "Use a fresh selected-window element ref to click, append text or scroll without taking focus where supported. Background typing appends to the current field value; caret editing, keys and named shortcuts require explicit foreground selection. Shortcuts support select-all/find and browser address-bar/back/forward/reload on recognized browsers. A foreground-required result means no input was sent; request a new approved foreground selection and observe before choosing an action. Driver failures can have unknown effects: never replay them. Observe after every action. User interaction with the selected app stops control. Never enter secrets.",
     defaultMode: "full-access", defaultRisk: "critical",
     parameters: appActionSchema(false)
   },
@@ -196,7 +197,7 @@ const TOOLS: Record<string, BackendTool> = {
   },
   "local-desktop-action": {
     name: "local-desktop-action",
-    description: "Perform one action against the latest selected-window screenshot: click/scroll at its actual pixel coordinates or an observed element ref, type in an observed text control, or press a supported key. Observe afterwards to verify the effect. Never guess coordinates, enter secrets, or replay input whose outcome is unknown. This uses the user's foreground Windows session.",
+    description: "Perform one action against the latest selected-window screenshot: click/scroll at its actual pixel coordinates or an observed element ref, type in an observed text control, press a supported key or use a named shortcut. Address-bar/back/forward/reload shortcuts require a recognized browser window. Observe afterwards to verify the effect. Never guess coordinates, enter secrets, or replay input whose outcome is unknown. This uses the user's foreground Windows session.",
     defaultMode: "full-access", defaultRisk: "critical",
     parameters: appActionSchema(true)
   },

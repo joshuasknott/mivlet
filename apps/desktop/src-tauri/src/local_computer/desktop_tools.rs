@@ -196,6 +196,32 @@ struct DesktopInput {
     text: Option<String>,
     key: Option<String>,
     modifiers: Option<Vec<String>>,
+    shortcut: Option<Shortcut>,
+}
+#[derive(Clone, Copy, Debug, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Shortcut {
+    SelectAll,
+    Find,
+    AddressBar,
+    BrowserBack,
+    BrowserForward,
+    BrowserReload,
+}
+impl Shortcut {
+    fn keys(self) -> (&'static str, &'static str) {
+        match self {
+            Self::SelectAll => ("A", "CTRL"),
+            Self::Find => ("F", "CTRL"),
+            Self::AddressBar => ("L", "CTRL"),
+            Self::BrowserBack => ("LEFT", "ALT"),
+            Self::BrowserForward => ("RIGHT", "ALT"),
+            Self::BrowserReload => ("R", "CTRL"),
+        }
+    }
+    fn browser_only(self) -> bool {
+        !matches!(self, Self::SelectAll | Self::Find)
+    }
 }
 pub(crate) fn parse_action(value: Value, allow_pixels: bool) -> Result<DesktopAction, String> {
     let action: DesktopAction = serde_json::from_value(value).map_err(|error| {
@@ -205,6 +231,9 @@ pub(crate) fn parse_action(value: Value, allow_pixels: bool) -> Result<DesktopAc
         return Err("Invalid application input: observationId must be the fresh non-empty ID returned by Observe.".into());
     }
     let input = &action.input;
+    if input.shortcut.is_some() && input.action != "shortcut" {
+        return Err("Invalid application input: shortcut is only valid with action 'shortcut'. No input was dispatched.".into());
+    }
     let pointer = input.x.is_some() || input.y.is_some();
     let element = input.element_ref.is_some();
     let correction = match input.action.as_str() {
@@ -226,7 +255,11 @@ pub(crate) fn parse_action(value: Value, allow_pixels: bool) -> Result<DesktopAc
         "key" if !element && !pointer && input.key.is_some() && input.modifiers.is_some()
             && input.delta_y.is_none() && input.text.is_none() => None,
         "key" => Some("key requires exactly key and modifiers; use an empty modifiers array when Shift is not needed"),
-        _ => Some("action must be click, type, scroll, or key"),
+        "shortcut" if !element && !pointer && input.shortcut.is_some()
+            && input.key.is_none() && input.modifiers.is_none()
+            && input.delta_y.is_none() && input.text.is_none() => None,
+        "shortcut" => Some("shortcut requires exactly one supported shortcut name"),
+        _ => Some("action must be click, type, scroll, key, or shortcut"),
     };
     if let Some(correction) = correction {
         return Err(format!("Invalid application input for '{}': {correction}. No input was dispatched; correct this call using the same fresh observationId.", input.action));
@@ -323,8 +356,36 @@ fn arguments(
             args["modifiers"] = json!(mods.iter().map(|_| "SHIFT").collect::<Vec<_>>());
             Ok(("press_key", args))
         }
+        "shortcut" => {
+            let (key, modifier) = input.shortcut.expect("shortcut was prevalidated").keys();
+            args["key"] = json!(key);
+            args["modifiers"] = json!([modifier]);
+            Ok(("press_key", args))
+        }
         _ => unreachable!("action payload was prevalidated"),
     }
+}
+fn action_requirements(
+    action: &DesktopAction,
+    mode: DeliveryMode,
+    browser_window: bool,
+) -> Result<Option<&'static str>, String> {
+    if action
+        .input
+        .shortcut
+        .is_some_and(|shortcut| shortcut.browser_only())
+        && !browser_window
+    {
+        return Err("This shortcut requires a recognized browser window. Select the browser and observe again. No input was dispatched.".into());
+    }
+    if mode == DeliveryMode::Background
+        && (matches!(action.input.action.as_str(), "key" | "shortcut")
+            || action.input.x.is_some()
+            || action.input.y.is_some())
+    {
+        return Ok(Some("Keyboard, shortcut and pixel actions require foreground selection. Background control uses fresh element refs for clicking, appending text and scrolling."));
+    }
+    Ok(None)
 }
 pub(crate) fn act(
     computers: &LocalComputerState,
@@ -346,8 +407,8 @@ pub(crate) fn act(
             if mode == DeliveryMode::Background && window.background_requires_foreground() {
                 return Ok(PreparedCall::ForegroundRequired("This app framework can activate itself during background input. Request foreground selection before using it."));
             }
-            if mode == DeliveryMode::Background && (action.input.action == "key" || action.input.x.is_some() || action.input.y.is_some()) {
-                return Ok(PreparedCall::ForegroundRequired("Keyboard and pixel actions require foreground selection. Background control uses fresh element refs for clicking, appending text and scrolling."));
+            if let Some(reason) = action_requirements(&action, mode, window.is_browser())? {
+                return Ok(PreparedCall::ForegroundRequired(reason));
             }
             let (name, args) = arguments(
                 &action,
@@ -450,6 +511,78 @@ mod tests {
             json!({"observationId":"fresh","input":{"action":"type","elementRef":"e0","text":"hello"}})
         )
         .is_ok());
+    }
+
+    #[test]
+    fn shortcuts_use_only_fixed_keys_against_the_selected_window() {
+        for (shortcut, key, modifier) in [
+            ("select-all", "A", "CTRL"),
+            ("find", "F", "CTRL"),
+            ("address-bar", "L", "CTRL"),
+            ("browser-back", "LEFT", "ALT"),
+            ("browser-forward", "RIGHT", "ALT"),
+            ("browser-reload", "R", "CTRL"),
+        ] {
+            let (name, args) = input(json!({"observationId":"fresh","input":{
+                "action":"shortcut","shortcut":shortcut
+            }}))
+            .unwrap();
+            assert_eq!(name, "press_key");
+            assert_eq!(
+                args,
+                json!({"pid":12,"window_id":34,"key":key,"modifiers":[modifier]})
+            );
+        }
+    }
+    #[test]
+    fn shortcut_preflight_requires_foreground_and_native_browser_recognition() {
+        for shortcut in [
+            "select-all",
+            "find",
+            "address-bar",
+            "browser-back",
+            "browser-forward",
+            "browser-reload",
+        ] {
+            let action = parse_action(
+                json!({"observationId":"fresh","input":{
+                    "action":"shortcut","shortcut":shortcut
+                }}),
+                false,
+            )
+            .unwrap();
+            assert!(action_requirements(&action, DeliveryMode::Background, true)
+                .unwrap()
+                .is_some());
+            assert!(action_requirements(&action, DeliveryMode::Foreground, true)
+                .unwrap()
+                .is_none());
+            let non_browser = action_requirements(&action, DeliveryMode::Foreground, false);
+            assert_eq!(
+                non_browser.is_ok(),
+                matches!(shortcut, "select-all" | "find")
+            );
+        }
+    }
+    #[test]
+    fn shortcuts_cannot_accept_arbitrary_combinations_or_mixed_action_fields() {
+        for fields in [
+            json!({"action":"shortcut","shortcut":"run"}),
+            json!({"action":"shortcut","shortcut":"select-all","modifiers":["Meta"]}),
+            json!({"action":"shortcut","shortcut":"select-all","key":"R"}),
+            json!({"action":"shortcut","shortcut":"select-all","elementRef":"e0"}),
+            json!({"action":"shortcut","shortcut":"select-all","x":1,"y":1}),
+            json!({"action":"shortcut","shortcut":"select-all","text":"hello"}),
+            json!({"action":"shortcut","shortcut":"select-all","deltaY":100}),
+            json!({"action":"shortcut"}),
+            json!({"action":"key","key":"Enter","modifiers":[],"shortcut":"select-all"}),
+        ] {
+            assert!(input(json!({"observationId":"fresh","input":fields})).is_err());
+        }
+        assert!(input(
+            json!({"observationId":"","input":{"action":"shortcut","shortcut":"select-all"}})
+        )
+        .is_err());
     }
 
     #[test]

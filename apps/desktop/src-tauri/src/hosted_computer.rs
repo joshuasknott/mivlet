@@ -2026,6 +2026,13 @@ mod tests {
             .clear();
     }
 
+    fn live_view_test_guard() -> std::sync::MutexGuard<'static, ()> {
+        // Production intentionally retains only one takeover URL globally.
+        // These tests must not clear each other's native secret mid-assertion.
+        static LOCK: Mutex<()> = Mutex::new(());
+        LOCK.lock().expect("live view test lock")
+    }
+
     fn live_view_target(workspace_id: &str) -> HostedBrowserTarget {
         HostedBrowserTarget {
             workspace_id: workspace_id.into(),
@@ -2036,6 +2043,7 @@ mod tests {
 
     #[test]
     fn live_view_secrets_stay_native_and_are_omitted_from_frontend_snapshots() {
+        let _guard = live_view_test_guard();
         clear_live_view_handles();
         let snapshot = HostedBrowserSnapshot {
             current_url: "https://example.com/".into(),
@@ -2083,6 +2091,7 @@ mod tests {
 
     #[test]
     fn storing_a_live_view_drops_other_workspace_secrets() {
+        let _guard = live_view_test_guard();
         clear_live_view_handles();
         store_live_view(
             "workspace:alpha",
@@ -2111,6 +2120,7 @@ mod tests {
 
     #[test]
     fn invalid_live_view_urls_are_not_stored() {
+        let _guard = live_view_test_guard();
         clear_live_view_handles();
         assert!(store_live_view(
             "workspace:alpha",
@@ -2158,6 +2168,7 @@ mod tests {
 
     #[test]
     fn live_view_open_requires_selected_hosted_scope_even_when_a_handle_exists() {
+        let _guard = live_view_test_guard();
         clear_live_view_handles();
         store_live_view(
             "workspace:alpha",
