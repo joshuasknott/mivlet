@@ -274,6 +274,7 @@
     #[test]
     fn tool_approval_is_secret_free_and_arguments_reject_credentials() {
         let proposal = McpToolProposal {
+            operation: McpOperation::Tool,
             workspace_id: "workspace-a".into(),
             session_id: "mcp-1234567890abcdef1234567890abcdef".into(),
             tool_name: "read".into(),
@@ -309,6 +310,31 @@
         )
         .is_err());
         assert!(validate_mcp_arguments(&serde_json::json!(["not-an-object"])).is_err());
+    }
+
+    #[test]
+    fn resource_operations_bind_a_single_uri_without_tool_or_direct_file_authority() {
+        let mut proposal = McpToolProposal {
+            operation: McpOperation::Resource,
+            workspace_id: "workspace-a".into(), session_id: "mcp-1234567890abcdef1234567890abcdef".into(),
+            tool_name: "resources/read".into(), arguments: serde_json::json!({"uri":"file:///server-owned/brief"}),
+        };
+        assert_eq!(resource_uri_for_proposal(&proposal).unwrap(), Some("file:///server-owned/brief"));
+        assert!(!routine_official_read(&proposal).unwrap());
+        let approval = approval_for_tool_proposal(&proposal, "exact-fingerprint", "approval-one".into(), "now".into());
+        assert_eq!(approval.mode, "read-only");
+        assert_eq!(approval.service, "MCP resources");
+        assert!(approval.confirmation_phrase.is_none());
+        proposal.arguments["extra"] = Value::Bool(true);
+        assert!(resource_uri_for_proposal(&proposal).is_err());
+        proposal.arguments = serde_json::json!({"uri":"https://user:secret@example.com/data"});
+        assert!(resource_uri_for_proposal(&proposal).is_err());
+        proposal.arguments = serde_json::json!({"uri":"note://brief"});
+        proposal.tool_name = "arbitrary-tool".into();
+        assert!(resource_uri_for_proposal(&proposal).is_err());
+        let legacy: McpToolProposal = serde_json::from_value(serde_json::json!({"workspaceId":"w","sessionId":"s","toolName":"read","arguments":{}})).unwrap();
+        assert!(legacy.operation == McpOperation::Tool);
+        assert!(serde_json::from_value::<McpToolProposal>(serde_json::json!({"workspaceId":"w","sessionId":"s","toolName":"read","arguments":{},"hostPath":"C:/private"})).is_err());
     }
 
     #[test]

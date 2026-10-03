@@ -65,6 +65,7 @@ export async function resolveRuntimeMcpCapabilityRoute(
 }
 
 export interface RuntimeMcpToolProposal {
+  operation?: "tool" | "resource";
   workspaceId: string;
   sessionId: string;
   toolName: string;

@@ -4,6 +4,7 @@ import {
   parseMcpLine,
   isMcpResponse,
   normalizeMcpToolResult,
+  normalizeMcpResourceResult,
   type McpFrame,
   type McpNotification,
   type McpRequest,
@@ -15,6 +16,7 @@ import type { RuntimeAuthorizedMcpToolCall, RuntimeMcpConnectionDetails, Runtime
 
 export interface DesktopMcpTransportHandle extends McpTransport {
   readonly sessionId: string;
+  prepareResourceRead(uri: string): ReturnType<DesktopMcpTransportHandle["prepareToolCall"]>;
   recordDiscovery(tools: string[], resources: string[]): Promise<RuntimeMcpConnectionDetails>;
   prepareToolCall(toolName: string, args: Record<string, unknown>): Promise<{
     proposal: RuntimeMcpToolProposal;
@@ -31,6 +33,7 @@ export interface DesktopMcpTransportHandle extends McpTransport {
 }
 
 interface PendingToolResponse {
+  resource: boolean;
   resolve: (value: unknown) => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout>;
@@ -72,7 +75,7 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
         if (frame.error) pending.reject(new Error(`MCP ${frame.error.code}: ${frame.error.message}`));
         else {
           try {
-            pending.resolve(normalizeMcpToolResult(frame.result));
+            pending.resolve(pending.resource ? normalizeMcpResourceResult(frame.result) : normalizeMcpToolResult(frame.result));
           } catch (error) {
             pending.reject(error instanceof Error ? error : new Error("MCP tool returned invalid content."));
           }
@@ -111,9 +114,12 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
     return recorded;
   }
 
-  async prepareToolCall(toolName: string, args: Record<string, unknown>) {
+  prepareResourceRead(uri: string) { return this.prepareToolCall("resources/read", { uri }, "resource"); }
+
+  async prepareToolCall(toolName: string, args: Record<string, unknown>, operation?: RuntimeMcpToolProposal["operation"]) {
     if (this.closed) throw new Error("MCP transport is closed.");
     const proposal: RuntimeMcpToolProposal = {
+      ...(operation ? { operation } : {}),
       workspaceId: this.workspaceId,
       sessionId: this.sessionId,
       toolName,
@@ -154,7 +160,7 @@ class DesktopMcpTransport implements DesktopMcpTransportHandle {
           })
         ).catch(() => undefined);
       }, 30_000);
-      this.pendingToolResponses.set(requestId, { resolve, reject, timeout });
+      this.pendingToolResponses.set(requestId, { resolve, reject, timeout, resource: proposal.operation === "resource" });
     });
     try {
       await executeRuntimeApprovedMcpToolCall(proposal, permitId, requestId);
@@ -274,9 +280,12 @@ class RemoteDesktopMcpTransport implements DesktopMcpTransportHandle {
     return recorded;
   }
 
-  async prepareToolCall(toolName: string, args: Record<string, unknown>) {
+  prepareResourceRead(uri: string) { return this.prepareToolCall("resources/read", { uri }, "resource"); }
+
+  async prepareToolCall(toolName: string, args: Record<string, unknown>, operation?: RuntimeMcpToolProposal["operation"]) {
     if (this.closed) throw new Error("MCP transport is closed.");
     const proposal: RuntimeMcpToolProposal = {
+      ...(operation ? { operation } : {}),
       workspaceId: this.workspaceId,
       sessionId: this.sessionId,
       toolName,
@@ -316,7 +325,7 @@ class RemoteDesktopMcpTransport implements DesktopMcpTransportHandle {
       throw new Error("Remote MCP did not return the approved tool response.");
     }
     if (response.error) throw new Error(`MCP ${response.error.code}: ${response.error.message}`);
-    return normalizeMcpToolResult(response.result);
+    return proposal.operation === "resource" ? normalizeMcpResourceResult(response.result) : normalizeMcpToolResult(response.result);
   }
 
   close(): Promise<void> {

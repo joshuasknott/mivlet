@@ -14,7 +14,7 @@ export async function openConnectorTools(workspaceId: string, serverId: string) 
     const discovery = await transport.recordDiscovery(tools.map((tool) => tool.name), resources.map((resource) => resource.uri));
     // Public Vercel discovery alone says nothing about authenticated account
     // access. Existing installations receive the same automatic check as setup.
-    if (serverId === "marketplace-vercel" && discovery.enabledTools.length) {
+    if (serverId === "marketplace-vercel" && (discovery.enabledTools.length || discovery.enabledResources?.length)) {
       if (!discovery.enabledTools.includes("list_teams")) throw new Error("Reconnect Vercel to grant account access.");
       const { proposal, prepared } = await transport.prepareToolCall("list_teams", {});
       if (prepared.requiresApproval !== false) throw new Error("Could not verify Vercel account access. Reconnect Vercel.");
@@ -23,7 +23,7 @@ export async function openConnectorTools(workspaceId: string, serverId: string) 
       });
       assertConnectorToolSucceeded(await transport.executeAuthorizedToolCall(proposal, permit.permitId));
     }
-    return { transport, client, tools, discovery };
+    return { transport, client, tools, resources, discovery };
   } catch (error) {
     await client.close().catch(() => undefined);
     throw error;

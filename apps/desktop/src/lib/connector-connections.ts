@@ -11,6 +11,8 @@ interface RemoteConnectionState {
   discoveredAt?: string;
   discoveredTools: string[];
   enabledTools: string[];
+  discoveredResources?: string[];
+  enabledResources?: string[];
 }
 
 export function connectorConnectionsChanged(workspaceId: string) {
@@ -22,7 +24,8 @@ export function remoteConnectionReady(connection: RemoteConnectionState) {
     && connection.credentialState === "available"
     && connection.healthState === "healthy"
     && connection.discoveryState === "discovered"
-    && connection.enabledTools.some((tool) => connection.discoveredTools.includes(tool));
+    && (connection.enabledTools.some((tool) => connection.discoveredTools.includes(tool))
+      || (connection.enabledResources ?? []).some(uri => connection.discoveredResources?.includes(uri)));
 }
 
 /** One route for setup, Installed, mentions and new turns. Prefer verified

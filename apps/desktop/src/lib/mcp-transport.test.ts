@@ -91,6 +91,21 @@ afterEach(() => {
 });
 
 describe("desktop MCP transport", () => {
+  it.each([false, true])("reads correlated text resources through a native permit (remote: %s)", async remote => {
+    runtime.execute.mockImplementation(async (_proposal, _permit, id) => {
+      const frame = JSON.stringify({ jsonrpc: "2.0", id, result: { contents: [{ uri: "note://brief", text: "Resource evidence", mimeType: "text/plain" }] } });
+      if (remote) return [frame];
+      queueMicrotask(() => onLine?.(frame)); return [];
+    });
+    const transport = remote ? await createDesktopRemoteMcpTransport("workspace-a", "remote-tools") : await createDesktopMcpTransport("workspace-a", "files");
+    const { proposal, prepared } = await transport!.prepareResourceRead("note://brief");
+    expect(proposal).toMatchObject({ operation: "resource", toolName: "resources/read", arguments: { uri: "note://brief" } });
+    const permit = await transport!.authorizeToolCall(proposal, { request: prepared.approval, decision: "once", decidedAt: "now" });
+    await expect(transport!.executeAuthorizedToolCall(proposal, permit.permitId)).resolves.toMatchObject({ instructionAuthority: "none", content: [{ kind: "embedded-text", uri: "note://brief", text: "Resource evidence" }] });
+    expect(runtime.write).not.toHaveBeenCalled();
+    expect(runtime.sendRemote).not.toHaveBeenCalled();
+    await transport!.close();
+  });
   it("routes validated frames and binds writes to workspace and session", async () => {
     const transport = await createDesktopMcpTransport("workspace-a", "files");
     expect(transport).not.toBeNull();

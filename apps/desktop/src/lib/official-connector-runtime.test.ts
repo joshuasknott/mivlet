@@ -7,9 +7,11 @@ const approval = { id: "source", action: "connector-call", riskLevel: "critical"
 const input = JSON.stringify({ connectorId: "notion", toolName: "search", input: { query: "test" } });
 const options = { workspaceId: "workspace-1", connectorIds: ["notion"], queueApproval: vi.fn() };
 const fixture = () => ({
+  resources: [{ uri: "notion://safe", name: "Brief" }, { uri: "notion://disabled", name: "Private" }],
   tools: [{ name: "search", inputSchema: { type: "object" } }, { name: "delete", inputSchema: { type: "object" } }],
-  discovery: { enabledTools: ["search"] }, client: { close: vi.fn() },
+  discovery: { enabledTools: ["search"], enabledResources: ["notion://safe"] }, client: { close: vi.fn().mockResolvedValue(undefined) },
   transport: {
+    prepareResourceRead: vi.fn().mockResolvedValue({ proposal: { operation: "resource", toolName: "resources/read", arguments: { uri: "notion://safe" } }, prepared: { approval: { ...approval, id: "native-resource" } } }),
     prepareToolCall: vi.fn().mockResolvedValue({ proposal: { toolName: "search" }, prepared: { approval: { ...approval, id: "native" } } }),
     authorizeToolCall: vi.fn().mockResolvedValue({ permitId: "permit" }),
     executeAuthorizedToolCall: vi.fn().mockResolvedValue({ trust: "untrusted", content: [] }),
@@ -17,6 +19,28 @@ const fixture = () => ({
 });
 beforeEach(() => vi.clearAllMocks());
 describe("official connector agent tools", () => {
+  it("reads only an enabled resource through its exact native proposal and closes the session", async () => {
+    const connection = fixture(); open.mockResolvedValue(connection);
+    const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, options);
+    await executor({ ...approval, action: "connector-resource" }, JSON.stringify({ connectorId: "notion", uri: "notion://safe" }));
+    expect(connection.transport.prepareResourceRead).toHaveBeenCalledWith("notion://safe");
+    expect(connection.transport.prepareToolCall).not.toHaveBeenCalled();
+    expect(connection.transport.executeAuthorizedToolCall).toHaveBeenCalledWith({ operation: "resource", toolName: "resources/read", arguments: { uri: "notion://safe" } }, "permit");
+    expect(connection.client.close).toHaveBeenCalled();
+  });
+  it("rejects undiscovered or disabled resources before preparing a permit", async () => {
+    const connection = fixture(); open.mockResolvedValue(connection);
+    const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, options);
+    await expect(executor({ ...approval, action: "connector-resource" }, JSON.stringify({ connectorId: "notion", uri: "notion://disabled" }))).rejects.toThrow("enabled connector");
+    expect(connection.transport.prepareResourceRead).not.toHaveBeenCalled();
+  });
+  it("blocks Stop during approval before an app operation is authorized", async () => {
+    const connection = fixture(); open.mockResolvedValue(connection);
+    let cancelled = false;
+    const executor = createDesktopToolExecutor({ waitForDecision: vi.fn(async () => { cancelled = true; return "granted" as const; }) }, { ...options, shouldCancel: () => cancelled });
+    await expect(executor(approval, input)).rejects.toThrow("connector access changed");
+    expect(connection.transport.authorizeToolCall).not.toHaveBeenCalled();
+  });
   it("propagates provider isError as failure and closes the connection", async () => {
     const connection = fixture(); connection.client.close.mockResolvedValue(undefined);
     connection.transport.executeAuthorizedToolCall.mockResolvedValue({ isError: true, content: [{ type: "text", text: "Permission denied. Reconnect Notion." }] });
@@ -47,6 +71,7 @@ describe("official connector agent tools", () => {
     const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, options);
     const output = await executor({ ...approval, action: "connector-tools" }, input);
     expect(output).toContain('"instructionAuthority":"none"'); expect(output).toContain("search"); expect(output).not.toContain("delete");
+    expect(output).toContain("notion://safe"); expect(output).not.toContain("notion://disabled");
     expect(connection.client.close).toHaveBeenCalled();
   });
   it("uses the exact native proposal and single-use permit", async () => {
