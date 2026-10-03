@@ -83,7 +83,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 31] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 32] = [
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -95,6 +95,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 31] = [
     "write-file",
     "create-spreadsheet",
     "create-document",
+    "create-presentation",
     "run-shell",
     "web-fetch",
     "computer-artifact",
@@ -214,7 +215,7 @@ pub(crate) fn execute_tool_outcome(
     match tool.as_str() {
         "read-file" => ToolOutcome::Done(run_read_file(&arguments, workspace_root)),
         "write-file" => ToolOutcome::Done(run_write_file(&arguments, workspace_root)),
-        "create-spreadsheet" | "create-document" => ToolOutcome::Done(Err(
+        "create-spreadsheet" | "create-document" | "create-presentation" => ToolOutcome::Done(Err(
             "Office authoring requires the scoped native workspace boundary.".into(),
         )),
         "run-shell" => ToolOutcome::Done(Err(
@@ -281,7 +282,9 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "repository-recover" => Some(("full-access", "high")),
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
-        "create-spreadsheet" | "create-document" => Some(("full-access", "high")),
+        "create-spreadsheet" | "create-document" | "create-presentation" => {
+            Some(("full-access", "high"))
+        }
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
         "local-app-list" => Some(("read-only", "low")),
@@ -363,6 +366,7 @@ fn is_computer_tool(tool: &str) -> bool {
             | "write-file"
             | "create-spreadsheet"
             | "create-document"
+            | "create-presentation"
             | "computer-artifact"
             | "generate-image"
             | "edit-image"
@@ -436,7 +440,11 @@ pub(crate) fn validate_tool_approval_binding(
         .iter()
         .map(|value| truncate_characters(&normalize_spaces(value), 240))
         .collect::<std::collections::BTreeSet<_>>();
-    if matches!(tool, "create-spreadsheet" | "create-document") || tool.starts_with("repository-") {
+    if matches!(
+        tool,
+        "create-spreadsheet" | "create-document" | "create-presentation"
+    ) || tool.starts_with("repository-")
+    {
         let digest_entries = approved
             .iter()
             .filter(|value| value.starts_with(ARGUMENT_DIGEST_PREFIX))
@@ -1624,7 +1632,10 @@ pub async fn execute_tool_call(
         );
         return result.map(|output| ToolResult { ok: true, output });
     }
-    if matches!(tool.as_str(), "create-spreadsheet" | "create-document") {
+    if matches!(
+        tool.as_str(),
+        "create-spreadsheet" | "create-document" | "create-presentation"
+    ) {
         let workspace_id = request
             .workspace_id
             .clone()
@@ -1933,7 +1944,11 @@ fn record_audit(recorder: crate::action_history::Recorder, store: Option<&crate:
 /// file content, env values, or command payloads beyond a bounded prefix.
 fn preview_tool_arguments(tool: &str, arguments: &serde_json::Value) -> String {
     let pick = match tool {
-        "read-file" | "write-file" | "create-spreadsheet" | "create-document" => "path",
+        "read-file"
+        | "write-file"
+        | "create-spreadsheet"
+        | "create-document"
+        | "create-presentation" => "path",
         "run-shell" => "command",
         "web-fetch" => "url",
         "generate-image" | "edit-image" => "title",

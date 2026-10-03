@@ -24,6 +24,34 @@ const textCell = {
 };
 
 export const OFFICE_TOOLS: Record<string, BackendTool> = {
+  "create-presentation": {
+    name: "create-presentation",
+    description:
+      "Create an editable macro-free 16:9 PPTX in this agent's private workspace. Provide short titles, optional paragraphs and at most five short bullets per slide; choose a light or dark theme. Mivlet rejects overfull slides, escapes text, and validates the passive Office package. Publish the verified file with computer-artifact. Use a new path for revisions; existing files are never overwritten.",
+    defaultMode: "full-access",
+    defaultRisk: "high",
+    parameters: JSON.stringify({
+      type: "object",
+      properties: {
+        path: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9 _./-]{0,240}\\.pptx$" },
+        title: { type: "string", minLength: 1, maxLength: 160 },
+        theme: { type: "string", enum: ["light", "dark"] },
+        slides: {
+          type: "array", minItems: 1, maxItems: 30,
+          items: {
+            type: "object",
+            properties: {
+              title: { type: "string", minLength: 1, maxLength: 120 },
+              body: { type: "string", minLength: 1, maxLength: 600 },
+              bullets: { type: "array", maxItems: 5, items: { type: "string", minLength: 1, maxLength: 120 } },
+            },
+            required: ["title"], additionalProperties: false,
+          },
+        },
+      },
+      required: ["path", "title", "slides"], additionalProperties: false,
+    }),
+  },
   "create-spreadsheet": {
     name: "create-spreadsheet",
     description:

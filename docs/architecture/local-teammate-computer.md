@@ -232,15 +232,30 @@ preparation and verification; the path-based system launch still leaves a race
 between verification and the associated application's open.
 The removed Linux image no longer supplies office, coding or shell programs.
 
-Two native-boundary tools author a narrow passive Office subset without launching
+Three native-boundary tools author a bounded passive Office subset without launching
 Microsoft Office, a scripting language or a process. `create-document` accepts a
 title plus bounded headings, paragraphs, bullets and tables. `create-spreadsheet`
 accepts at most eight sheets and 100,000 cells; formula cells are limited to
 same-sheet `SUM`, `AVERAGE`, `MIN`, `MAX` and `COUNT` over earlier A1 ranges of at
-most 10,000 cells. Rust calculates the cached formula result. Both tools write a
+most 10,000 cells. Rust calculates the cached formula result.
+`create-presentation` produces editable 16:9 PPTX with light/dark themes, up to
+30 slides, short titles, optional paragraphs and real bullets. Dense slides are
+rejected so authors split content instead of losing it. All three tools write a
 temporary OOXML package, reopen it through the existing macro, embedding and
 external-relationship validator, and only then place it at a new publication-safe
 workspace path. `computer-artifact` remains a distinct, explicit publication step.
+
+The conversation viewer extracts bounded Office content from the exact
+receipt-verified published bytes: document paragraphs/tables, sheet grids with
+cached formula values and preserved cell positions, and ordered slide text.
+It accepts no HTML or external assets and does not claim Office layout fidelity.
+Previews stop at 128 KB of text, 100 rows, 26 columns, eight sheets or 30 slides;
+unsupported/oversized parts fall back to external opening. Save uses a native
+file dialog rather than a model/renderer-selected host path, re-verifies the
+receipt after selection, stages exact bytes and commits under the current
+generation. Cancellation and revocation prevent placement, and existing files
+are never overwritten. Open creates a fresh copy for normal Office editing.
+PDF authoring/preview, charts and arbitrary Office editing remain separate gaps.
 
 Repository ZIP import has a different boundary. It creates a sanitized private
 snapshot for bounded file reads and explicit text edits. It does not initialize

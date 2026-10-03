@@ -1,0 +1,15 @@
+.office-preview { font-size: 14px; line-height: 1.6; min-width: 0; }
+.office-preview__notice { color: var(--ink-muted); font-size: 12px; margin: 0 0 16px; }
+.office-preview__sections { display: flex; gap: 6px; overflow-x: auto; margin: 0 0 16px; padding: 3px; }
+.office-preview__sections button { flex: 0 0 auto; min-height: 44px; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-2); color: var(--ink); background: var(--surface); cursor: pointer; }
+.office-preview__sections button[aria-pressed="true"] { background: var(--surface-hover); border-color: var(--ink-muted); font-weight: 500; }
+.office-preview__page { padding: 20px; border: 1px solid var(--line); border-radius: var(--radius-2); background: var(--surface); overflow-wrap: anywhere; }
+.office-preview__page > p { margin: 0 0 12px; white-space: pre-wrap; }
+.office-preview__page > h3 { margin: 0 0 16px; font-size: 16px; }
+.office-preview__page > h3.office-preview__title { font-size: 22px; }
+.office-preview__table { max-width: 100%; overflow: auto; margin: 12px 0; }
+.office-preview__table table { border-collapse: collapse; min-width: 100%; font-size: 12px; }
+.office-preview__table th, .office-preview__table td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; vertical-align: top; white-space: pre-wrap; min-width: 65px; max-width: 320px; overflow-wrap: anywhere; }
+.office-preview__table th { color: var(--ink-muted); background: var(--surface-raised); font-weight: 500; }
+.office-preview--spreadsheet .office-preview__page { padding: 12px; }
+.office-preview--presentation .office-preview__page { min-height: 230px; }

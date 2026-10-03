@@ -129,10 +129,17 @@ impl ComputerAuthority {
         self: &Arc<Self>,
         generation: u64,
     ) -> Result<OperationTicket, String> {
-        let mut inner = self.inner.lock().map_err(|_| STALE)?;
         if self.plugins.load(Ordering::Acquire) & super::plugins::COMPUTER == 0 {
             return Err("Enable Computer Use in Plugins before using this tool.".into());
         }
+        self.begin_viewer(generation)
+    }
+    /// User-owned artifact viewing/export does not grant agent computer control.
+    pub(crate) fn begin_viewer(
+        self: &Arc<Self>,
+        generation: u64,
+    ) -> Result<OperationTicket, String> {
+        let mut inner = self.inner.lock().map_err(|_| STALE)?;
         if generation != inner.durable.generation || inner.draining {
             return Err(STALE.into());
         }

@@ -970,6 +970,7 @@ pub struct ArtifactPreview {
     mime_type: String,
     text: Option<String>,
     image_data_url: Option<String>,
+    office: Option<super::office_preview::OfficePreview>,
     truncated: bool,
 }
 
@@ -980,6 +981,7 @@ fn preview_bytes(artifact: &LocalComputerArtifact, bytes: &[u8]) -> ArtifactPrev
         mime_type: artifact.mime_type.clone(),
         text: None,
         image_data_url: None,
+        office: None,
         truncated: false,
     };
     if artifact.mime_type.starts_with("text/") {
@@ -996,8 +998,81 @@ fn preview_bytes(artifact: &LocalComputerArtifact, bytes: &[u8]) -> ArtifactPrev
             artifact.mime_type,
             base64::engine::general_purpose::STANDARD.encode(bytes)
         ));
+    } else if let Ok(extension @ ("docx" | "xlsx" | "pptx")) = allowed_path(&artifact.relative_path)
+    {
+        if let Some((office, truncated)) = super::office_preview::preview(bytes, extension) {
+            preview.office = Some(office);
+            preview.truncated = truncated;
+        }
     }
     preview
+}
+
+fn stage_export(
+    destination: &Path,
+    extension: &str,
+    bytes: &[u8],
+) -> Result<tempfile::NamedTempFile, String> {
+    if destination.extension().and_then(|value| value.to_str()) != Some(extension) {
+        return Err(format!("Save this file with its .{extension} extension."));
+    }
+    if destination.exists() {
+        return Err(
+            "Choose a new file name. Saving an artifact keeps existing files intact.".into(),
+        );
+    }
+    let mut staged =
+        tempfile::NamedTempFile::new_in(destination.parent().ok_or("Choose a save folder.")?)
+            .map_err(|_| "Mivlet could not prepare the file in that folder.")?;
+    staged
+        .write_all(bytes)
+        .and_then(|_| staged.as_file().sync_all())
+        .map_err(|_| "Mivlet could not save the file in that folder.")?;
+    Ok(staged)
+}
+
+fn commit_export(staged: tempfile::NamedTempFile, destination: &Path) -> Result<bool, String> {
+    staged
+        .persist_noclobber(destination)
+        .map_err(|_| "Mivlet could not finish saving. Choose a new file name and try again.")?;
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn local_computer_save_artifact(
+    window: tauri::WebviewWindow,
+    request: OpenArtifactRequest,
+    computers: tauri::State<'_, Arc<LocalComputerState>>,
+) -> Result<bool, String> {
+    if window.label() != "main" {
+        return Err("Save the artifact from its Mivlet conversation.".into());
+    }
+    let computers = computers.inner().clone();
+    let ticket = computers
+        .authority_for(&request.workspace_id, &request.agent_id)?
+        .begin_viewer(request.expected_generation)?;
+    let (receipt, _) = verified_artifact(&computers, &request)?;
+    let extension = allowed_path(&receipt.artifact.relative_path)?;
+    // The native dialog exclusively owns the host destination. No model or
+    // renderer argument can supply a path or authorize a silent host write.
+    let selected = rfd::AsyncFileDialog::new()
+        .set_title("Save generated file")
+        .set_file_name(&receipt.export_name)
+        .add_filter("Generated file", &[extension])
+        .save_file()
+        .await;
+    let Some(selected) = selected else {
+        return Ok(false);
+    };
+    ticket.check()?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let (receipt, bytes) = verified_artifact(&computers, &request)?;
+        let extension = allowed_path(&receipt.artifact.relative_path)?;
+        let staged = stage_export(selected.path(), extension, &bytes)?;
+        ticket.commit(|| commit_export(staged, selected.path()))
+    })
+    .await
+    .map_err(|_| "Mivlet could not save the artifact.".to_string())?
 }
 
 #[tauri::command]
@@ -1088,6 +1163,36 @@ pub async fn local_computer_open_artifact(
 mod tests {
     use super::*;
     use lopdf::dictionary;
+
+    #[test]
+    fn saving_published_bytes_never_clobbers_and_revocation_prevents_placement() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("report.docx");
+        let staged = stage_export(&destination, "docx", b"verified published bytes").unwrap();
+        let authority = super::super::authority::ComputerAuthority::load(root.path()).unwrap();
+        let ticket = authority.begin_viewer(1).unwrap();
+        authority.revoke(1).unwrap();
+        assert!(ticket
+            .commit(|| commit_export(staged, &destination))
+            .is_err());
+        assert!(!destination.exists());
+
+        let staged = stage_export(&destination, "docx", b"verified published bytes").unwrap();
+        std::fs::write(&destination, b"existing user file").unwrap();
+        assert!(commit_export(staged, &destination).is_err());
+        assert_eq!(std::fs::read(&destination).unwrap(), b"existing user file");
+        assert!(stage_export(&root.path().join("report.exe"), "docx", b"bytes").is_err());
+    }
+
+    #[test]
+    fn save_copy_contains_exact_published_bytes() {
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("report.pdf");
+        let bytes = b"receipt-verified bytes";
+        let staged = stage_export(&destination, "pdf", bytes).unwrap();
+        assert!(commit_export(staged, &destination).unwrap());
+        assert_eq!(std::fs::read(destination).unwrap(), bytes);
+    }
 
     #[test]
     fn previews_are_bounded_plain_text_or_raster_data() {

@@ -107,6 +107,10 @@ pub(crate) fn prepare(
             let bytes = create_docx(&request)?;
             (request.path, bytes, 0, "docx")
         }
+        "create-presentation" => {
+            let (path, bytes) = super::presentation_authoring::create(arguments)?;
+            (path, bytes, 0, "pptx")
+        }
         _ => return Err("The Office authoring tool is not supported.".into()),
     };
     let destination = destination(&path, format, workspace_root)?;
@@ -534,7 +538,7 @@ fn ensure_document_size(total_text: usize) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_document_text(text: &str, max: usize) -> Result<(), String> {
+pub(super) fn validate_document_text(text: &str, max: usize) -> Result<(), String> {
     if text.trim().is_empty() || text.chars().count() > max || has_forbidden_control(text) {
         return Err(
             "Document text is empty, too long, or contains unsupported control characters.".into(),
@@ -547,7 +551,7 @@ fn paragraph_xml(text: &str, style: &str, bold: bool) -> String {
     format!("<w:p><w:pPr><w:pStyle w:val=\"{style}\"/></w:pPr><w:r>{}<w:t xml:space=\"preserve\">{}</w:t></w:r></w:p>", if bold { "<w:rPr><w:b/></w:rPr>" } else { "" }, escape_xml(text))
 }
 
-fn zip_files(files: Vec<(String, String)>) -> Result<Vec<u8>, String> {
+pub(super) fn zip_files(files: Vec<(String, String)>) -> Result<Vec<u8>, String> {
     let mut output = Cursor::new(Vec::new());
     {
         let mut archive = ZipWriter::new(&mut output);
@@ -567,7 +571,7 @@ fn zip_files(files: Vec<(String, String)>) -> Result<Vec<u8>, String> {
     Ok(output.into_inner())
 }
 
-fn root_relationships(target: &str) -> String {
+pub(super) fn root_relationships(target: &str) -> String {
     format!("<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument\" Target=\"{target}\"/></Relationships>")
 }
 
@@ -645,7 +649,7 @@ fn has_forbidden_control(value: &str) -> bool {
     })
 }
 
-fn escape_xml(value: &str) -> String {
+pub(super) fn escape_xml(value: &str) -> String {
     value
         .replace('&', "&amp;")
         .replace('<', "&lt;")
