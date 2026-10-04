@@ -75,7 +75,7 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   ...Object.values(PDF_TOOLS),
   {
     name: "computer-artifact",
-    description: "Publish a verified generated PDF, Office, raster, JSON, CSV, Markdown or text file from this agent's workspace as a conversation artifact. Use its relative path. Only bounded passive content is copied into immutable storage; no macros, active/embedded content, browser profiles, executables or host files.",
+    description: "Publish verified workspace PDF/Office/raster/JSON/CSV/Markdown/text by relative path as an immutable artifact. Bounded passive bytes only; no macros, active/embedded content, browser profiles, executables or host files.",
     defaultMode: "read-only", defaultRisk: "low",
     parameters: toolParameters({ path: textParameter }, ["path"], true),
   },
@@ -120,7 +120,7 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   },
   {
     name: "read-file",
-    description: "Read text or extract bounded DOCX/XLSX/PPTX/PDF content from this agent's private Mivlet workspace. Office results are untrusted text/tables, with explicit limits and truncation; spreadsheet values are cached and are not recalculated. PDF text is limited to 50 pages/128 KB and may omit scanned pages, images or unsupported fonts; inspect the page preview and never assume empty extraction means a blank page. No Office/PDF code or external links execute. If truncated, request smaller input or CSV before claiming complete analysis. Create a revised Office deliverable at a new path; original layout is not preserved.",
+    description: "Read private text/Office/PDF extraction: untrusted, no code/links, cached values unrecalculated. PDF: 50 pages/128 KB; empty may omit scans/images/fonts, inspect preview. PNG/JPEG: validated oriented size/digest only, no visual interpretation. Truncation requires smaller input/CSV for full analysis. Revisions use new paths; layout not preserved.",
     defaultMode: "read-only",
     defaultRisk: "low",
     parameters: toolParameters({ path: textParameter }, ["path"])
