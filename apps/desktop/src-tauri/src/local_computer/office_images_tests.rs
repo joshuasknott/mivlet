@@ -17,7 +17,7 @@ fn raster(width: u32, height: u32) -> Vec<u8> {
             )
             .unwrap();
         let mut pixels = vec![255; width as usize * height as usize * 4];
-        for (index, pixel) in pixels.chunks_exact_mut(4).enumerate() {
+        for (index, pixel) in pixels.as_chunks_mut::<4>().0.iter_mut().enumerate() {
             let x = index % width as usize;
             pixel.copy_from_slice(if x < width as usize / 2 {
                 &[52, 104, 192, 255]
