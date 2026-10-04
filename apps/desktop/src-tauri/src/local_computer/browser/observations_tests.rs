@@ -39,6 +39,7 @@ fn tab_choices_are_exact_window_generation_expiry_and_single_use_fenced() {
         created: Instant::now(),
         window: 77,
         choices: HashMap::from([("opaque-ref".into(), "native-target".into())]),
+        activations: HashMap::new(),
     };
     assert!(snapshot.consume(11, 2, "opaque-ref").is_err());
     assert!(snapshot.consume(10, 3, "opaque-ref").is_err());

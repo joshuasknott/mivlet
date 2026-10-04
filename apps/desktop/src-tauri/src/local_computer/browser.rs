@@ -191,8 +191,26 @@ pub(crate) fn navigate(
 enum Request<'a> {
     Read(Option<(&'a str, &'a str)>),
     Navigate(&'a str, &'a str, &'a str),
+    Activate(&'a str, &'a str, &'a str),
     Click(&'a str, &'a str, &'a str),
     Scroll(&'a str, &'a str, &'a str),
+}
+pub(crate) fn activate(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+    title: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Activate(reference, origin, title),
+    )
 }
 pub(crate) fn scroll(
     computers: &LocalComputerState,
@@ -298,6 +316,15 @@ fn execute(
                     reference,
                     origin,
                     url,
+                    &check,
+                    &checked_dispatch,
+                ),
+                Request::Activate(reference, origin, title) => process.activate(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    title,
                     &check,
                     &checked_dispatch,
                 ),

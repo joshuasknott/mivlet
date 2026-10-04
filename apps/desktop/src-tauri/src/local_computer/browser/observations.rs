@@ -18,6 +18,7 @@ pub(super) struct TabSnapshot {
     created: Instant,
     window: u64,
     choices: HashMap<String, String>,
+    activations: HashMap<String, super::activation::Choice>,
 }
 impl TabSnapshot {
     fn consume(
@@ -34,6 +35,17 @@ impl TabSnapshot {
         }
         Ok((self.choices.remove(reference).ok_or(STALE)?, self.window))
     }
+    pub(super) fn activation(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+    ) -> Result<super::activation::Choice, String> {
+        self.consume(hwnd, generation, reference)?;
+        self.activations
+            .remove(reference)
+            .ok_or_else(|| STALE.into())
+    }
 }
 
 fn bounded(value: &Value, max: usize) -> String {
@@ -44,6 +56,14 @@ fn bounded(value: &Value, max: usize) -> String {
         .filter(|c| !c.is_control() || matches!(c, '\n' | '\t'))
         .take(max)
         .collect()
+}
+pub(super) fn title(value: &Value) -> String {
+    let title = bounded(&value["title"], 200);
+    if crate::secret_redaction::looks_secret(&title) {
+        "Private title".into()
+    } else {
+        title
+    }
 }
 fn id(value: &Value) -> Result<String, String> {
     value
@@ -173,6 +193,7 @@ pub(super) fn tabs(
     let (window, pages) = targets(process, hwnd, check)?;
     let mut choices = HashMap::new();
     let mut navigation = HashMap::new();
+    let mut activations = HashMap::new();
     let mut tabs = Vec::new();
     let live: HashSet<_> = pages
         .iter()
@@ -183,12 +204,7 @@ pub(super) fn tabs(
         let target = id(&page["targetId"])?;
         let reference = super::super::super::desktop_tools::opaque_id()?;
         choices.insert(reference.clone(), target.clone());
-        let title = bounded(&page["title"], 200);
-        let title = if crate::secret_redaction::looks_secret(&title) {
-            "Private title".into()
-        } else {
-            title
-        };
+        let title = title(&page);
         let raw_url = page["url"].as_str().unwrap_or_default();
         let mut origin = url_origin(raw_url);
         let mut navigation_ref = None;
@@ -198,12 +214,16 @@ pub(super) fn tabs(
             let choice = super::navigation::Choice::capture(
                 hwnd, generation, window, &target, &session, raw_url, &value,
             )?;
+            activations.insert(
+                reference.clone(),
+                super::activation::Choice::capture(choice.clone(), title.clone()),
+            );
             let reference = super::super::super::desktop_tools::opaque_id()?;
             origin = Some(choice.origin.clone());
             navigation_ref = Some(reference.clone());
             navigation.insert(reference, choice);
         }
-        tabs.push(json!({"tabRef":reference,"navigationRef":navigation_ref,"title":title,"origin":origin}));
+        tabs.push(json!({"tabRef":reference,"navigationRef":navigation_ref,"title":title,"origin":origin,"canActivate":activations.contains_key(&reference)}));
     }
     check()?;
     process.tabs = Some(TabSnapshot {
@@ -212,9 +232,10 @@ pub(super) fn tabs(
         created: Instant::now(),
         window,
         choices,
+        activations,
     });
     process.navigation = navigation;
-    Ok(json!({"tabs":tabs,"trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+    Ok(json!({"tabs":tabs,"activationExpiresSeconds":30,"trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
 #[derive(Clone, PartialEq, Eq)]

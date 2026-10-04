@@ -16,6 +16,18 @@ const request: NativeCompletionRequest = {
 };
 
 describe("native application action schemas", () => {
+  it("shares explicit listed tab selection without native IDs or focus options", () => {
+    const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-activate")!;
+    const schema = JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["tabRef", "origin", "title"]);
+    expect(Object.keys(schema.properties)).toEqual(["tabRef", "origin", "title"]);
+    expect(schema.additionalProperties).toBe(false);
+    const requestWithTool = { ...request, tools: [tool] };
+    const openAi = shapeOpenAiRequest(requestWithTool) as { tools: Array<{ function: { parameters: unknown } }> };
+    const anthropic = shapeAnthropicRequest({ ...requestWithTool, providerId: "anthropic" }) as { tools: Array<{ input_schema: unknown }> };
+    expect(openAi.tools[0].function.parameters).toEqual(schema);
+    expect(anthropic.tools[0].input_schema).toEqual(schema);
+  });
   it("shares bounded browser scrolling without coordinate, amount or script inputs", () => {
     const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-scroll")!;
     const schema = JSON.parse(tool.parameters);

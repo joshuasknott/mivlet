@@ -258,18 +258,26 @@ fn navigation_cannot_use_the_unfenced_read_surface() {
 }
 
 #[test]
-fn clicks_and_scrolls_require_dispatch_and_stop_interrupts_wait_without_replay() {
+fn browser_inputs_require_dispatch_and_stop_interrupts_wait_without_replay() {
     use std::io::Read;
-    for (command, params, method) in [
+    for (command, params, method, session) in [
         (
             Command::Click,
             serde_json::json!({"x":10,"y":20,"duration":0,"tapCount":1,"gestureSourceType":"mouse"}),
             "Input.synthesizeTapGesture",
+            Some("session"),
         ),
         (
             Command::Scroll,
             serde_json::json!({"type":"mouseWheel","x":400,"y":300,"deltaX":0,"deltaY":480,"modifiers":0,"buttons":0,"button":"none","pointerType":"mouse"}),
             "Input.dispatchMouseEvent",
+            Some("session"),
+        ),
+        (
+            Command::Activate,
+            serde_json::json!({"targetId":"exact-native-target"}),
+            "Target.activateTarget",
+            None,
         ),
     ] {
         let root = tempfile::tempdir().unwrap();
@@ -281,7 +289,7 @@ fn clicks_and_scrolls_require_dispatch_and_stop_interrupts_wait_without_replay()
         let output = Pair::new(true).unwrap();
         let mut control = ControlPipe::new(input.parent, output.parent);
         assert!(control
-            .read_command(command, params.clone(), Some("session"), &|| Ok(()))
+            .read_command(command, params.clone(), session, &|| Ok(()))
             .is_err());
         let mut available = 0;
         unsafe {
@@ -304,7 +312,7 @@ fn clicks_and_scrolls_require_dispatch_and_stop_interrupts_wait_without_replay()
             control.exchange(
                 command,
                 params,
-                Some("session"),
+                session,
                 &|| ticket.check(),
                 Some(&|start| ticket.with_current(start)),
             )
@@ -318,13 +326,7 @@ fn clicks_and_scrolls_require_dispatch_and_stop_interrupts_wait_without_replay()
         assert!(String::from_utf8_lossy(&bytes[..count]).contains(method));
         // Even a fresh authority must not reuse an interrupted pipe or replay input.
         assert!(control
-            .exchange(
-                command,
-                params,
-                Some("session"),
-                &|| Ok(()),
-                Some(&|start| start())
-            )
+            .exchange(command, params, session, &|| Ok(()), Some(&|start| start()))
             .is_err());
         unsafe {
             PeekNamedPipe(

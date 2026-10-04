@@ -317,6 +317,7 @@ pub(super) enum Command {
     Accessibility,
     DescribeNode,
     Navigate,
+    Activate,
     Quads,
     Layout,
     Hit,
@@ -336,6 +337,7 @@ impl Command {
             Self::Accessibility => "Accessibility.getFullAXTree",
             Self::DescribeNode => "DOM.describeNode",
             Self::Navigate => "Page.navigate",
+            Self::Activate => "Target.activateTarget",
             Self::Quads => "DOM.getContentQuads",
             Self::Layout => "Page.getLayoutMetrics",
             Self::Hit => "DOM.getNodeForLocation",
@@ -364,7 +366,7 @@ impl ControlPipe {
     ) -> Result<serde_json::Value, String> {
         if matches!(
             command,
-            Command::Navigate | Command::Click | Command::Scroll
+            Command::Navigate | Command::Activate | Command::Click | Command::Scroll
         ) {
             return Err("Browser input requires the native dispatch fence.".into());
         }
@@ -414,6 +416,20 @@ impl ControlPipe {
             Command::Navigate,
             params,
             Some(session),
+            check,
+            Some(dispatch),
+        )
+    }
+    pub(super) fn activate(
+        &mut self,
+        target: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<serde_json::Value, String> {
+        self.exchange(
+            Command::Activate,
+            serde_json::json!({"targetId":target}),
+            None,
             check,
             Some(dispatch),
         )

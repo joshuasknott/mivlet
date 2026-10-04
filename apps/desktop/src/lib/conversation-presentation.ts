@@ -41,6 +41,7 @@ const toolLabels: Record<string, [string, string]> = {
   "web-fetch": ["Reading an exact web page", "Read an exact web page"],
   "local-app-list": ["Listing open applications", "Listed open applications"],
   "local-browser-tabs": ["Checking browser tabs", "Checked browser tabs"],
+  "local-browser-activate": ["Selecting a browser tab", "Selected browser tab; awaiting observation"],
   "local-browser-observe": ["Reading the browser page", "Read the browser page"],
   "local-browser-navigate": ["Opening a browser page", "Navigation sent; awaiting observation"],
   "local-browser-click": ["Using a browser control", "Click sent; awaiting observation"],

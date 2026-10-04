@@ -4,6 +4,19 @@ import { createComputerTaskExecutor } from "./computer-task-executor";
 
 const approval = (tool: string) => ({ action: `${tool} approved action` } as ApprovalRequest);
 describe("computer task execution bounds", () => {
+  it("requires page reconciliation and forbids uncertain tab activation replay with a fresh ref", async () => {
+    const execute = vi.fn().mockRejectedValueOnce(new Error("Browser tab activation outcome is uncertain. No input was replayed."));
+    const guarded = createComputerTaskExecutor(execute);
+    const action = '{"tabRef":"old","origin":"https://example.test","title":"Report"}';
+    await expect(guarded(approval("local-browser-activate"), action)).rejects.toThrow("uncertain");
+    execute.mockResolvedValue('{"tabs":[]}');
+    await guarded(approval("local-browser-tabs"), '{}');
+    await expect(guarded(approval("local-browser-activate"), action)).rejects.toThrow("Reconcile");
+    execute.mockResolvedValue('{"tabVisible":true,"content":[]}');
+    await guarded(approval("local-browser-observe"), '{}');
+    await expect(guarded(approval("local-browser-activate"), action.replace("old", "fresh"))).rejects.toThrow("already has an uncertain outcome");
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
   it("does not replay uncertain scrolling using a fresh scroll ref", async () => {
     const execute = vi.fn().mockRejectedValueOnce(new Error("Browser scroll outcome is uncertain. No input was replayed."));
     const guarded = createComputerTaskExecutor(execute);

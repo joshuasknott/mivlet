@@ -17,7 +17,7 @@ const COMPUTER_TOOLS = new Set([
   "repository-status", "repository-read", "repository-write", "repository-run", "repository-commit", "repository-publish", "repository-recover",
   "read-file", "write-file", "workspace-run", "create-spreadsheet", "create-document", "create-presentation", "create-pdf", "computer-artifact",
   "local-app-list", "local-app-select", "local-app-observe", "local-app-action",
-  "local-browser-open", "local-browser-tabs", "local-browser-observe", "local-browser-navigate", "local-browser-click", "local-browser-scroll",
+  "local-browser-open", "local-browser-tabs", "local-browser-observe", "local-browser-activate", "local-browser-navigate", "local-browser-click", "local-browser-scroll",
   "local-desktop-observe", "local-desktop-action",
   "generate-image", "edit-image",
 ]);

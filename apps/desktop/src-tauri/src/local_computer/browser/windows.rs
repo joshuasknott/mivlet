@@ -24,6 +24,8 @@ use windows_sys::Win32::{
     },
 };
 
+#[path = "activation.rs"]
+mod activation;
 #[path = "controls.rs"]
 mod controls;
 #[cfg(debug_assertions)]
@@ -402,6 +404,26 @@ pub(super) struct BrowserProcess {
 }
 
 impl BrowserProcess {
+    pub(super) fn activate(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        title: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        activation::activate(
+            self,
+            (hwnd, generation),
+            reference,
+            origin,
+            title,
+            check,
+            dispatch,
+        )
+    }
     pub(super) fn scroll(
         &mut self,
         hwnd: u64,

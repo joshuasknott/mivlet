@@ -2,7 +2,7 @@ import type { ToolExecutor } from "@mivlet/connectors";
 import { isLocalComputerTool } from "./computer-tools";
 
 const OBSERVATIONS = new Set(["local-app-observe", "local-desktop-observe", "local-browser-observe"]);
-const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "local-browser-click", "local-browser-scroll", "local-browser-navigate", "write-file"]);
+const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "local-browser-click", "local-browser-scroll", "local-browser-navigate", "local-browser-activate", "write-file"]);
 type RecoveryClass = "stale-observation" | "loading" | "human-control" | "uncertain-effect" | "foreground-required";
 type PendingRecovery = { kind: RecoveryClass; tools: ReadonlySet<string>; target?: string };
 

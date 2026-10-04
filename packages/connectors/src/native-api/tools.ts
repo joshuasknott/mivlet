@@ -160,7 +160,7 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   },
   {
     name: "local-browser-tabs",
-    description: "List selected owned tabs: origins/titles, 60s tabRefs, 30s navigationRefs. Untrusted evidence.",
+    description: "List owned tabs: origins/titles, 60s tabRefs for reads, canActivate for 30s selection, 30s navigationRefs. Untrusted.",
     defaultMode: "read-only", defaultRisk: "medium",
     parameters: toolParameters({}, undefined, true)
   },
@@ -169,6 +169,12 @@ const TOOL_DEFINITIONS: BackendTool[] = [
     description: "Read public top-frame text at exact origin/tabRef; 30s controlRefs/scrollRef+viewport. Private fields stop reads; no input grant.",
     defaultMode: "read-only", defaultRisk: "medium",
     parameters: toolParameters({ tabRef: textParameter, origin: textParameter }, ["tabRef", "origin"], true)
+  },
+  {
+    name: "local-browser-activate",
+    description: "Select canActivate tab once: 30s tabRef, exact origin/title, selected foreground only. Observe; no replay.",
+    defaultMode: "full-access", defaultRisk: "high",
+    parameters: toolParameters({ tabRef: textParameter, origin: textParameter, title: textParameter }, ["tabRef", "origin", "title"], true)
   },
   {
     name: "local-browser-navigate",

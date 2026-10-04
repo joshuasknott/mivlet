@@ -10,14 +10,15 @@ use std::time::{Duration, Instant};
 const STALE: &str = "The browser navigation choice expired or its document changed. List its tabs again before choosing a new action.";
 const UNKNOWN: &str = "Browser navigation was not confirmed. It may have changed the page or started a browser-managed download. No input was replayed and no Mivlet artifact was imported; start a fresh request and inspect the current state.";
 
+#[derive(Clone)]
 pub(super) struct Choice {
     hwnd: u64,
     generation: u64,
     window: u64,
     created: Instant,
-    target: String,
-    session: String,
-    frame: Frame,
+    pub(super) target: String,
+    pub(super) session: String,
+    pub(super) frame: Frame,
     pub(super) origin: String,
 }
 impl Choice {
@@ -64,6 +65,31 @@ impl Choice {
             return Err(STALE.into());
         }
         Ok(())
+    }
+    pub(super) fn validate_live(
+        &self,
+        process: &mut BrowserProcess,
+        hwnd: u64,
+        generation: u64,
+        origin: &str,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<(), String> {
+        let (window, pages) = observations::targets(process, hwnd, check)?;
+        let page = pages
+            .iter()
+            .find(|page| page["targetId"] == self.target)
+            .ok_or(STALE)?;
+        if page["url"].as_str() != Some(&self.frame.url) {
+            return Err(STALE.into());
+        }
+        let current = observations::call(
+            process,
+            Command::Frames,
+            json!({}),
+            Some(&self.session),
+            check,
+        )?;
+        self.check(hwnd, generation, origin, window, &current)
     }
 }
 fn source_origin(value: &str) -> Result<String, String> {
@@ -118,22 +144,7 @@ pub(super) fn navigate(
     process.navigation.clear();
     process.controls.clear();
     process.scroll = None;
-    let (window, pages) = observations::targets(process, hwnd, check)?;
-    let page = pages
-        .iter()
-        .find(|page| page["targetId"] == choice.target)
-        .ok_or(STALE)?;
-    if page["url"].as_str() != Some(&choice.frame.url) {
-        return Err(STALE.into());
-    }
-    let current = observations::call(
-        process,
-        Command::Frames,
-        json!({}),
-        Some(&choice.session),
-        check,
-    )?;
-    choice.check(hwnd, generation, origin, window, &current)?;
+    choice.validate_live(process, hwnd, generation, origin, check)?;
     check()?;
     let result = process._pipe.as_mut().ok_or("The browser's native connection is unavailable.")?.navigate(
         json!({"url":destination.as_str(), "frameId":choice.frame.id, "referrerPolicy":"noReferrer"}), &choice.session, check, dispatch
