@@ -72,7 +72,9 @@ a reviewed pinned extension and currently fail as missing commands.
 Fresh snapshots exclude Git custody and reject links, reparse paths, hardlinks,
 aliases and oversized entries. Originals are never changed. Successful commands
 seal a tree hash; repository import verifies it again and uses a staged rename
-with rollback. Analysis reopens only declared passive outputs, validates content
+with rollback. Hashing/copying polls Stop outside the authority lock; only the
+final rename holds the current-generation fence, and old-tree deletion follows
+outside that fence. Analysis reopens only declared passive outputs, validates content
 and imports the set through its existing generation-fenced transaction.
 
 Private crash journals are persisted before runtime staging. Exclusive run

@@ -84,6 +84,18 @@ pub struct CompletedRun {
     work: PathBuf,
     limits: Limits,
 }
+pub struct PreparedRepositoryImport(files::PreparedTree);
+pub struct RepositoryImportCleanup {
+    _previous: tempfile::TempDir,
+}
+impl PreparedRepositoryImport {
+    /// Call inside the generation fence; drop returned cleanup outside it.
+    pub fn commit(self) -> Result<RepositoryImportCleanup, String> {
+        Ok(RepositoryImportCleanup {
+            _previous: self.0.commit()?,
+        })
+    }
+}
 impl CompletedRun {
     pub fn receipt(&self) -> &Receipt {
         &self.receipt
@@ -92,14 +104,35 @@ impl CompletedRun {
         &self.work
     }
     pub fn import_repository(&self, destination: &Path) -> Result<(), String> {
-        self.verify_seal()?;
-        files::replace_tree(&self.work, destination, self.limits)
+        self.prepare_repository_import(destination, || true)?
+            .commit()
+            .map(drop)
+    }
+    /// Stage the expensive copy without holding the authority lock; Stop is
+    /// polled during inspection/copying. Only the final rename needs the fence.
+    pub fn prepare_repository_import(
+        &self,
+        destination: &Path,
+        current: impl Fn() -> bool,
+    ) -> Result<PreparedRepositoryImport, String> {
+        self.verify_seal_current(&current)?;
+        let prepared = files::prepare_tree(&self.work, destination, self.limits, &current)?;
+        if Some(&prepared.digest) != self.receipt.output_id.as_ref() {
+            return Err(
+                "The sealed command snapshot changed during import. No changes imported.".into(),
+            );
+        }
+        Ok(PreparedRepositoryImport(prepared))
     }
     pub fn verify_seal(&self) -> Result<(), String> {
+        self.verify_seal_current(&|| true)
+    }
+    fn verify_seal_current(&self, current: &dyn Fn() -> bool) -> Result<(), String> {
         if self.receipt.exit_code != Some(0) || self.receipt.interrupted {
             return Err("Failed or interrupted command snapshots cannot be imported.".into());
         }
-        if Some(files::tree_id(&self.work, self.limits)?) != self.receipt.output_id {
+        if Some(files::tree_id_current(&self.work, self.limits, current)?) != self.receipt.output_id
+        {
             return Err("The sealed command snapshot changed. No changes imported.".into());
         }
         Ok(())

@@ -309,7 +309,22 @@ fn execute_in(
                 }
             };
             if result.exit_code == Some(0) && !result.interrupted {
-                ticket.with_current(|| completed.import_repository(&root))?;
+                let imported = (|| {
+                    let prepared =
+                        completed.prepare_repository_import(&root, || ticket.check().is_ok())?;
+                    ticket.with_current(|| prepared.commit()).map(drop)
+                })();
+                if let Err(error) = imported {
+                    repo.operation =
+                        "command result not imported; inspect before continuing".into();
+                    repo.last_result = Some(process::CommandResult {
+                        interrupted: true,
+                        output: crate::secret_redaction::redact_secret_text_or_omit(&error),
+                        ..result
+                    });
+                    save(directory, &repo)?;
+                    return Err(error);
+                }
             }
             repo.operation = if result.interrupted {
                 "command interrupted; inspect changes before continuing"

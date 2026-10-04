@@ -121,7 +121,8 @@ fn reserved_name(name: &str) -> bool {
         })
     })
 }
-pub(crate) fn scan(root: &Path, limits: Limits) -> Result<BTreeMap<String, u64>, String> {
+#[cfg(test)]
+fn scan(root: &Path, limits: Limits) -> Result<BTreeMap<String, u64>, String> {
     scan_current(root, limits, &|| true)
 }
 fn scan_current(
@@ -179,13 +180,6 @@ fn scan_current(
     }
     Ok(files)
 }
-pub(crate) fn copy_tree(
-    source: &Path,
-    destination: &Path,
-    limits: Limits,
-) -> Result<String, String> {
-    copy_tree_current(source, destination, limits, &|| true)
-}
 pub(crate) fn copy_tree_current(
     source: &Path,
     destination: &Path,
@@ -220,20 +214,37 @@ pub(crate) fn copy_tree_current(
     Ok(hex::encode(digest.finalize()))
 }
 pub(crate) fn tree_id(root: &Path, limits: Limits) -> Result<String, String> {
-    let entries = scan(root, limits)?;
+    tree_id_current(root, limits, &|| true)
+}
+pub(crate) fn tree_id_current(
+    root: &Path,
+    limits: Limits,
+    current: &dyn Fn() -> bool,
+) -> Result<String, String> {
+    let entries = scan_current(root, limits, current)?;
     let mut digest = Sha256::new();
     for (path, _) in entries {
+        if !current() {
+            return Err("Native execution stopped while verifying command files.".into());
+        }
         digest.update((path.len() as u64).to_le_bytes());
         digest.update(path.as_bytes());
         digest.update(Sha256::digest(read(&root.join(path), limits.file_bytes)?));
     }
     Ok(hex::encode(digest.finalize()))
 }
-pub(crate) fn replace_tree(
+pub(crate) struct PreparedTree {
+    staged: tempfile::TempDir,
+    backup: tempfile::TempDir,
+    destination: PathBuf,
+    pub(crate) digest: String,
+}
+pub(crate) fn prepare_tree(
     source: &Path,
     destination: &Path,
     limits: Limits,
-) -> Result<(), String> {
+    current: &dyn Fn() -> bool,
+) -> Result<PreparedTree, String> {
     strict_path(destination)?;
     let parent = destination
         .parent()
@@ -242,22 +253,35 @@ pub(crate) fn replace_tree(
         .prefix("native-import-")
         .tempdir_in(parent)
         .map_err(|_| "Cannot stage reviewed command changes.")?;
-    copy_tree(source, staged.path(), limits)?;
+    let digest = copy_tree_current(source, staged.path(), limits, current)?;
     let backup = tempfile::Builder::new()
         .prefix("native-previous-")
         .tempdir_in(parent)
         .map_err(|_| "Cannot preserve managed repository during import.")?;
-    let previous = backup.path().join("checkout");
-    fs::rename(destination, &previous)
-        .map_err(|_| "Cannot preserve managed checkout; no command files imported.")?;
-    if fs::rename(staged.path(), destination).is_err() {
-        if fs::rename(&previous, destination).is_err() {
-            let path = backup.keep();
-            return Err(format!("Managed checkout import needs recovery. Previous files retained at {}. Do not replay.",path.display()));
+    Ok(PreparedTree {
+        staged,
+        backup,
+        destination: destination.to_owned(),
+        digest,
+    })
+}
+impl PreparedTree {
+    pub(crate) fn commit(self) -> Result<tempfile::TempDir, String> {
+        strict_path(&self.destination)?;
+        let previous = self.backup.path().join("checkout");
+        fs::rename(&self.destination, &previous)
+            .map_err(|_| "Cannot preserve managed checkout; no command files imported.")?;
+        if fs::rename(self.staged.path(), &self.destination).is_err() {
+            if fs::rename(&previous, &self.destination).is_err() {
+                let path = self.backup.keep();
+                return Err(format!("Managed checkout import needs recovery. Previous files retained at {}. Do not replay.",path.display()));
+            }
+            return Err("Cannot import command files; previous checkout restored.".into());
         }
-        return Err("Cannot import command files; previous checkout restored.".into());
+        // Return old-tree custody so its potentially large deletion happens
+        // after the caller releases the authority lock.
+        Ok(self.backup)
     }
-    Ok(())
 }
 
 #[cfg(test)]
@@ -299,7 +323,8 @@ mod tests {
         let source = tempfile::tempdir().unwrap();
         let staged = tempfile::tempdir().unwrap();
         fs::write(source.path().join("data.csv"), "value\n15\n").unwrap();
-        let id = copy_tree(source.path(), staged.path(), Limits::ANALYSIS).unwrap();
+        let id =
+            copy_tree_current(source.path(), staged.path(), Limits::ANALYSIS, &|| true).unwrap();
         assert_eq!(id, tree_id(staged.path(), Limits::ANALYSIS).unwrap());
         fs::write(staged.path().join("data.csv"), "modified").unwrap();
         assert_eq!(
@@ -314,6 +339,28 @@ mod tests {
             }
         )
         .is_err());
+        let destination = tempfile::tempdir().unwrap();
+        fs::write(destination.path().join("previous"), "preserved").unwrap();
+        assert!(
+            prepare_tree(source.path(), destination.path(), Limits::ANALYSIS, &|| {
+                false
+            })
+            .is_err()
+        );
+        let prepared = prepare_tree(source.path(), destination.path(), Limits::ANALYSIS, &|| {
+            true
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.path().join("previous")).unwrap(),
+            "preserved"
+        );
+        assert!(!destination.path().join("data.csv").exists());
+        prepared.commit().unwrap();
+        assert_eq!(
+            fs::read_to_string(destination.path().join("data.csv")).unwrap(),
+            "value\n15\n"
+        );
     }
     #[test]
     fn git_metadata_and_links_are_rejected() {
