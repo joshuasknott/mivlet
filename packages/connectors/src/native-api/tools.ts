@@ -175,6 +175,12 @@ const TOOLS: Record<string, BackendTool> = {
     defaultMode: "read-only", defaultRisk: "low",
     parameters: JSON.stringify({ type: "object", properties: {}, additionalProperties: false })
   },
+  "local-browser-open": {
+    name: "local-browser-open",
+    description: "Open the agent's private Chrome/Edge window before app selection. Foreground launch can interrupt the user; grants no input. Stop retains the page.",
+    defaultMode: "full-access", defaultRisk: "high",
+    parameters: JSON.stringify({ type: "object", properties: { deliveryMode: { type: "string", enum: ["foreground"] } }, required: ["deliveryMode"], additionalProperties: false })
+  },
   "local-app-select": {
     name: "local-app-select",
     description: "Select one windowId from the latest local-app-list result. deliveryMode defaults to background and does not raise the window. Explicit foreground selection brings it forward and is required for screenshots, pixel input and keyboard/caret editing. Both modes follow Mivlet's global approvals; Full Access has no separate app grant. Only one agent may control this Windows session at a time. Observe after selection. Stop, user interference or uncertain input requires a fresh user request; never silently resume or replay it.",

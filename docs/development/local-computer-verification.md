@@ -214,3 +214,27 @@ The read-only direct credential inventory is opt-in:
 ```powershell
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml live_visual_provider_connection_inventory --lib -- --ignored --nocapture
 ```
+
+## Owned browser launch (4 October 2026)
+
+The opt-in native acceptance opened the actual protected, publisher-verified
+Google Chrome installation with a disposable private profile. It found the
+exact process-owned visible window and confirmed that no `DevToolsActivePort`
+was created. Starting and stopping the pinned Cua driver left that browser
+alive; releasing its account-owned process job closed it. The test made no
+website requests, entered no credentials, and did not exercise a provider turn.
+
+Repeat this check only in a Windows interactive session:
+
+```powershell
+$env:MIVLET_OWNED_BROWSER_ACCEPTANCE = '1'
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml native_owned_browser_acceptance --lib -- --ignored --nocapture
+Remove-Item Env:MIVLET_OWNED_BROWSER_ACCEPTANCE
+```
+
+Separate tests verify real owned parent/descendant job cleanup, profile directory
+pinning, closed launch arguments/environment, rejected writable or untrusted
+executables, missing Stop support and exclusive generation-fenced launch
+reservations. These are native boundary tests. Ordinary agent launch/approval,
+real sign-in, packaged clean-machine behavior, DOM control and managed
+upload/download acceptance remain outstanding.

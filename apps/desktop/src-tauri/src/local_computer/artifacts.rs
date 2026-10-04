@@ -569,7 +569,7 @@ fn canonical(path: &Path) -> Result<PathBuf, String> {
 // Validate the actual opened handle before reading. Rechecking path names alone
 // would allow a guest to swap a parent directory after canonicalization.
 #[cfg(windows)]
-fn opened_path(file: &File) -> Result<PathBuf, String> {
+pub(super) fn opened_path(file: &File) -> Result<PathBuf, String> {
     use std::os::windows::{ffi::OsStringExt, io::AsRawHandle};
     use windows_sys::Win32::Storage::FileSystem::GetFinalPathNameByHandleW;
     let mut buffer = vec![0u16; 32768];

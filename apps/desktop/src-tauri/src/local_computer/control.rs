@@ -60,10 +60,34 @@ struct Inner {
     choices_at: Option<Instant>,
     choices_scope: Option<Scope>,
     pending: Option<Pending>,
+    launching: Option<BrowserLaunch>,
     active: Option<Arc<Grant>>,
     observation: Option<Observation>,
     message: Option<String>,
     retiring: Option<Arc<AtomicBool>>,
+}
+struct BrowserLaunch {
+    key: Scope,
+    request: String,
+    identity: Arc<()>,
+    authority: Arc<ComputerAuthority>,
+}
+pub(super) struct BrowserLaunchGuard<'a> {
+    control: &'a NativeControl,
+    identity: Arc<()>,
+}
+impl Drop for BrowserLaunchGuard<'_> {
+    fn drop(&mut self) {
+        if let Ok(mut inner) = self.control.inner.lock() {
+            if inner
+                .launching
+                .as_ref()
+                .is_some_and(|launch| Arc::ptr_eq(&launch.identity, &self.identity))
+            {
+                inner.launching = None;
+            }
+        }
+    }
 }
 struct Pending {
     key: Scope,
@@ -137,7 +161,46 @@ pub struct ControlSnapshot {
 
 impl NativeControl {
     pub(super) fn active(&self) -> bool {
-        self.inner.lock().is_ok_and(|inner| inner.active.is_some())
+        self.inner
+            .lock()
+            .is_ok_and(|inner| inner.active.is_some() || inner.launching.is_some())
+    }
+    pub(super) fn reserve_browser_launch(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        request: &str,
+        authority: Arc<ComputerAuthority>,
+    ) -> Result<BrowserLaunchGuard<'_>, String> {
+        let mut inner = self.inner.lock().map_err(|_| STALE)?;
+        authority.check_generation(generation)?;
+        if inner.active.is_some()
+            || inner.pending.is_some()
+            || inner.launching.is_some()
+            || inner
+                .retiring
+                .as_ref()
+                .is_some_and(|done| !done.load(Ordering::Acquire))
+        {
+            return Err("Computer control is busy. Open the owned browser before selecting an app; stopped control requires a fresh request.".into());
+        }
+        let identity = Arc::new(());
+        inner.launching = Some(BrowserLaunch {
+            key: Scope {
+                workspace: workspace.into(),
+                agent: agent.into(),
+                generation,
+            },
+            request: request.into(),
+            identity: identity.clone(),
+            authority,
+        });
+        inner.message = None;
+        Ok(BrowserLaunchGuard {
+            control: self,
+            identity,
+        })
     }
     pub(super) fn snapshot(&self, workspace: &str, agent: &str) -> Result<ControlSnapshot, String> {
         let inner = self.inner.lock().map_err(|_| STALE)?;
@@ -157,6 +220,12 @@ impl NativeControl {
             } else {
                 ("idle", None, None)
             }
+        } else if let Some(launch) = &inner.launching {
+            if launch.key.workspace == workspace && launch.key.agent == agent {
+                ("connecting", Some(launch.request.clone()), None)
+            } else {
+                ("busy", None, None)
+            }
         } else {
             ("idle", None, None)
         };
@@ -164,12 +233,19 @@ impl NativeControl {
             .active
             .as_ref()
             .map(|g| g.key.generation)
-            .or_else(|| inner.pending.as_ref().map(|p| p.key.generation));
+            .or_else(|| inner.pending.as_ref().map(|p| p.key.generation))
+            .or_else(|| inner.launching.as_ref().map(|p| p.key.generation));
         Ok(ControlSnapshot {
             status,
             request_id: request,
             generation,
-            application: choice.map(|c| c.application.clone()),
+            application: choice.map(|c| c.application.clone()).or_else(|| {
+                inner
+                    .launching
+                    .as_ref()
+                    .filter(|launch| launch.key.workspace == workspace && launch.key.agent == agent)
+                    .map(|_| "Mivlet browser".into())
+            }),
             title: choice.map(|c| c.title.clone()),
             message: inner.message.clone(),
             delivery_mode: if choice.is_some() {
@@ -250,6 +326,9 @@ impl NativeControl {
     /// observation. No response or UIA lock is held while Stop acquires this lock.
     pub(super) fn stop(&self, message: &str) {
         if let Ok(mut inner) = self.inner.lock() {
+            if let Some(launch) = inner.launching.take() {
+                launch.authority.revoke_and_drain_later();
+            }
             if let Some(pending) = inner.pending.take() {
                 pending.authority.revoke_and_drain_later();
             }
@@ -263,6 +342,16 @@ impl NativeControl {
 
     pub(super) fn stop_scope(&self, workspace: &str, agent: &str, generation: u64, message: &str) {
         if let Ok(mut inner) = self.inner.lock() {
+            if inner.launching.as_ref().is_some_and(|launch| {
+                launch.key.workspace == workspace
+                    && launch.key.agent == agent
+                    && launch.key.generation == generation
+            }) {
+                if let Some(launch) = inner.launching.take() {
+                    launch.authority.revoke_and_drain_later();
+                }
+                inner.message = Some(message.into());
+            }
             if inner.pending.as_ref().is_some_and(|p| {
                 p.key.workspace == workspace
                     && p.key.agent == agent
@@ -571,6 +660,12 @@ pub(crate) fn select_app_window(
             return Err("The previous Windows action is still being cleaned up. Computer control remains stopped.".into());
         }
         inner.retiring = None;
+        if inner.launching.is_some() {
+            return Err(
+                "An owned browser is opening. Wait for that operation before selecting a window."
+                    .into(),
+            );
+        }
         if inner.active.as_ref().is_some_and(|g| g.key != key)
             || inner.pending.as_ref().is_some_and(|p| p.key != key)
         {

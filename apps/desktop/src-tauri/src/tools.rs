@@ -83,7 +83,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 34] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 35] = [
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -105,6 +105,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 34] = [
     "edit-image",
     "local-app-observe",
     "local-app-list",
+    "local-browser-open",
     "local-app-select",
     "local-app-action",
     "local-desktop-observe",
@@ -297,6 +298,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "run-shell" => Some(("full-access", "critical")),
         "web-fetch" => Some(("read-only", "medium")),
         "local-app-list" => Some(("read-only", "low")),
+        "local-browser-open" => Some(("full-access", "high")),
         "local-app-select" => Some(("read-only", "medium")),
         "local-app-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
         "local-app-action" | "local-desktop-action" => Some(("full-access", "critical")),
@@ -383,6 +385,7 @@ fn is_computer_tool(tool: &str) -> bool {
             | "edit-image"
             | "local-app-observe"
             | "local-app-list"
+            | "local-browser-open"
             | "local-app-select"
             | "local-app-action"
             | "local-desktop-observe"
@@ -1467,6 +1470,32 @@ pub async fn execute_tool_call(
             None,
         );
         return result.map(|output| ToolResult { ok: true, output });
+    }
+    if tool == "local-browser-open" {
+        if arguments != serde_json::json!({"deliveryMode":"foreground"}) {
+            return Err("Opening a browser requires explicit deliveryMode foreground under the normal approval policy.".into());
+        }
+        let workspace = request
+            .workspace_id
+            .clone()
+            .ok_or("Browser opening requires a workspace.")?;
+        let agent = request
+            .agent_id
+            .clone()
+            .ok_or("Browser opening requires an agent.")?;
+        let computers = local_computers.inner().clone();
+        let output = tauri::async_runtime::spawn_blocking(move || {
+            crate::local_computer::browser::open(
+                &computers,
+                &workspace,
+                &agent,
+                computer_generation,
+                &request_id,
+            )
+        })
+        .await
+        .map_err(|_| "The owned browser stopped unexpectedly.")??;
+        return Ok(ToolResult { ok: true, output });
     }
     if matches!(tool.as_str(), "local-app-list" | "local-app-select") {
         let workspace = request

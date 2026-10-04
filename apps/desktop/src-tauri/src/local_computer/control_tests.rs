@@ -2,6 +2,63 @@
 //! WinForms fixture. No account, personal app or saved computer is used here.
 use super::super::desktop_tools;
 use super::*;
+
+#[test]
+fn browser_launch_reservation_is_exclusive_generation_fenced_and_stale_cleanup_safe() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let authority = ComputerAuthority::load(first.path()).unwrap();
+    let other = ComputerAuthority::load(second.path()).unwrap();
+    let control = NativeControl::default();
+    let ticket = authority.begin_agent(1).unwrap();
+    let old = control
+        .reserve_browser_launch(
+            "workspace-one",
+            "agent-one",
+            1,
+            "request-old",
+            authority.clone(),
+        )
+        .unwrap();
+    assert!(control
+        .reserve_browser_launch(
+            "workspace-one",
+            "agent-two",
+            1,
+            "request-other",
+            other.clone()
+        )
+        .is_err());
+    control.stop_scope("workspace-one", "agent-one", 2, "wrong generation");
+    assert!(control.active());
+    assert!(ticket.check().is_ok());
+    control.stop_scope("workspace-one", "agent-one", 1, "matching Stop");
+    assert!(!control.active());
+    assert!(ticket.check().is_err());
+    let current = control
+        .reserve_browser_launch(
+            "workspace-one",
+            "agent-two",
+            1,
+            "request-old",
+            other.clone(),
+        )
+        .unwrap();
+    drop(old);
+    assert!(control.active());
+    assert_eq!(
+        control
+            .snapshot("workspace-one", "agent-two")
+            .unwrap()
+            .request_id
+            .as_deref(),
+        Some("request-old")
+    );
+    control.stop("global Stop");
+    assert!(other.check_generation(1).is_err());
+    drop(current);
+    assert!(!control.active());
+}
 use serde_json::json;
 
 fn selected(state: &LocalComputerState, agent: &str, pid: u32) -> ControlSnapshot {

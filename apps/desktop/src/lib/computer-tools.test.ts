@@ -20,7 +20,7 @@ describe("conversation computer tools", () => {
     const prior = conversationComputerTools([connector], true, true, enabled);
     const names = conversationComputerTools(prior, true, true, enabled, false, false).map(tool => tool.name);
     expect(names).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "workspace-run", "create-spreadsheet", "create-document", "create-pdf", "computer-artifact"]));
-    expect(names.some(name => name.startsWith("local-app-") || name.startsWith("local-desktop-"))).toBe(false);
+    expect(names.some(name => name.startsWith("local-app-") || name.startsWith("local-desktop-") || name.startsWith("local-browser-"))).toBe(false);
   });
   it("requires a separate image API connection and Computer plugin even for previously discovered image tools", () => {
     const discovered = ["generate-image", "edit-image"].map((name) => ({ name, description: "Image API", parameters: "{}" }));
@@ -63,7 +63,7 @@ describe("conversation computer tools", () => {
     const previous = ["run-shell", "local-browser-action", "local-browser-observe"].map(name => ({ name, description: "old", parameters: "{}" }));
     const names = conversationComputerTools(previous, true, true, enabled).map(tool => tool.name);
     expect(names).not.toContain("run-shell");
-    expect(names.some(name => name.startsWith("local-browser"))).toBe(false);
+    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-open"]);
     expect(names).toContain("local-app-observe");
   });
   it("does not advertise unavailable computers", () => {

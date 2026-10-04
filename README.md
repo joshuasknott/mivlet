@@ -160,6 +160,13 @@ a deployed or production-validated service.
   direct API models. See the [provider matrix](docs/architecture/local-teammate-computer.md#tool-and-provider-paths)
   for supported routes and [verification evidence](docs/development/local-computer-verification.md#visual-provider-expansion)
   for live limitations. No local shell tool is exposed.
+- Agents can open a Mivlet-owned Chrome or Edge window under global approvals,
+  using a private profile outside agent files. Launch requires explicit foreground
+  delivery and a protected system installation with a verified publisher.
+  The agent then lists and selects the window through normal computer tools.
+  Stop leaves this browser open for human takeover; account changes and app
+  closure close it. This currently uses Windows controls; DOM browser tools and
+  managed uploads/downloads remain incomplete.
 - Runtime-detected operating-system dictation. It fails closed when speech
   recognition is unavailable and does not retain raw audio.
 
