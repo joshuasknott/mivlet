@@ -98,6 +98,7 @@
     "web-fetch": "web-fetch",
     "local-app-observe": "browser-read",
     "local-app-list": "browser-read",
+    "local-browser-open": "browser-state-mutation",
     "local-app-select": "browser-read",
     "local-desktop-observe": "browser-read",
     "local-app-action": "browser-state-mutation",

@@ -2,6 +2,7 @@
 pub(crate) mod activity;
 pub(crate) mod artifacts;
 pub(crate) mod authority;
+pub(crate) mod browser;
 pub(crate) mod coding;
 pub(crate) mod control;
 mod cua;
@@ -42,6 +43,7 @@ const MAX_SAFE_UI_BYTES: u64 = 9_007_199_254_740_991;
 
 pub struct LocalComputerState {
     native: control::NativeControl,
+    browsers: browser::BrowserManager,
     driver_directory: PathBuf,
     activity_error: Mutex<Option<String>>,
     plugins: plugins::PluginAuthority,
@@ -178,6 +180,7 @@ impl LocalComputerState {
             .map_err(|_| "Mivlet resources are unavailable.")?;
         Ok(Self {
             native: control::NativeControl::default(),
+            browsers: browser::BrowserManager::default(),
             driver_directory: if cfg!(debug_assertions) {
                 PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/cua-driver")
             } else {
@@ -195,6 +198,7 @@ impl LocalComputerState {
     pub(crate) fn for_test(root: PathBuf) -> Self {
         Self {
             native: control::NativeControl::default(),
+            browsers: browser::BrowserManager::default(),
             driver_directory: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
                 .join("resources/cua-driver"),
             activity_error: Mutex::new(None),
@@ -1005,6 +1009,7 @@ pub(crate) async fn shutdown_all(state: Arc<LocalComputerState>) {
     state
         .native
         .stop("Mivlet closed. Computer permission was revoked.");
+    state.browsers.shutdown();
     if let Ok(authorities) = state.authorities.lock() {
         for authority in authorities.values() {
             authority.revoke_and_drain_later();

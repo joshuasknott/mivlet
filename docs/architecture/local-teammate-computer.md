@@ -153,6 +153,24 @@ content cannot be reliably classified, so choose non-sensitive windows.
 
 ## Tool and provider paths
 
+`local-browser-open` launches installed Chrome or Edge with a private profile
+outside the agent's `workspace/` directory. The foreground-only operation uses
+the same exact approval, workspace/agent generation and installation-wide
+exclusive control reservation. Opening grants no input authority: the agent must
+list, select and observe its window normally. At most four browsers are owned by
+one account, with one per agent. Closed browser instances can be reopened without
+replaying the previous request.
+
+Native code accepts only protected system installations, pins the executable,
+checks its Authenticode publisher, clears inherited provider/shell configuration,
+and assigns a suspended process to an account-owned job before allowing it to run.
+Root, scope and profile directory handles prevent replacement during its lifetime.
+No debugging TCP endpoint is enabled. The profile is independent of the user's
+usual browser profile, but the window still shares the interactive Windows session.
+The published browser outlives the input driver and Stop for human takeover;
+unpublished cancelled launches are closed, and account/app shutdown closes the
+owned browser job. DOM control and native upload/download custody remain pending.
+
 The driver is private to Rust; React receives no driver methods, process handles,
 raw accessibility tokens or screenshots. Native code only exposes:
 
