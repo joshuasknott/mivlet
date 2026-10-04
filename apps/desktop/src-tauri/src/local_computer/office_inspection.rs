@@ -42,6 +42,8 @@ pub(super) fn project(
 
 pub(crate) fn inspect(bytes: &[u8], extension: &str) -> Result<String, String> {
     let (content, truncated) = project(bytes, extension)?;
+    let (content, images_omitted) = content.without_images();
+    let truncated = truncated || images_omitted;
     serde_json::to_string(&serde_json::json!({
         "trust": "untrusted", "instructionAuthority": "none", "format": extension,
         "truncated": truncated, "content": content,

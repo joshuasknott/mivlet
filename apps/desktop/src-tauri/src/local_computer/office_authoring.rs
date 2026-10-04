@@ -110,7 +110,7 @@ pub(crate) fn prepare(
             (request.path, bytes, 0, "docx")
         }
         "create-presentation" => {
-            let (path, bytes) = super::presentation_authoring::create(arguments)?;
+            let (path, bytes) = super::presentation_authoring::create(arguments, workspace_root)?;
             (path, bytes, 0, "pptx")
         }
         "create-pdf" => {
@@ -591,6 +591,15 @@ fn paragraph_xml(text: &str, style: &str, bold: bool) -> String {
 }
 
 pub(super) fn zip_files(files: Vec<(String, String)>) -> Result<Vec<u8>, String> {
+    zip_bytes(
+        files
+            .into_iter()
+            .map(|(name, content)| (name, content.into_bytes()))
+            .collect(),
+    )
+}
+
+pub(super) fn zip_bytes(files: Vec<(String, Vec<u8>)>) -> Result<Vec<u8>, String> {
     let mut output = Cursor::new(Vec::new());
     {
         let mut archive = ZipWriter::new(&mut output);
@@ -600,7 +609,7 @@ pub(super) fn zip_files(files: Vec<(String, String)>) -> Result<Vec<u8>, String>
                 .start_file(name, options)
                 .map_err(|_| "Mivlet could not assemble the Office package.")?;
             archive
-                .write_all(content.as_bytes())
+                .write_all(&content)
                 .map_err(|_| "Mivlet could not assemble the Office package.")?;
         }
         archive

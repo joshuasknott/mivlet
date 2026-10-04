@@ -48,6 +48,46 @@ describe("bounded Office tool contracts", () => {
     expect(schema.properties.sheets.maxItems).toBe(8);
   });
 
+  it("binds the image path, digest and alt text into shared slide approvals", () => {
+    const schema = JSON.parse(lookupTool("create-presentation")!.parameters);
+    const image = schema.properties.slides.items.properties.image;
+    expect(image.required).toEqual(["path", "sha256", "alt"]);
+    expect(image.additionalProperties).toBe(false);
+    expect(image.properties.sha256.pattern).toBe("^[a-f0-9]{64}$");
+    const args = {
+      path: "report.pptx",
+      title: "Report",
+      slides: [
+        {
+          title: "Results",
+          image: {
+            path: "charts/net.png",
+            sha256: "a".repeat(64),
+            alt: "Net chart",
+          },
+        },
+      ],
+    };
+    const approval = buildToolApproval(
+      "luna",
+      "create-presentation",
+      JSON.stringify(args),
+    );
+    for (const field of ["path", "sha256", "alt"] as const) {
+      const changed = structuredClone(args);
+      changed.slides[0]!.image[field] =
+        field === "sha256" ? "b".repeat(64) : "changed";
+      expect(
+        buildToolApproval(
+          "luna",
+          "create-presentation",
+          JSON.stringify(changed),
+        ).dataUsed,
+      ).not.toEqual(approval.dataUsed);
+    }
+    expect(JSON.stringify(approval.dataUsed)).toContain("charts/net.png");
+  });
+
   it("keeps document creation bounded and behind an exact high-risk approval", () => {
     const args = JSON.stringify({
       path: "reports/summary.docx",

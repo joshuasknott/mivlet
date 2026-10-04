@@ -388,7 +388,18 @@ unequal-length data fails before placement. Fixed DrawingML parts contain real
 worksheet references plus verified caches, so Office can edit the source cells
 and recalculate the chart. This follows the [Open XML drawing/chart relationship structure](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/how-to-insert-a-chart-into-a-spreadsheet).
 `create-presentation` produces editable 16:9 PPTX with light/dark themes, up to
-30 slides, short titles, optional paragraphs and real bullets. Dense slides are
+30 slides, short titles, optional paragraphs and real bullets. A slide may include
+one workspace PNG/JPEG with its exact SHA-256 and literal alt text. `read-file`
+fully decodes a raster and returns its oriented dimensions and digest, without
+visual interpretation or raster bytes. Native authoring verifies the opened
+workspace handle and digest, decodes and applies EXIF orientation, strips all
+metadata and embeds a fixed PNG picture relationship. No source URL, host path,
+SVG, animation or active media is accepted. There are at most eight images per
+deck, 4 MB per source/normalized image, 4096 pixels per side, four million pixels
+and 16 MB normalized raster data per deck. Pictures retain their aspect ratio;
+text uses a shorter side-by-side layout. This uses the standard
+[PresentationML picture structure](https://learn.microsoft.com/en-us/dotnet/api/documentformat.openxml.presentation.picture?view=openxml-3.0.1).
+Dense slides are
 rejected so authors split content instead of losing it. All three tools write a
 temporary OOXML package, reopen it through the existing macro, embedding and
 external-relationship validator, and only then place it at a new publication-safe
@@ -396,7 +407,14 @@ workspace path. `computer-artifact` remains a distinct, explicit publication ste
 
 The conversation viewer extracts bounded Office content from the exact
 receipt-verified published bytes: document paragraphs/tables, sheet grids with
-cached formula values and preserved cell positions, and ordered slide text.
+cached formula values and preserved cell positions, and ordered slide text and
+pictures. The native picture projection independently decodes only exact local
+image relationships into metadata-free PNG thumbnails, 512 pixels per side,
+eight attempts and 4 MB total thumbnail bytes. Hidden/cropped/transformed or
+unsupported pictures are omitted with a truncation notice. Model-facing Office
+extraction omits raster payloads; only the explicitly opened UI preview receives
+thumbnails. Source files remain unchanged and authoring still commits under the
+existing operation generation fence.
 It accepts no HTML or external assets and does not claim Office layout fidelity.
 Supported column/line charts are projected from the worksheet cells, never from
 potentially stale chart caches. The chart/data view labels those values as cached;

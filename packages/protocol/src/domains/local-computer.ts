@@ -147,6 +147,7 @@ export interface LocalComputerOfficePreview {
     blocks: readonly (
       | { type: "paragraph"; text: string; style: "title" | "heading" | "paragraph" }
       | { type: "table"; rows: readonly (readonly string[])[] }
+      | { type: "image"; dataUrl: string; alt: string; width: number; height: number }
       | { type: "chart"; kind: "column" | "line"; title: string; categories: readonly string[];
           series: readonly { name: string; values: readonly number[] }[] }
     )[];

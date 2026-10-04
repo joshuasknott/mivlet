@@ -1,5 +1,6 @@
 //! Bounded content projections of already receipt-verified passive Office files.
-//! No HTML, scripts, external relationships or embedded media enter the UI.
+//! No HTML, scripts or external assets enter the UI. Pictures are independently
+//! decoded into bounded metadata-free native PNG thumbnails.
 use quick_xml::{events::Event, Reader, XmlVersion};
 use serde::Serialize;
 use std::{
@@ -7,12 +8,33 @@ use std::{
     io::{Cursor, Read},
 };
 mod charts;
+mod images;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct OfficePreview {
     kind: &'static str,
     sections: Vec<Section>,
+}
+
+impl OfficePreview {
+    /// Raster thumbnails belong only to an explicitly opened UI preview. Never
+    /// serialize them into a tool reply, transcript or provider prompt.
+    pub(super) fn without_images(mut self) -> (Self, bool) {
+        let mut omitted = false;
+        for section in &mut self.sections {
+            for block in &mut section.blocks {
+                if let Block::Image { alt, .. } = block {
+                    *block = Block::Paragraph {
+                        text: format!("Image omitted: {alt}"),
+                        style: "paragraph",
+                    };
+                    omitted = true;
+                }
+            }
+        }
+        (self, omitted)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -24,6 +46,13 @@ pub(super) struct Section {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Block {
+    Image {
+        #[serde(rename = "dataUrl")]
+        data_url: String,
+        alt: String,
+        width: u32,
+        height: u32,
+    },
     Paragraph {
         text: String,
         style: &'static str,
@@ -161,6 +190,8 @@ fn part(archive: &mut zip::ZipArchive<Cursor<&[u8]>>, path: &str) -> Option<Node
 struct Budget {
     remaining: usize,
     truncated: bool,
+    image_bytes: usize,
+    image_count: usize,
 }
 impl Budget {
     fn text(&mut self, value: &str) -> String {
@@ -269,27 +300,31 @@ fn relationships(root: &Node, base: &str) -> HashMap<String, String> {
             if !node.attribute("TargetMode").is_empty() {
                 return None;
             }
-            let target = node.attribute("Target");
-            let mut parts = if target.starts_with('/') {
-                Vec::new()
-            } else {
-                base.split('/').collect()
-            };
-            for segment in target.trim_start_matches('/').split('/') {
-                match segment {
-                    ".." => {
-                        parts.pop()?;
-                    }
-                    "." => {}
-                    "" => return None,
-                    value => parts.push(value),
-                }
-            }
-            let path = parts.join("/");
-            (!path.contains([':', '\\']) && path.ends_with(".xml"))
+            let path = relationship_path(node.attribute("Target"), base)?;
+            path.ends_with(".xml")
                 .then(|| (node.attribute("Id").into(), path))
         })
         .collect()
+}
+
+fn relationship_path(target: &str, base: &str) -> Option<String> {
+    let mut parts = if target.starts_with('/') {
+        Vec::new()
+    } else {
+        base.split('/').collect()
+    };
+    for segment in target.trim_start_matches('/').split('/') {
+        match segment {
+            ".." => {
+                parts.pop()?;
+            }
+            "." => {}
+            "" => return None,
+            value => parts.push(value),
+        }
+    }
+    let path = parts.join("/");
+    (!path.contains([':', '\\']) && !path.chars().any(char::is_control)).then_some(path)
 }
 
 fn coordinates(reference: &str) -> Option<(usize, usize)> {
@@ -391,24 +426,39 @@ fn presentation(
     budget.truncated |= slides.len() > 30;
     let mut sections = Vec::new();
     for (index, slide) in slides.iter().take(30).enumerate() {
-        let root = part(archive, rels.get(slide.attribute("id"))?)?;
-        let source = root.find("p");
-        budget.truncated |= source.len() > 100;
-        let blocks = source
-            .iter()
-            .take(100)
-            .enumerate()
-            .map(|(index, p)| {
-                let mut block = paragraph(p, budget);
-                if index == 0 {
-                    let Block::Paragraph { style, .. } = &mut block else {
-                        unreachable!()
-                    };
-                    *style = "title";
+        let slide_path = rels.get(slide.attribute("id"))?;
+        let root = part(archive, slide_path)?;
+        let tree = *root.find("spTree").first()?;
+        let mut blocks = Vec::new();
+        let mut paragraph_count = 0;
+        budget.truncated |= tree.children.len() > 100;
+        for shape in tree.children.iter().take(100) {
+            match shape.name.as_str() {
+                "sp" => {
+                    for p in shape.find("p") {
+                        if paragraph_count >= 100 {
+                            budget.truncated = true;
+                            break;
+                        }
+                        let mut block = paragraph(p, budget);
+                        if paragraph_count == 0 {
+                            let Block::Paragraph { style, .. } = &mut block else {
+                                unreachable!()
+                            };
+                            *style = "title";
+                        }
+                        paragraph_count += 1;
+                        blocks.push(block);
+                    }
                 }
-                block
-            })
-            .collect();
+                "pic" => match images::extract(archive, shape, slide_path, budget) {
+                    Some(block) => blocks.push(block),
+                    None => budget.truncated = true,
+                },
+                "nvGrpSpPr" | "grpSpPr" => {}
+                _ => budget.truncated = true,
+            }
+        }
         sections.push(Section {
             name: format!("Slide {}", index + 1),
             blocks,
@@ -424,6 +474,8 @@ pub(super) fn preview(bytes: &[u8], extension: &str) -> Option<(OfficePreview, b
     let mut budget = Budget {
         remaining: 128 * 1024,
         truncated: false,
+        image_bytes: 0,
+        image_count: 0,
     };
     let (kind, sections) = match extension {
         "docx" => (
@@ -474,6 +526,7 @@ mod tests {
                 &mut Budget {
                     remaining: 30,
                     truncated: false,
+                    ..Budget::default()
                 },
             )
             .unwrap(),

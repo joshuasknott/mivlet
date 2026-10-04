@@ -611,6 +611,11 @@ fn opened_path(_file: &File) -> Result<PathBuf, String> {
 }
 
 pub(super) fn read_bounded(root: &Path, path: &Path) -> Result<Vec<u8>, String> {
+    read_bounded_limit(root, path, MAX_BYTES)
+}
+
+pub(crate) fn read_bounded_limit(root: &Path, path: &Path, limit: u64) -> Result<Vec<u8>, String> {
+    let limit = limit.min(MAX_BYTES);
     let root = canonical(root)?;
     let source = canonical(path)?;
     if !source.starts_with(&root) {
@@ -634,15 +639,15 @@ pub(super) fn read_bounded(root: &Path, path: &Path) -> Result<Vec<u8>, String> 
     let metadata = file
         .metadata()
         .map_err(|_| "The artifact metadata is unavailable.")?;
-    if !metadata.is_file() || metadata.len() > MAX_BYTES {
-        return Err("Choose a regular file of at most 25 MB.".into());
+    if !metadata.is_file() || metadata.len() > limit {
+        return Err("Choose a regular file within the operation's byte limit.".into());
     }
     let mut bytes = Vec::with_capacity(metadata.len() as usize);
     std::io::Read::by_ref(&mut file)
-        .take(MAX_BYTES + 1)
+        .take(limit + 1)
         .read_to_end(&mut bytes)
         .map_err(|_| "The artifact could not be read.")?;
-    if bytes.len() as u64 != metadata.len() || bytes.len() as u64 > MAX_BYTES {
+    if bytes.len() as u64 != metadata.len() || bytes.len() as u64 > limit {
         return Err("The file changed while publishing. Save it and try again.".into());
     }
     Ok(bytes)

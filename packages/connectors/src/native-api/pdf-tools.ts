@@ -9,7 +9,7 @@ const block = (type: string, properties: Record<string, unknown>, required = Obj
 export const PDF_TOOLS: Record<string, BackendTool> = {
   "create-pdf": {
     name: "create-pdf", defaultMode: "full-access", defaultRisk: "high",
-    description: "Create a passive A4 PDF report in this agent's private workspace, with measured text wrapping, pagination, headings, bullets, repeated table headers and vector bar charts. At most 200 blocks, 50 pages and 100 KB text; output at most 8 MB. Fixed embedded fonts support precomposed left-to-right text; unsupported glyphs, complex scripts and overfull rows/charts fail clearly rather than corrupting text. Use new paths for revisions; existing files cannot be overwritten. Verify with read-file and publish with computer-artifact after validation. No code, links, remote assets or host app automation run.",
+    description: "Create passive A4 PDF: wrapped text, pagination, headings/bullets, repeated table headers, vector bars. Max 200 blocks, 50 pages, 100 KB text, 8 MB output. Embedded fonts support precomposed LTR; unsupported glyphs/scripts or overfull rows/charts fail. New workspace path only; verify with read-file, publish with computer-artifact after validation. No code/links/remote assets/host automation.",
     parameters: JSON.stringify({
       type: "object", properties: {
         path: { type: "string", maxLength: 240, pattern: "^[A-Za-z0-9][A-Za-z0-9 _./-]*\\.pdf$" },

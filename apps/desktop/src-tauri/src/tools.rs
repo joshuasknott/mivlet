@@ -993,6 +993,17 @@ pub(crate) fn run_read_file(
         .and_then(|s| s.to_str())
         .unwrap_or("")
         .to_ascii_lowercase();
+    if matches!(extension.as_str(), "png" | "jpg" | "jpeg") {
+        let bytes = crate::local_computer::artifacts::read_bounded_limit(
+            workspace_root,
+            &confined,
+            4 * 1024 * 1024,
+        )?;
+        return Ok(ToolResult {
+            ok: true,
+            output: crate::local_computer::office_images::inspect(&bytes, &extension)?,
+        });
+    }
     if crate::local_computer::office_inspection::is_office(&extension) || extension == "pdf" {
         let file = std::fs::File::open(&confined).map_err(|_| format!("File not found: {path}"))?;
         let mut bytes = Vec::new();
