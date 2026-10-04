@@ -169,6 +169,7 @@ pub(super) fn tabs(
     process.tabs = None;
     process.navigation.clear();
     process.controls.clear();
+    process.scroll = None;
     let (window, pages) = targets(process, hwnd, check)?;
     let mut choices = HashMap::new();
     let mut navigation = HashMap::new();
@@ -474,6 +475,7 @@ pub(super) fn observe(
     check: &dyn Fn() -> Result<(), String>,
 ) -> Result<String, String> {
     process.controls.clear();
+    process.scroll = None;
     let origin = exact_origin(requested_origin)?;
     // Consume before I/O; this choice cannot be replayed by a later observation.
     let (target, expected_window) = process
@@ -520,6 +522,20 @@ pub(super) fn observe(
     } else {
         (Vec::new(), HashMap::new())
     };
+    let (viewport, scroll) = if visible {
+        super::scrolling::capture(
+            process,
+            (hwnd, generation, window),
+            &target,
+            &session,
+            &before,
+            &origin,
+            &nodes,
+            check,
+        )?
+    } else {
+        (Value::Null, None)
+    };
     let after = frame(
         &call(process, Command::Frames, json!({}), Some(&session), check)?,
         &origin,
@@ -529,7 +545,9 @@ pub(super) fn observe(
     }
     check()?;
     process.controls = choices;
-    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+    let scroll_ref = scroll.as_ref().map(|(reference, _)| reference.clone());
+    process.scroll = scroll;
+    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"viewport":viewport,"scrollRef":scroll_ref,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
 pub(super) fn checked_tree(
@@ -572,6 +590,26 @@ pub(super) fn checked_tree(
     Ok((nodes.clone(), projection(nodes, &document.id)?))
 }
 
+/// Chromium DOM hit testing takes document CSS coordinates; Input takes viewport
+/// CSS coordinates. Only native measured scroll offsets may bridge the two.
+pub(super) fn document_point(point: (i32, i32), offsets: (f64, f64)) -> Result<(i32, i32), String> {
+    let coordinate = |value: i32, offset: f64| {
+        if !(0..=10000).contains(&value)
+            || !offset.is_finite()
+            || !(0.0..=10_000_000.0).contains(&offset)
+        {
+            return Err(
+                "The browser hit-test coordinate is unavailable. No browser input was dispatched.",
+            );
+        }
+        Ok((f64::from(value) + offset).round() as i32)
+    };
+    Ok((
+        coordinate(point.0, offsets.0)?,
+        coordinate(point.1, offsets.1)?,
+    ))
+}
+
 #[cfg(debug_assertions)]
 pub(super) fn acceptance(
     process: &mut BrowserProcess,
@@ -579,90 +617,8 @@ pub(super) fn acceptance(
     check: &dyn Fn() -> Result<(), String>,
     dispatch: &super::super::super::control::NativeDispatch<'_>,
 ) -> Result<(), String> {
-    use std::{
-        io::{Read, Write},
-        net::TcpListener,
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-    };
-    let listener =
-        TcpListener::bind("127.0.0.1:0").map_err(|_| "Browser QA listener unavailable.")?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|_| "Browser QA listener unavailable.")?;
-    let origin = format!(
-        "http://{}",
-        listener
-            .local_addr()
-            .map_err(|_| "Browser QA address unavailable.")?
-    );
-    struct Server {
-        stop: Arc<AtomicBool>,
-        thread: Option<std::thread::JoinHandle<()>>,
-    }
-    impl Drop for Server {
-        fn drop(&mut self) {
-            self.stop.store(true, Ordering::Release);
-            if let Some(thread) = self.thread.take() {
-                let _ = thread.join();
-            }
-        }
-    }
-    let stop = Arc::new(AtomicBool::new(false));
-    let ending = stop.clone();
-    let _server = Server {
-        stop,
-        thread: Some(std::thread::spawn(move || {
-            while !ending.load(Ordering::Acquire) {
-                if let Ok((mut stream, _)) = listener.accept() {
-                    let _ = stream.set_read_timeout(Some(Duration::from_millis(300)));
-                    let _ = stream.set_write_timeout(Some(Duration::from_millis(300)));
-                    let mut request = [0u8; 4096];
-                    let mut count = 0;
-                    while count < request.len()
-                        && !request[..count]
-                            .windows(4)
-                            .any(|bytes| bytes == b"\r\n\r\n")
-                    {
-                        match stream.read(&mut request[count..]) {
-                            Ok(0) | Err(_) => break,
-                            Ok(size) => count += size,
-                        }
-                    }
-                    // Chrome can preconnect without issuing a request. Never send an
-                    // unsolicited response or close with unread partial request data.
-                    if !request[..count]
-                        .windows(4)
-                        .any(|bytes| bytes == b"\r\n\r\n")
-                    {
-                        continue;
-                    }
-                    let private =
-                        String::from_utf8_lossy(&request[..count]).starts_with("GET /private ");
-                    let file = String::from_utf8_lossy(&request[..count]).starts_with("GET /file ");
-                    let second =
-                        String::from_utf8_lossy(&request[..count]).starts_with("GET /second ");
-                    let body = if file {
-                        "<!doctype html><title>Private file step</title><label>Choose file<input type=file></label>"
-                    } else if private {
-                        "<!doctype html><title>Private step</title><label>Password<input type=password value='Hidden password delta'></label>"
-                    } else {
-                        "<!doctype html><title>Mivlet browser fixture</title><script>Object.defineProperty(Document.prototype,'visibilityState',{get:()=> 'visible'});</script><h1>Quarterly report</h1><p>Revenue 42</p><button onclick=\"document.getElementById('result').textContent='Activated once'\">Activate once</button><button onclick=\"window.open('/second','_blank')\">Open second tab</button><p id=result>Not activated</p><label>Notes<input value='Hidden entry alpha'></label><textarea>Hidden entry beta</textarea><div contenteditable=true>Hidden entry gamma</div><iframe srcdoc=\"<p>Hidden subframe epsilon</p>\"></iframe>"
-                    };
-                    let body = if second {
-                        body.replace("Mivlet browser fixture", "Second tab fixture")
-                    } else {
-                        body.to_string()
-                    };
-                    let _=write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body);
-                } else {
-                    std::thread::sleep(Duration::from_millis(10));
-                }
-            }
-        })),
-    };
+    let _server = super::fixture_server::Server::start()?;
+    let origin = _server.origin.clone();
     let (_, pages) = targets(process, hwnd, check)?;
     if pages.len() != 1 {
         return Err("Browser QA requires its sole disposable tab.".into());
@@ -792,6 +748,7 @@ pub(super) fn acceptance(
         }
     }
     super::tab_acceptance::run(process, hwnd, &origin, check, dispatch)?;
+    super::scroll_acceptance::run(process, hwnd, &origin, check, dispatch)?;
     eprintln!("Owned browser DOM fixture: document-bound navigation and visible-tab public button click each dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed refs, password field and file chooser refused.");
     Ok(())
 }

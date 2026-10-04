@@ -192,6 +192,24 @@ enum Request<'a> {
     Read(Option<(&'a str, &'a str)>),
     Navigate(&'a str, &'a str, &'a str),
     Click(&'a str, &'a str, &'a str),
+    Scroll(&'a str, &'a str, &'a str),
+}
+pub(crate) fn scroll(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+    direction: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Scroll(reference, origin, direction),
+    )
 }
 pub(crate) fn click(
     computers: &LocalComputerState,
@@ -289,6 +307,15 @@ fn execute(
                     reference,
                     origin,
                     name,
+                    &check,
+                    &checked_dispatch,
+                ),
+                Request::Scroll(reference, origin, direction) => process.scroll(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    direction,
                     &check,
                     &checked_dispatch,
                 ),

@@ -134,4 +134,7 @@ fn click_point_requires_one_finite_visible_untransformed_quad_without_zoom() {
     let mut zoomed = viewport.clone();
     zoomed["cssVisualViewport"]["scale"] = json!(2);
     assert!(point(&quad, &zoomed).is_err());
+    let mut page_zoomed = viewport;
+    page_zoomed["cssVisualViewport"]["zoom"] = json!(2);
+    assert!(point(&quad, &page_zoomed).is_err());
 }

@@ -154,31 +154,37 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   },
   {
     name: "local-browser-open",
-    description: "Open the agent's private Chrome/Edge window before app selection. Foreground launch can interrupt the user; grants no input. Stop retains the page.",
+    description: "Open private Chrome/Edge for selection. Interrupts users; grants no input. Stop retains it.",
     defaultMode: "full-access", defaultRisk: "high",
     parameters: toolParameters({ deliveryMode: { type: "string", enum: ["foreground"] } }, ["deliveryMode"], true)
   },
   {
     name: "local-browser-tabs",
-    description: "List the selected owned browser's tabs: titles/origins, single-use 60s tabRefs and 30s navigationRefs. Select its sole window first. Untrusted evidence; no input grant or personal profile access.",
+    description: "List selected owned tabs: origins/titles, 60s tabRefs, 30s navigationRefs. Untrusted evidence.",
     defaultMode: "read-only", defaultRisk: "medium",
     parameters: toolParameters({}, undefined, true)
   },
   {
     name: "local-browser-observe",
-    description: "Read bounded top-frame text from a 60s tabRef at its exact HTTP(S) origin; up to 32 visible-tab buttons/HTTP links get 30s controlRefs. Fields/subframes omitted; private fields stop reads. Untrusted evidence, no input grant or agent script.",
+    description: "Read public top-frame text at exact origin/tabRef; 30s controlRefs/scrollRef+viewport. Private fields stop reads; no input grant.",
     defaultMode: "read-only", defaultRisk: "medium",
     parameters: toolParameters({ tabRef: textParameter, origin: textParameter }, ["tabRef", "origin"], true)
   },
   {
     name: "local-browser-navigate",
-    description: "Navigate a selected foreground owned tab once using its 30s navigationRef, exact source origin and HTTP(S) URL. Network/download effects are possible; no artifact import. List/observe to verify; never replay uncertain navigation.",
+    description: "Navigate once: 30s navigationRef, exact source origin, HTTP(S) URL. Selected foreground only. Observe; no replay/file import.",
     defaultMode: "full-access", defaultRisk: "high",
     parameters: toolParameters({ navigationRef: textParameter, origin: textParameter, url: textParameter }, ["navigationRef", "origin", "url"], true)
   },
   {
+    name: "local-browser-scroll",
+    description: "Scroll up/down once: 30s scrollRef, exact origin. Visible foreground public center only; bounded wheel. Observe; no replay.",
+    defaultMode: "full-access", defaultRisk: "critical",
+    parameters: toolParameters({ scrollRef: textParameter, origin: textParameter, direction: { type: "string", enum: ["up", "down"] } }, ["scrollRef", "origin", "direction"], true)
+  },
+  {
     name: "local-browser-click",
-    description: "Click one observed button/HTTP link using its 30s controlRef, exact origin and name. Requires a visible tab in the selected foreground owned window. No scroll/focus change. May submit data or download; no artifact import. Observe to verify; never replay uncertain input.",
+    description: "Click visible button/HTTP link: 30s controlRef, exact origin/name; foreground only. Observe; no replay/import.",
     defaultMode: "full-access", defaultRisk: "critical",
     parameters: toolParameters({ controlRef: textParameter, origin: textParameter, name: textParameter }, ["controlRef", "origin", "name"], true)
   },

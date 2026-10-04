@@ -117,6 +117,7 @@ pub(super) fn navigate(
     process.tabs = None;
     process.navigation.clear();
     process.controls.clear();
+    process.scroll = None;
     let (window, pages) = observations::targets(process, hwnd, check)?;
     let page = pages
         .iter()

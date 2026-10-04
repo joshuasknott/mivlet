@@ -16,6 +16,19 @@ const request: NativeCompletionRequest = {
 };
 
 describe("native application action schemas", () => {
+  it("shares bounded browser scrolling without coordinate, amount or script inputs", () => {
+    const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-scroll")!;
+    const schema = JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["scrollRef", "origin", "direction"]);
+    expect(Object.keys(schema.properties)).toEqual(["scrollRef", "origin", "direction"]);
+    expect(schema.properties.direction.enum).toEqual(["up", "down"]);
+    expect(schema.additionalProperties).toBe(false);
+    const requestWithScroll = { ...request, tools: [tool] };
+    const openAi = shapeOpenAiRequest(requestWithScroll) as { tools: Array<{ function: { parameters: unknown } }> };
+    const anthropic = shapeAnthropicRequest({ ...requestWithScroll, providerId: "anthropic" }) as { tools: Array<{ input_schema: unknown }> };
+    expect(openAi.tools[0].function.parameters).toEqual(schema);
+    expect(anthropic.tools[0].input_schema).toEqual(schema);
+  });
   it("shares exact observed browser click scope without script, selector or coordinate inputs", () => {
     const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-click")!;
     const schema = JSON.parse(tool.parameters);

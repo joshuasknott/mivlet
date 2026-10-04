@@ -103,6 +103,7 @@
     "local-browser-observe": "browser-read",
     "local-browser-navigate": "browser-state-mutation",
     "local-browser-click": "browser-state-mutation",
+    "local-browser-scroll": "browser-state-mutation",
     "local-app-select": "browser-read",
     "local-desktop-observe": "browser-read",
     "local-app-action": "browser-state-mutation",

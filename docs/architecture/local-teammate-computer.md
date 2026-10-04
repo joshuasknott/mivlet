@@ -218,7 +218,10 @@ the top frame; overlays, child-only hit targets, fragmented/rotated/offscreen
 controls and viewport zoom fail closed. One complete fixed mouse tap starts in
 one bounded fenced pipe write; no caller selector, coordinates, script, separate
 down/up writes or automatic replay are available. Other tabs may remain open;
-the exact target must still be present in the sole selected browser window.
+DOM hit tests use document CSS coordinates: native code adds measured, bounded
+page scroll offsets to the viewport point. Input still uses viewport coordinates;
+agents cannot supply either coordinate or scroll offset.
+The exact target must still be present in the sole selected browser window.
 A fixed `document.visibilityState` read in a private isolated world checks that
 this tab is visible before control discovery and twice before input. Page-world
 getter overrides cannot supply this state. The private probe grants no universal
@@ -233,6 +236,25 @@ occur, but this path imports no file. Downloads/file-picker/editable/custom DOM
 controls and private pages require another supported workflow or human control.
 The shared task guard reconciles uncertain browser input through page observation
 and refuses the same action even with a newly issued opaque reference.
+
+On an unzoomed visible public page, observation can also return a 30-second,
+single-use `scrollRef` and bounded CSS viewport dimensions/scroll position.
+`local-browser-scroll` accepts only that reference, the exact origin and `up` or
+`down`. The native choice binds the document/frame/loader/full URL, window,
+generation, viewport and center hit node/metadata. Its public AX ancestry must
+reach the approved root without crossing widgets, editable content or subframes.
+Hidden tabs and unsupported center targets offer no scroll choice. Before input,
+native code repeats privacy, visibility, viewport, hit and document checks.
+Scrolling or resizing since observation requires a new observation.
+
+One fixed `Input.dispatchMouseEvent` wheel event starts through the same account,
+lease and generation dispatch fence: no buttons or modifiers, native center,
+vertical distance of 80% of viewport height capped at 600 CSS pixels. No caller
+coordinates, amounts, focus changes, multi-step gesture or replay are exposed.
+Page handlers and nested scrolling can affect the result; an acknowledged event
+proves dispatch only. The agent observes again, and the shared task guard counts
+actual viewport progress while ignoring fresh scroll-reference values. Stop
+interrupts pipe waits without replaying the event or closing the user's browser.
 
 `local-browser-tabs` also captures document-bound `navigationRef` choices, valid
 for 30 seconds and one use. `local-browser-navigate` requires an explicitly
@@ -252,7 +274,7 @@ locks; cancellation and response waits happen outside them. The fixed native
 only dispatched, not verified page load: the agent must list and observe again.
 Errors, downloads and interrupted replies have uncertain outcomes and are not
 replayed. Browser-managed downloads are not imported or presented as Mivlet
-artifacts; native transfer custody and DOM element actions remain pending.
+artifacts; native transfer custody and richer DOM inputs remain pending.
 
 The driver is private to Rust; React receives no driver methods, process handles,
 raw accessibility tokens or screenshots. Native code only exposes:
