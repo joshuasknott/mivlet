@@ -2,7 +2,7 @@ import type { BackendModel, BackendProvider } from "@mivlet/protocol";
 import { catalogueCapabilities, resolveModelCapabilities } from "./model-catalogue";
 
 /** Composer pixels have their own audited path; this grants no screenshot tools. */
-export function supportsUserImageInput(provider: BackendProvider, model: BackendModel): boolean {
+export function supportsUserImageInput(provider: BackendProvider, model: Pick<BackendModel, "id" | "available" | "capabilities">): boolean {
   if (provider.authState !== "connected" || !model.available) return false;
   if (provider.backendType === "codex-app-server") return model.capabilities?.vision === true;
   return provider.backendType === "claude-agent" && provider.driverKind === "claude-agent"

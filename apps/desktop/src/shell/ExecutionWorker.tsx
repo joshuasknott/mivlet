@@ -214,10 +214,10 @@ export function ExecutionWorker({
         if (
           images.images.length &&
           !supportsUserImageInput(provider, { id: session.model.modelId,
-            label: session.model.modelId, available: true, capabilities: session.model.capabilities })
+            available: true, capabilities: session.model.capabilities })
         )
           throw new Error(
-            "Reattach images with a supported Codex or Claude model.",
+            "Reattach images with a supported Codex/Claude model.",
           );
         controller.resetCancellation();
         const staged = await prepareExecutionAttachments(
