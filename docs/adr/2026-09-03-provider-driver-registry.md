@@ -44,6 +44,19 @@ change capabilities only when their runtime and account state are connected.
 Antigravity remains a separate pinned ACP runtime because Mivlet owns its
 verified installation and account-scoped profile lifecycle.
 
+Claude's SDK launch explicitly uses non-interactive print/stream-JSON mode,
+disables session persistence and the provider's Chrome integration, and supplies
+only Mivlet's SDK MCP server with built-in tools/settings disabled. Windows
+discovery skips batch shims and requires the official native `claude.exe`; model
+values stay bound to a single option without shell parsing. The native account
+profile remains separate from workspace data. Mivlet owns conversation history;
+each new SDK process receives the supplied context instead of resuming a provider
+session. An opt-in initialization check uses a verified official executable in a
+disposable signed-out profile and sends no model prompt. It does not establish
+authenticated provider execution or screenshot support.
+The launch flags follow the [official CLI contract](https://code.claude.com/docs/en/cli-reference);
+Windows native-executable selection follows the [official SDK transport](https://github.com/anthropics/claude-agent-sdk-python/blob/9c69ce7aced5cdf2aa1ac86fe62e877b4962de8b/src/claude_agent_sdk/_internal/transport/subprocess_cli.py).
+
 Claude's shared tool replies consume the exact pending call once and copy their
 native transport handles before releasing run and bridge locks. Stdin writes
 run off the UI thread, with a 10-second deadline and a 2 MiB encoded-frame limit.
