@@ -302,7 +302,7 @@ fn private_attributes(node: &Value) -> Result<bool, String> {
             .as_str()
             .ok_or("Invalid browser field metadata.")?
             .to_ascii_lowercase();
-        if (name == "type" && value == "password")
+        if (name == "type" && matches!(value.as_str(), "password" | "file"))
             || (name == "autocomplete"
                 && value.split_ascii_whitespace().any(|value| {
                     matches!(value, "current-password" | "new-password" | "one-time-code")
@@ -380,7 +380,7 @@ fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
     let mut fields = Vec::new();
     for index in reachable(nodes, frame, true)?
         .into_iter()
-        .filter(|index| editable(&nodes[*index]))
+        .filter(|index| editable(&nodes[*index]) || nodes[*index]["role"]["value"] == "button")
     {
         if backend(&nodes[index]).is_some() {
             fields.push(index);
@@ -405,7 +405,9 @@ fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
             {
                 break;
             }
-            if editable(&nodes[parent]) && backend(&nodes[parent]).is_some() {
+            if (editable(&nodes[parent]) || nodes[parent]["role"]["value"] == "button")
+                && backend(&nodes[parent]).is_some()
+            {
                 covered = true;
                 break;
             }
@@ -633,7 +635,10 @@ pub(super) fn acceptance(
                     }
                     let private =
                         String::from_utf8_lossy(&request[..count]).starts_with("GET /private ");
-                    let body = if private {
+                    let file = String::from_utf8_lossy(&request[..count]).starts_with("GET /file ");
+                    let body = if file {
+                        "<!doctype html><title>Private file step</title><label>Choose file<input type=file></label>"
+                    } else if private {
                         "<!doctype html><title>Private step</title><label>Password<input type=password value='Hidden password delta'></label>"
                     } else {
                         "<!doctype html><title>Mivlet browser fixture</title><h1>Quarterly report</h1><p>Revenue 42</p><button onclick=\"document.getElementById('result').textContent='Activated once'\">Activate once</button><p id=result>Not activated</p><label>Notes<input value='Hidden entry alpha'></label><textarea>Hidden entry beta</textarea><div contenteditable=true>Hidden entry gamma</div><iframe srcdoc=\"<p>Hidden subframe epsilon</p>\"></iframe>"
@@ -649,8 +654,8 @@ pub(super) fn acceptance(
     if pages.len() != 1 {
         return Err("Browser QA requires its sole disposable tab.".into());
     }
-    for private in [false, true] {
-        let url = format!("{origin}/{}", if private { "private" } else { "report" });
+    for (private, path) in [(false, "report"), (true, "private"), (true, "file")] {
+        let url = format!("{origin}/{path}");
         let listed: Value = serde_json::from_str(&tabs(process, hwnd, 1, check)?)
             .map_err(|_| "Browser QA tab list invalid.")?;
         let navigation_ref = listed["tabs"][0]["navigationRef"]
@@ -712,7 +717,7 @@ pub(super) fn acceptance(
         let observed = observe(process, hwnd, 1, reference, &origin, check);
         if private {
             if !observed.as_ref().is_err_and(|error| error == PRIVATE) {
-                return Err("Browser QA did not pause the private field.".into());
+                return Err("Browser QA did not pause the private field or file chooser.".into());
             }
         } else {
             let observed = observed?;
@@ -772,7 +777,7 @@ pub(super) fn acceptance(
             }
         }
     }
-    eprintln!("Owned browser DOM fixture: document-bound navigation and sole-tab public button click each dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed refs and password field refused.");
+    eprintln!("Owned browser DOM fixture: document-bound navigation and sole-tab public button click each dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed refs, password field and file chooser refused.");
     Ok(())
 }
 

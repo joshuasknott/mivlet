@@ -193,8 +193,10 @@ session identifiers, debugging methods, JavaScript, field values or subframes.
 
 The read projection bounds the tree to 2,000 nodes, its output to 200 labels and
 16,000 text characters, and the operation to 15 seconds. Editable descendants are
-omitted, including editable field names that may embed entered values. Native field metadata pauses reads for password, OTP or payment fields;
-credential-shaped output is refused. Page text remains explicitly untrusted.
+omitted, including editable field names that may embed entered values. Native field metadata pauses reads for password, OTP, payment or file-picker fields;
+button-role nodes are also inspected so a file chooser cannot export a selected
+filename through an accessible button label.
+Credential-shaped output is refused. Page text remains explicitly untrusted.
 Reads invalidate older desktop action observations. A cancelled or malformed pipe
 exchange disables further agent commands while keeping the pipe handles alive for
 human use; close that private window and open a fresh browser to resume agent reads.

@@ -241,8 +241,12 @@ The click revision repeated this opt-in check using the current native executabl
 and actual installed Chrome. The production observation exposed a public button,
 the closed native click resolved its current CSS layout and hit identity, and a
 fresh observation verified the changed paragraph. A consumed control reference
-was refused; password and original field/subframe omission checks still passed.
+was refused; password, file-chooser and original field/subframe omission checks
+still passed. File fields with AX button roles are checked before label projection.
 Driver Stop preserved the browser and its pipe, and owner cleanup closed it.
+One preceding fixture run stopped on an uncertain navigation response, without
+replay; a separate fresh-profile run completed all checks. The uncertain result
+was not treated as a successful navigation.
 Separate native tests cover label/origin/document/window/generation/expiry
 binding, disabled and unsupported DOM nodes, finite visible geometry and Stop
 while a dispatched click waits, with no replay. This proves the bounded sole-tab
