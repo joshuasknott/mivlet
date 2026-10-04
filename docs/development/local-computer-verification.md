@@ -342,3 +342,20 @@ Remove-Item Env:MIVLET_OFFICE_QA_OUTPUT
 
 The test emits `pictures.pptx`, `pictures-preview.json` and `picture-source.png`.
 Fixtures do not establish live provider or arbitrary Office-file compatibility.
+
+## Unfinished tab-selection checkpoint
+
+The `codex/browser-tab-selection` branch adds shared `local-browser-activate`
+using a listed `canActivate` tab's exact reference, origin and title. Native
+selection consumes a document-bound choice, retires older action references and
+uses the existing foreground dispatch, account, generation and Stop fences.
+Only a fixed native target activation and visibility probe are exposed.
+
+This is an unfinished draft, paused at the user's request. Real browser
+acceptance still needs to exercise switching between two tabs, changed/closed
+targets, stale and consumed choices, background/focus-loss refusal and Stop
+without replay or browser closure. No provider-driven or packaged acceptance is
+claimed. The local desktop build passed, but its common JavaScript/CSS budget
+exceeded the unchanged ceiling by 0.4 KiB. Resolve that regression without
+raising the budget, then complete native acceptance and exact-head review before
+considering a merge. Do not resume this work without a new user instruction.
