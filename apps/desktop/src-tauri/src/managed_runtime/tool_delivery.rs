@@ -21,6 +21,7 @@ pub(super) struct Delivery {
     stdin: Arc<Mutex<ChildStdin>>,
     bridge: Arc<Mutex<ToolBridge>>,
     child: Arc<Mutex<crate::provider_process::SupervisedChild>>,
+    completed: bool,
 }
 
 pub(super) fn prepare(owner: &str, request: ManagedToolResponse) -> Result<Delivery, String> {
@@ -57,6 +58,7 @@ pub(super) fn prepare(owner: &str, request: ManagedToolResponse) -> Result<Deliv
         stdin,
         bridge,
         child,
+        completed: false,
     };
     // Bound the actual encoded SDK frame, including JSON escaping and wrappers.
     if delivery.response.to_string().len() > MAX_WIRE_BYTES {
@@ -87,7 +89,7 @@ impl Delivery {
         let _ = terminate_claude_turn(&self.child);
     }
     pub(super) async fn send(
-        self,
+        mut self,
         check_account: impl Fn() -> Result<(), String>,
     ) -> Result<(), String> {
         if self.current(&check_account).is_err() {
@@ -121,6 +123,7 @@ impl Delivery {
             .lock()
             .map_err(|_| FAILED)?
             .finish_response(&self.request);
+        self.completed = true;
         Ok(())
     }
 }
@@ -129,12 +132,9 @@ impl Drop for Delivery {
     fn drop(&mut self) {
         // An abandoned async command must not leave its detached pipe writer
         // delivering a consumed reply after its caller has gone away.
-        let unfinished = self
-            .bridge
-            .lock()
-            .map(|bridge| bridge.delivering(&self.request))
-            .unwrap_or(true);
-        if unfinished {
+        // SDK cancellation may already have removed the in-flight marker.
+        // Only our confirmed completion proves that no writer needs cleanup.
+        if !self.completed {
             self.stop();
         }
     }

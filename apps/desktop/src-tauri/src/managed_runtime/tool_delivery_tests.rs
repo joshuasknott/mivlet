@@ -227,27 +227,32 @@ async fn stalled_provider_times_out_and_cannot_receive_a_second_reply() {
 
 #[tokio::test]
 async fn abandoned_async_response_closes_its_blocked_writer_and_consumed_call() {
-    let fixture = Fixture::new(false);
-    let delivery = prepare("fixture-owner", fixture.response(&"x".repeat(512 * 1024))).unwrap();
-    let writer = tokio::spawn(async move { delivery.send(|| Ok(())).await });
-    wait_for_blocked_write(&fixture).await;
-    writer.abort();
-    assert!(tokio::time::timeout(Duration::from_secs(2), writer)
-        .await
-        .unwrap()
-        .unwrap_err()
-        .is_cancelled());
-    assert!(!fixture.bridge.lock().unwrap().delivering("native-control"));
-    assert!(fixture.child.lock().unwrap().try_wait().unwrap().is_some());
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while fixture.input.try_lock().is_err() {
-        assert!(
-            Instant::now() < deadline,
-            "abandoned pipe writer survived cleanup"
-        );
-        tokio::time::sleep(Duration::from_millis(10)).await;
+    for sdk_cancelled in [false, true] {
+        let fixture = Fixture::new(false);
+        let delivery = prepare("fixture-owner", fixture.response(&"x".repeat(512 * 1024))).unwrap();
+        let writer = tokio::spawn(async move { delivery.send(|| Ok(())).await });
+        wait_for_blocked_write(&fixture).await;
+        if sdk_cancelled {
+            fixture.bridge.lock().unwrap().cancel("native-control");
+        }
+        writer.abort();
+        assert!(tokio::time::timeout(Duration::from_secs(2), writer)
+            .await
+            .unwrap()
+            .unwrap_err()
+            .is_cancelled());
+        assert!(!fixture.bridge.lock().unwrap().delivering("native-control"));
+        assert!(fixture.child.lock().unwrap().try_wait().unwrap().is_some());
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while fixture.input.try_lock().is_err() {
+            assert!(
+                Instant::now() < deadline,
+                "abandoned pipe writer survived cleanup"
+            );
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        assert!(prepare("fixture-owner", fixture.response("replay")).is_err());
     }
-    assert!(prepare("fixture-owner", fixture.response("replay")).is_err());
 }
 
 #[test]
