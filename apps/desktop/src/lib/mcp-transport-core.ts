@@ -1,0 +1,307 @@
+/** Desktop adapter for the native owner-bound local STDIO MCP process. */
+
+import {
+  parseMcpLine,
+  isMcpResponse,
+  normalizeMcpToolResult,
+  normalizeMcpResourceResult,
+  type McpFrame,
+  type McpNotification,
+  type McpRequest
+} from "@mivlet/connectors";
+import type { ApprovalResolutionRequest } from "@mivlet/protocol";
+import { authorizeRuntimeMcpToolCall, closeRuntimeRemoteMcpSession, closeRuntimeMcpProcess, executeRuntimeApprovedMcpToolCall, listenRuntimeMcpFrames, openRuntimeRemoteMcpSession, pollRuntimeRemoteMcpMessages, recordRuntimeMcpDiscovery, prepareRuntimeMcpToolCall, spawnRuntimeMcpProcess, sendRuntimeRemoteMcpFrame, writeRuntimeMcpFrame } from "../runtime/domains/mcp";
+import type { RuntimeAuthorizedMcpToolCall, RuntimeMcpConnectionDetails, RuntimeMcpToolProposal } from "../runtime/domains/mcp";
+
+import type { DesktopMcpTransportHandle } from "./mcp-transport-contract";
+
+interface PendingToolResponse {
+  resource: boolean;
+  resolve: (value: unknown) => void;
+  reject: (error: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+}
+
+function hasDesktopRuntime(): boolean {
+  return typeof window !== "undefined" &&
+    Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__);
+}
+
+function requireRuntime<T>(value: T | null | undefined, purpose: string): T {
+  if (!value) throw new Error(`MCP ${purpose} requires the desktop app.`);
+  return value;
+}
+
+abstract class DesktopMcpBase {
+  private closePromise?: Promise<void>;
+  protected readonly frameHandlers = new Set<(frame: McpFrame) => void>();
+  protected readonly closeHandlers = new Set<() => void>();
+  protected closed = false;
+  protected ensureOpen(): void { if (this.closed) throw new Error("MCP transport is closed."); }
+  constructor(protected readonly workspaceId: string, public readonly sessionId: string) {}
+
+  protected abstract nativeClose(): Promise<unknown>;
+  protected onTransportClosed(): void {}
+  protected markClosed(): void {
+    if (this.closed) return;
+    this.closed = true;
+    this.onTransportClosed();
+    for (const handler of this.closeHandlers) handler();
+    this.closeHandlers.clear();
+    this.frameHandlers.clear();
+  }
+  protected beginNativeClose(): Promise<void> {
+    return this.closePromise ??= this.nativeClose().catch(() => undefined).then(() => undefined);
+  }
+  close(): Promise<void> { this.markClosed(); return this.beginNativeClose(); }
+
+  subscribe(handler: (frame: McpFrame) => void): () => void {
+    this.frameHandlers.add(handler);
+    return () => this.frameHandlers.delete(handler);
+  }
+
+  subscribeClose(handler: () => void): () => void {
+    if (this.closed) {
+      queueMicrotask(handler);
+      return () => undefined;
+    }
+    this.closeHandlers.add(handler);
+    return () => this.closeHandlers.delete(handler);
+  }
+
+  async recordDiscovery(
+    tools: string[],
+    resources: string[]
+  ): Promise<RuntimeMcpConnectionDetails> {
+    this.ensureOpen();
+    const recorded = await recordRuntimeMcpDiscovery(this.workspaceId, this.sessionId, tools, resources);
+    this.ensureOpen();
+    return requireRuntime(recorded, "discovery");
+  }
+
+  prepareResourceRead(uri: string) { return this.prepareToolCall("resources/read", { uri }, "resource"); }
+
+  async prepareToolCall(toolName: string, args: Record<string, unknown>, operation?: RuntimeMcpToolProposal["operation"]) {
+    this.ensureOpen();
+    const proposal: RuntimeMcpToolProposal = {
+      ...(operation ? { operation } : {}),
+      workspaceId: this.workspaceId,
+      sessionId: this.sessionId,
+      toolName,
+      arguments: JSON.parse(JSON.stringify(args)) as Record<string, unknown>
+    };
+    const prepared = await prepareRuntimeMcpToolCall(proposal);
+    this.ensureOpen();
+    return { proposal, prepared: requireRuntime(prepared, "tool approval") };
+  }
+
+  async authorizeToolCall(
+    proposal: RuntimeMcpToolProposal,
+    resolution: ApprovalResolutionRequest
+  ): Promise<RuntimeAuthorizedMcpToolCall> {
+    this.ensureOpen();
+    const authorized = await authorizeRuntimeMcpToolCall(proposal, resolution);
+    this.ensureOpen();
+    return requireRuntime(authorized, "tool approval");
+  }
+
+}
+
+class DesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportHandle {
+  private readonly pendingToolResponses = new Map<string, PendingToolResponse>();
+  private nextToolRequest = 1;
+
+  constructor(
+    workspaceId: string,
+    sessionId: string,
+    private readonly unlisten: () => void
+  ) { super(workspaceId, sessionId); }
+
+  handleLine(line: string): void {
+    if (line === "[MCP-CLOSED]") {
+      this.markClosed();
+      void this.beginNativeClose();
+      return;
+    }
+    if (this.closed) return;
+    const frame = parseMcpLine(line);
+    if (!frame) return;
+    if (isMcpResponse(frame) && typeof frame.id === "string") {
+      const pending = this.pendingToolResponses.get(frame.id);
+      if (pending) {
+        this.pendingToolResponses.delete(frame.id);
+        clearTimeout(pending.timeout);
+        if (frame.error) pending.reject(new Error(`MCP ${frame.error.code}: ${frame.error.message}`));
+        else {
+          try {
+            pending.resolve(pending.resource ? normalizeMcpResourceResult(frame.result) : normalizeMcpToolResult(frame.result));
+          } catch (error) {
+            pending.reject(error instanceof Error ? error : new Error("MCP tool returned invalid content."));
+          }
+        }
+      }
+    }
+    for (const handler of this.frameHandlers) handler(frame);
+  }
+
+  async send(frame: McpRequest | McpNotification): Promise<void> {
+    this.ensureOpen();
+    await writeRuntimeMcpFrame(this.workspaceId, this.sessionId, JSON.stringify(frame));
+  }
+
+  async executeAuthorizedToolCall(
+    proposal: RuntimeMcpToolProposal,
+    permitId: string
+  ): Promise<unknown> {
+    this.ensureOpen();
+    const requestId = `native-mcp-tool-${this.nextToolRequest++}`;
+    const response = new Promise<unknown>((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        this.pendingToolResponses.delete(requestId);
+        reject(new Error("The approved MCP tool call timed out."));
+        void writeRuntimeMcpFrame(
+          this.workspaceId,
+          this.sessionId,
+          JSON.stringify({
+            jsonrpc: "2.0",
+            method: "notifications/cancelled",
+            params: { requestId, reason: "Mivlet request timeout" }
+          })
+        ).catch(() => undefined);
+      }, 30_000);
+      this.pendingToolResponses.set(requestId, { resolve, reject, timeout, resource: proposal.operation === "resource" });
+    });
+    try {
+      const dispatch = executeRuntimeApprovedMcpToolCall(proposal, permitId, requestId).then(result => {
+        this.ensureOpen();
+        requireRuntime(result, "tool execution");
+      });
+      const [, result] = await Promise.all([dispatch, response]);
+      return result;
+    } catch (error) {
+      const pending = this.pendingToolResponses.get(requestId);
+      if (pending) {
+        clearTimeout(pending.timeout);
+        pending.reject(error instanceof Error ? error : new Error("MCP tool dispatch failed."));
+      }
+      this.pendingToolResponses.delete(requestId);
+      throw error;
+    }
+  }
+
+  protected nativeClose() { return closeRuntimeMcpProcess(this.workspaceId, this.sessionId); }
+
+  protected onTransportClosed(): void {
+    this.unlisten();
+    for (const pending of this.pendingToolResponses.values()) {
+      clearTimeout(pending.timeout);
+      pending.reject(new Error("MCP transport is closed."));
+    }
+    this.pendingToolResponses.clear();
+  }
+}
+
+export async function createDesktopMcpTransport(
+  workspaceId: string,
+  launchReference: string
+): Promise<DesktopMcpTransportHandle | null> {
+  if (!hasDesktopRuntime()) return null;
+  const spawned = await spawnRuntimeMcpProcess(workspaceId, launchReference);
+  if (!spawned) return null;
+  let transport: DesktopMcpTransport | undefined;
+  const buffered: string[] = [];
+  const unlisten = await listenRuntimeMcpFrames(spawned.channel, (line) => {
+    if (transport) transport.handleLine(line);
+    else buffered.push(line);
+  });
+  if (!unlisten) {
+    await closeRuntimeMcpProcess(workspaceId, spawned.sessionId).catch(() => undefined);
+    throw new Error("Mivlet could not listen to the local MCP server.");
+  }
+  transport = new DesktopMcpTransport(workspaceId, spawned.sessionId, unlisten);
+  for (const line of buffered) transport.handleLine(line);
+  return transport;
+}
+
+class RemoteDesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportHandle {
+  private polling = false;
+  private nextToolRequest = 1;
+
+  async send(frame: McpRequest | McpNotification): Promise<void> {
+    this.ensureOpen();
+    const lines = await sendRuntimeRemoteMcpFrame(
+      this.workspaceId,
+      this.sessionId,
+      JSON.stringify(frame)
+    );
+    this.ensureOpen();
+    for (const line of requireRuntime(lines, "transport")) {
+      const received = parseMcpLine(line);
+      if (received) {
+        for (const handler of this.frameHandlers) handler(received);
+      }
+    }
+    if ("id" in frame && frame.method === "initialize") this.beginPolling();
+  }
+
+  async executeAuthorizedToolCall(
+    proposal: RuntimeMcpToolProposal,
+    permitId: string
+  ): Promise<unknown> {
+    this.ensureOpen();
+    const requestId = `native-mcp-tool-${this.nextToolRequest++}`;
+    const lines = await executeRuntimeApprovedMcpToolCall(proposal, permitId, requestId);
+    this.ensureOpen();
+
+    let response: Extract<McpFrame, { id: string | number }> | undefined;
+    for (const line of requireRuntime(lines, "tool execution")) {
+      const frame = parseMcpLine(line);
+      if (!frame) continue;
+      if (isMcpResponse(frame) && frame.id === requestId) response = frame;
+      for (const handler of this.frameHandlers) handler(frame);
+    }
+    if (!response || !isMcpResponse(response)) {
+      throw new Error("Remote MCP did not return the approved tool response.");
+    }
+    if (response.error) throw new Error(`MCP ${response.error.code}: ${response.error.message}`);
+    return proposal.operation === "resource" ? normalizeMcpResourceResult(response.result) : normalizeMcpToolResult(response.result);
+  }
+
+  protected nativeClose() { return closeRuntimeRemoteMcpSession(this.workspaceId, this.sessionId); }
+
+  private beginPolling(): void {
+    if (this.polling || this.closed) return;
+    this.polling = true;
+    void this.pollLoop();
+  }
+
+  private async pollLoop(): Promise<void> {
+    try {
+      while (!this.closed) {
+        try {
+          const result = await pollRuntimeRemoteMcpMessages(this.workspaceId, this.sessionId);
+          if (!result || !result.supported || this.closed) break;
+          for (const line of result.frames) {
+            const received = parseMcpLine(line);
+            if (received) for (const handler of this.frameHandlers) handler(received);
+          }
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("session expired")) break;
+          await new Promise((resolve) => setTimeout(resolve, 1_000));
+        }
+      }
+    } finally {
+      this.polling = false;
+    }
+  }
+}
+
+export async function createDesktopRemoteMcpTransport(
+  workspaceId: string,
+  configurationReference: string
+): Promise<DesktopMcpTransportHandle | null> {
+  if (!hasDesktopRuntime()) return null;
+  const opened = await openRuntimeRemoteMcpSession(workspaceId, configurationReference);
+  if (!opened) return null;
+  return new RemoteDesktopMcpTransport(workspaceId, opened.sessionId);
+}

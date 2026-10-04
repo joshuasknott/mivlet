@@ -22,6 +22,28 @@ const fixture = () => ({
 });
 beforeEach(() => vi.clearAllMocks());
 describe("official connector agent tools", () => {
+  it("closes an in-flight app task on Stop and discards a later success", async () => {
+    vi.useFakeTimers();
+    try {
+      const connection = fixture(); open.mockResolvedValue(connection);
+      let cancelled = false;
+      let finish!: (value: unknown) => void;
+      let started!: () => void;
+      const dispatched = new Promise<void>(resolve => { started = resolve; });
+      connection.transport.executeAuthorizedToolCall.mockImplementationOnce(() => { started(); return new Promise(resolve => { finish = resolve; }); });
+      const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, { ...options, shouldCancel: () => cancelled });
+      const pending = executor(approval, input);
+      const result = expect(pending).rejects.toThrow("External effects already accepted");
+      await dispatched;
+      cancelled = true;
+      await vi.advanceTimersByTimeAsync(50);
+      await result;
+      expect(connection.client.close).toHaveBeenCalledOnce();
+      finish({ trust: "untrusted", content: [{ type: "text", text: "late success" }] });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally { vi.useRealTimers(); }
+  });
   it("uses an admitted custom server through the same exact native tool permit", async () => {
     const connection = fixture(); open.mockResolvedValue(connection);
     const connectorId = customMcpConnectorId("local-brief")!;
@@ -49,15 +71,23 @@ describe("official connector agent tools", () => {
     const connection = fixture(); open.mockResolvedValue(connection);
     let cancelled = false;
     const executor = createDesktopToolExecutor({ waitForDecision: vi.fn(async () => { cancelled = true; return "granted" as const; }) }, { ...options, shouldCancel: () => cancelled });
-    await expect(executor(approval, input)).rejects.toThrow("connector access changed");
+    await expect(executor(approval, input)).rejects.toThrow("This connected app task was cancelled or its access changed.");
     expect(connection.transport.authorizeToolCall).not.toHaveBeenCalled();
+  });
+  it("rejects an old generation at the approval boundary before its first timer tick", async () => {
+    const connection = fixture(); open.mockResolvedValue(connection);
+    let current = { workspaceId: "workspace-1", agentId: "agent", generation: 1, ready: false, controller: "agent" as const };
+    const executor = createDesktopToolExecutor({ waitForDecision: vi.fn(async () => { current = { ...current, generation: 2 }; return "granted" as const; }) }, { ...options, localComputerCurrent: () => current });
+    await expect(executor(approval, input)).rejects.toThrow("This connected app task was cancelled or its access changed.");
+    expect(connection.transport.authorizeToolCall).not.toHaveBeenCalled();
+    expect(connection.client.close).toHaveBeenCalledOnce();
   });
   it("blocks Stop during the final provider check before external dispatch", async () => {
     const connection = fixture(); open.mockResolvedValue(connection);
     let cancelled = false;
     providerCheck.mockResolvedValueOnce(undefined).mockImplementationOnce(async () => { cancelled = true; });
     const executor = createDesktopToolExecutor({ waitForDecision: vi.fn().mockResolvedValue("granted") }, { ...options, shouldCancel: () => cancelled });
-    await expect(executor({ ...approval, id: "mivlet-shared-test" }, input)).rejects.toThrow("connector access changed");
+    await expect(executor({ ...approval, id: "mivlet-shared-test" }, input)).rejects.toThrow("cancelled");
     expect(connection.transport.authorizeToolCall).toHaveBeenCalledOnce();
     expect(connection.transport.executeAuthorizedToolCall).not.toHaveBeenCalled();
     expect(connection.client.close).toHaveBeenCalledOnce();
@@ -122,7 +152,7 @@ describe("official connector agent tools", () => {
     let allowed = true;
     const decision = vi.fn().mockImplementationOnce(async () => { allowed = false; return "granted"; });
     const executor = createDesktopToolExecutor({ waitForDecision: decision }, { ...options, connectorAccessCurrent: () => allowed });
-    await expect(executor(approval, input)).rejects.toThrow("connector access changed");
+    await expect(executor(approval, input)).rejects.toThrow("This connected app task was cancelled or its access changed.");
     expect(connection.transport.authorizeToolCall).not.toHaveBeenCalled();
     expect(connection.transport.executeAuthorizedToolCall).not.toHaveBeenCalled();
   });
