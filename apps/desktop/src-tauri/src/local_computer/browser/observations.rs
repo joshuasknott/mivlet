@@ -245,7 +245,7 @@ fn private_attributes(node: &Value) -> Result<bool, String> {
     if attributes.len() > 512 || attributes.len() % 2 != 0 {
         return Err("The browser field metadata exceeded its limit.".into());
     }
-    for pair in attributes.chunks_exact(2) {
+    for pair in attributes.as_chunks::<2>().0 {
         let name = pair[0]
             .as_str()
             .ok_or("Invalid browser field metadata.")?
