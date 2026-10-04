@@ -44,6 +44,15 @@ change capabilities only when their runtime and account state are connected.
 Antigravity remains a separate pinned ACP runtime because Mivlet owns its
 verified installation and account-scoped profile lifecycle.
 
+Claude's shared tool replies consume the exact pending call once and copy their
+native transport handles before releasing run and bridge locks. Stdin writes
+run off the UI thread, with a 10-second deadline and a 2 MiB encoded-frame limit.
+Cancellation, Stop and account changes invalidate delivery; an uncertain or
+partial reply closes this supervised provider turn without replaying its action
+or sending a second reply. A real subprocess regression exercises blocked stdin
+through the actual response preparation and native Stop paths. This establishes
+local transport behavior, not live Claude account acceptance or screenshot support.
+
 ## Credential boundary
 
 ### Embedded direct API execution (2026-09-10)

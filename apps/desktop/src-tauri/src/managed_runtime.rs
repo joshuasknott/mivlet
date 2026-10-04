@@ -28,6 +28,7 @@ use tauri::{AppHandle, Emitter};
 use crate::models::{BackendModel, BackendVerifyResult};
 mod image_input;
 mod shared_tools;
+mod tool_delivery;
 use shared_tools::{Dispatch, ToolBridge, ToolSpec};
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(12);
@@ -1613,6 +1614,9 @@ fn start_claude_turn(
                 break;
             }
         }
+        if let Ok(mut bridge) = tool_bridge.lock() {
+            bridge.stop();
+        }
         if let Ok(mut provider_child) = child.lock() {
             let _ = provider_child.kill();
         }
@@ -2192,36 +2196,18 @@ pub struct ManagedToolResponse {
 }
 
 #[tauri::command]
-pub fn respond_managed_runtime_tool(request: ManagedToolResponse) -> Result<(), String> {
+pub async fn respond_managed_runtime_tool(request: ManagedToolResponse) -> Result<(), String> {
     let owner = crate::backends::require_current_internal_user()?;
-    let runs = active_runs()
-        .lock()
-        .map_err(|_| "The provider tool turn is unavailable.")?;
-    let run = runs
-        .get(&request.request_id)
-        .ok_or("The provider tool turn has ended.")?;
-    if run.owner != owner || run.provider_id != "claude" {
-        return Err("The Mivlet tool response belongs to another provider turn.".into());
-    }
-    let response = run
-        .tool_bridge
-        .lock()
-        .map_err(|_| "Mivlet tool responses are unavailable.")?
-        .respond(
-            &request.tool_request_id,
-            &request.call_id,
-            request.ok,
-            &request.output,
-        )?;
-    let stdin = run
-        .stdin
-        .as_ref()
-        .ok_or("The provider tool transport has closed.")?;
-    write_json(
-        stdin,
-        "claude",
-        &shared_tool_response(&request.tool_request_id, response),
-    )
+    let delivery = tool_delivery::prepare(&owner, request)?;
+    delivery
+        .send(|| {
+            if crate::backends::require_current_internal_user()? == owner {
+                Ok(())
+            } else {
+                Err("The provider turn's account changed.".into())
+            }
+        })
+        .await
 }
 
 /// Check a shared call again after waiting for approval. This grants no authority.
@@ -2400,6 +2386,9 @@ pub fn shutdown_managed_runtime_turn(request_id: String) -> Result<(), String> {
         .map_err(|_| "Managed provider turn state is unavailable.".to_string())?
         .remove(&request_id);
     if let Some(run) = run {
+        if let Ok(mut bridge) = run.tool_bridge.lock() {
+            bridge.stop();
+        }
         let _ = run
             .child
             .lock()

@@ -18,6 +18,7 @@ pub(super) struct ToolSpec {
 pub(super) struct ToolBridge {
     tools: Vec<Value>,
     pending: HashMap<String, Value>,
+    delivering: HashSet<String>,
     seen: HashSet<String>,
     calls: usize,
     stopped: bool,
@@ -168,17 +169,28 @@ impl ToolBridge {
         }
         let id = pending["id"].clone();
         self.pending.remove(request_id);
+        self.delivering.insert(request_id.into());
         Ok(json!({"jsonrpc":"2.0","id":id,"result":{
             "content":[{"type":"text","text":output}],"isError":!ok}}))
     }
 
     pub fn cancel(&mut self, request_id: &str) {
         self.pending.remove(request_id);
+        self.delivering.remove(request_id);
+    }
+
+    pub fn delivering(&self, request_id: &str) -> bool {
+        !self.stopped && self.delivering.contains(request_id)
+    }
+
+    pub fn finish_response(&mut self, request_id: &str) {
+        self.delivering.remove(request_id);
     }
 
     pub fn stop(&mut self) {
         self.stopped = true;
         self.pending.clear();
+        self.delivering.clear();
     }
 
     pub fn current(&self, approval_id: &str, tool: &str, arguments: &Value) -> bool {
