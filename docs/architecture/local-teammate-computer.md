@@ -179,7 +179,7 @@ across input-driver Stop. The profile is independent of the user's
 usual browser profile, but the window still shares the interactive Windows session.
 The published browser outlives the input driver and Stop for human takeover;
 unpublished cancelled launches are closed, and account/app shutdown closes the
-owned browser job. DOM control and native upload/download custody remain pending.
+owned browser job. Native upload/download custody remains pending.
 
 Shared `local-browser-tabs` and `local-browser-observe` provide text reads in the
 agent's owned browser through the same selected-window lease and global approval
@@ -193,12 +193,37 @@ session identifiers, debugging methods, JavaScript, field values or subframes.
 
 The read projection bounds the tree to 2,000 nodes, its output to 200 labels and
 16,000 text characters, and the operation to 15 seconds. Editable descendants are
-omitted, including editable field names that may embed entered values. Native field metadata pauses reads for password, OTP or payment fields;
-credential-shaped output is refused. Page text remains explicitly untrusted.
+omitted, including editable field names that may embed entered values. Native field metadata pauses reads for password, OTP, payment or file-picker fields;
+button-role nodes are also inspected so a file chooser cannot export a selected
+filename through an accessible button label.
+Credential-shaped output is refused. Page text remains explicitly untrusted.
 Reads invalidate older desktop action observations. A cancelled or malformed pipe
 exchange disables further agent commands while keeping the pipe handles alive for
 human use; close that private window and open a fresh browser to resume agent reads.
-DOM actions and native upload/download custody remain pending.
+Form editing, multi-tab DOM input and native upload/download custody remain pending.
+
+For a sole HTTP(S) tab, observation also exposes a bounded subset of named,
+enabled top-frame buttons and HTTP links as opaque `controlRef` choices.
+At most 32 candidate controls are inspected; `controlsPartial` explicitly marks
+this limited subset rather than claiming complete page interaction coverage.
+`local-browser-click` requires the exact observed origin/name, a choice less than
+30 seconds old, an exact approval and the selected foreground window. Native code
+consumes the choice and invalidates every older tab/navigation/control reference,
+then rechecks target, window, generation, frame, loader, full URL, public AX label
+and native DOM metadata. Field privacy checks run again before acting.
+
+Mivlet resolves one finite, fully visible axis-aligned CSS quad without scrolling
+or changing focus. The current hit-test must identify that exact backend node in
+the top frame; overlays, child-only hit targets, fragmented/rotated/offscreen
+controls and viewport zoom fail closed. One complete fixed mouse tap starts in
+one bounded fenced pipe write; no caller selector, coordinates, script, separate
+down/up writes or automatic replay are available. Tab multiplicity is checked
+again before dispatch. The result states dispatch only and requires a fresh
+observation. Button activation may submit data and browser-managed downloads may
+occur, but this path imports no file. Downloads/file-picker/editable/custom DOM
+controls and private pages require another supported workflow or human control.
+The shared task guard reconciles uncertain browser input through page observation
+and refuses the same action even with a newly issued opaque reference.
 
 `local-browser-tabs` also captures document-bound `navigationRef` choices, valid
 for 30 seconds and one use. `local-browser-navigate` requires an explicitly

@@ -83,7 +83,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 38] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 39] = [
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -109,6 +109,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 38] = [
     "local-browser-tabs",
     "local-browser-observe",
     "local-browser-navigate",
+    "local-browser-click",
     "local-app-select",
     "local-app-action",
     "local-desktop-observe",
@@ -303,6 +304,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "local-app-list" => Some(("read-only", "low")),
         "local-browser-open" => Some(("full-access", "high")),
         "local-browser-navigate" => Some(("full-access", "high")),
+        "local-browser-click" => Some(("full-access", "critical")),
         "local-browser-tabs" | "local-browser-observe" => Some(("read-only", "medium")),
         "local-app-select" => Some(("read-only", "medium")),
         "local-app-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
@@ -394,6 +396,7 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-browser-tabs"
             | "local-browser-observe"
             | "local-browser-navigate"
+            | "local-browser-click"
             | "local-app-select"
             | "local-app-action"
             | "local-desktop-observe"
@@ -1528,6 +1531,52 @@ pub async fn execute_tool_call(
         })
         .await
         .map_err(|_| "The browser observation stopped unexpectedly.")??;
+        return Ok(ToolResult { ok: true, output });
+    }
+    if tool == "local-browser-click" {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Click {
+            control_ref: String,
+            origin: String,
+            name: String,
+        }
+        let value: Click = serde_json::from_value(arguments).map_err(|_| "Invalid browser input: use the observed controlRef, exact origin and name. No browser input was dispatched.")?;
+        if value.control_ref.len() != 48
+            || !value
+                .control_ref
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || value.origin.len() > 2048
+            || value.name.trim().is_empty()
+            || value.name.chars().count() > 200
+            || value.name.chars().any(char::is_control)
+            || crate::secret_redaction::looks_secret(&value.name)
+        {
+            return Err("Invalid browser input scope. No browser input was dispatched.".into());
+        }
+        let workspace = request
+            .workspace_id
+            .clone()
+            .ok_or("Browser input requires a workspace.")?;
+        let agent = request
+            .agent_id
+            .clone()
+            .ok_or("Browser input requires an agent.")?;
+        let computers = local_computers.inner().clone();
+        let output = tauri::async_runtime::spawn_blocking(move || {
+            crate::local_computer::browser::click(
+                &computers,
+                &workspace,
+                &agent,
+                computer_generation,
+                &value.control_ref,
+                &value.origin,
+                &value.name,
+            )
+        })
+        .await
+        .map_err(|_| "Browser click outcome is uncertain. Do not replay it.")??;
         return Ok(ToolResult { ok: true, output });
     }
     if tool == "local-browser-navigate" {

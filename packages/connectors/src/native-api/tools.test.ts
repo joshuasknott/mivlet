@@ -16,6 +16,18 @@ const request: NativeCompletionRequest = {
 };
 
 describe("native application action schemas", () => {
+  it("shares exact observed browser click scope without script, selector or coordinate inputs", () => {
+    const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-click")!;
+    const schema = JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["controlRef", "origin", "name"]);
+    expect(Object.keys(schema.properties)).toEqual(["controlRef", "origin", "name"]);
+    expect(schema.additionalProperties).toBe(false);
+    const requestWithClick = { ...request, tools: [tool] };
+    const openAi = shapeOpenAiRequest(requestWithClick) as { tools: Array<{ function: { parameters: unknown } }> };
+    const anthropic = shapeAnthropicRequest({ ...requestWithClick, providerId: "anthropic" }) as { tools: Array<{ input_schema: unknown }> };
+    expect(openAi.tools[0].function.parameters).toEqual(schema);
+    expect(anthropic.tools[0].input_schema).toEqual(schema);
+  });
   it("advertises action-specific inputs without flat irrelevant fields", () => {
     const app = JSON.parse(actionTools.find((tool) => tool.name === "local-app-action")!.parameters);
     expect(app.required).toEqual(["observationId", "input"]);

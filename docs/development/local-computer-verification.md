@@ -237,6 +237,22 @@ from the opaque blank tab, verified report contents by a fresh observation, and
 refused a reused navigation choice. This still does not establish a full native
 selected-window lease or live provider/account journey.
 
+The click revision repeated this opt-in check using the current native executable
+and actual installed Chrome. The production observation exposed a public button,
+the closed native click resolved its current CSS layout and hit identity, and a
+fresh observation verified the changed paragraph. A consumed control reference
+was refused; password, file-chooser and original field/subframe omission checks
+still passed. File fields with AX button roles are checked before label projection.
+Driver Stop preserved the browser and its pipe, and owner cleanup closed it.
+One preceding fixture run stopped on an uncertain navigation response, without
+replay; a separate fresh-profile run completed all checks. The uncertain result
+was not treated as a successful navigation.
+Separate native tests cover label/origin/document/window/generation/expiry
+binding, disabled and unsupported DOM nodes, finite visible geometry and Stop
+while a dispatched click waits, with no replay. This proves the bounded sole-tab
+button path, not form editing, arbitrary controls, full selected-window/account
+acceptance or managed downloads/uploads.
+
 Repeat this check only in a Windows interactive session:
 
 ```powershell
@@ -250,5 +266,5 @@ Separate tests verify real owned parent/descendant job cleanup, profile director
 pinning, closed launch arguments/environment, rejected writable or untrusted
 executables, missing Stop support and exclusive generation-fenced launch
 reservations. These are native boundary tests. Ordinary agent launch/approval,
-real sign-in, packaged clean-machine behavior, DOM control and managed
+real sign-in, packaged clean-machine behavior, broader DOM input and managed
 upload/download acceptance remain outstanding.

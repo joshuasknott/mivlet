@@ -167,6 +167,7 @@ pub(super) fn tabs(
 ) -> Result<String, String> {
     process.tabs = None;
     process.navigation.clear();
+    process.controls.clear();
     let (window, pages) = targets(process, hwnd, check)?;
     let mut choices = HashMap::new();
     let mut navigation = HashMap::new();
@@ -214,7 +215,7 @@ pub(super) fn tabs(
     Ok(json!({"tabs":tabs,"trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 pub(super) struct Frame {
     pub(super) id: String,
     pub(super) loader: String,
@@ -301,7 +302,7 @@ fn private_attributes(node: &Value) -> Result<bool, String> {
             .as_str()
             .ok_or("Invalid browser field metadata.")?
             .to_ascii_lowercase();
-        if (name == "type" && value == "password")
+        if (name == "type" && matches!(value.as_str(), "password" | "file"))
             || (name == "autocomplete"
                 && value.split_ascii_whitespace().any(|value| {
                     matches!(value, "current-password" | "new-password" | "one-time-code")
@@ -314,7 +315,11 @@ fn private_attributes(node: &Value) -> Result<bool, String> {
     Ok(false)
 }
 
-fn reachable(nodes: &[Value], frame: &str, field_descendants: bool) -> Result<Vec<usize>, String> {
+pub(super) fn reachable(
+    nodes: &[Value],
+    frame: &str,
+    field_descendants: bool,
+) -> Result<Vec<usize>, String> {
     if nodes.len() > 2000 {
         return Err("This page's accessibility tree exceeded its read limit. Use a smaller page or an existing connector.".into());
     }
@@ -375,7 +380,7 @@ fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
     let mut fields = Vec::new();
     for index in reachable(nodes, frame, true)?
         .into_iter()
-        .filter(|index| editable(&nodes[*index]))
+        .filter(|index| editable(&nodes[*index]) || nodes[*index]["role"]["value"] == "button")
     {
         if backend(&nodes[index]).is_some() {
             fields.push(index);
@@ -400,7 +405,9 @@ fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
             {
                 break;
             }
-            if editable(&nodes[parent]) && backend(&nodes[parent]).is_some() {
+            if (editable(&nodes[parent]) || nodes[parent]["role"]["value"] == "button")
+                && backend(&nodes[parent]).is_some()
+            {
                 covered = true;
                 break;
             }
@@ -417,7 +424,7 @@ fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
 }
 
 #[derive(serde::Serialize)]
-struct Projection {
+pub(super) struct Projection {
     content: Vec<Value>,
     truncated: bool,
 }
@@ -465,6 +472,7 @@ pub(super) fn observe(
     requested_origin: &str,
     check: &dyn Fn() -> Result<(), String>,
 ) -> Result<String, String> {
+    process.controls.clear();
     let origin = exact_origin(requested_origin)?;
     // Consume before I/O; this choice cannot be replayed by a later observation.
     let (target, expected_window) = process
@@ -491,11 +499,44 @@ pub(super) fn observe(
         &call(process, Command::Frames, json!({}), Some(&session), check)?,
         &origin,
     )?;
+    let (nodes, content) = checked_tree(process, &session, &before, check)?;
+    let (controls, choices) = if pages.len() == 1 {
+        super::controls::capture(
+            process,
+            (hwnd, generation, window),
+            &target,
+            &session,
+            &before,
+            &origin,
+            &nodes,
+            check,
+        )?
+    } else {
+        (Vec::new(), HashMap::new())
+    };
+    let after = frame(
+        &call(process, Command::Frames, json!({}), Some(&session), check)?,
+        &origin,
+    )?;
+    if before != after {
+        return Err("The browser document changed during observation. List tabs and observe again; no content was delivered.".into());
+    }
+    check()?;
+    process.controls = choices;
+    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"controlScope":"sole-tab-buttons-http-links","controlExpiresSeconds":30,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+}
+
+pub(super) fn checked_tree(
+    process: &mut BrowserProcess,
+    session: &str,
+    document: &Frame,
+    check: &dyn Fn() -> Result<(), String>,
+) -> Result<(Vec<Value>, Projection), String> {
     let tree = call(
         process,
         Command::Accessibility,
-        json!({"frameId":before.id,"depth":8}),
-        Some(&session),
+        json!({"frameId":document.id,"depth":8}),
+        Some(session),
         check,
     )?;
     let nodes = tree["nodes"]
@@ -504,7 +545,7 @@ pub(super) fn observe(
     if nodes.len() > 2000 {
         return Err("The browser accessibility tree exceeded its read limit.".into());
     }
-    let fields = privacy_fields(nodes, &before.id)?;
+    let fields = privacy_fields(nodes, &document.id)?;
     for index in fields {
         let node = &nodes[index];
         let backend = node["backendDOMNodeId"]
@@ -515,23 +556,14 @@ pub(super) fn observe(
             process,
             Command::DescribeNode,
             json!({"backendNodeId":backend,"depth":0,"pierce":false}),
-            Some(&session),
+            Some(session),
             check,
         )?;
         if private_attributes(&metadata["node"])? {
             return Err(PRIVATE.into());
         }
     }
-    let content = projection(nodes, &before.id)?;
-    let after = frame(
-        &call(process, Command::Frames, json!({}), Some(&session), check)?,
-        &origin,
-    )?;
-    if before != after {
-        return Err("The browser document changed during observation. List tabs and observe again; no content was delivered.".into());
-    }
-    check()?;
-    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+    Ok((nodes.clone(), projection(nodes, &document.id)?))
 }
 
 #[cfg(debug_assertions)]
@@ -603,10 +635,13 @@ pub(super) fn acceptance(
                     }
                     let private =
                         String::from_utf8_lossy(&request[..count]).starts_with("GET /private ");
-                    let body = if private {
+                    let file = String::from_utf8_lossy(&request[..count]).starts_with("GET /file ");
+                    let body = if file {
+                        "<!doctype html><title>Private file step</title><label>Choose file<input type=file></label>"
+                    } else if private {
                         "<!doctype html><title>Private step</title><label>Password<input type=password value='Hidden password delta'></label>"
                     } else {
-                        "<!doctype html><title>Mivlet browser fixture</title><h1>Quarterly report</h1><p>Revenue 42</p><label>Notes<input value='Hidden entry alpha'></label><textarea>Hidden entry beta</textarea><div contenteditable=true>Hidden entry gamma</div><iframe srcdoc=\"<p>Hidden subframe epsilon</p>\"></iframe>"
+                        "<!doctype html><title>Mivlet browser fixture</title><h1>Quarterly report</h1><p>Revenue 42</p><button onclick=\"document.getElementById('result').textContent='Activated once'\">Activate once</button><p id=result>Not activated</p><label>Notes<input value='Hidden entry alpha'></label><textarea>Hidden entry beta</textarea><div contenteditable=true>Hidden entry gamma</div><iframe srcdoc=\"<p>Hidden subframe epsilon</p>\"></iframe>"
                     };
                     let _=write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body);
                 } else {
@@ -619,8 +654,8 @@ pub(super) fn acceptance(
     if pages.len() != 1 {
         return Err("Browser QA requires its sole disposable tab.".into());
     }
-    for private in [false, true] {
-        let url = format!("{origin}/{}", if private { "private" } else { "report" });
+    for (private, path) in [(false, "report"), (true, "private"), (true, "file")] {
+        let url = format!("{origin}/{path}");
         let listed: Value = serde_json::from_str(&tabs(process, hwnd, 1, check)?)
             .map_err(|_| "Browser QA tab list invalid.")?;
         let navigation_ref = listed["tabs"][0]["navigationRef"]
@@ -682,7 +717,7 @@ pub(super) fn acceptance(
         let observed = observe(process, hwnd, 1, reference, &origin, check);
         if private {
             if !observed.as_ref().is_err_and(|error| error == PRIVATE) {
-                return Err("Browser QA did not pause the private field.".into());
+                return Err("Browser QA did not pause the private field or file chooser.".into());
             }
         } else {
             let observed = observed?;
@@ -692,12 +727,57 @@ pub(super) fn acceptance(
             {
                 return Err("Browser QA projection did not preserve public text and omit field/subframe contents.".into());
             }
+            let evidence: Value = serde_json::from_str(&observed)
+                .map_err(|_| "Browser control QA observation invalid.")?;
+            let control = evidence["controls"]
+                .as_array()
+                .and_then(|controls| {
+                    controls
+                        .iter()
+                        .find(|control| control["name"] == "Activate once")
+                })
+                .ok_or("Browser QA public button was not offered.")?;
+            let control_ref = control["controlRef"]
+                .as_str()
+                .ok_or("Browser QA control identity missing.")?;
+            let clicked = super::controls::click(
+                process,
+                (hwnd, 1),
+                control_ref,
+                &origin,
+                "Activate once",
+                check,
+                dispatch,
+            )?;
+            if !clicked.contains("click-dispatched")
+                || super::controls::click(
+                    process,
+                    (hwnd, 1),
+                    control_ref,
+                    &origin,
+                    "Activate once",
+                    check,
+                    dispatch,
+                )
+                .is_ok()
+            {
+                return Err("Browser QA click was missing or replayable.".into());
+            }
+            let listed: Value = serde_json::from_str(&tabs(process, hwnd, 1, check)?)
+                .map_err(|_| "Browser QA tabs invalid after click.")?;
+            let next = listed["tabs"][0]["tabRef"]
+                .as_str()
+                .ok_or("Browser QA fresh tab missing.")?;
+            let verified = observe(process, hwnd, 1, next, &origin, check)?;
+            if !verified.contains("Activated once") || verified.contains("Not activated") {
+                return Err("Browser QA click did not produce its freshly observed result.".into());
+            }
             if observe(process, hwnd, 1, reference, &origin, check).is_ok() {
                 return Err("Browser QA reused a consumed tab reference.".into());
             }
         }
     }
-    eprintln!("Owned browser DOM fixture: document-bound navigation dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed ref and password field refused.");
+    eprintln!("Owned browser DOM fixture: document-bound navigation and sole-tab public button click each dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed refs, password field and file chooser refused.");
     Ok(())
 }
 

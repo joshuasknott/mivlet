@@ -24,6 +24,8 @@ use windows_sys::Win32::{
     },
 };
 
+#[path = "controls.rs"]
+mod controls;
 #[path = "helper.rs"]
 mod helper;
 #[path = "navigation.rs"]
@@ -384,9 +386,30 @@ pub(super) struct BrowserProcess {
     tabs: Option<observations::TabSnapshot>,
     sessions: std::collections::HashMap<String, String>,
     navigation: std::collections::HashMap<String, navigation::Choice>,
+    controls: std::collections::HashMap<String, controls::Choice>,
 }
 
 impl BrowserProcess {
+    pub(super) fn click(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        name: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        controls::click(
+            self,
+            (hwnd, generation),
+            reference,
+            origin,
+            name,
+            check,
+            dispatch,
+        )
+    }
     pub(super) fn navigate(
         &mut self,
         hwnd: u64,
@@ -584,6 +607,7 @@ impl BrowserProcess {
                 tabs: None,
                 sessions: std::collections::HashMap::new(),
                 navigation: std::collections::HashMap::new(),
+                controls: std::collections::HashMap::new(),
             })
         }
     }

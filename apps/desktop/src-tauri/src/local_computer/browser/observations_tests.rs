@@ -1,6 +1,17 @@
 use super::*;
 
 #[test]
+fn button_role_file_choosers_require_metadata_privacy_check_before_any_projection() {
+    let nodes = vec![
+        json!({"nodeId":"root","role":{"value":"RootWebArea"},"frameId":"frame","childIds":["file"]}),
+        json!({"nodeId":"file","role":{"value":"button"},"backendDOMNodeId":42,"name":{"value":"private selected filename"}}),
+    ];
+    assert_eq!(privacy_fields(&nodes, "frame").unwrap(), vec![1]);
+    assert!(private_attributes(&json!({"nodeType":1,"attributes":["type","file"]})).unwrap());
+    assert!(!private_attributes(&json!({"nodeType":1,"attributes":["type","submit"]})).unwrap());
+}
+
+#[test]
 fn tab_choices_are_exact_window_generation_expiry_and_single_use_fenced() {
     let mut snapshot = TabSnapshot {
         hwnd: 10,
@@ -148,6 +159,7 @@ fn field_privacy_metadata_refuses_password_otp_and_payment_fields() {
     );
     for attrs in [
         json!(["type", "PASSWORD"]),
+        json!(["type", "file"]),
         json!(["autocomplete", "section-login one-time-code"]),
         json!(["autocomplete", "cc-number"]),
     ] {

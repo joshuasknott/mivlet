@@ -603,7 +603,7 @@ impl NativeControl {
     ) -> Result<String, String> {
         self.with_native(workspace, agent, generation, ticket, |window, mode, check, dispatch| {
             if !mode.is_foreground() {
-                return Ok(foreground_required("Browser navigation requires an explicitly selected foreground window. No navigation was dispatched.").to_string());
+                return Ok(foreground_required("Browser input requires an explicitly selected foreground window. No browser input was dispatched.").to_string());
             }
             action(window, check, dispatch)
         })
@@ -657,7 +657,7 @@ impl NativeControl {
             Ok(value)
         })();
         if result.is_err() {
-            self.stop_if(&grant.request, "Browser control stopped. Fresh permission is required. Any dispatched navigation may have taken effect; never replay it automatically.");
+            self.stop_if(&grant.request, "Browser control stopped. Fresh permission is required. Any dispatched browser input may have taken effect; never replay it automatically.");
         }
         result
     }
