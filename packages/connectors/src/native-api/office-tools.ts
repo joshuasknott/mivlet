@@ -1,5 +1,16 @@
 import type { BackendTool } from "@mivlet/protocol";
 
+const boundedText = (maxLength: number) => ({
+  type: "string",
+  minLength: 1,
+  maxLength,
+});
+
+const cellRange = {
+  type: "string",
+  pattern: "^[A-Z]{1,2}[1-9][0-9]{0,3}:[A-Z]{1,2}[1-9][0-9]{0,3}$",
+};
+
 const textCell = {
   oneOf: [
     { type: "string", maxLength: 2_000 },
@@ -12,10 +23,7 @@ const textCell = {
           type: "string",
           enum: ["sum", "average", "min", "max", "count"],
         },
-        range: {
-          type: "string",
-          pattern: "^[A-Z]{1,2}[1-9][0-9]{0,3}:[A-Z]{1,2}[1-9][0-9]{0,3}$",
-        },
+        range: cellRange,
       },
       required: ["formula", "range"],
       additionalProperties: false,
@@ -37,7 +45,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
           type: "string",
           pattern: "^[A-Za-z0-9][A-Za-z0-9 _./-]{0,240}\\.pptx$",
         },
-        title: { type: "string", minLength: 1, maxLength: 160 },
+        title: boundedText(160),
         theme: { type: "string", enum: ["light", "dark"] },
         slides: {
           type: "array",
@@ -46,12 +54,12 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
           items: {
             type: "object",
             properties: {
-              title: { type: "string", minLength: 1, maxLength: 120 },
-              body: { type: "string", minLength: 1, maxLength: 600 },
+              title: boundedText(120),
+              body: boundedText(600),
               bullets: {
                 type: "array",
                 maxItems: 5,
-                items: { type: "string", minLength: 1, maxLength: 120 },
+                items: boundedText(120),
               },
             },
             required: ["title"],
@@ -66,7 +74,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
   "create-spreadsheet": {
     name: "create-spreadsheet",
     description:
-      "Create one genuine macro-free XLSX in this agent's private Mivlet workspace from bounded cells and safe same-sheet aggregate formulas. Formula cells use a declarative operation and A1 range; Mivlet calculates and stores the verified cached result. Read the file back or publish it with computer-artifact only after this tool reports validation success.",
+      "Create passive XLSX cells, verified aggregate formulas and editable column/line charts. Charts use same-sheet vertical ranges of 2–24 cells, 1–3 numeric series; max 2/sheet, 8/file. New workspace path only. Publish validated output with computer-artifact.",
     defaultMode: "full-access",
     defaultRisk: "high",
     parameters: JSON.stringify({
@@ -83,7 +91,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
           items: {
             type: "object",
             properties: {
-              name: { type: "string", minLength: 1, maxLength: 31 },
+              name: boundedText(31),
               rows: {
                 type: "array",
                 minItems: 1,
@@ -93,6 +101,34 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
                   minItems: 1,
                   maxItems: 52,
                   items: textCell,
+                },
+              },
+              charts: {
+                type: "array",
+                maxItems: 2,
+                items: {
+                  type: "object",
+                  properties: {
+                    title: boundedText(120),
+                    type: { type: "string", enum: ["column", "line"] },
+                    categories: cellRange,
+                    series: {
+                      type: "array",
+                      minItems: 1,
+                      maxItems: 3,
+                      items: {
+                        type: "object",
+                        properties: {
+                          name: boundedText(80),
+                          values: cellRange,
+                        },
+                        required: ["name", "values"],
+                        additionalProperties: false,
+                      },
+                    },
+                  },
+                  required: ["title", "type", "categories", "series"],
+                  additionalProperties: false,
                 },
               },
             },
@@ -118,7 +154,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
           type: "string",
           pattern: "^[A-Za-z0-9][A-Za-z0-9 _./-]{0,240}\\.docx$",
         },
-        title: { type: "string", minLength: 1, maxLength: 160 },
+        title: boundedText(160),
         blocks: {
           type: "array",
           minItems: 1,
@@ -129,7 +165,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
                 type: "object",
                 properties: {
                   type: { type: "string", enum: ["paragraph", "bullet"] },
-                  text: { type: "string", minLength: 1, maxLength: 8_000 },
+                  text: boundedText(8_000),
                 },
                 required: ["type", "text"],
                 additionalProperties: false,
@@ -138,7 +174,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
                 type: "object",
                 properties: {
                   type: { type: "string", enum: ["heading"] },
-                  text: { type: "string", minLength: 1, maxLength: 500 },
+                  text: boundedText(500),
                   level: { type: "integer", minimum: 1, maximum: 3 },
                 },
                 required: ["type", "text", "level"],
@@ -156,7 +192,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
                       type: "array",
                       minItems: 1,
                       maxItems: 12,
-                      items: { type: "string", minLength: 1, maxLength: 2_000 },
+                      items: boundedText(2_000),
                     },
                   },
                 },

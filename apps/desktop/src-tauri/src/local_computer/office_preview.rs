@@ -6,6 +6,7 @@ use std::{
     collections::HashMap,
     io::{Cursor, Read},
 };
+mod charts;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -23,8 +24,19 @@ pub(super) struct Section {
 #[derive(Debug, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 enum Block {
-    Paragraph { text: String, style: &'static str },
-    Table { rows: Vec<Vec<String>> },
+    Paragraph {
+        text: String,
+        style: &'static str,
+    },
+    Table {
+        rows: Vec<Vec<String>>,
+    },
+    Chart {
+        kind: &'static str,
+        title: String,
+        categories: Vec<String>,
+        series: Vec<charts::Series>,
+    },
 }
 
 #[derive(Default)]
@@ -261,7 +273,7 @@ fn relationships(root: &Node, base: &str) -> HashMap<String, String> {
             let mut parts = if target.starts_with('/') {
                 Vec::new()
             } else {
-                vec![base]
+                base.split('/').collect()
             };
             for segment in target.trim_start_matches('/').split('/') {
                 match segment {
@@ -317,7 +329,8 @@ fn workbook(
     budget.truncated |= sheets.len() > 8;
     let mut sections = Vec::new();
     for sheet in sheets.iter().take(8) {
-        let root = part(archive, rels.get(sheet.attribute("id"))?)?;
+        let sheet_path = rels.get(sheet.attribute("id"))?;
+        let root = part(archive, sheet_path)?;
         let mut rows: Vec<Vec<String>> = Vec::new();
         for cell in root.find("c") {
             let (row, column) = coordinates(cell.attribute("r"))?;
@@ -351,9 +364,18 @@ fn workbook(
             rows[row].resize(width, String::new());
             rows[row][column] = budget.text(&value);
         }
+        let mut blocks = vec![Block::Table { rows }];
+        blocks.extend(charts::extract(
+            archive,
+            &root,
+            sheet_path,
+            sheet.attribute("name"),
+            &strings,
+            budget,
+        ));
         sections.push(Section {
             name: budget.text(sheet.attribute("name")),
-            blocks: vec![Block::Table { rows }],
+            blocks,
         });
     }
     Some(sections)

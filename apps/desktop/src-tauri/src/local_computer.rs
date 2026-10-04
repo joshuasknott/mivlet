@@ -17,6 +17,7 @@ pub(crate) mod pdf_inspection;
 pub(crate) mod plugins;
 mod presentation_authoring;
 pub(crate) mod repositories;
+mod spreadsheet_charts;
 mod windows;
 pub(crate) mod workspace_execution;
 use authority::{ComputerAuthority, OperationTicket};

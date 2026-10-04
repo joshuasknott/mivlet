@@ -32,14 +32,16 @@ struct SpreadsheetRequest {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Sheet {
-    name: String,
-    rows: Vec<Vec<Cell>>,
+pub(super) struct Sheet {
+    pub(super) name: String,
+    pub(super) rows: Vec<Vec<Cell>>,
+    #[serde(default)]
+    pub(super) charts: Vec<super::spreadsheet_charts::Chart>,
 }
 
 #[derive(Deserialize)]
 #[serde(untagged)]
-enum Cell {
+pub(super) enum Cell {
     Text(String),
     Number(f64),
     Boolean(bool),
@@ -48,7 +50,7 @@ enum Cell {
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct FormulaCell {
+pub(super) struct FormulaCell {
     formula: Aggregate,
     range: String,
 }
@@ -213,6 +215,15 @@ fn destination(path: &str, extension: &str, root: &Path) -> Result<PathBuf, Stri
 }
 
 fn create_xlsx(request: &SpreadsheetRequest) -> Result<(Vec<u8>, usize), String> {
+    if request
+        .sheets
+        .iter()
+        .map(|sheet| sheet.charts.len())
+        .sum::<usize>()
+        > 8
+    {
+        return Err("Use at most eight charts in one spreadsheet.".into());
+    }
     if request.sheets.is_empty() || request.sheets.len() > MAX_SHEETS {
         return Err("A spreadsheet needs between 1 and 8 sheets.".into());
     }
@@ -221,7 +232,9 @@ fn create_xlsx(request: &SpreadsheetRequest) -> Result<(Vec<u8>, usize), String>
     let mut formula_count = 0;
     let mut total_text = 0usize;
     let mut total_cells = 0usize;
-    for sheet in &request.sheets {
+    let mut chart_files = Vec::new();
+    let mut chart_types = String::new();
+    for (index, sheet) in request.sheets.iter().enumerate() {
         validate_sheet_name(&sheet.name, &mut names)?;
         total_cells = total_cells.saturating_add(sheet.rows.iter().map(Vec::len).sum::<usize>());
         total_text = total_text.saturating_add(
@@ -241,15 +254,24 @@ fn create_xlsx(request: &SpreadsheetRequest) -> Result<(Vec<u8>, usize), String>
         if total_cells > MAX_TOTAL_CELLS {
             return Err("A spreadsheet may contain at most 100000 cells.".into());
         }
-        let (xml, formulas) = worksheet_xml(sheet)?;
-        formula_count += formulas;
-        worksheets.push(xml);
+        let mut worksheet = worksheet_xml(sheet)?;
+        super::spreadsheet_charts::append(
+            index + 1,
+            sheet,
+            &worksheet.values,
+            &mut worksheet.xml,
+            &mut chart_files,
+            &mut chart_types,
+        )?;
+        formula_count += worksheet.formulas;
+        worksheets.push(worksheet.xml);
     }
 
     let mut files = vec![
         (
             "[Content_Types].xml".into(),
-            xlsx_content_types(request.sheets.len()),
+            xlsx_content_types(request.sheets.len())
+                .replace("</Types>", &format!("{chart_types}</Types>")),
         ),
         ("_rels/.rels".into(), root_relationships("xl/workbook.xml")),
         ("xl/workbook.xml".into(), workbook_xml(&request.sheets)),
@@ -265,10 +287,17 @@ fn create_xlsx(request: &SpreadsheetRequest) -> Result<(Vec<u8>, usize), String>
             .enumerate()
             .map(|(index, xml)| (format!("xl/worksheets/sheet{}.xml", index + 1), xml)),
     );
+    files.extend(chart_files);
     Ok((zip_files(files)?, formula_count))
 }
 
-fn worksheet_xml(sheet: &Sheet) -> Result<(String, usize), String> {
+struct Worksheet {
+    xml: String,
+    formulas: usize,
+    values: Vec<Vec<Option<f64>>>,
+}
+
+fn worksheet_xml(sheet: &Sheet) -> Result<Worksheet, String> {
     if sheet.rows.is_empty() || sheet.rows.len() > MAX_ROWS {
         return Err("Each spreadsheet sheet needs between 1 and 2000 rows.".into());
     }
@@ -344,7 +373,11 @@ fn worksheet_xml(sheet: &Sheet) -> Result<(String, usize), String> {
         xml.push_str("</row>");
     }
     xml.push_str("</sheetData><pageMargins left=\"0.7\" right=\"0.7\" top=\"0.75\" bottom=\"0.75\" header=\"0.3\" footer=\"0.3\"/></worksheet>");
-    Ok((xml, formulas))
+    Ok(Worksheet {
+        xml,
+        formulas,
+        values,
+    })
 }
 
 fn evaluate_aggregate(
@@ -393,7 +426,7 @@ fn evaluate_aggregate(
     Ok(result)
 }
 
-fn parse_range(value: &str) -> Result<((usize, usize), (usize, usize)), String> {
+pub(super) fn parse_range(value: &str) -> Result<((usize, usize), (usize, usize)), String> {
     let (start, end) = value
         .split_once(':')
         .ok_or("Formula ranges must use A1:B2 notation.")?;
@@ -629,7 +662,7 @@ fn docx_styles() -> String {
     "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?><w:styles xmlns:w=\"http://schemas.openxmlformats.org/wordprocessingml/2006/main\"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii=\"Aptos\" w:hAnsi=\"Aptos\"/><w:sz w:val=\"22\"/><w:color w:val=\"000000\"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after=\"160\" w:line=\"276\" w:lineRule=\"auto\"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type=\"paragraph\" w:default=\"1\" w:styleId=\"Normal\"><w:name w:val=\"Normal\"/></w:style><w:style w:type=\"paragraph\" w:styleId=\"Title\"><w:name w:val=\"Title\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:spacing w:before=\"0\" w:after=\"320\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"40\"/><w:color w:val=\"000000\"/></w:rPr></w:style><w:style w:type=\"paragraph\" w:styleId=\"Heading1\"><w:name w:val=\"heading 1\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"280\" w:after=\"120\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"30\"/><w:color w:val=\"000000\"/></w:rPr></w:style><w:style w:type=\"paragraph\" w:styleId=\"Heading2\"><w:name w:val=\"heading 2\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"240\" w:after=\"100\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"26\"/><w:color w:val=\"000000\"/></w:rPr></w:style><w:style w:type=\"paragraph\" w:styleId=\"Heading3\"><w:name w:val=\"heading 3\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:keepNext/><w:spacing w:before=\"200\" w:after=\"80\"/></w:pPr><w:rPr><w:b/><w:sz w:val=\"23\"/><w:color w:val=\"000000\"/></w:rPr></w:style><w:style w:type=\"paragraph\" w:styleId=\"ListParagraph\"><w:name w:val=\"List Paragraph\"/><w:basedOn w:val=\"Normal\"/><w:pPr><w:ind w:left=\"360\" w:hanging=\"180\"/></w:pPr></w:style></w:styles>".into()
 }
 
-fn cell_reference(row: usize, column: usize) -> String {
+pub(super) fn cell_reference(row: usize, column: usize) -> String {
     let mut column = column + 1;
     let mut letters = String::new();
     while column > 0 {
@@ -640,7 +673,7 @@ fn cell_reference(row: usize, column: usize) -> String {
     format!("{letters}{}", row + 1)
 }
 
-fn number_text(value: f64) -> String {
+pub(super) fn number_text(value: f64) -> String {
     if value == -0.0 {
         "0".into()
     } else {
@@ -752,7 +785,8 @@ mod tests {
         let generation = authority.snapshot().unwrap().generation;
         let arguments = json!({
             "path": "reports/cancelled.xlsx",
-            "sheets": [{ "name": "Summary", "rows": [["Item", "Value"], ["Total", 26]] }]
+            "sheets": [{ "name": "Summary", "rows": [["Item", "Value"], ["Total", 26], ["Other", 3]],
+                "charts": [{"title":"Values", "type":"column", "categories":"A2:A3", "series":[{"name":"Value", "values":"B2:B3"}]}] }]
         });
 
         let ticket = authority.begin_agent(generation).unwrap();
