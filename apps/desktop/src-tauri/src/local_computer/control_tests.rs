@@ -3,6 +3,66 @@
 use super::super::desktop_tools;
 use super::*;
 
+struct BrowserStopFixture(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+impl super::super::browser::LaunchStop for BrowserStopFixture {
+    fn stop(&self) {
+        self.0.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
+#[test]
+fn stopping_an_unpublished_browser_kills_its_preparation_before_revoking_authority() {
+    let root = tempfile::tempdir().unwrap();
+    let authority = ComputerAuthority::load(root.path()).unwrap();
+    let control = NativeControl::default();
+    let launch = control
+        .reserve_browser_launch(
+            "workspace-one",
+            "agent-one",
+            1,
+            "request-one",
+            authority.clone(),
+        )
+        .unwrap();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    launch
+        .attach(std::sync::Arc::new(BrowserStopFixture(calls.clone())))
+        .unwrap();
+    control.stop_scope("workspace-one", "agent-one", 2, "wrong generation");
+    assert_eq!(calls.load(Ordering::Acquire), 0);
+    control.stop_scope("workspace-one", "agent-one", 1, "Stop");
+    assert_eq!(calls.load(Ordering::Acquire), 1);
+    assert!(authority.check_generation(1).is_err());
+    assert!(launch
+        .attach(std::sync::Arc::new(BrowserStopFixture(calls.clone())))
+        .is_err());
+}
+
+#[test]
+fn published_browser_is_detached_from_launch_stop_but_old_turn_is_revoked() {
+    let root = tempfile::tempdir().unwrap();
+    let authority = ComputerAuthority::load(root.path()).unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    let control = NativeControl::default();
+    let launch = control
+        .reserve_browser_launch(
+            "workspace-one",
+            "agent-one",
+            1,
+            "request-one",
+            authority.clone(),
+        )
+        .unwrap();
+    let calls = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    launch
+        .attach(std::sync::Arc::new(BrowserStopFixture(calls.clone())))
+        .unwrap();
+    launch.publish(ticket, || Ok(())).unwrap();
+    control.stop("Stop after publication");
+    assert_eq!(calls.load(Ordering::Acquire), 0);
+    assert!(authority.check_generation(1).is_err());
+}
+
 #[test]
 fn browser_launch_reservation_is_exclusive_generation_fenced_and_stale_cleanup_safe() {
     let first = tempfile::tempdir().unwrap();

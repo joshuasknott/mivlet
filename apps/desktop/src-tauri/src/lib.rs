@@ -80,6 +80,16 @@ pub fn open_antigravity_browser_helper(raw_url: &str) -> bool {
     antigravity_acp::open_validated_browser_helper(raw_url)
 }
 
+/// Closed native child process entry. It never initializes Tauri or account data.
+pub fn run_browser_child(arguments: &[std::ffi::OsString]) -> bool {
+    local_computer::browser::run_child(arguments)
+}
+
+#[cfg(debug_assertions)]
+pub fn check_owned_browser() -> Result<(), String> {
+    local_computer::browser::check_owned_browser()
+}
+
 /// Developer-only live check; prints status/counts, never credentials or source content.
 #[cfg(debug_assertions)]
 pub fn check_connectors() {
