@@ -4,6 +4,42 @@ import { createComputerTaskExecutor } from "./computer-task-executor";
 
 const approval = (tool: string) => ({ action: `${tool} approved action` } as ApprovalRequest);
 describe("computer task execution bounds", () => {
+  it("reconciles an uncertain browser click through page observation without replaying a fresh ref", async () => {
+    const execute = vi.fn().mockRejectedValueOnce(new Error("Browser click outcome is uncertain. No input was replayed."));
+    const guarded = createComputerTaskExecutor(execute);
+    const action = JSON.stringify({ controlRef: "old", origin: "https://example.test", name: "Submit" });
+    await expect(guarded(approval("local-browser-click"), action)).rejects.toThrow("uncertain");
+    execute.mockResolvedValue('{"controls":[]}');
+    await guarded(approval("local-browser-tabs"), "{}");
+    await expect(guarded(approval("local-browser-click"), action)).rejects.toThrow("Reconcile");
+    await guarded(approval("local-browser-observe"), '{"tabRef":"fresh","origin":"https://example.test"}');
+    await expect(guarded(approval("local-browser-click"), action.replace("old", "new"))).rejects.toThrow("already has an uncertain outcome");
+    expect(execute).toHaveBeenCalledTimes(3);
+  });
+  it("requires foreground selection and page observation after a refused browser click", async () => {
+    const execute = vi.fn().mockResolvedValueOnce('{"status":"foreground-required","inputDispatched":false}');
+    const guarded = createComputerTaskExecutor(execute);
+    const action = '{"controlRef":"old","origin":"https://example.test","name":"Next"}';
+    await guarded(approval("local-browser-click"), action);
+    execute.mockResolvedValue('{"status":"active","deliveryMode":"foreground"}');
+    await guarded(approval("local-app-select"), '{"windowId":"fresh","deliveryMode":"foreground"}');
+    await expect(guarded(approval("local-browser-click"), action)).rejects.toThrow("Observe");
+    await guarded(approval("local-browser-observe"), '{}');
+    execute.mockResolvedValue('{"status":"click-dispatched","verified":false}');
+    await expect(guarded(approval("local-browser-click"), action.replace("old", "fresh"))).resolves.toContain("click-dispatched");
+  });
+  it("bounds unchanged browser actions even when every observation has fresh opaque controls", async () => {
+    let sequence = 0;
+    const execute = vi.fn(async (request: ApprovalRequest) => request.action.startsWith("local-browser-observe")
+      ? JSON.stringify({ controls: [{ controlRef: String(++sequence), name: "Next" }], content: "same" }) : '{"status":"click-dispatched"}');
+    const guarded = createComputerTaskExecutor(execute);
+    await guarded(approval("local-browser-observe"), '{}');
+    for (let step = 0; step < 3; step++) {
+      await guarded(approval("local-browser-click"), `{"controlRef":"${step}","name":"Next"}`);
+      await guarded(approval("local-browser-observe"), '{}');
+    }
+    await expect(guarded(approval("local-browser-click"), '{}')).rejects.toThrow("unchanged");
+  });
   it("requires explicit foreground selection and a new observation after a no-input refusal", async () => {
     const execute = vi.fn(async (request: ApprovalRequest, args: string) => {
       if (request.action.startsWith("local-app-select")) return JSON.stringify({ status: "active", deliveryMode: JSON.parse(args).deliveryMode });

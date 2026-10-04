@@ -116,6 +116,7 @@ pub(super) fn navigate(
     // Clear every older tab/action choice before checking or sending input.
     process.tabs = None;
     process.navigation.clear();
+    process.controls.clear();
     let (window, pages) = observations::targets(process, hwnd, check)?;
     let page = pages
         .iter()

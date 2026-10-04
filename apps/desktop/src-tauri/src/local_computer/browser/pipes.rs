@@ -317,6 +317,10 @@ pub(super) enum Command {
     Accessibility,
     DescribeNode,
     Navigate,
+    Quads,
+    Layout,
+    Hit,
+    Click,
 }
 impl Command {
     fn method(&self) -> &'static str {
@@ -329,6 +333,10 @@ impl Command {
             Self::Accessibility => "Accessibility.getFullAXTree",
             Self::DescribeNode => "DOM.describeNode",
             Self::Navigate => "Page.navigate",
+            Self::Quads => "DOM.getContentQuads",
+            Self::Layout => "Page.getLayoutMetrics",
+            Self::Hit => "DOM.getNodeForLocation",
+            Self::Click => "Input.synthesizeTapGesture",
         }
     }
 }
@@ -348,8 +356,8 @@ impl ControlPipe {
         session: Option<&str>,
         check: &dyn Fn() -> Result<(), String>,
     ) -> Result<serde_json::Value, String> {
-        if matches!(command, Command::Navigate) {
-            return Err("Browser navigation requires the native dispatch fence.".into());
+        if matches!(command, Command::Navigate | Command::Click) {
+            return Err("Browser input requires the native dispatch fence.".into());
         }
         self.exchange(command, params, session, check, None)
     }
@@ -368,6 +376,16 @@ impl ControlPipe {
             check,
             Some(dispatch),
         )
+    }
+
+    pub(super) fn click(
+        &mut self,
+        params: serde_json::Value,
+        session: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<serde_json::Value, String> {
+        self.exchange(Command::Click, params, Some(session), check, Some(dispatch))
     }
 
     fn exchange(

@@ -174,6 +174,65 @@ fn navigation_cannot_use_the_unfenced_read_surface() {
     );
     assert_eq!(available, 0);
 }
+
+#[test]
+fn clicks_require_dispatch_and_stop_interrupts_wait_without_replay() {
+    use std::io::Read;
+    let root = tempfile::tempdir().unwrap();
+    let authority = crate::local_computer::authority::ComputerAuthority::load(root.path()).unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    let stopping = authority.clone();
+    let mut input = Pair::new(false).unwrap();
+    let output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    let params =
+        serde_json::json!({"x":10,"y":20,"duration":0,"tapCount":1,"gestureSourceType":"mouse"});
+    assert!(control
+        .read_command(Command::Click, params.clone(), Some("session"), &|| Ok(()))
+        .is_err());
+    let mut available = 0;
+    unsafe {
+        PeekNamedPipe(
+            input.child.as_raw_handle(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut available,
+            std::ptr::null_mut(),
+        );
+    }
+    assert_eq!(available, 0);
+    let began = Instant::now();
+    let revoker = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        stopping.revoke(1).unwrap();
+    });
+    assert!(control
+        .click(params.clone(), "session", &|| ticket.check(), &|start| {
+            ticket.with_current(start)
+        })
+        .is_err());
+    revoker.join().unwrap();
+    assert!(began.elapsed() < Duration::from_secs(2));
+    let mut bytes = [0u8; 4097];
+    let count = input.child.read(&mut bytes).unwrap();
+    assert_eq!(bytes[..count].iter().filter(|byte| **byte == 0).count(), 1);
+    assert!(String::from_utf8_lossy(&bytes[..count]).contains("Input.synthesizeTapGesture"));
+    assert!(control
+        .click(params, "session", &|| Ok(()), &|start| start())
+        .is_err());
+    unsafe {
+        PeekNamedPipe(
+            input.child.as_raw_handle(),
+            std::ptr::null_mut(),
+            0,
+            std::ptr::null_mut(),
+            &mut available,
+            std::ptr::null_mut(),
+        );
+    }
+    assert_eq!(available, 0);
+}
 #[test]
 fn revocation_before_dispatch_sends_no_navigation_frame() {
     let root = tempfile::tempdir().unwrap();

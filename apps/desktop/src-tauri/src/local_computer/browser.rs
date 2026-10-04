@@ -191,6 +191,24 @@ pub(crate) fn navigate(
 enum Request<'a> {
     Read(Option<(&'a str, &'a str)>),
     Navigate(&'a str, &'a str, &'a str),
+    Click(&'a str, &'a str, &'a str),
+}
+pub(crate) fn click(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+    name: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Click(reference, origin, name),
+    )
 }
 fn execute(
     computers: &LocalComputerState,
@@ -212,7 +230,7 @@ fn execute(
     {
         let scope = computers.scope(workspace, agent)?;
         // Secret-store reads happen before taking any control/authority lock.
-        let account_dispatch = if matches!(arguments, Request::Navigate(..)) {
+        let account_dispatch = if !matches!(arguments, Request::Read(..)) {
             Some(crate::account_session::AccountDispatchFence::capture()?)
         } else {
             None
@@ -242,36 +260,41 @@ fn execute(
                 .lock()
                 .map_err(|_| "The owned browser is unavailable.")?;
             let process = processes.get_mut(&scope.key).filter(|process| process.alive()).ok_or("Select this agent's Mivlet-owned browser before reading its tabs. Ordinary browser profiles are not available through this tool.")?;
+            let checked_dispatch = |start: &mut dyn FnMut() -> Result<(), String>| {
+                dispatch.ok_or("Browser input requires a native dispatch fence.")?(&mut || {
+                    check_liveness()?;
+                    account_dispatch
+                        .as_ref()
+                        .ok_or("The account dispatch fence is unavailable.")?
+                        .with_current(&mut *start)
+                })
+            };
             match arguments {
                 Request::Read(Some((reference, origin))) => {
                     process.observe_tab(window.identity.hwnd, generation, reference, origin, &check)
                 }
                 Request::Read(None) => process.tabs(window.identity.hwnd, generation, &check),
-                Request::Navigate(reference, origin, url) => {
-                    let dispatch =
-                        dispatch.ok_or("Browser navigation requires a native dispatch fence.")?;
-                    let checked_dispatch = |start: &mut dyn FnMut() -> Result<(), String>| {
-                        dispatch(&mut || {
-                            check_liveness()?;
-                            account_dispatch
-                                .as_ref()
-                                .ok_or("The account dispatch fence is unavailable.")?
-                                .with_current(&mut *start)
-                        })
-                    };
-                    process.navigate(
-                        window.identity.hwnd,
-                        generation,
-                        reference,
-                        origin,
-                        url,
-                        &check,
-                        &checked_dispatch,
-                    )
-                }
+                Request::Navigate(reference, origin, url) => process.navigate(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    url,
+                    &check,
+                    &checked_dispatch,
+                ),
+                Request::Click(reference, origin, name) => process.click(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    name,
+                    &check,
+                    &checked_dispatch,
+                ),
             }
         };
-        let result = if matches!(arguments, Request::Navigate(..)) {
+        let result = if !matches!(arguments, Request::Read(..)) {
             computers.native.act_native(
                 workspace,
                 agent,

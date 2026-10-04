@@ -1,8 +1,8 @@
 import type { ToolExecutor } from "@mivlet/connectors";
 import { isLocalComputerTool } from "./computer-tools";
 
-const OBSERVATIONS = new Set(["local-app-observe", "local-desktop-observe"]);
-const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "write-file"]);
+const OBSERVATIONS = new Set(["local-app-observe", "local-desktop-observe", "local-browser-observe"]);
+const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "local-browser-click", "local-browser-navigate", "write-file"]);
 type RecoveryClass = "stale-observation" | "loading" | "human-control" | "uncertain-effect" | "foreground-required";
 type PendingRecovery = { kind: RecoveryClass; tools: ReadonlySet<string>; target?: string };
 
@@ -158,11 +158,13 @@ function provesNoEffect(error: unknown): boolean {
     || message.startsWith("unknown tool ")
     || message.includes("requires the desktop runtime to execute")
     || message.includes("requires click, fill, press, or select")
+    || message.includes("no browser input was dispatched")
     || message.includes("requires an exact observed tab ref")
     || message.includes("action is not allowed for the observed browser control");
 }
 
 function observationTools(tool: string): ReadonlySet<string> {
+  if (tool.startsWith("local-browser")) return new Set(["local-browser-observe"]);
   return new Set(tool.startsWith("local-app")
     ? ["local-app-observe"]
     : ["local-desktop-observe"]);
@@ -172,12 +174,7 @@ function uncertainRecovery(tool: string, argumentsJson: string): PendingRecovery
   if (tool === "write-file") {
     return { kind: "uncertain-effect", tools: new Set(["read-file"]), target: stringArgument(argumentsJson, "path") };
   }
-  if (tool.startsWith("local-app")) {
-    return { kind: "uncertain-effect", tools: new Set(["local-app-observe"]) };
-  }
-  if (tool === "local-desktop-action") {
-    return { kind: "uncertain-effect", tools: new Set(["local-desktop-observe"]) };
-  }
+  if (/^local-(app|desktop|browser)/.test(tool)) return { kind: "uncertain-effect", tools: observationTools(tool) };
   return { kind: "uncertain-effect", tools: new Set() };
 }
 
@@ -201,7 +198,7 @@ function stableArguments(value: string): string {
     const visit = (item: unknown): unknown => {
       if (Array.isArray(item)) return item.map(visit);
       if (!item || typeof item !== "object") return item;
-      return Object.fromEntries(Object.entries(item).filter(([key]) => !["observationId", "elementRef", "tabRef", "ref", "activeTabRef", "updatedAt", "observedAt", "expiresAt"].includes(key))
+      return Object.fromEntries(Object.entries(item).filter(([key]) => !["observationId", "elementRef", "controlRef", "navigationRef", "tabRef", "ref", "activeTabRef", "updatedAt", "observedAt", "expiresAt"].includes(key))
         .sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, visit(nested)]));
     };
     return JSON.stringify(visit(JSON.parse(value)));
