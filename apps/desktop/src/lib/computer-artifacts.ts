@@ -6,6 +6,7 @@ const artifactTypes: Readonly<Record<string, string>> = {
   xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
   pdf: "application/pdf",
+  json: "application/json",
   csv: "text/csv", txt: "text/plain", md: "text/markdown",
   png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", gif: "image/gif", webp: "image/webp",
 };

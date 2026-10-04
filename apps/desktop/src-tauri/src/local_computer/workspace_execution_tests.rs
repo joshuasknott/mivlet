@@ -136,6 +136,29 @@ fn stop_prevents_result_placement_and_cleanup_discards_staging() {
 }
 
 #[test]
+fn structured_outputs_require_valid_json_and_keep_original_bytes() {
+    let (temp, root, _authority) = fixture();
+    let scratch = temp.path().join("scratch");
+    fs::create_dir(&scratch).unwrap();
+    fs::write(scratch.join("good.json"), b"{\"total\":15}\n").unwrap();
+    fs::write(scratch.join("bad.json"), b"{invalid}").unwrap();
+    assert!(prepare_outputs(
+        &root,
+        &scratch,
+        &["good.json".into(), "bad.json".into()],
+        "bad"
+    )
+    .is_err());
+    assert!(!root.join("Generated").exists());
+    let prepared = prepare_outputs(&root, &scratch, &["good.json".into()], "good").unwrap();
+    let outputs = prepared.commit().unwrap();
+    assert_eq!(
+        fs::read(root.join(&outputs[0].path)).unwrap(),
+        b"{\"total\":15}\n"
+    );
+}
+
+#[test]
 #[ignore = "Requires Windows WSL Ubuntu with Bubblewrap and Python3; real projectless execution acceptance"]
 fn native_workspace_execution_acceptance() {
     let (_temp, root, authority) = fixture();

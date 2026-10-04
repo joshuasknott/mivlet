@@ -76,11 +76,11 @@ a deployed or production-validated service.
   attempt used for safe interruption and retry.
 - Published images appear directly in chat and open the existing file viewer;
   documents, spreadsheets and other published files use clickable file cards.
-  Text, Markdown and bounded Office content render in the viewer, with sheet
-  and slide selection. Open preserves full Office layout/editing; Save uses a
-  native file dialog and keeps existing files intact. PDF retains the default-app
-  fallback. Shared tools create passive DOCX, formula-bearing XLSX and editable
-  16:9 PPTX with light/dark themes and bounded text. Uploaded images and text can be previewed
+  Text, Markdown, JSON and bounded Office content render in the viewer, with sheet
+  and slide selection. PDFs have page navigation and zoom. Open preserves full
+  Office layout/editing; Save uses a native file dialog and keeps existing files
+  intact. Shared tools create passive DOCX, formula-bearing XLSX, editable
+  16:9 PPTX and PDF reports with tables and vector bar charts. Uploaded images and text can be previewed
   during the current session (bounded to 32 MB of preview memory). Upload pixels
   are not added to saved conversations; unavailable originals ask for reattachment.
   Saved workspace text files remain previewable through their scoped file path.
@@ -113,8 +113,9 @@ a deployed or production-validated service.
   Library lists saved agent workspace files with search and scoped previews.
   Open documents and side conversations retain closable content tabs. Collapsing it hides the entire panel except its window-bar
   toggle; the desktop agent sidebar stays expanded. Created files, search previews and side conversations
-  open alongside the main chat. Text, Markdown and images preview locally;
-  PDF and Office files retain their native external-open flow. Explicit web-link
+  open alongside the main chat. Text, Markdown, JSON, images, PDFs and bounded
+  Office content preview locally; published files also retain native Save/Open.
+  Explicit web-link
   clicks open script-free HTTPS frames; sites that block embedding or require
   interaction can be opened in the browser. Frames receive no native capabilities,
   while the application renderer retains its IPC-only network policy.

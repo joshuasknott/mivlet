@@ -326,6 +326,13 @@ timeout imports nothing, and existing files are never overwritten. Receipts
 include actual exit/interruption/output status and output path/size/SHA-256.
 The existing `read-file`, artifact publication, preview and Save flows apply.
 
+JSON outputs use the same immutable artifact receipt and native Save/Open flow.
+Admission requires a complete valid JSON value within the existing file and
+parser depth limits. The viewer displays at most 256 KB of literal UTF-8 text,
+with an explicit truncation indicator; strings never become HTML or active links.
+Saving retains the complete original bytes, including whitespace. An invalid
+declared JSON output rejects the entire `workspace-run` output set before import.
+
 Composer attachments also accept DOCX, XLSX and PPTX up to the existing 2 MB
 upload limit. Original bytes are staged under the exact agent/workspace/generation
 and are not decoded or imported as text knowledge. Invalid archives fail admission
