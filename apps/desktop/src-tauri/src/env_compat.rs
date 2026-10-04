@@ -4,6 +4,7 @@
 //! operator secrets keep working. A present empty `MIVLET_*` value does not
 //! fall through (fail closed). Values are never logged.
 
+use std::io::Write;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 static WARNED_LEGACY_ALIAS: AtomicBool = AtomicBool::new(false);
@@ -12,7 +13,12 @@ fn warn_legacy_alias() {
     if WARNED_LEGACY_ALIAS.swap(true, Ordering::Relaxed) {
         return;
     }
-    eprintln!("mivlet: using deprecated FABLE_* environment aliases; set MIVLET_* instead");
+    // Account restarts can outlive the development launcher's stderr reader.
+    // A diagnostic must not panic and abort the replacement during sign-in.
+    let _ = writeln!(
+        std::io::stderr(),
+        "mivlet: using deprecated FABLE_* environment aliases; set MIVLET_* instead"
+    );
 }
 
 /// Read `key` (`MIVLET_*`), then the matching `FABLE_*` alias when missing.
@@ -57,6 +63,47 @@ mod tests {
     use std::sync::Mutex;
 
     static ENV_LOCK: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn legacy_alias_survives_closed_launcher_stderr() {
+        use std::io::Write;
+        use std::process::{Command, Stdio};
+
+        let mut child = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "env_compat::tests::closed_launcher_stderr_worker",
+                "--nocapture",
+            ])
+            .env("MIVLET_TEST_CLOSED_STDERR", "1")
+            .env_remove("MIVLET_RESTART_DIAGNOSTIC_TEST")
+            .env("FABLE_RESTART_DIAGNOSTIC_TEST", "fixture")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // The development CLI exits after the outgoing native process, closing
+        // the reader inherited by its replacement. Release the child only once
+        // that reader is gone so the regression is deterministic.
+        drop(child.stderr.take());
+        child.stdin.take().unwrap().write_all(b"x").unwrap();
+        assert!(child.wait().unwrap().success());
+    }
+
+    #[test]
+    fn closed_launcher_stderr_worker() {
+        use std::io::Read;
+
+        if std::env::var_os("MIVLET_TEST_CLOSED_STDERR").is_none() {
+            return;
+        }
+        std::io::stdin().read_exact(&mut [0]).unwrap();
+        assert_eq!(
+            var_named("MIVLET_RESTART_DIAGNOSTIC_TEST").unwrap(),
+            "fixture"
+        );
+    }
 
     fn with_env(mivlet: Option<&str>, fable: Option<&str>, body: impl FnOnce()) {
         let _guard = ENV_LOCK.lock().expect("env lock");
