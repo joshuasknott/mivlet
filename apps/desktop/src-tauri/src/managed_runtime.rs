@@ -27,6 +27,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::models::{BackendModel, BackendVerifyResult};
 mod image_input;
+mod sdk_launch;
 mod shared_tools;
 mod tool_delivery;
 use shared_tools::{Dispatch, ToolBridge, ToolSpec};
@@ -216,7 +217,19 @@ fn executable_candidates(provider_id: &str) -> Vec<PathBuf> {
 fn find_executable(provider_id: &str) -> Option<PathBuf> {
     executable_candidates(provider_id)
         .into_iter()
-        .find(|candidate| candidate.is_file())
+        .find(|candidate| {
+            sdk_launch::executable_allowed(provider_id, candidate) && candidate.is_file()
+        })
+}
+
+fn missing_runtime_message(provider_id: &str) -> String {
+    if provider_id == "claude" && cfg!(windows) {
+        return "Install the official native Claude executable (claude.exe), then reopen Mivlet. Windows batch shims cannot run this adapter.".into();
+    }
+    format!(
+        "Install the official {} runtime, then reopen Mivlet.",
+        provider_label(provider_id)
+    )
 }
 
 fn executable_command(path: &Path) -> Command {
@@ -419,6 +432,9 @@ fn command_for_provider(
     if provider_id != "claude" || cfg!(target_os = "macos") {
         return Err(format!("{} is unavailable until its provider-owned credential store supports verified Mivlet account isolation. Connect a direct API provider instead.", provider_label(provider_id)));
     }
+    if !sdk_launch::executable_allowed(provider_id, path) {
+        return Err("Install the official native Claude executable (claude.exe); Windows batch shims cannot run this adapter.".into());
+    }
     crate::account_session::ensure_current()?;
     let mut command = executable_command(path);
     for key in [
@@ -565,10 +581,7 @@ fn probe_status(
             installed: false,
             authenticated: false,
             version: None,
-            message: Some(format!(
-                "Install the official {} runtime, then reopen Mivlet.",
-                provider_label(provider_id)
-            )),
+            message: Some(missing_runtime_message(provider_id)),
         });
     };
     let mut version_command = command_for_provider(app, user_id, provider_id, &path)?;
@@ -676,10 +689,7 @@ pub(crate) fn status_for(provider_id: &str, previously_connected: bool) -> Manag
         authenticated: installed && previously_connected,
         version: None,
         message: Some(if !installed {
-            format!(
-                "Install the official {} runtime, then reopen Mivlet.",
-                provider_label(provider_id)
-            )
+            missing_runtime_message(provider_id)
         } else if previously_connected {
             format!(
                 "{} account connection is ready to verify.",
@@ -749,12 +759,8 @@ pub async fn start_managed_runtime_login(
         return Err("OpenCode has no single account login. Run `opencode auth login` for the provider you want, then check the connection in Mivlet.".into());
     }
     let user_id = crate::backends::require_current_internal_user()?;
-    let path = find_executable(&provider_id).ok_or_else(|| {
-        format!(
-            "Install the official {} runtime first.",
-            provider_label(&provider_id)
-        )
-    })?;
+    let path =
+        find_executable(&provider_id).ok_or_else(|| missing_runtime_message(&provider_id))?;
     let app_for_task = app.clone();
     let user_for_task = user_id.clone();
     let provider_for_task = provider_id.clone();
@@ -1489,33 +1495,13 @@ fn start_claude_turn(
     if provider_id != "claude" {
         return Err("This provider does not use the Claude agent adapter.".into());
     }
-    let path = find_executable(&provider_id)
-        .ok_or_else(|| "Install the official Claude runtime first.".to_string())?;
+    let path =
+        find_executable(&provider_id).ok_or_else(|| missing_runtime_message(&provider_id))?;
     let workspace = workspace_dir(&app, &user_id, &provider_id)?;
     let prompt = image_input::user_message(&request.request, &request.options)?;
     let tool_bridge = Arc::new(Mutex::new(ToolBridge::new(&request.request.tools)?));
     let mut command = command_for_provider(&app, &user_id, &provider_id, &path)?;
-    command.args([
-        "--output-format",
-        "stream-json",
-        "--verbose",
-        "--input-format",
-        "stream-json",
-        "--include-partial-messages",
-        "--permission-prompt-tool",
-        "stdio",
-        "--permission-mode",
-        "default",
-        "--setting-sources=",
-        "--strict-mcp-config",
-        "--mcp-config",
-        r#"{"mcpServers":{"mivlet":{"type":"sdk","name":"mivlet"}}}"#,
-        "--tools=",
-    ]);
-    let model = request.request.model.trim();
-    if !model.is_empty() {
-        command.args(["--model", model]);
-    }
+    sdk_launch::configure(&mut command, &request.request.model);
     command
         .current_dir(&workspace)
         .stdin(Stdio::piped())

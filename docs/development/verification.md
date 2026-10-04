@@ -102,6 +102,18 @@ For Rust changes, use the affected tests plus:
 
 UI changes need browser/native inspection of affected flows and relevant viewport sizes. Packaging, native Windows control, authentication, deployment, and live smoke tests are separate evidence. Wrangler dry-runs establish packaging and bindings only. Report skipped checks and missing prerequisites without describing them as passes.
 
+Claude SDK initialization has a separate opt-in check:
+`cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml native_claude_sdk_initialization_acceptance -- --ignored --nocapture`.
+Set `MIVLET_CLAUDE_SDK_ACCEPTANCE_EXE` to an independently verified official
+executable and `MIVLET_CLAUDE_SDK_ACCEPTANCE_SHA256` to its release SHA256.
+The check clears inherited credentials, creates a disposable profile, requires
+signed-out status, sends only SDK/MCP initialization, and closes the supervised
+process. It sends no user prompt and verifies no paid model execution. Windows
+CLI 2.1.289 passed on October 4 after its official release checksum and Anthropic
+Authenticode signature were independently verified. This is startup evidence;
+authenticated shared tool calls, images and packaged account acceptance remain
+separate checks.
+
 Use `pnpm tauri:dev` for interactive desktop work. Its launcher owns the Vite
 server so account-driven native restarts cannot tear down the UI server. The
 server stays available after the native process exits; stop the development
