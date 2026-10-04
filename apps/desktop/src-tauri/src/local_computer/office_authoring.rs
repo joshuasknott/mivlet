@@ -1,9 +1,9 @@
-//! Bounded passive DOCX/XLSX authoring for an agent's private workspace.
+//! Bounded passive DOCX/XLSX/PPTX/PDF authoring for an agent's private workspace.
 //!
 //! This is deliberately not an Office automation or command-execution surface.
-//! The model supplies a small declarative document, Rust writes fixed OOXML
-//! parts, then the normal publication sanitizer reopens and validates the whole
-//! package before the file is placed in the workspace.
+//! The model supplies a small declarative document; Rust writes fixed OOXML or
+//! vector PDF, then the publication sanitizer validates the output before its
+//! placement in the workspace.
 
 use crate::tools::{confine_path, ToolResult};
 use serde::Deserialize;
@@ -111,32 +111,38 @@ pub(crate) fn prepare(
             let (path, bytes) = super::presentation_authoring::create(arguments)?;
             (path, bytes, 0, "pptx")
         }
-        _ => return Err("The Office authoring tool is not supported.".into()),
+        "create-pdf" => {
+            let (path, bytes) = super::pdf_authoring::create(arguments)?;
+            (path, bytes, 0, "pdf")
+        }
+        _ => return Err("The document authoring tool is not supported.".into()),
     };
     let destination = destination(&path, format, workspace_root)?;
     if destination.exists() {
         return Err(
-            "Choose a new workspace path; Office authoring does not overwrite an existing file."
+            "Choose a new workspace path; Document authoring does not overwrite an existing file."
                 .into(),
         );
     }
-    if !crate::local_computer::artifacts::check_office(&bytes, format)? {
+    if format == "pdf" {
+        crate::local_computer::artifacts::checked_pdf(&bytes)?;
+    } else if !crate::local_computer::artifacts::check_office(&bytes, format)? {
         return Err("Mivlet rejected the generated Office package before publication.".into());
     }
     let staging_root = workspace_root
         .parent()
-        .ok_or("The Office staging path is invalid.")?;
+        .ok_or("The document staging path is invalid.")?;
     let mut staging = tempfile::Builder::new()
         .prefix("office-author-")
         .tempfile_in(staging_root)
-        .map_err(|_| "Mivlet could not prepare the Office output.")?;
+        .map_err(|_| "Mivlet could not prepare the document output.")?;
     staging
         .write_all(&bytes)
-        .map_err(|_| "Mivlet could not stage the Office output.")?;
+        .map_err(|_| "Mivlet could not stage the document output.")?;
     staging
         .as_file()
         .sync_all()
-        .map_err(|_| "Mivlet could not stage the Office output.")?;
+        .map_err(|_| "Mivlet could not stage the document output.")?;
     Ok(PreparedOffice {
         destination,
         path,
@@ -161,15 +167,15 @@ impl PreparedOffice {
         } = self;
         let parent = destination
             .parent()
-            .ok_or("The Office output path is invalid.")?;
+            .ok_or("The document output path is invalid.")?;
         fs::create_dir_all(parent)
-            .map_err(|_| "Mivlet could not prepare the Office output folder.")?;
+            .map_err(|_| "Mivlet could not prepare the document output folder.")?;
         staging.persist_noclobber(&destination).map_err(|error| {
             if error.error.kind() == std::io::ErrorKind::AlreadyExists {
-                "Choose a new workspace path; Office authoring does not overwrite an existing file."
+                "Choose a new workspace path; Document authoring does not overwrite an existing file."
                     .to_string()
             } else {
-                "Mivlet could not finish the Office output.".to_string()
+                "Mivlet could not finish the document output.".to_string()
             }
         })?;
         let output = json!({
@@ -183,7 +189,7 @@ impl PreparedOffice {
         Ok(ToolResult {
             ok: true,
             output: serde_json::to_string(&output)
-                .map_err(|_| "The Office authoring receipt is invalid.")?,
+                .map_err(|_| "The document authoring receipt is invalid.")?,
         })
     }
 }

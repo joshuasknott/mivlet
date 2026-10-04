@@ -279,8 +279,24 @@ The existing artifact and private-file previews render PDFs up to 8 MB with
 PDF.js, page navigation, zoom and bounded page text. Renderer fonts and character
 maps are packaged, with their notices; its asset factory accepts only exact
 packaged names. No document URL is fetched and no annotation/form layer runs.
-The lazy renderer has its own bundle chunk. PDF authoring, generated charts and
-arbitrary Office editing remain separate gaps.
+The lazy renderer has its own bundle chunk.
+
+`create-pdf` uses the same shared tool registry, native exact-content approval,
+staging, generation-fenced placement and no-overwrite path as Office authoring.
+It creates passive A4 reports with headings, paragraphs, bullets, automatically
+wrapped tables with repeated headers, page breaks and vector bar charts. Reports
+are bounded to 200 blocks, 100 KB of text, 50 pages and 8 MB. A chart accepts up
+to 20 label/value pairs, including negative and zero values. No code, arbitrary
+font, remote asset, link or host application runs. Generated PDFs pass the same
+passive validation before placement; `computer-artifact` explicitly publishes
+the result for the existing page preview and Save/Open actions.
+
+Fixed embedded Liberation Sans fonts provide measured widths and Unicode text
+maps. Precomposed Latin, Greek and Cyrillic text supported by those fonts remains
+selectable and readable. Missing glyphs, complex shaping/bidirectional scripts,
+combining marks and overfull rows/charts are rejected with a clear alternative.
+This report contract does not imply arbitrary PDF editing, OCR, layout fidelity
+for existing documents, editable Office charts or a general code renderer.
 
 Composer attachments also accept DOCX, XLSX and PPTX up to the existing 2 MB
 upload limit. Original bytes are staged under the exact agent/workspace/generation

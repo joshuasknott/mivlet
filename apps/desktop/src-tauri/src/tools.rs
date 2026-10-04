@@ -83,7 +83,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 32] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 33] = [
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -96,6 +96,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 32] = [
     "create-spreadsheet",
     "create-document",
     "create-presentation",
+    "create-pdf",
     "run-shell",
     "web-fetch",
     "computer-artifact",
@@ -215,9 +216,11 @@ pub(crate) fn execute_tool_outcome(
     match tool.as_str() {
         "read-file" => ToolOutcome::Done(run_read_file(&arguments, workspace_root)),
         "write-file" => ToolOutcome::Done(run_write_file(&arguments, workspace_root)),
-        "create-spreadsheet" | "create-document" | "create-presentation" => ToolOutcome::Done(Err(
-            "Office authoring requires the scoped native workspace boundary.".into(),
-        )),
+        "create-spreadsheet" | "create-document" | "create-presentation" | "create-pdf" => {
+            ToolOutcome::Done(Err(
+                "Document authoring requires the scoped native workspace boundary.".into(),
+            ))
+        }
         "run-shell" => ToolOutcome::Done(Err(
             "Terminal commands require the asynchronous isolated-computer boundary.".into(),
         )),
@@ -282,7 +285,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "repository-recover" => Some(("full-access", "high")),
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
-        "create-spreadsheet" | "create-document" | "create-presentation" => {
+        "create-spreadsheet" | "create-document" | "create-presentation" | "create-pdf" => {
             Some(("full-access", "high"))
         }
         "run-shell" => Some(("full-access", "critical")),
@@ -367,6 +370,7 @@ fn is_computer_tool(tool: &str) -> bool {
             | "create-spreadsheet"
             | "create-document"
             | "create-presentation"
+            | "create-pdf"
             | "computer-artifact"
             | "generate-image"
             | "edit-image"
@@ -442,7 +446,7 @@ pub(crate) fn validate_tool_approval_binding(
         .collect::<std::collections::BTreeSet<_>>();
     if matches!(
         tool,
-        "create-spreadsheet" | "create-document" | "create-presentation"
+        "create-spreadsheet" | "create-document" | "create-presentation" | "create-pdf"
     ) || tool.starts_with("repository-")
     {
         let digest_entries = approved
@@ -473,14 +477,16 @@ fn approval_argument_previews(
     let object = arguments.as_object().ok_or_else(|| {
         format!("Tool {tool} arguments must be an object at the execution boundary.")
     })?;
-    Ok(object
-        .iter()
+    let mut entries = object.iter().collect::<Vec<_>>();
+    entries.sort_unstable_by(|(left, _), (right, _)| left.encode_utf16().cmp(right.encode_utf16()));
+    entries
+        .into_iter()
         .take(16)
         .map(|(key, value)| {
-            let raw_rendered = value
-                .as_str()
-                .map(str::to_string)
-                .unwrap_or_else(|| value.to_string());
+            let raw_rendered = match value.as_str() {
+                Some(text) => text.to_string(),
+                None => canonical_json(value)?,
+            };
             let rendered = if tool == "web-fetch" && key == "url" {
                 normalize_url_for_fingerprint(&raw_rendered).unwrap_or(raw_rendered)
             } else if matches!(tool, "cloud-browser") && key == "url" {
@@ -490,9 +496,12 @@ fn approval_argument_previews(
             } else {
                 raw_rendered
             };
-            truncate_characters(&normalize_spaces(&format!("{key}: {rendered}")), 240)
+            Ok(truncate_characters(
+                &normalize_spaces(&format!("{key}: {rendered}")),
+                240,
+            ))
         })
-        .collect::<std::collections::BTreeSet<_>>())
+        .collect::<Result<std::collections::BTreeSet<_>, String>>()
 }
 
 fn argument_digest(arguments: &serde_json::Value) -> Result<String, String> {
@@ -506,7 +515,19 @@ fn canonical_json(value: &serde_json::Value) -> Result<String, String> {
     match value {
         serde_json::Value::Object(object) => {
             let mut keys = object.keys().collect::<Vec<_>>();
-            keys.sort_unstable();
+            // JSON.stringify enumerates index properties first, even after
+            // canonicalValue inserts keys sorted by JavaScript UTF-16 order.
+            let index = |key: &str| {
+                key.parse::<u32>()
+                    .ok()
+                    .filter(|index| *index < u32::MAX && index.to_string() == key)
+            };
+            keys.sort_unstable_by(|left, right| match (index(left), index(right)) {
+                (Some(left), Some(right)) => left.cmp(&right),
+                (Some(_), None) => std::cmp::Ordering::Less,
+                (None, Some(_)) => std::cmp::Ordering::Greater,
+                (None, None) => left.encode_utf16().cmp(right.encode_utf16()),
+            });
             let mut output = String::from("{");
             for (index, key) in keys.into_iter().enumerate() {
                 if index > 0 {
@@ -528,6 +549,23 @@ fn canonical_json(value: &serde_json::Value) -> Result<String, String> {
                 .map(canonical_json)
                 .collect::<Result<Vec<_>, _>>()?;
             Ok(format!("[{}]", values.join(",")))
+        }
+        serde_json::Value::Number(number) => {
+            // Never collapse distinct native integers into one JS fingerprint.
+            if number
+                .as_i64()
+                .is_some_and(|value| value.unsigned_abs() > 9_007_199_254_740_991)
+                || number
+                    .as_u64()
+                    .is_some_and(|value| value > 9_007_199_254_740_991)
+            {
+                return Err("Tool argument integer exceeds the exact JavaScript range.".into());
+            }
+            let value = number
+                .as_f64()
+                .filter(|value| value.is_finite())
+                .ok_or("Invalid tool argument number.")?;
+            Ok(ryu_js::Buffer::new().format(value).to_string())
         }
         _ => serde_json::to_string(value)
             .map_err(|_| "Tool arguments could not be canonicalized.".to_string()),
@@ -1659,16 +1697,16 @@ pub async fn execute_tool_call(
     }
     if matches!(
         tool.as_str(),
-        "create-spreadsheet" | "create-document" | "create-presentation"
+        "create-spreadsheet" | "create-document" | "create-presentation" | "create-pdf"
     ) {
         let workspace_id = request
             .workspace_id
             .clone()
-            .ok_or_else(|| "Office authoring requires an active workspace.".to_string())?;
+            .ok_or_else(|| "Document authoring requires an active workspace.".to_string())?;
         let agent_id = request
             .agent_id
             .clone()
-            .ok_or_else(|| "Office authoring requires a saved agent.".to_string())?;
+            .ok_or_else(|| "Document authoring requires a saved agent.".to_string())?;
         let computers = local_computers.inner().clone();
         let operation_tool = tool.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
@@ -1683,7 +1721,7 @@ pub async fn execute_tool_call(
             ticket.commit(|| prepared.commit())
         })
         .await
-        .map_err(|_| "The Office authoring task stopped unexpectedly.".to_string())?;
+        .map_err(|_| "The Document authoring task stopped unexpectedly.".to_string())?;
         audit_tool_outcome(
             ToolOutcomeAudit {
                 tool: &tool,
@@ -1696,7 +1734,7 @@ pub async fn execute_tool_call(
                 } else {
                     "office-authoring"
                 },
-                message: "Office authoring completed",
+                message: "Document authoring completed",
             },
             None,
         );
@@ -1973,7 +2011,8 @@ fn preview_tool_arguments(tool: &str, arguments: &serde_json::Value) -> String {
         | "write-file"
         | "create-spreadsheet"
         | "create-document"
-        | "create-presentation" => "path",
+        | "create-presentation"
+        | "create-pdf" => "path",
         "run-shell" => "command",
         "web-fetch" => "url",
         "generate-image" | "edit-image" => "title",
@@ -2297,6 +2336,71 @@ mod connector_authority_tests {
         assert!(is_computer_tool("create-document"));
         assert!(is_computer_tool("generate-image"));
         assert!(is_computer_tool("edit-image"));
+    }
+
+    #[test]
+    fn approval_canonicalization_matches_ecmascript_fixtures_without_integer_collisions() {
+        use serde_json::Value;
+        let fixtures: Value = serde_json::from_str(include_str!(
+            "../../../../packages/connectors/src/native-api/approval-canonical-fixtures.json"
+        ))
+        .unwrap();
+        for fixture in fixtures.as_array().unwrap() {
+            let arguments: Value = serde_json::from_str(fixture["raw"].as_str().unwrap()).unwrap();
+            assert_eq!(
+                canonical_json(&arguments).unwrap(),
+                fixture["canonical"].as_str().unwrap(),
+                "{}",
+                fixture["name"]
+            );
+            assert_eq!(
+                argument_digest(&arguments).unwrap(),
+                fixture["digest"].as_str().unwrap(),
+                "{}",
+                fixture["name"]
+            );
+        }
+        assert!(canonical_json(&json!({"value":9_007_199_254_740_992u64})).is_err());
+        assert!(canonical_json(&json!({"value":9_007_199_254_740_993u64})).is_err());
+        let arguments: Value =
+            serde_json::from_str("{\"path\":\"report.pdf\",\"values\":[0.000001,1e-7,-0,1.0]}")
+                .unwrap();
+        let previews = approval_argument_previews("create-pdf", &arguments).unwrap();
+        assert!(previews.contains("values: [0.000001,1e-7,0,1]"));
+        assert_ne!(
+            argument_digest(&json!({"value":1e-6})).unwrap(),
+            argument_digest(&json!({"value":2e-6})).unwrap()
+        );
+    }
+
+    #[test]
+    fn pdf_approval_rejects_changes_beyond_the_content_preview() {
+        let tool = "create-pdf";
+        let mut approved = request(tool);
+        approved.arguments = json!({"path":"report.pdf","title":"Report","blocks":[{"type":"paragraph","text":format!("{}original", "x".repeat(400))}]});
+        let preview = approval_argument_previews(tool, &approved.arguments).unwrap();
+        approved.approval.request.data_used = preview
+            .iter()
+            .cloned()
+            .chain(std::iter::once(
+                argument_digest(&approved.arguments).unwrap(),
+            ))
+            .collect();
+        validate_tool_approval_binding(tool, &approved.arguments, &approved.approval.request)
+            .unwrap();
+        approved.arguments["blocks"][0]["text"] = json!(format!("{}changed", "x".repeat(400)));
+        assert_eq!(
+            approval_argument_previews(tool, &approved.arguments).unwrap(),
+            preview
+        );
+        assert!(validate_tool_approval_binding(
+            tool,
+            &approved.arguments,
+            &approved.approval.request
+        )
+        .is_err());
+        assert_eq!(tool_policy(tool), Some(("full-access", "high")));
+        assert!(is_computer_tool(tool));
     }
 
     #[test]

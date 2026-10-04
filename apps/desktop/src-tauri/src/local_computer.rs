@@ -10,6 +10,8 @@ pub(crate) mod office_authoring;
 pub(crate) mod office_inspection;
 mod office_passive;
 mod office_preview;
+mod pdf_authoring;
+mod pdf_font;
 pub(crate) mod pdf_inspection;
 pub(crate) mod plugins;
 mod presentation_authoring;

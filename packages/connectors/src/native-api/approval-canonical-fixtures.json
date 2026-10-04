@@ -1,0 +1,50 @@
+[
+  {
+    "name": "decimal-chart",
+    "raw": "{\"path\":\"report.pdf\",\"title\":\"Report\",\"blocks\":[{\"type\":\"bar-chart\",\"title\":\"Ratio\",\"labels\":[\"A\",\"B\",\"C\",\"D\"],\"values\":[0.000001,1e-7,-0,1.0]}]}",
+    "canonical": "{\"blocks\":[{\"labels\":[\"A\",\"B\",\"C\",\"D\"],\"title\":\"Ratio\",\"type\":\"bar-chart\",\"values\":[0.000001,1e-7,0,1]}],\"path\":\"report.pdf\",\"title\":\"Report\"}",
+    "digest": "Arguments SHA-256: 0e3002cf45721b264472e14f30fc23b9683f2fd74cfbe8b956a61ceef071acbd"
+  },
+  {
+    "name": "exponents",
+    "raw": "{\"value\":1e21,\"small\":5e-324}",
+    "canonical": "{\"small\":5e-324,\"value\":1e+21}",
+    "digest": "Arguments SHA-256: fba6050dcb64962c29434d1127b02daf3b54f783d0ddac705cba23227333e833"
+  },
+  {
+    "name": "decimal-round-trip",
+    "raw": "{\"values\":[8.633977737306281e-29,4.2997742770239716e-16,0.09855449153110385,126728743.78040433,1902216658927.5002]}",
+    "canonical": "{\"values\":[8.633977737306281e-29,4.2997742770239716e-16,0.09855449153110385,126728743.78040433,1902216658927.5002]}",
+    "digest": "Arguments SHA-256: 073763e10180bbc909a9d3f1093428ae737013405ce1880be52b0f55a9b81355"
+  },
+  {
+    "name": "long-decimal",
+    "raw": "{\"value\":0.84551240822557006}",
+    "canonical": "{\"value\":0.8455124082255701}",
+    "digest": "Arguments SHA-256: 674c602a247ea01a9c96361ed0415ff74b8bf68a2b2e4c329ac79ea0613dfd15"
+  },
+  {
+    "name": "safe-integer",
+    "raw": "{\"value\":9007199254740991}",
+    "canonical": "{\"value\":9007199254740991}",
+    "digest": "Arguments SHA-256: 16c63bddb910905c4ee8abf36273baa20dba53020dbaf265da5936013ded185d"
+  },
+  {
+    "name": "unicode-keys",
+    "raw": "{\"\\ue000\":\"first\",\"\\ud83d\\ude00\":\"second\"}",
+    "canonical": "{\"😀\":\"second\",\"\":\"first\"}",
+    "digest": "Arguments SHA-256: e71312e22786fdd2b5671c4c5db839487e08f62e651d5f0689a0bc15464ab9ce"
+  },
+  {
+    "name": "index-keys",
+    "raw": "{\"10\":\"ten\",\"2\":\"two\",\"01\":\"one\",\"4294967295\":\"max\"}",
+    "canonical": "{\"2\":\"two\",\"10\":\"ten\",\"01\":\"one\",\"4294967295\":\"max\"}",
+    "digest": "Arguments SHA-256: b136a3556652e1af95ac91672bb961269b5092d452d087c8c35771b9a172db50"
+  },
+  {
+    "name": "literal-strings",
+    "raw": "{\"value\":\"Crème Δοκιμή Итог \\n \\\"quote\\\"\"}",
+    "canonical": "{\"value\":\"Crème Δοκιμή Итог \\n \\\"quote\\\"\"}",
+    "digest": "Arguments SHA-256: 26bcad966e6eb8236f4396605ad5614fbdef788c3a27f0cff32bbd6a294609c9"
+  }
+]

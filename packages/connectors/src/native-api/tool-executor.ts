@@ -41,8 +41,8 @@ export interface ToolRuntime {
   readFile(path: string): Promise<string | null>;
   /** Write/overwrite a workspace file. Returns the number of bytes written. */
   writeFile(path: string, content: string): Promise<number>;
-  /** Author one passive Office package through a bounded runtime implementation. */
-  authorOffice?(tool: "create-spreadsheet" | "create-document", input: Record<string, unknown>): Promise<string>;
+  /** Author one passive Office package or PDF through a bounded runtime implementation. */
+  authorOffice?(tool: "create-spreadsheet" | "create-document" | "create-presentation" | "create-pdf", input: Record<string, unknown>): Promise<string>;
   /** Run a command only when an isolated hosted runtime is explicitly supplied. */
   runShell(command: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
   /** Fetch a URL and return its text. Returns null on a fetch failure. */
@@ -338,9 +338,11 @@ async function dispatch(
       return `Wrote ${written} byte${written === 1 ? "" : "s"} to ${path}.`;
     }
     case "create-spreadsheet":
+    case "create-presentation":
+    case "create-pdf":
     case "create-document": {
       if (!runtime.authorOffice) {
-        throw new Error("Bounded Office authoring is unavailable in this runtime.");
+        throw new Error("Bounded document authoring is unavailable in this runtime.");
       }
       return runtime.authorOffice(toolName, parsed);
     }
