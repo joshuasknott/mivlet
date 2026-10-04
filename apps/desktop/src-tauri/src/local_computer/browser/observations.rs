@@ -369,18 +369,33 @@ fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
     Ok(fields)
 }
 
-fn projection(nodes: &[Value], frame: &str) -> Result<Vec<Value>, String> {
+#[derive(serde::Serialize)]
+struct Projection {
+    content: Vec<Value>,
+    truncated: bool,
+}
+fn projection(nodes: &[Value], frame: &str) -> Result<Projection, String> {
     let mut output = Vec::new();
     let mut remaining = 16000;
+    let mut truncated = false;
     for index in reachable(nodes, frame, false)? {
         let node = &nodes[index];
-        if node["ignored"] == false && output.len() < 200 && remaining > 0 {
+        if node["ignored"] == false {
+            if output.len() >= 200 || remaining == 0 {
+                truncated = true;
+                continue;
+            }
             let role = bounded(&node["role"]["value"], 80);
             let mut name = bounded(&node["name"]["value"], 400.min(remaining));
             // Accessible field names can embed all or part of the current value.
             // Omit them entirely rather than guessing which substring is a label.
             if editable(node) {
                 name.clear();
+            } else if node["name"]["value"]
+                .as_str()
+                .is_some_and(|value| value.chars().count() > 400.min(remaining))
+            {
+                truncated = true;
             }
             if crate::secret_redaction::looks_secret(&name) {
                 return Err(PRIVATE.into());
@@ -389,7 +404,10 @@ fn projection(nodes: &[Value], frame: &str) -> Result<Vec<Value>, String> {
             output.push(json!({"role":role,"name":name}));
         }
     }
-    Ok(output)
+    Ok(Projection {
+        content: output,
+        truncated,
+    })
 }
 
 pub(super) fn observe(
@@ -491,7 +509,7 @@ pub(super) fn observe(
         return Err("The browser document changed during observation. List tabs and observe again; no content was delivered.".into());
     }
     check()?;
-    Ok(json!({"origin":origin,"content":content,"truncated":nodes.len()>200,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
 #[cfg(debug_assertions)]

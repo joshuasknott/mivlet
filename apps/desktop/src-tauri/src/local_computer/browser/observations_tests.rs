@@ -116,6 +116,31 @@ fn partial_long_field_values_cannot_leak_through_accessible_names() {
     assert!(result.contains("Report"));
 }
 #[test]
+fn projection_reports_label_and_total_text_truncation_before_node_limit() {
+    let mut root = node("1", "RootWebArea", "Report", &["2"]);
+    root["frameId"] = "frame".into();
+    let clipped = projection(
+        &[root.clone(), node("2", "StaticText", &"a".repeat(401), &[])],
+        "frame",
+    )
+    .unwrap();
+    assert!(clipped.truncated);
+    assert_eq!(clipped.content[1]["name"].as_str().unwrap().len(), 400);
+    let mut nodes = vec![root];
+    nodes[0]["childIds"] = json!((2..=50).map(|id| id.to_string()).collect::<Vec<_>>());
+    nodes.extend((2..=50).map(|id| node(&id.to_string(), "StaticText", &"b".repeat(400), &[])));
+    let clipped = projection(&nodes, "frame").unwrap();
+    assert!(clipped.truncated);
+    assert_eq!(
+        clipped
+            .content
+            .iter()
+            .map(|node| node["name"].as_str().unwrap().chars().count())
+            .sum::<usize>(),
+        16000
+    );
+}
+#[test]
 fn field_privacy_metadata_refuses_password_otp_and_payment_fields() {
     assert!(
         !private_attributes(&json!({"nodeType":3,"nodeValue":"hidden editable descendant"}))
