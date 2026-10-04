@@ -78,7 +78,12 @@ fn source_origin(value: &str) -> Result<String, String> {
 fn source_frame(value: &Value, origin: &str) -> Result<Frame, String> {
     if origin == "about:blank" {
         let frame = observations::document(value)?;
-        if frame.url != "about:blank" {
+        if frame.url != "about:blank"
+            || !matches!(
+                value["frameTree"]["frame"]["securityOrigin"].as_str(),
+                Some("://" | "null")
+            )
+        {
             return Err(STALE.into());
         }
         Ok(frame)

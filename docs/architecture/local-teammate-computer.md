@@ -200,6 +200,26 @@ exchange disables further agent commands while keeping the pipe handles alive fo
 human use; close that private window and open a fresh browser to resume agent reads.
 DOM actions and native upload/download custody remain pending.
 
+`local-browser-tabs` also captures document-bound `navigationRef` choices, valid
+for 30 seconds and one use. `local-browser-navigate` requires an explicitly
+selected foreground window, the exact listed source origin and an approved HTTP(S)
+destination URL. Only an opaque `about:blank` document can bootstrap
+navigation; HTTP(S)-inherited blank documents and internal/file/data URLs fail
+closed. Native code rechecks the window, target, source origin, frame, loader and
+full URL before dispatch, then invalidates all older tab and navigation choices.
+
+Navigation starts one bounded overlapped pipe write while holding the current
+control and generation fences. Account expiry/generation/open/deadline checks run
+inside that dispatch fence. Credential reads happen beforehand; the identity
+check uses a nonblocking lock and cached expiry and refuses a busy or changed
+identity. It never waits, flushes or retries a partial write under those
+locks; cancellation and response waits happen outside them. The fixed native
+`Page.navigate` call sends no referrer or JavaScript. A successful reply means
+only dispatched, not verified page load: the agent must list and observe again.
+Errors, downloads and interrupted replies have uncertain outcomes and are not
+replayed. Browser-managed downloads are not imported or presented as Mivlet
+artifacts; native transfer custody and DOM element actions remain pending.
+
 The driver is private to Rust; React receives no driver methods, process handles,
 raw accessibility tokens or screenshots. Native code only exposes:
 

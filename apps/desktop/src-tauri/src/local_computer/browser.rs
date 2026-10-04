@@ -211,20 +211,29 @@ fn execute(
     #[cfg(windows)]
     {
         let scope = computers.scope(workspace, agent)?;
+        // Secret-store reads happen before taking any control/authority lock.
+        let account_dispatch = if matches!(arguments, Request::Navigate(..)) {
+            Some(crate::account_session::AccountDispatchFence::capture()?)
+        } else {
+            None
+        };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         let run = |window: &super::windows::WindowBinding,
                    lease_check: &dyn Fn() -> Result<(), String>,
                    dispatch: Option<&super::control::NativeDispatch<'_>>| {
-            let check = || {
-                lease_check()?;
+            let check_liveness = || {
                 computers.ensure_open()?;
-                crate::account_session::ensure_current()?;
                 if computers.browsers.closing.load(Ordering::Acquire)
                     || std::time::Instant::now() >= deadline
                 {
-                    return Err("The browser read stopped or reached its time limit. No browser input was sent.".into());
+                    return Err("The browser operation stopped or reached its time limit. Do not replay previously dispatched navigation.".into());
                 }
                 Ok(())
+            };
+            let check = || {
+                lease_check()?;
+                crate::account_session::ensure_current()?;
+                check_liveness()
             };
             check()?;
             let mut processes = computers
@@ -238,15 +247,28 @@ fn execute(
                     process.observe_tab(window.identity.hwnd, generation, reference, origin, &check)
                 }
                 Request::Read(None) => process.tabs(window.identity.hwnd, generation, &check),
-                Request::Navigate(reference, origin, url) => process.navigate(
-                    window.identity.hwnd,
-                    generation,
-                    reference,
-                    origin,
-                    url,
-                    &check,
-                    dispatch.ok_or("Browser navigation requires a native dispatch fence.")?,
-                ),
+                Request::Navigate(reference, origin, url) => {
+                    let dispatch =
+                        dispatch.ok_or("Browser navigation requires a native dispatch fence.")?;
+                    let checked_dispatch = |start: &mut dyn FnMut() -> Result<(), String>| {
+                        dispatch(&mut || {
+                            check_liveness()?;
+                            account_dispatch
+                                .as_ref()
+                                .ok_or("The account dispatch fence is unavailable.")?
+                                .with_current(&mut *start)
+                        })
+                    };
+                    process.navigate(
+                        window.identity.hwnd,
+                        generation,
+                        reference,
+                        origin,
+                        url,
+                        &check,
+                        &checked_dispatch,
+                    )
+                }
             }
         };
         let result = if matches!(arguments, Request::Navigate(..)) {

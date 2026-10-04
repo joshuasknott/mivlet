@@ -61,6 +61,30 @@ pub(crate) fn ensure_current() -> Result<(), String> {
     )
 }
 
+pub(crate) struct AccountDispatchFence(crate::clerk_identity::NativeIdentityDispatch);
+impl AccountDispatchFence {
+    pub(crate) fn capture() -> Result<Self, String> {
+        let identity = crate::clerk_identity::NativeIdentityDispatch::capture()?;
+        check(
+            binding()?,
+            identity.account_binding(),
+            CLOSING.load(Ordering::Acquire),
+        )?;
+        Ok(Self(identity))
+    }
+    pub(crate) fn with_current<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.0.with_current(|| {
+            if CLOSING.load(Ordering::Acquire) {
+                return Err("The account is closing; no new browser input was dispatched.".into());
+            }
+            operation()
+        })
+    }
+}
+
 pub(crate) fn credential_key(key: &str) -> Result<String, String> {
     // Deliberately pinned, including a late completion: never resolve a new
     // account's namespace from mutable identity after an await.

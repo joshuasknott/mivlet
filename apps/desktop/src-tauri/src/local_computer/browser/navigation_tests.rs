@@ -55,6 +55,16 @@ fn initial_blank_can_be_navigated_but_other_internal_urls_cannot() {
         "target",
         "session",
         "about:blank",
+        &frame("about:blank", "https://inherited.example")
+    )
+    .is_err());
+    assert!(Choice::capture(
+        10,
+        1,
+        77,
+        "target",
+        "session",
+        "about:blank",
         &frame("about:blank", "://")
     )
     .is_ok());
