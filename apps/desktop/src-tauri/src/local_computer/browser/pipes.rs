@@ -253,6 +253,51 @@ pub(super) fn write(
     Ok(())
 }
 
+/// Start exactly one framed write under the native dispatch fence. No waiting,
+/// loop, flush or partial-write retry can hold its Stop/authority locks.
+fn write_once(
+    file: &File,
+    message: &[u8],
+    deadline: Instant,
+    check: &dyn Fn() -> Result<(), String>,
+    dispatch: &super::super::super::control::NativeDispatch<'_>,
+) -> Result<(), String> {
+    if message.len() > 4096 || message.contains(&0) {
+        return Err("The private browser request exceeded its limit.".into());
+    }
+    let mut frame = message.to_vec();
+    frame.push(0);
+    let mut operation = Pending::new(file)?;
+    let mut count = 0;
+    check()?;
+    dispatch(&mut || {
+        let completed = unsafe {
+            WriteFile(
+                file.as_raw_handle(),
+                frame.as_ptr(),
+                frame.len() as u32,
+                &mut count,
+                &mut operation.overlapped,
+            )
+        };
+        if completed == 0 {
+            if unsafe { GetLastError() } != ERROR_IO_PENDING {
+                return Err(FAILURE.into());
+            }
+            operation.pending = true;
+        }
+        Ok(())
+    })?;
+    if operation.pending {
+        count = operation.wait(deadline, check)?;
+    }
+    check()?;
+    if count as usize != frame.len() {
+        return Err("The navigation write was not confirmed. Its outcome is uncertain; input was not retried.".into());
+    }
+    Ok(())
+}
+
 pub(super) struct ControlPipe {
     pub input: File,
     pub output: Framed,
@@ -260,8 +305,10 @@ pub(super) struct ControlPipe {
     interrupted: bool,
 }
 
-/// This is the complete native read surface. No method name comes from an agent.
-pub(super) enum ReadCommand {
+/// Closed native protocol surface. Navigation additionally requires the native
+/// dispatch fence; no method name comes from an agent.
+#[derive(Clone, Copy)]
+pub(super) enum Command {
     Version,
     Targets,
     Window,
@@ -269,10 +316,9 @@ pub(super) enum ReadCommand {
     Frames,
     Accessibility,
     DescribeNode,
-    #[cfg(debug_assertions)]
-    FixtureNavigate,
+    Navigate,
 }
-impl ReadCommand {
+impl Command {
     fn method(&self) -> &'static str {
         match self {
             Self::Version => "Browser.getVersion",
@@ -282,8 +328,7 @@ impl ReadCommand {
             Self::Frames => "Page.getFrameTree",
             Self::Accessibility => "Accessibility.getFullAXTree",
             Self::DescribeNode => "DOM.describeNode",
-            #[cfg(debug_assertions)]
-            Self::FixtureNavigate => "Page.navigate",
+            Self::Navigate => "Page.navigate",
         }
     }
 }
@@ -298,10 +343,40 @@ impl ControlPipe {
     }
     pub(super) fn read_command(
         &mut self,
-        command: ReadCommand,
+        command: Command,
         params: serde_json::Value,
         session: Option<&str>,
         check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<serde_json::Value, String> {
+        if matches!(command, Command::Navigate) {
+            return Err("Browser navigation requires the native dispatch fence.".into());
+        }
+        self.exchange(command, params, session, check, None)
+    }
+
+    pub(super) fn navigate(
+        &mut self,
+        params: serde_json::Value,
+        session: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<serde_json::Value, String> {
+        self.exchange(
+            Command::Navigate,
+            params,
+            Some(session),
+            check,
+            Some(dispatch),
+        )
+    }
+
+    fn exchange(
+        &mut self,
+        command: Command,
+        params: serde_json::Value,
+        session: Option<&str>,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: Option<&super::super::super::control::NativeDispatch<'_>>,
     ) -> Result<serde_json::Value, String> {
         if self.interrupted {
             return Err("The browser's private connection was interrupted. The page remains yours; close its window and open a fresh Mivlet browser to resume agent reads.".into());
@@ -314,7 +389,12 @@ impl ControlPipe {
                 message["sessionId"] = session.into();
             }
             let deadline = Instant::now() + Duration::from_secs(5);
-            write(&self.input, message.to_string().as_bytes(), deadline, check)?;
+            let message = message.to_string();
+            if let Some(dispatch) = dispatch {
+                write_once(&self.input, message.as_bytes(), deadline, check, dispatch)?;
+            } else {
+                write(&self.input, message.as_bytes(), deadline, check)?;
+            }
             // Protocol events are private and bounded; only the exact reply is consumed.
             for _ in 0..64 {
                 let mut response: serde_json::Value =
@@ -350,8 +430,7 @@ impl ControlPipe {
     }
     /// Only a fixed native readiness probe; no public CDP method or JavaScript surface.
     pub(super) fn verify(&mut self, check: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
-        let response =
-            self.read_command(ReadCommand::Version, serde_json::json!({}), None, check)?;
+        let response = self.read_command(Command::Version, serde_json::json!({}), None, check)?;
         let product = response["product"].as_str().unwrap_or("");
         if response["protocolVersion"] != "1.3"
             || product.len() > 100

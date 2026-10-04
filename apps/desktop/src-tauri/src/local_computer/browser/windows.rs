@@ -26,6 +26,8 @@ use windows_sys::Win32::{
 
 #[path = "helper.rs"]
 mod helper;
+#[path = "navigation.rs"]
+mod navigation;
 #[path = "observations.rs"]
 mod observations;
 #[path = "pipes.rs"]
@@ -76,7 +78,12 @@ pub(super) fn acceptance() -> Result<(), String> {
     if profile.join("DevToolsActivePort").exists() {
         return Err("The browser exposed a TCP debugging endpoint.".into());
     }
-    observations::acceptance(&mut process, window.identity.hwnd, &|| ticket.check())?;
+    observations::acceptance(
+        &mut process,
+        window.identity.hwnd,
+        &|| ticket.check(),
+        &|start| ticket.with_current(start),
+    )?;
     let runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/cua-driver");
     let driver =
         super::super::cua::Driver::start(&runtime, (window.identity.pid, window.identity.hwnd))?;
@@ -376,9 +383,24 @@ pub(super) struct BrowserProcess {
     product: &'static str,
     tabs: Option<observations::TabSnapshot>,
     sessions: std::collections::HashMap<String, String>,
+    navigation: std::collections::HashMap<String, navigation::Choice>,
 }
 
 impl BrowserProcess {
+    pub(super) fn navigate(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        url: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        navigation::navigate(
+            self, hwnd, generation, reference, origin, url, check, dispatch,
+        )
+    }
     pub(super) fn tabs(
         &mut self,
         hwnd: u64,
@@ -561,6 +583,7 @@ impl BrowserProcess {
                 product: image.product,
                 tabs: None,
                 sessions: std::collections::HashMap::new(),
+                navigation: std::collections::HashMap::new(),
             })
         }
     }

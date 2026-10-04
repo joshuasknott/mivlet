@@ -17,6 +17,12 @@ fn native_browser_read_never_runs_without_the_exact_selected_window_lease() {
     });
     assert!(result.is_err());
     assert!(!called.get());
+    let result = control.act_native("workspace-one", "agent-one", 1, &ticket, |_, _, _| {
+        called.set(true);
+        Ok(String::new())
+    });
+    assert!(result.is_err());
+    assert!(!called.get());
 }
 impl super::super::browser::LaunchStop for BrowserStopFixture {
     fn stop(&self) {

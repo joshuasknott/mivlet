@@ -22,6 +22,9 @@ const STALE: &str =
     "Computer control changed. Start a fresh request and select the current window again.";
 const TTL: Duration = Duration::from_secs(30);
 
+pub(super) type NativeDispatch<'a> =
+    dyn Fn(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String> + 'a;
+
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum DeliveryMode {
@@ -577,6 +580,48 @@ impl NativeControl {
         ticket: &OperationTicket,
         read: impl FnOnce(&WindowBinding, &dyn Fn() -> Result<(), String>) -> Result<T, String>,
     ) -> Result<T, String> {
+        self.with_native(
+            workspace,
+            agent,
+            generation,
+            ticket,
+            |window, _, check, _| read(window, check),
+        )
+    }
+
+    pub(super) fn act_native(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        ticket: &OperationTicket,
+        action: impl FnOnce(
+            &WindowBinding,
+            &dyn Fn() -> Result<(), String>,
+            &NativeDispatch<'_>,
+        ) -> Result<String, String>,
+    ) -> Result<String, String> {
+        self.with_native(workspace, agent, generation, ticket, |window, mode, check, dispatch| {
+            if !mode.is_foreground() {
+                return Ok(foreground_required("Browser navigation requires an explicitly selected foreground window. No navigation was dispatched.").to_string());
+            }
+            action(window, check, dispatch)
+        })
+    }
+
+    fn with_native<T>(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        ticket: &OperationTicket,
+        operation: impl FnOnce(
+            &WindowBinding,
+            DeliveryMode,
+            &dyn Fn() -> Result<(), String>,
+            &NativeDispatch<'_>,
+        ) -> Result<T, String>,
+    ) -> Result<T, String> {
         let grant = self.grant(&Scope {
             workspace: workspace.into(),
             agent: agent.into(),
@@ -588,6 +633,14 @@ impl NativeControl {
             Self::check(&inner, &grant, ticket)?;
             grant.window.check_enabled()
         };
+        let dispatch = |start: &mut dyn FnMut() -> Result<(), String>| {
+            let inner = self.inner.lock().map_err(|_| STALE)?;
+            Self::check(&inner, &grant, ticket)?;
+            grant.window.check_enabled()?;
+            // Only start one bounded OVERLAPPED WriteFile here. Wait/cancel
+            // outside both locks; Stop must never wait on a stalled browser.
+            ticket.with_current(start)
+        };
         let result = (|| {
             check()?;
             windows::privacy_check(grant.window.identity.hwnd)?;
@@ -597,14 +650,14 @@ impl NativeControl {
                 // A DOM read cannot leave an older desktop action observation usable.
                 inner.observation = None;
             }
-            let value = read(&grant.window, &check)?;
+            let value = operation(&grant.window, grant.delivery_mode, &check, &dispatch)?;
             windows::privacy_check(grant.window.identity.hwnd)?;
             check()?;
             *grant.last_activity.lock().map_err(|_| STALE)? = Instant::now();
             Ok(value)
         })();
         if result.is_err() {
-            self.stop_if(&grant.request, "Browser observation stopped. Fresh permission is required; no browser input was sent.");
+            self.stop_if(&grant.request, "Browser control stopped. Fresh permission is required. Any dispatched navigation may have taken effect; never replay it automatically.");
         }
         result
     }

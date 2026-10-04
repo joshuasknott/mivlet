@@ -116,7 +116,7 @@ fn read_protocol_discards_private_events_and_checks_the_exact_session() {
     assert_eq!(
         control
             .read_command(
-                ReadCommand::Accessibility,
+                Command::Accessibility,
                 serde_json::json!({}),
                 Some("session-one"),
                 &|| Ok(())
@@ -131,17 +131,12 @@ fn cancelled_protocol_is_never_reused_and_does_not_close_browser_handles() {
     let output = Pair::new(true).unwrap();
     let mut control = ControlPipe::new(input.parent, output.parent);
     assert!(control
-        .read_command(ReadCommand::Targets, serde_json::json!({}), None, &|| Err(
+        .read_command(Command::Targets, serde_json::json!({}), None, &|| Err(
             "stopped".into()
         ))
         .is_err());
     let error = control
-        .read_command(
-            ReadCommand::Targets,
-            serde_json::json!({}),
-            None,
-            &|| Ok(()),
-        )
+        .read_command(Command::Targets, serde_json::json!({}), None, &|| Ok(()))
         .unwrap_err();
     assert!(error.contains("page remains yours"));
     let mut flags = 0;
@@ -149,4 +144,118 @@ fn cancelled_protocol_is_never_reused_and_does_not_close_browser_handles() {
         unsafe { GetHandleInformation(control.input.as_raw_handle(), &mut flags) },
         0
     );
+}
+#[test]
+fn navigation_cannot_use_the_unfenced_read_surface() {
+    let input = Pair::new(false).unwrap();
+    let output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    assert!(control
+        .read_command(
+            Command::Navigate,
+            serde_json::json!({"url":"https://example.com/"}),
+            Some("session"),
+            &|| Ok(())
+        )
+        .is_err());
+    let mut available = 0;
+    assert_ne!(
+        unsafe {
+            PeekNamedPipe(
+                input.child.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    assert_eq!(available, 0);
+}
+#[test]
+fn revocation_before_dispatch_sends_no_navigation_frame() {
+    let root = tempfile::tempdir().unwrap();
+    let authority = crate::local_computer::authority::ComputerAuthority::load(root.path()).unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    authority.revoke(1).unwrap();
+    let input = Pair::new(false).unwrap();
+    let output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    assert!(control
+        .navigate(
+            serde_json::json!({"url":"https://example.com/"}),
+            "session",
+            &|| Ok(()),
+            &|start| ticket.with_current(start)
+        )
+        .is_err());
+    let mut available = 0;
+    assert_ne!(
+        unsafe {
+            PeekNamedPipe(
+                input.child.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    assert_eq!(available, 0);
+}
+#[test]
+fn stop_can_revoke_while_navigation_waits_and_does_not_replay_the_frame() {
+    use std::io::Read;
+    let root = tempfile::tempdir().unwrap();
+    let authority = crate::local_computer::authority::ComputerAuthority::load(root.path()).unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    let stopping = authority.clone();
+    let mut input = Pair::new(false).unwrap();
+    let output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    let start = Instant::now();
+    let revoker = std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(50));
+        stopping.revoke(1).unwrap();
+    });
+    assert!(control
+        .navigate(
+            serde_json::json!({"url":"https://example.com/"}),
+            "session",
+            &|| ticket.check(),
+            &|start| ticket.with_current(start)
+        )
+        .is_err());
+    revoker.join().unwrap();
+    assert!(start.elapsed() < Duration::from_secs(2));
+    let mut bytes = [0u8; 4097];
+    let count = input.child.read(&mut bytes).unwrap();
+    assert_eq!(bytes[..count].iter().filter(|byte| **byte == 0).count(), 1);
+    assert!(control
+        .navigate(
+            serde_json::json!({"url":"https://example.com/"}),
+            "session",
+            &|| Ok(()),
+            &|start| start()
+        )
+        .is_err());
+    let mut available = 0;
+    assert_ne!(
+        unsafe {
+            PeekNamedPipe(
+                input.child.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    assert_eq!(available, 0);
 }

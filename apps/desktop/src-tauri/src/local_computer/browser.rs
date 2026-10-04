@@ -163,6 +163,42 @@ pub(crate) fn read(
     generation: u64,
     arguments: Option<(&str, &str)>,
 ) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Read(arguments),
+    )
+}
+pub(crate) fn navigate(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+    url: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Navigate(reference, origin, url),
+    )
+}
+enum Request<'a> {
+    Read(Option<(&'a str, &'a str)>),
+    Navigate(&'a str, &'a str, &'a str),
+}
+fn execute(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    arguments: Request<'_>,
+) -> Result<String, String> {
     computers.validate_target(workspace, agent)?;
     let ticket = computers
         .authority_for(workspace, agent)?
@@ -176,24 +212,58 @@ pub(crate) fn read(
     {
         let scope = computers.scope(workspace, agent)?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
-        let result = computers.native.read_native(workspace, agent, generation, &ticket, |window, lease_check| {
+        let run = |window: &super::windows::WindowBinding,
+                   lease_check: &dyn Fn() -> Result<(), String>,
+                   dispatch: Option<&super::control::NativeDispatch<'_>>| {
             let check = || {
                 lease_check()?;
                 computers.ensure_open()?;
                 crate::account_session::ensure_current()?;
-                if computers.browsers.closing.load(Ordering::Acquire) || std::time::Instant::now() >= deadline {
+                if computers.browsers.closing.load(Ordering::Acquire)
+                    || std::time::Instant::now() >= deadline
+                {
                     return Err("The browser read stopped or reached its time limit. No browser input was sent.".into());
                 }
                 Ok(())
             };
             check()?;
-            let mut processes = computers.browsers.processes.lock().map_err(|_| "The owned browser is unavailable.")?;
+            let mut processes = computers
+                .browsers
+                .processes
+                .lock()
+                .map_err(|_| "The owned browser is unavailable.")?;
             let process = processes.get_mut(&scope.key).filter(|process| process.alive()).ok_or("Select this agent's Mivlet-owned browser before reading its tabs. Ordinary browser profiles are not available through this tool.")?;
             match arguments {
-                Some((reference, origin)) => process.observe_tab(window.identity.hwnd, generation, reference, origin, &check),
-                None => process.tabs(window.identity.hwnd, generation, &check),
+                Request::Read(Some((reference, origin))) => {
+                    process.observe_tab(window.identity.hwnd, generation, reference, origin, &check)
+                }
+                Request::Read(None) => process.tabs(window.identity.hwnd, generation, &check),
+                Request::Navigate(reference, origin, url) => process.navigate(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    url,
+                    &check,
+                    dispatch.ok_or("Browser navigation requires a native dispatch fence.")?,
+                ),
             }
-        });
+        };
+        let result = if matches!(arguments, Request::Navigate(..)) {
+            computers.native.act_native(
+                workspace,
+                agent,
+                generation,
+                &ticket,
+                |window, check, dispatch| run(window, check, Some(dispatch)),
+            )
+        } else {
+            computers
+                .native
+                .read_native(workspace, agent, generation, &ticket, |window, check| {
+                    run(window, check, None)
+                })
+        };
         ticket.finish(result)
     }
 }

@@ -1,6 +1,6 @@
 //! Exact selected-window, origin-bounded browser reads. CDP identifiers and
 //! field values stay native. This module sends no page input or JavaScript.
-use super::{pipes::ReadCommand, BrowserProcess};
+use super::{pipes::Command, BrowserProcess};
 use serde_json::{json, Value};
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -57,7 +57,7 @@ fn id(value: &Value) -> Result<String, String> {
         .map(String::from)
         .ok_or_else(|| "The browser returned an unsupported native identity.".into())
 }
-fn url_origin(value: &str) -> Option<String> {
+pub(super) fn url_origin(value: &str) -> Option<String> {
     if value.len() > 8192 || value.chars().any(char::is_control) {
         return None;
     }
@@ -74,9 +74,9 @@ fn url_origin(value: &str) -> Option<String> {
 fn exact_origin(value: &str) -> Result<String, String> {
     url_origin(value).filter(|origin| origin == value).ok_or_else(|| "Browser observation requires an exact HTTP(S) origin without a path, credentials, query or fragment.".into())
 }
-fn call(
+pub(super) fn call(
     process: &mut BrowserProcess,
-    command: ReadCommand,
+    command: Command,
     args: Value,
     session: Option<&str>,
     check: &dyn Fn() -> Result<(), String>,
@@ -87,7 +87,7 @@ fn call(
         .ok_or("The browser's native connection is unavailable.")?
         .read_command(command, args, session, check)
 }
-fn targets(
+pub(super) fn targets(
     process: &mut BrowserProcess,
     hwnd: u64,
     check: &dyn Fn() -> Result<(), String>,
@@ -116,7 +116,7 @@ fn targets(
     }
     let value = call(
         process,
-        ReadCommand::Targets,
+        Command::Targets,
         json!({"filter":[{"type":"page","exclude":false},{"exclude":true}]}),
         None,
         check,
@@ -138,7 +138,7 @@ fn targets(
         }
         let bounds = call(
             process,
-            ReadCommand::Window,
+            Command::Window,
             json!({"targetId":target}),
             None,
             check,
@@ -166,24 +166,42 @@ pub(super) fn tabs(
     check: &dyn Fn() -> Result<(), String>,
 ) -> Result<String, String> {
     process.tabs = None;
+    process.navigation.clear();
     let (window, pages) = targets(process, hwnd, check)?;
     let mut choices = HashMap::new();
+    let mut navigation = HashMap::new();
     let mut tabs = Vec::new();
-    let mut live = HashSet::new();
+    let live: HashSet<_> = pages
+        .iter()
+        .map(|page| id(&page["targetId"]))
+        .collect::<Result<_, _>>()?;
+    process.sessions.retain(|target, _| live.contains(target));
     for page in pages {
         let target = id(&page["targetId"])?;
-        live.insert(target.clone());
         let reference = super::super::super::desktop_tools::opaque_id()?;
-        choices.insert(reference.clone(), target);
+        choices.insert(reference.clone(), target.clone());
         let title = bounded(&page["title"], 200);
         let title = if crate::secret_redaction::looks_secret(&title) {
             "Private title".into()
         } else {
             title
         };
-        tabs.push(json!({"tabRef":reference,"title":title,"origin":url_origin(page["url"].as_str().unwrap_or_default())}));
+        let raw_url = page["url"].as_str().unwrap_or_default();
+        let mut origin = url_origin(raw_url);
+        let mut navigation_ref = None;
+        if origin.is_some() || raw_url == "about:blank" {
+            let session = session(process, &target, check)?;
+            let value = call(process, Command::Frames, json!({}), Some(&session), check)?;
+            let choice = super::navigation::Choice::capture(
+                hwnd, generation, window, &target, &session, raw_url, &value,
+            )?;
+            let reference = super::super::super::desktop_tools::opaque_id()?;
+            origin = Some(choice.origin.clone());
+            navigation_ref = Some(reference.clone());
+            navigation.insert(reference, choice);
+        }
+        tabs.push(json!({"tabRef":reference,"navigationRef":navigation_ref,"title":title,"origin":origin}));
     }
-    process.sessions.retain(|target, _| live.contains(target));
     check()?;
     process.tabs = Some(TabSnapshot {
         hwnd,
@@ -192,16 +210,29 @@ pub(super) fn tabs(
         window,
         choices,
     });
+    process.navigation = navigation;
     Ok(json!({"tabs":tabs,"trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
 #[derive(PartialEq, Eq)]
-struct Frame {
-    id: String,
-    loader: String,
-    url: String,
+pub(super) struct Frame {
+    pub(super) id: String,
+    pub(super) loader: String,
+    pub(super) url: String,
 }
-fn frame(value: &Value, origin: &str) -> Result<Frame, String> {
+pub(super) fn document(value: &Value) -> Result<Frame, String> {
+    let root = &value["frameTree"]["frame"];
+    let url = root["url"]
+        .as_str()
+        .filter(|value| value.len() <= 8192 && !value.chars().any(char::is_control))
+        .ok_or("The browser page URL is missing or unsupported.")?;
+    Ok(Frame {
+        id: id(&root["id"])?,
+        loader: id(&root["loaderId"])?,
+        url: url.into(),
+    })
+}
+pub(super) fn frame(value: &Value, origin: &str) -> Result<Frame, String> {
     let root = &value["frameTree"]["frame"];
     let raw = root["url"]
         .as_str()
@@ -210,11 +241,27 @@ fn frame(value: &Value, origin: &str) -> Result<Frame, String> {
     {
         return Err("The live browser page is outside the exact approved origin. No page content was delivered.".into());
     }
-    Ok(Frame {
-        id: id(&root["id"])?,
-        loader: id(&root["loaderId"])?,
-        url: raw.into(),
-    })
+    document(value)
+}
+
+pub(super) fn session(
+    process: &mut BrowserProcess,
+    target: &str,
+    check: &dyn Fn() -> Result<(), String>,
+) -> Result<String, String> {
+    if let Some(session) = process.sessions.get(target) {
+        return Ok(session.clone());
+    }
+    let result = call(
+        process,
+        Command::Attach,
+        json!({"targetId":target,"flatten":true}),
+        None,
+        check,
+    )?;
+    let session = id(&result["sessionId"])?;
+    process.sessions.insert(target.into(), session.clone());
+    Ok(session)
 }
 fn editable(node: &Value) -> bool {
     matches!(
@@ -439,33 +486,14 @@ pub(super) fn observe(
                 .into(),
         );
     }
-    let session = if let Some(session) = process.sessions.get(&target) {
-        session.clone()
-    } else {
-        let result = call(
-            process,
-            ReadCommand::Attach,
-            json!({"targetId":target,"flatten":true}),
-            None,
-            check,
-        )?;
-        let session = id(&result["sessionId"])?;
-        process.sessions.insert(target, session.clone());
-        session
-    };
+    let session = session(process, &target, check)?;
     let before = frame(
-        &call(
-            process,
-            ReadCommand::Frames,
-            json!({}),
-            Some(&session),
-            check,
-        )?,
+        &call(process, Command::Frames, json!({}), Some(&session), check)?,
         &origin,
     )?;
     let tree = call(
         process,
-        ReadCommand::Accessibility,
+        Command::Accessibility,
         json!({"frameId":before.id,"depth":8}),
         Some(&session),
         check,
@@ -485,7 +513,7 @@ pub(super) fn observe(
             .ok_or("The browser field could not be checked for privacy.")?;
         let metadata = call(
             process,
-            ReadCommand::DescribeNode,
+            Command::DescribeNode,
             json!({"backendNodeId":backend,"depth":0,"pierce":false}),
             Some(&session),
             check,
@@ -496,13 +524,7 @@ pub(super) fn observe(
     }
     let content = projection(nodes, &before.id)?;
     let after = frame(
-        &call(
-            process,
-            ReadCommand::Frames,
-            json!({}),
-            Some(&session),
-            check,
-        )?,
+        &call(process, Command::Frames, json!({}), Some(&session), check)?,
         &origin,
     )?;
     if before != after {
@@ -517,6 +539,7 @@ pub(super) fn acceptance(
     process: &mut BrowserProcess,
     hwnd: u64,
     check: &dyn Fn() -> Result<(), String>,
+    dispatch: &super::super::super::control::NativeDispatch<'_>,
 ) -> Result<(), String> {
     use std::{
         io::{Read, Write},
@@ -596,35 +619,42 @@ pub(super) fn acceptance(
     if pages.len() != 1 {
         return Err("Browser QA requires its sole disposable tab.".into());
     }
-    let target = id(&pages[0]["targetId"])?;
-    let result = call(
-        process,
-        ReadCommand::Attach,
-        json!({"targetId":target,"flatten":true}),
-        None,
-        check,
-    )?;
-    let session = id(&result["sessionId"])?;
-    process.sessions.insert(target, session.clone());
     for private in [false, true] {
         let url = format!("{origin}/{}", if private { "private" } else { "report" });
-        let result = call(
-            process,
-            ReadCommand::FixtureNavigate,
-            json!({"url":url}),
-            Some(&session),
-            check,
-        )?;
-        if result["errorText"]
+        let listed: Value = serde_json::from_str(&tabs(process, hwnd, 1, check)?)
+            .map_err(|_| "Browser QA tab list invalid.")?;
+        let navigation_ref = listed["tabs"][0]["navigationRef"]
             .as_str()
-            .is_some_and(|error| !error.is_empty())
-            || result["isDownload"].as_bool() == Some(true)
+            .ok_or("Browser QA navigation choice missing.")?;
+        let source_origin = listed["tabs"][0]["origin"]
+            .as_str()
+            .ok_or("Browser QA source origin missing.")?;
+        let result = super::navigation::navigate(
+            process,
+            hwnd,
+            1,
+            navigation_ref,
+            source_origin,
+            &url,
+            check,
+            dispatch,
+        )?;
+        if !result.contains("navigation-dispatched") {
+            return Err("Browser QA navigation was not dispatched.".into());
+        }
+        if super::navigation::navigate(
+            process,
+            hwnd,
+            1,
+            navigation_ref,
+            source_origin,
+            &url,
+            check,
+            dispatch,
+        )
+        .is_ok()
         {
-            eprintln!(
-                "Browser QA navigation error: {}",
-                bounded(&result["errorText"], 120)
-            );
-            return Err("Browser QA navigation was not confirmed.".into());
+            return Err("Browser QA replayed navigation.".into());
         }
         std::thread::sleep(Duration::from_millis(350));
         let listed: Value = serde_json::from_str(&tabs(process, hwnd, 1, check)?)
@@ -667,7 +697,7 @@ pub(super) fn acceptance(
             }
         }
     }
-    eprintln!("Owned browser DOM fixture: public text read; field values, editable descendants and subframes omitted; outside origin, consumed ref and password field refused.");
+    eprintln!("Owned browser DOM fixture: document-bound navigation dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed ref and password field refused.");
     Ok(())
 }
 

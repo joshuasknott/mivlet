@@ -193,6 +193,12 @@ const TOOLS: Record<string, BackendTool> = {
     defaultMode: "read-only", defaultRisk: "medium",
     parameters: JSON.stringify({ type: "object", properties: { tabRef: { type: "string" }, origin: { type: "string" } }, required: ["tabRef", "origin"], additionalProperties: false })
   },
+  "local-browser-navigate": {
+    name: "local-browser-navigate",
+    description: "Navigate the selected foreground owned-browser tab using a single-use 30s navigationRef and exact source origin from local-browser-tabs. Destination must be HTTP(S). May issue network requests or start a browser-managed download; no file becomes a Mivlet artifact. Dispatch does not prove page load: list/observe again. Never replay an uncertain outcome.",
+    defaultMode: "full-access", defaultRisk: "high",
+    parameters: JSON.stringify({ type: "object", properties: { navigationRef: { type: "string" }, origin: { type: "string" }, url: { type: "string" } }, required: ["navigationRef", "origin", "url"], additionalProperties: false })
+  },
   "local-app-select": {
     name: "local-app-select",
     description: "Select one windowId from the latest local-app-list result. deliveryMode defaults to background and does not raise the window. Explicit foreground selection brings it forward and is required for screenshots, pixel input and keyboard/caret editing. Both modes follow Mivlet's global approvals; Full Access has no separate app grant. Only one agent may control this Windows session at a time. Observe after selection. Stop, user interference or uncertain input requires a fresh user request; never silently resume or replay it.",
