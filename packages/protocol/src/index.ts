@@ -388,6 +388,7 @@ export type ConnectorActionKind =
   | "linear.update-issue"
   | "linear.comment"
   | "google-drive.create-file"
+  | "google-drive.upload-artifact"
   | "google-drive.update-file"
   | "google-drive.move-file"
   | "google-drive.rename-file"

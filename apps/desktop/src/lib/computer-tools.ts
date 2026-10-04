@@ -1,6 +1,17 @@
 import type { NativeToolSpec, BackendModel, BackendProvider, BuiltinPlugins, LocalComputerSnapshot } from "@mivlet/protocol";
 import { registeredToolSpecs } from "@mivlet/connectors/native-api/tools";
 import { computerVisionUnavailableReason, supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
+import type { DesktopToolExecutorOptions } from "./desktop-tool-options";
+
+/** The same captured authority fence for file tools and native artifact egress. */
+export function computerAuthorityCurrent(
+  admitted: Partial<NonNullable<DesktopToolExecutorOptions["localComputer"]>> | undefined,
+  current: DesktopToolExecutorOptions["localComputer"],
+): boolean {
+  return Boolean(admitted?.ready && admitted.controller === "agent" && Number.isSafeInteger(admitted.generation)
+    && current?.ready && current.controller === "agent"
+    && (["workspaceId", "agentId", "generation"] as const).every(key => current[key] === admitted[key]));
+}
 
 const COMPUTER_TOOLS = new Set([
   "repository-status", "repository-read", "repository-write", "repository-run", "repository-commit", "repository-publish", "repository-recover",

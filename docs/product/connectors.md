@@ -164,6 +164,21 @@ rechecked after approval and on result delivery. Native reads use the connected
 account's consent without an extra approval; external writes require a fresh,
 exact approval with a preview in the conversation. Connector status refreshes
 after turns and when the window regains focus.
+The shared `connector-action` can upload an already published passive deliverable
+to native Google Drive using `google-drive.upload-artifact`, an `artifactId` and
+an exact `destinationFolderId` (`root` means My Drive). Mivlet reads the immutable
+receipt-verified PDF, Office, raster or data file in Rust; the model does not send
+base64 bytes or host paths. This uses the same connected `drive.file` account and
+approval panel, showing the filename, type, size, destination and SHA-256.
+Preparation and execution bind the saved agent, computer generation, account and
+connection selection revision. Stop, takeover, account/access changes or a
+changed artifact cancel/refuse the upload; an uncertain outcome must be checked
+in Drive before another approval. Uploads use the [official one-request multipart format](https://developers.google.com/workspace/drive/api/guides/manage-uploads#multipart)
+at a fixed Google origin, with no redirects or mutation retries. This bounded
+path supports files up to 5 MiB, creates a new file and preserves its exact MIME
+type; conversion, replacing a Drive file and resumable larger uploads are not
+implemented. Local byte, approval and cancellation tests do not establish live
+Google account acceptance.
 Connector mentions display an inline logo and name while retaining stable IDs
 in stored messages. Codex and embedded OpenCode turns disable host shell tools
 and provider memories; unadvertised tool requests are declined without opening
