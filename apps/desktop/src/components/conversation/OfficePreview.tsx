@@ -23,9 +23,7 @@ export function OfficePreview({
   const spreadsheet = office.kind === "spreadsheet";
   return (
     <div className={`office-preview office-preview--${office.kind}`}>
-      <p className="office-preview__notice">
-        {notice}
-      </p>
+      <p className="office-preview__notice">{notice}</p>
       {office.sections.length > 1 && (
         <div
           className="office-preview__sections"
@@ -55,6 +53,8 @@ export function OfficePreview({
             ) : (
               <p key={index}>{block.text || "\u00a0"}</p>
             )
+          ) : block.type === "chart" ? (
+            <PreviewChart key={index} chart={block} />
           ) : (
             <PreviewTable
               key={index}
@@ -72,6 +72,133 @@ export function OfficePreview({
         </p>
       )}
     </div>
+  );
+}
+
+type Chart = Extract<
+  LocalComputerOfficePreview["sections"][number]["blocks"][number],
+  { type: "chart" }
+>;
+const chartColors = ["#2563eb", "#b45309", "#047857"];
+
+function PreviewChart({ chart }: { chart: Chart }) {
+  const { categories, series } = chart;
+  if (
+    categories.length < 2 ||
+    categories.length > 24 ||
+    !series.length ||
+    series.length > 3 ||
+    series.some(
+      (item) =>
+        item.values.length !== categories.length ||
+        item.values.some(
+          (value) => !Number.isFinite(value) || Math.abs(value) > 1e12,
+        ),
+    )
+  )
+    return <p>Open the file to view this chart.</p>;
+  const values = series.flatMap((item) => [...item.values]);
+  const min = Math.min(0, ...values),
+    max = Math.max(0, ...values);
+  const span = max - min || 1;
+  const y = (value: number) => 20 + ((max - value) / span) * 190;
+  const step = 500 / categories.length;
+  const x = (index: number) => 70 + (index + 0.5) * step;
+  const zero = y(0);
+  return (
+    <figure className="office-preview__chart">
+      <figcaption>{chart.title}</figcaption>
+      <div
+        className="office-preview__plot"
+        tabIndex={0}
+        role="region"
+        aria-label={`${chart.title} plot`}
+      >
+        <svg
+          viewBox="0 0 600 245"
+          role="img"
+          aria-label={`${chart.title}, ${chart.kind} chart`}
+        >
+          <text x="4" y="20">
+            {max.toLocaleString(undefined, { notation: "compact" })}
+          </text>
+          <text x="4" y="210">
+            {min.toLocaleString(undefined, { notation: "compact" })}
+          </text>
+          <line x1="70" x2="570" y1={zero} y2={zero} stroke="currentColor" />
+          {series.map((item, index) =>
+            chart.kind === "line" ? (
+              <g key={index} fill={chartColors[index]}>
+                <polyline
+                  fill="none"
+                  stroke={chartColors[index]}
+                  strokeWidth="2.5"
+                  points={item.values
+                    .map((value, point) => `${x(point)},${y(value)}`)
+                    .join(" ")}
+                />
+                {item.values.map((value, point) => (
+                  <circle key={point} cx={x(point)} cy={y(value)} r="3">
+                    <title>{`${categories[point]} · ${item.name}: ${value}`}</title>
+                  </circle>
+                ))}
+              </g>
+            ) : (
+              <g key={index} fill={chartColors[index]}>
+                {item.values.map((value, point) => (
+                  <rect
+                    key={point}
+                    x={
+                      70 +
+                      point * step +
+                      step * 0.1 +
+                      (index * step * 0.8) / series.length
+                    }
+                    y={Math.min(zero, y(value))}
+                    width={(step * 0.8) / series.length}
+                    height={Math.abs(y(value) - zero)}
+                  >
+                    <title>{`${categories[point]} · ${item.name}: ${value}`}</title>
+                  </rect>
+                ))}
+              </g>
+            ),
+          )}
+          {categories.map((_, index) => (
+            <text key={index} x={x(index)} y="235" textAnchor="middle">
+              {index + 1}
+            </text>
+          ))}
+        </svg>
+      </div>
+      <p className="office-preview__legend">
+        {series.map((item, index) => (
+          <span key={index}>
+            <i style={{ background: chartColors[index] }} aria-hidden="true" />
+            {item.name}
+          </span>
+        ))}
+      </p>
+      <p className="office-preview__notice">
+        Cached worksheet values · Category numbers match the data below. Open
+        the file to edit and recalculate.
+      </p>
+      <details>
+        <summary>Chart data</summary>
+        <PreviewTable
+          spreadsheet={false}
+          name={`${chart.title} data`}
+          rows={[
+            ["#", "Category", ...series.map((item) => item.name)],
+            ...categories.map((label, index) => [
+              String(index + 1),
+              label,
+              ...series.map((item) => String(item.values[index])),
+            ]),
+          ]}
+        />
+      </details>
+    </figure>
   );
 }
 

@@ -63,4 +63,45 @@ describe("bounded Office tool contracts", () => {
       confirmationPhrase: "approve create-document",
     });
   });
+
+  it("binds chart data and source ranges into the same exact document approval", () => {
+    const schema = JSON.parse(lookupTool("create-spreadsheet")!.parameters);
+    const charts = schema.properties.sheets.items.properties.charts;
+    expect(charts.maxItems).toBe(2);
+    expect(charts.items.properties.type.enum).toEqual(["column", "line"]);
+    expect(charts.items.properties.series.maxItems).toBe(3);
+    expect(charts.items.additionalProperties).toBe(false);
+    const args = {
+      path: "report.xlsx",
+      sheets: [
+        {
+          name: "Data",
+          rows: [
+            ["Jan", 12],
+            ["Feb", -8],
+          ],
+          charts: [
+            {
+              title: "Net",
+              type: "column",
+              categories: "A1:A2",
+              series: [{ name: "Net", values: "B1:B2" }],
+            },
+          ],
+        },
+      ],
+    };
+    const approval = buildToolApproval(
+      "luna",
+      "create-spreadsheet",
+      JSON.stringify(args),
+    );
+    expect(JSON.stringify(approval.dataUsed)).toContain("B1:B2");
+    const changed = structuredClone(args);
+    changed.sheets[0]!.charts[0]!.series[0]!.values = "C1:C2";
+    expect(
+      buildToolApproval("luna", "create-spreadsheet", JSON.stringify(changed))
+        .dataUsed,
+    ).not.toEqual(approval.dataUsed);
+  });
 });

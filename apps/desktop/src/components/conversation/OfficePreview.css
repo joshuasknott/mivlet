@@ -13,3 +13,11 @@
 .office-preview__table th { color: var(--ink-muted); background: var(--surface-raised); font-weight: 500; }
 .office-preview--spreadsheet .office-preview__page { padding: 12px; }
 .office-preview--presentation .office-preview__page { min-height: 230px; }
+.office-preview__chart { margin: 24px 0; }
+.office-preview__chart figcaption { font-weight: 500; }
+.office-preview__plot { overflow: auto; max-width: 100%; }
+.office-preview__chart svg { width: 100%; min-width: 600px; height: auto; color: var(--ink-muted); font-size: 12px; }
+.office-preview__legend { display: flex; flex-wrap: wrap; gap: 12px; font-size: 12px; }
+.office-preview__legend span { display: inline-flex; align-items: center; gap: 6px; }
+.office-preview__legend i { width: 10px; height: 10px; border-radius: 2px; }
+.office-preview__chart summary { min-height: 44px; cursor: pointer; padding: 10px 0; }

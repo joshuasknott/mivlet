@@ -325,6 +325,12 @@ title plus bounded headings, paragraphs, bullets and tables. `create-spreadsheet
 accepts at most eight sheets and 100,000 cells; formula cells are limited to
 same-sheet `SUM`, `AVERAGE`, `MIN`, `MAX` and `COUNT` over earlier A1 ranges of at
 most 10,000 cells. Rust calculates the cached formula result.
+Sheets can also contain editable clustered column or line charts: at most two
+per sheet and eight per file, one to three numeric series and 2–24 categories.
+Each category/series is a vertical same-sheet A1 range; missing, nonnumeric or
+unequal-length data fails before placement. Fixed DrawingML parts contain real
+worksheet references plus verified caches, so Office can edit the source cells
+and recalculate the chart. This follows the [Open XML drawing/chart relationship structure](https://learn.microsoft.com/en-us/office/open-xml/spreadsheet/how-to-insert-a-chart-into-a-spreadsheet).
 `create-presentation` produces editable 16:9 PPTX with light/dark themes, up to
 30 slides, short titles, optional paragraphs and real bullets. Dense slides are
 rejected so authors split content instead of losing it. All three tools write a
@@ -336,6 +342,14 @@ The conversation viewer extracts bounded Office content from the exact
 receipt-verified published bytes: document paragraphs/tables, sheet grids with
 cached formula values and preserved cell positions, and ordered slide text.
 It accepts no HTML or external assets and does not claim Office layout fidelity.
+Supported column/line charts are projected from the worksheet cells, never from
+potentially stale chart caches. The chart/data view labels those values as cached;
+it does not recalculate formulas. Unsupported chart types, axes, nonlocal ranges
+or hidden rows/columns are omitted with the truncation notice. Narrow chart
+regions scroll without shrinking their labels; exact values remain available in
+keyboard-accessible data tables. Native generation and independent XLSX
+open/edit/resave fixtures establish this bounded contract, not Excel rendering
+or live provider acceptance.
 Previews stop at 128 KB of text, 100 rows, 26 columns, eight sheets or 30 slides;
 unsupported/oversized parts fall back to external opening. Save uses a native
 file dialog rather than a model/renderer-selected host path, re-verifies the
