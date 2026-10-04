@@ -83,7 +83,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 35] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 37] = [
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -106,6 +106,8 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 35] = [
     "local-app-observe",
     "local-app-list",
     "local-browser-open",
+    "local-browser-tabs",
+    "local-browser-observe",
     "local-app-select",
     "local-app-action",
     "local-desktop-observe",
@@ -299,6 +301,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "web-fetch" => Some(("read-only", "medium")),
         "local-app-list" => Some(("read-only", "low")),
         "local-browser-open" => Some(("full-access", "high")),
+        "local-browser-tabs" | "local-browser-observe" => Some(("read-only", "medium")),
         "local-app-select" => Some(("read-only", "medium")),
         "local-app-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
         "local-app-action" | "local-desktop-action" => Some(("full-access", "critical")),
@@ -386,6 +389,8 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-app-observe"
             | "local-app-list"
             | "local-browser-open"
+            | "local-browser-tabs"
+            | "local-browser-observe"
             | "local-app-select"
             | "local-app-action"
             | "local-desktop-observe"
@@ -1470,6 +1475,57 @@ pub async fn execute_tool_call(
             None,
         );
         return result.map(|output| ToolResult { ok: true, output });
+    }
+    if matches!(
+        tool.as_str(),
+        "local-browser-tabs" | "local-browser-observe"
+    ) {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Observation {
+            tab_ref: String,
+            origin: String,
+        }
+        let observation = if tool == "local-browser-observe" {
+            let value: Observation = serde_json::from_value(arguments).map_err(|_| {
+                "Use an exact tabRef and HTTP(S) origin from the current browser tab list."
+            })?;
+            if value.tab_ref.len() != 48
+                || !value.tab_ref.bytes().all(|byte| byte.is_ascii_hexdigit())
+                || value.origin.len() > 2048
+            {
+                return Err("Invalid browser tab reference or origin.".into());
+            }
+            Some(value)
+        } else {
+            if arguments != serde_json::json!({}) {
+                return Err("Browser tab discovery takes no arguments.".into());
+            }
+            None
+        };
+        let workspace = request
+            .workspace_id
+            .clone()
+            .ok_or("Browser reads require a workspace.")?;
+        let agent = request
+            .agent_id
+            .clone()
+            .ok_or("Browser reads require an agent.")?;
+        let computers = local_computers.inner().clone();
+        let output = tauri::async_runtime::spawn_blocking(move || {
+            crate::local_computer::browser::read(
+                &computers,
+                &workspace,
+                &agent,
+                computer_generation,
+                observation
+                    .as_ref()
+                    .map(|value| (value.tab_ref.as_str(), value.origin.as_str())),
+            )
+        })
+        .await
+        .map_err(|_| "The browser observation stopped unexpectedly.")??;
+        return Ok(ToolResult { ok: true, output });
     }
     if tool == "local-browser-open" {
         if arguments != serde_json::json!({"deliveryMode":"foreground"}) {

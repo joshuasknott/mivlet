@@ -567,6 +567,48 @@ impl NativeControl {
         result
     }
 
+    /// Native browser reads share the selected-window lease and its driver serial fence.
+    /// The callback receives only the exact selected identity, never a new input grant.
+    pub(super) fn read_native<T>(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        ticket: &OperationTicket,
+        read: impl FnOnce(&WindowBinding, &dyn Fn() -> Result<(), String>) -> Result<T, String>,
+    ) -> Result<T, String> {
+        let grant = self.grant(&Scope {
+            workspace: workspace.into(),
+            agent: agent.into(),
+            generation,
+        })?;
+        let _serial = grant.driver.serial()?;
+        let check = || {
+            let inner = self.inner.lock().map_err(|_| STALE)?;
+            Self::check(&inner, &grant, ticket)?;
+            grant.window.check_enabled()
+        };
+        let result = (|| {
+            check()?;
+            windows::privacy_check(grant.window.identity.hwnd)?;
+            {
+                let mut inner = self.inner.lock().map_err(|_| STALE)?;
+                Self::check(&inner, &grant, ticket)?;
+                // A DOM read cannot leave an older desktop action observation usable.
+                inner.observation = None;
+            }
+            let value = read(&grant.window, &check)?;
+            windows::privacy_check(grant.window.identity.hwnd)?;
+            check()?;
+            *grant.last_activity.lock().map_err(|_| STALE)? = Instant::now();
+            Ok(value)
+        })();
+        if result.is_err() {
+            self.stop_if(&grant.request, "Browser observation stopped. Fresh permission is required; no browser input was sent.");
+        }
+        result
+    }
+
     pub(super) fn retain(
         &self,
         request: &str,

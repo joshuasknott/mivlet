@@ -224,8 +224,13 @@ was created. Starting and stopping the pinned Cua driver left that browser
 alive; releasing its account-owned process job closed it. The subsequent sealed
 pipe acceptance used the actual native desktop executable, verified the fixed
 browser protocol before and after driver Stop, and confirmed owner cleanup.
-The test made no
-website requests, entered no credentials, and did not exercise a provider turn.
+The subsequent native DOM acceptance served frozen report/form/password fixtures
+only on a disposable `127.0.0.1` listener. It read report text, omitted input and
+textarea values, editable text and subframes, and refused an outside origin,
+consumed tab reference and password field. It entered no credentials, made no
+external website requests, and did not exercise a provider turn or full native
+selected-window lease. Shared lease fences and provider tool availability have
+separate regression coverage; real account/provider acceptance remains pending.
 
 Repeat this check only in a Windows interactive session:
 

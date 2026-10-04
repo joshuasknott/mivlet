@@ -313,6 +313,7 @@ export function ExecutionWorker({
           session.work.capturedContext ? `Captured request context (${session.work.capturedContext.capturedAt}):\n${session.work.capturedContext.text}` : "",
           CONVERSATION_STYLE_INSTRUCTIONS,
           tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
+          tools.some(tool => tool.name === "local-browser-observe") ? "Select this agent's sole browser window, list local-browser-tabs, then local-browser-observe with its single-use 60s tabRef and exact origin. Output omits subframes, field values and editable contents. No DOM input, JavaScript or file transfers. Errors stop control; await a fresh request. Windows actions need separate fresh observations and approvals." : "",
           builtinPluginInstructions(
             session.work.prompt,
             staged.node?.plugins,

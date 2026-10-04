@@ -40,6 +40,8 @@ const toolLabels: Record<string, [string, string]> = {
   "create-document": ["Creating a document", "Created a document"],
   "web-fetch": ["Reading an exact web page", "Read an exact web page"],
   "local-app-list": ["Listing open applications", "Listed open applications"],
+  "local-browser-tabs": ["Checking browser tabs", "Checked browser tabs"],
+  "local-browser-observe": ["Reading the browser page", "Read the browser page"],
   "local-app-select": ["Selecting an application window", "Selected an application window"],
   "local-app-observe": ["Checking the application", "Observed the application"],
   "local-app-action": ["Sending application input", "Input sent; awaiting observation"],
