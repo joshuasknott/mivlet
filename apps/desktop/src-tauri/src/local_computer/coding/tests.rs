@@ -206,6 +206,7 @@ fn recovery_and_repository_lock_are_visible() {
 }
 
 #[test]
+#[cfg(windows)]
 #[ignore = "Requires Windows native execution setup and bundled runtime; run explicitly for native acceptance"]
 fn native_coding_acceptance() {
     let (_temp, directory, authority, repo) = fixture();
@@ -264,13 +265,22 @@ fn native_coding_acceptance() {
         .join("timeout.txt")
         .exists());
     let authority2 = authority.clone();
+    let mut sentinel = process::NativeSentinel::new();
+    call(
+        &directory,
+        &ticket,
+        "repository-write",
+        json!({"repositoryId": repo.id, "path": "stop.js", "content": process::NATIVE_STOP_SCRIPT}),
+    );
+    let binding = ticket.execution_binding();
     let stopper = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(3));
-        authority2.revoke(1).unwrap();
+        process::stop_after_native_ready(&binding, || {
+            authority2.revoke(1).unwrap();
+        });
     });
-    assert!(execute_in(&directory, &ticket, "repository-run", json!({"repositoryId": repo.id, "command": "node -e \"setTimeout(()=>require('fs').writeFileSync('late.txt','escape'),5000)\"", "network": false, "timeoutSeconds": 30})).is_err());
+    assert!(execute_in(&directory, &ticket, "repository-run", json!({"repositoryId": repo.id, "command": "node stop.js", "network": false, "timeoutSeconds": 30})).is_err());
     stopper.join().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(4));
+    sentinel.assert_alive();
     assert!(!checkout(&directory, &repo)
         .unwrap()
         .join("late.txt")
@@ -278,4 +288,132 @@ fn native_coding_acceptance() {
     let recovered = load(&directory).unwrap().unwrap();
     assert!(recovered.last_result.unwrap().interrupted);
     println!("Native coding acceptance: real failing Node test, scoped edit, passing test, actual Git diff, cancellation killed descendant; no external publication.");
+}
+
+#[test]
+#[cfg(windows)]
+#[ignore = "Requires native setup/runtime; revokes exactly between suspended creation and resume"]
+fn native_cancelled_launch_acceptance() {
+    use std::cell::Cell;
+    let (_temp, directory, authority, repo) = fixture();
+    let ticket = authority.begin_agent(1).unwrap();
+    let binding = ticket.execution_binding();
+    let reached = Cell::new(false);
+    let resumed = Cell::new(false);
+    let mut sentinel = process::NativeSentinel::new();
+    let result = mivlet_windows_executor::run(
+        &process::execution_resources().unwrap(),
+        &checkout(&directory, &repo).unwrap(),
+        "node -e \"require('fs').writeFileSync('launch-ran.txt','stale execution')\"",
+        false,
+        20,
+        mivlet_windows_executor::Limits::CODING,
+        binding.clone(),
+        || ticket.check().is_ok(),
+        |launch| {
+            reached.set(true);
+            // The actual process is already suspended, job-bound and verified.
+            let work = process::native_work(&binding).unwrap();
+            authority.revoke(1).unwrap();
+            let result = ticket.with_current(|| {
+                resumed.set(true);
+                launch()
+            });
+            assert!(result.is_err());
+            std::thread::sleep(std::time::Duration::from_millis(200));
+            assert!(!work.join("launch-ran.txt").exists());
+            result
+        },
+    );
+    assert!(
+        reached.get(),
+        "Fixture never reached suspended native launch"
+    );
+    assert!(
+        !resumed.get(),
+        "The revoked dispatch fence resumed a stale command"
+    );
+    assert!(result.is_err());
+    sentinel.assert_alive();
+}
+
+#[test]
+#[cfg(windows)]
+#[ignore = "Requires native setup/runtime; exercises coding status/recover across import rename gaps"]
+fn native_repository_import_recovery_acceptance() {
+    for boundary in [1u8, 2] {
+        let (temp, directory, authority, mut repo) = fixture();
+        let ticket = authority.begin_agent(1).unwrap();
+        let root = checkout(&directory, &repo).unwrap();
+        repo.operation = "command running; import outcome unknown after host restart".into();
+        save(&directory, &repo).unwrap();
+        let (_, completed) = process::native_run(
+            &root,
+            "echo actual command output > imported.txt",
+            false,
+            20,
+            false,
+            &ticket,
+        )
+        .unwrap();
+        let prepared = completed
+            .prepare_repository_import(&root, || ticket.check().is_ok())
+            .unwrap();
+        if boundary == 1 {
+            let journal: Value = serde_json::from_slice(
+                &fs::read(directory.join(&repo.id).join("native-import.json")).unwrap(),
+            )
+            .unwrap();
+            let previous = directory
+                .join(&repo.id)
+                .join(journal["transaction"].as_str().unwrap())
+                .join("previous");
+            fs::rename(&root, previous).unwrap();
+            drop(prepared);
+        } else {
+            drop(ticket.with_current(|| prepared.commit()).unwrap());
+        }
+        // Core crash supervisors actually terminate at both boundaries. Here
+        // recreate native authority to prove the desktop recovery route remains
+        // reachable with the missing checkout and a new generation.
+        drop(completed);
+        drop(ticket);
+        drop(authority);
+        let restarted = ComputerAuthority::load(&temp.path().join("authority")).unwrap();
+        let generation = restarted.snapshot().unwrap().generation;
+        let ticket = restarted.begin_agent(generation).unwrap();
+        let inspected = status(&directory, &ticket).unwrap();
+        assert_eq!(inspected["recoveryRequired"], true);
+        assert!(!inspected["changes"].is_null());
+        assert!(checkout(&directory, &repo).unwrap().exists());
+        assert_eq!(root.join("imported.txt").exists(), boundary == 2);
+        assert!(execute_in(
+            &directory,
+            &ticket,
+            "repository-write",
+            json!({"repositoryId":repo.id,"path":"blocked.txt","content":"must wait"})
+        )
+        .is_err());
+        let recovered = call(
+            &directory,
+            &ticket,
+            "repository-recover",
+            json!({"repositoryId":repo.id}),
+        );
+        assert!(recovered["message"]
+            .as_str()
+            .unwrap()
+            .contains("No command was replayed"));
+        assert!(!directory.join(&repo.id).join("native-import.json").exists());
+        assert_eq!(root.join("imported.txt").exists(), boundary == 2);
+        assert!(
+            load(&directory)
+                .unwrap()
+                .unwrap()
+                .last_result
+                .unwrap()
+                .interrupted
+        );
+        assert!(!temp.path().join("source/imported.txt").exists());
+    }
 }

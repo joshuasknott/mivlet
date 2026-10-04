@@ -25,6 +25,7 @@ fn execute(root: &Path, command: &str, seconds: u64) -> CompletedRun {
             operation_id: 1,
         },
         || true,
+        |launch| launch(),
     )
     .unwrap()
 }
@@ -197,6 +198,7 @@ fn native_execution_acceptance() {
                 .filter_map(Result::ok)
                 .any(|e| e.path().join("work/stop-ready.txt").exists())
         },
+        |launch| launch(),
     )
     .unwrap();
     assert!(stopped.receipt.interrupted);
@@ -309,6 +311,7 @@ fn native_network_build_acceptance() {
             operation_id: 3,
         },
         || true,
+        |launch| launch(),
     )
     .unwrap();
     println!("native build/network receipt: {:?}", result.receipt);
@@ -319,4 +322,56 @@ fn native_network_build_acceptance() {
         .contains("actual npm build/test passed"));
     assert!(result.receipt.output.contains("approved public HTTPS 200"));
     assert!(!source.path().join("bundle.js").exists());
+}
+
+#[test]
+#[ignore = "Requires native runtime/setup; cancels during the live storage walk"]
+fn native_storage_scan_stop_acceptance() {
+    use std::cell::Cell;
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("scan.js"), r#"const fs=require('fs'),cp=require('child_process'),path=require('path');cp.spawn(process.execPath,['-e',"setTimeout(()=>require('fs').writeFileSync('escaped.txt','escape'),4000)"],{detached:true,stdio:'ignore'}).unref();fs.writeFileSync('scan-ready.txt','actual execution');for(let n=0;n<8192;n++)fs.writeFileSync(path.join(process.env.USERPROFILE,'scan-'+n),'x');setTimeout(()=>{},60000);"#).unwrap();
+    let installation = setup::ready().unwrap();
+    let polls = Cell::new(0usize);
+    let stopped = run(
+        &resources(),
+        source.path(),
+        "node scan.js",
+        false,
+        20,
+        Limits::CODING,
+        Binding {
+            scope_id: "0".repeat(64),
+            generation: 1,
+            operation_id: 4,
+        },
+        || {
+            if process::in_storage_scan()
+                && fs::read_dir(&installation)
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .any(|entry| entry.path().join("work/scan-ready.txt").exists())
+            {
+                polls.set(polls.get() + 1);
+                polls.get() < 128
+            } else {
+                true
+            }
+        },
+        |launch| launch(),
+    )
+    .unwrap();
+    assert_eq!(
+        polls.get(),
+        128,
+        "Stop was not observed inside the live scan"
+    );
+    assert!(stopped.receipt().interrupted);
+    assert_eq!(
+        stopped.receipt().reason.as_deref(),
+        Some("stopped or stale generation")
+    );
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(!stopped.work().join("escaped.txt").exists());
+    assert!(stopped.import_repository(source.path()).is_err());
+    println!("Actual native Stop during live storage enumeration killed descendants and rejected import.");
 }

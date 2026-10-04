@@ -159,6 +159,7 @@ fn structured_outputs_require_valid_json_and_keep_original_bytes() {
 }
 
 #[test]
+#[cfg(windows)]
 #[ignore = "Requires Windows native execution setup and bundled runtime; real projectless execution acceptance"]
 fn native_workspace_execution_acceptance() {
     let (_temp, root, authority) = fixture();
@@ -207,20 +208,20 @@ fn native_workspace_execution_acceptance() {
     assert_eq!(timeout["command"]["interrupted"], true);
     assert_eq!(timeout["outputs"], json!([]));
     let a = authority.clone();
+    fs::write(root.join("stop.js"), coding::process::NATIVE_STOP_SCRIPT).unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    let binding = ticket.execution_binding();
+    let mut sentinel = coding::process::NativeSentinel::new();
     let stop = std::thread::spawn(move || {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        a.revoke(1).unwrap();
+        coding::process::stop_after_native_ready(&binding, || {
+            a.revoke(1).unwrap();
+        });
     });
-    assert!(execute_in(
-        &root,
-        authority.begin_agent(1).unwrap(),
-        request(
-            "node -e \"setTimeout(()=>require('fs').writeFileSync('late.txt','escape'),4000)\""
-        )
-    )
-    .is_err());
+    let mut stopped = request("node stop.js");
+    stopped["inputs"] = json!(["stop.js"]);
+    assert!(execute_in(&root, ticket, stopped).is_err());
     stop.join().unwrap();
-    std::thread::sleep(std::time::Duration::from_secs(4));
+    sentinel.assert_alive();
     assert!(!root.join("late.txt").exists());
     assert_eq!(fs::read_dir(root.join("Generated")).unwrap().count(), 1);
     assert!(root

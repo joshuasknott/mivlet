@@ -92,20 +92,53 @@ fn checkout(directory: &Path, repo: &Repository) -> Result<PathBuf, String> {
     let path = directory.join(&repo.id).join("checkout");
     crate::paths::strict_canonicalize(&path).map_err(|_| "Managed checkout needs recovery.".into())
 }
+fn reconcile_import(
+    directory: &Path,
+    repo: &mut Repository,
+    ticket: &OperationTicket,
+) -> Result<Option<mivlet_windows_executor::RepositoryImportRecovery>, String> {
+    let recovery = mivlet_windows_executor::recover_repository_import(
+        &directory.join(&repo.id).join("checkout"),
+        mivlet_windows_executor::Limits::CODING,
+        &ticket.execution_binding().scope_id,
+        || ticket.check().is_ok(),
+        |action| ticket.with_current(action),
+    )?;
+    if let Some(recovery) = &recovery {
+        repo.operation =
+            "command import outcome uncertain; inspect and use repository-recover".into();
+        repo.command_diff_id = None;
+        repo.last_result = Some(process::CommandResult {
+            interrupted: true,
+            output: format!(
+                "{}; no command replayed or staged output imported.",
+                recovery.outcome
+            ),
+            ..Default::default()
+        });
+        ticket.with_current(|| save(directory, repo))?;
+    }
+    Ok(recovery)
+}
 fn status(directory: &Path, ticket: &OperationTicket) -> Result<Value, String> {
-    let Some(repo) = load(directory)? else {
+    let Some(mut repo) = load(directory)? else {
         return Ok(json!({"repository": null}));
     };
     let mutex = lock(directory)?;
     let guard = mutex.try_lock();
     let busy = guard.is_err();
+    let recovery = if busy {
+        None
+    } else {
+        reconcile_import(directory, &mut repo, ticket)?
+    };
     let changes = if busy {
         Value::Null
     } else {
         git::changes(directory, &repo, ticket)?
     };
     Ok(
-        json!({"repository": repo, "busy": busy, "recoveryRequired": !busy && repo.operation != "idle", "changes": changes}),
+        json!({"repository": repo, "busy": busy, "recoveryRequired": !busy && repo.operation != "idle", "changes": changes, "importRecovery": recovery}),
     )
 }
 
@@ -159,9 +192,10 @@ pub async fn coding_repository_attach(
         let _guard = mutex.try_lock().map_err(|_| {
             "Stop the running repository operation before attaching another repository."
         })?;
-        if load(&directory)?.is_some_and(|repo| repo.operation.starts_with("publication")) {
+        if load(&directory)?.is_some_and(|repo| repo.operation.starts_with("publication")
+            || directory.join(&repo.id).join("native-import.json").exists()) {
             return Err(
-                "Recover the current publication before attaching another repository.".into(),
+                "Recover the current publication or command import before attaching another repository.".into(),
             );
         }
         let repository = git::attach(&directory, selected.path(), &ticket)?;
@@ -227,6 +261,24 @@ fn execute_in(
         return Err(
             "Repository selection changed. Inspect status and request a fresh approval.".into(),
         );
+    }
+    let import_recovery = reconcile_import(directory, &mut repo, ticket)?;
+    if let Some(recovery) = import_recovery {
+        if tool == "repository-recover" {
+            repo.operation = "idle".into();
+            ticket.with_current(|| save(directory, &repo))?;
+            mivlet_windows_executor::acknowledge_repository_import(
+                &directory.join(&repo.id).join("checkout"),
+                mivlet_windows_executor::Limits::CODING,
+                &ticket.execution_binding().scope_id,
+                || ticket.check().is_ok(),
+            )?;
+            return serde_json::to_string(&json!({"importRecovery": recovery, "message": "Existing checkout reconciled; uncertainty receipt preserved. Review its diff before continuing. No command was replayed and no staged snapshot was imported."}))
+                .map_err(|_| "Invalid import recovery result.".into());
+        }
+        if tool != "repository-read" {
+            return Err("Command import outcome is uncertain. Inspect status and use repository-recover before changing or publishing this checkout.".into());
+        }
     }
     if repo.operation.starts_with("publication")
         && !matches!(tool, "repository-read" | "repository-recover")
@@ -308,22 +360,26 @@ fn execute_in(
                     return Err(error);
                 }
             };
+            let mut committed_import = None;
             if result.exit_code == Some(0) && !result.interrupted {
                 let imported = (|| {
                     let prepared =
                         completed.prepare_repository_import(&root, || ticket.check().is_ok())?;
-                    ticket.with_current(|| prepared.commit()).map(drop)
+                    ticket.with_current(|| prepared.commit())
                 })();
-                if let Err(error) = imported {
-                    repo.operation =
-                        "command result not imported; inspect before continuing".into();
-                    repo.last_result = Some(process::CommandResult {
-                        interrupted: true,
-                        output: crate::secret_redaction::redact_secret_text_or_omit(&error),
-                        ..result
-                    });
-                    save(directory, &repo)?;
-                    return Err(error);
+                match imported {
+                    Ok(committed) => committed_import = Some(committed),
+                    Err(error) => {
+                        repo.operation =
+                            "command result not imported; inspect before continuing".into();
+                        repo.last_result = Some(process::CommandResult {
+                            interrupted: true,
+                            output: crate::secret_redaction::redact_secret_text_or_omit(&error),
+                            ..result
+                        });
+                        save(directory, &repo)?;
+                        return Err(error);
+                    }
                 }
             }
             repo.operation = if result.interrupted {
@@ -337,6 +393,11 @@ fn execute_in(
                 repo.command_diff_id = git::tree(directory, &repo, ticket).ok();
             }
             save(directory, &repo)?;
+            if let Some(committed) = committed_import {
+                // Keep the durable intent and previous tree until repository
+                // state is saved. Cleanup remains outside the Stop fence.
+                committed.acknowledge(|| ticket.check().is_ok())?;
+            }
             serde_json::to_value(result).map_err(|_| "Invalid command result.")?
         }
         "repository-commit" => git::commit(directory, &mut repo, &input, ticket)?,

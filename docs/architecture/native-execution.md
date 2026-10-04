@@ -15,6 +15,9 @@ capability grants and opt out of ALL_APPLICATION_PACKAGES. Mivlet verifies the
 suspended child's AppContainer SID and performs positive/negative AccessCheck
 probes before resuming it. Query class 46 is not relied on: this host rejects it
 with ERROR_INVALID_PARAMETER. No command starts when verification fails.
+The final single-use resume action runs inside the caller's native ticket fence.
+Stop that wins this fence leaves the verified child suspended and terminates its
+job; a stale command cannot start between a predicate check and resume.
 
 The only grants are the per-run work/home/temp trees (modify), pinned runtime and
 batch file (read/execute), fixed ancestry metadata (traverse/read attributes,
@@ -42,6 +45,10 @@ process count and aggregate CPU time are kernel limits; wall time and storage
 are watchdogs. Analysis uses 1 GiB/32 processes/64 MiB storage; coding uses
 2 GiB/64 processes/2 GiB storage. Combined output is capped at 64 KiB. The disk
 watchdog is not a hard quota and cannot eliminate every resource exhaustion risk.
+Live storage enumeration polls generation and deadline before each directory
+entry and metadata visit, with a bound on queued entries under churn. Post-exit
+hashing polls the same control, including bounded file-read chunks; interruption
+cannot produce an importable seal.
 
 ## Setup and runtimes
 
@@ -55,6 +62,12 @@ are provisioned. Maintenance takes an exclusive lease and fails while any run
 or unimported result holds custody. Cleanup removes only its exact capability
 ACEs and readiness stamp, preserving receipts and user files. Declined UAC,
 enterprise policy, missing resources and ACL drift leave commands unavailable.
+Privileged setup pins every existing/created ancestry directory with no-follow
+handles and no write/delete sharing. ACL reads/writes use these held objects;
+MAXIMUM_ALLOWED prevents recursive ACL propagation through preplanted children.
+Both setup files are exclusively opened without truncation and checked for
+reparse points/hardlinks before ACL changes or writes. Removal uses the verified
+stamp handle. Runtime status hashing runs on a blocking worker, outside UI dispatch.
 
 The bundle includes official Node 22.23.3/npm, Python 3.13.16 embeddable and
 pip 26.2.1. `prepare-execution-runtime.mjs` verifies pinned upstream archives and
@@ -76,12 +89,27 @@ with rollback. Hashing/copying polls Stop outside the authority lock; only the
 final rename holds the current-generation fence, and old-tree deletion follows
 outside that fence. Analysis reopens only declared passive outputs, validates content
 and imports the set through its existing generation-fenced transaction.
+Repository import first flushes one bounded durable intent, bound to the canonical
+checkout, run/command/input/output/previous hashes and scope/generation/operation.
+The previous tree and intent survive both renames and remain until native
+repository state is saved and acknowledgement is persisted. Restart inspection
+validates the intent and every surviving tree, restores only a missing previous
+checkout, and records immutable uncertainty. A completed second rename preserves
+both current and previous trees until explicit `repository-recover` reconciles
+the existing checkout. Staged command output is never imported during recovery;
+changes/publication are blocked until reconciliation. Interrupted acknowledged
+cleanup resumes without replaying imports or losing the recovery intent.
 
 Private crash journals are persisted before runtime staging. Exclusive run
 leases distinguish live custody from abandoned staging. The anonymous job dies
 when the native host exits. The next execution reconciles abandoned profiles and
 staging, records uncertainty and never replays a command or imports leftovers.
 Unexpected links or invalid recovery journals block cleanup for inspection.
+Initialization uses a separate short lease. New directories stay in the fixed
+`preparing-<runId>` namespace until their lease and complete flushed journal are
+published atomically as `run-<runId>` and final custody is acquired. Restart can
+reconcile a bounded partial preparation before journal completion; unexpected
+entries/links still fail closed. No profile or command exists before publication.
 
 Append-only receipts record run/runtime/input/output/command digests, an opaque
 authority scope, operation/generation, actual exit/interruption, bounds and
@@ -98,7 +126,10 @@ Prepare resources with `node apps/desktop/scripts/prepare-execution-runtime.mjs`
 Run ordinary core tests/Clippy plus the desktop suites. On an unelevated configured
 machine, run `cargo test --manifest-path packages/windows-executor/Cargo.toml
 native_ -- --ignored --nocapture --test-threads=1`, then the desktop
-`native_coding_acceptance` and `native_workspace_execution_acceptance` tests.
+`native_cancelled_launch_acceptance`, `native_coding_acceptance`,
+`native_repository_import_recovery_acceptance` and
+`native_workspace_execution_acceptance` tests individually with
+`-- --ignored --nocapture --test-threads=1`.
 These are actual local process/service checks. Live authenticated model/app,
 installed packaging and a clean-machine/enterprise-policy rehearsal are separate
 evidence and must not be inferred from them.
@@ -113,6 +144,7 @@ ordinary unelevated commands:
 | Core isolation acceptance | Unselected file read/write, Credential Manager and DPAPI denied under the actual child token; output capped; sealed-tree tampering rejected. |
 | Approved network/toolchain | Bundled npm built/tested a staged project, pip ran and explicitly enabled public HTTPS returned 200. This does not establish an IP/domain allowlist. |
 | Actual host death/restart | Supervisor terminated only its own host; kill-on-close ended its detached child. Recovery preserved an uncertain receipt with command/scope binding, imported nothing and removed abandoned staging. A supplied host environment canary did not reach the command. |
+| Review regressions | Abrupt host termination at both import rename boundaries and during partial journal preparation; cancellable wide-directory walks, live Stop inside storage enumeration, revoked suspended launch, and native coding status/recover with a missing checkout. Desktop Stop waits for a bound ready marker, observes the exact detached descendant, and preserves an unrelated sentinel. Setup link sentinels and directory replacement tests avoid protected targets. |
 | UI | Production setup component rendered in a browser fixture with simulated IPC: setup/repair/removal/declined responses, narrow wrapping and keyboard focus. This is separate from Windows UAC and authenticated native UI evidence. |
 
 Run these acceptance supervisors serially: any subsequent execution legitimately
@@ -125,6 +157,7 @@ clean-machine and authenticated live provider-to-tool journeys remain unverified
 References informed the design; no source was copied:
 
 - [Microsoft AppContainer/LPAC launch and isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer).
+- [Microsoft directory moves](https://learn.microsoft.com/en-us/windows/win32/fileio/moving-directories) and [handle-based ACL updates and inheritance behavior](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo).
 - [Codex Windows sandbox](https://openai.com/index/building-codex-windows-sandbox/) and
   [Apache-2.0 public source at c2f7fe8](https://github.com/openai/codex/tree/c2f7fe89d87ce853900d0b5cb1f5dc4863e44d73/codex-rs/windows-sandbox-rs).
 

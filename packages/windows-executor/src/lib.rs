@@ -7,6 +7,11 @@ mod acceptance;
 #[cfg(windows)]
 mod custody;
 mod files;
+mod repository_import;
+pub use repository_import::{
+    acknowledge_recovery as acknowledge_repository_import, recover as recover_repository_import,
+    Recovery as RepositoryImportRecovery,
+};
 #[cfg(windows)]
 mod process;
 mod runtime;
@@ -80,20 +85,71 @@ pub struct CompletedRun {
     receipt: Receipt,
     #[cfg(windows)]
     _lease: custody::Lease,
-    directory: tempfile::TempDir,
+    directory: ExecutionDirectory,
     work: PathBuf,
     limits: Limits,
 }
-pub struct PreparedRepositoryImport(files::PreparedTree);
+pub(crate) struct ExecutionDirectory {
+    path: PathBuf,
+    retained: bool,
+}
+impl ExecutionDirectory {
+    #[cfg(windows)]
+    pub(crate) fn create(path: PathBuf) -> Result<Self, String> {
+        std::fs::create_dir(&path).map_err(|_| "Cannot prepare native execution custody.")?;
+        Ok(Self {
+            path,
+            retained: false,
+        })
+    }
+    pub(crate) fn path(&self) -> &Path {
+        &self.path
+    }
+    #[cfg(windows)]
+    pub(crate) fn publish(&mut self, path: PathBuf) -> Result<(), String> {
+        std::fs::rename(&self.path, &path).map_err(|error| {
+            format!(
+                "Cannot publish prepared native custody (Windows {:?}).",
+                error.raw_os_error()
+            )
+        })?;
+        self.path = path;
+        Ok(())
+    }
+    #[cfg(windows)]
+    pub(crate) fn keep(mut self) -> PathBuf {
+        self.retained = true;
+        self.path.clone()
+    }
+}
+impl Drop for ExecutionDirectory {
+    fn drop(&mut self) {
+        if !self.retained {
+            let _ = std::fs::remove_dir_all(&self.path);
+        }
+    }
+}
+pub struct PreparedRepositoryImport {
+    prepared: repository_import::Prepared,
+    limits: Limits,
+}
 pub struct RepositoryImportCleanup {
-    _previous: tempfile::TempDir,
+    committed: repository_import::Committed,
+    limits: Limits,
 }
 impl PreparedRepositoryImport {
-    /// Call inside the generation fence; drop returned cleanup outside it.
+    /// Call inside the generation fence; acknowledge after durable repository
+    /// state persistence, outside that fence. Dropping never removes custody.
     pub fn commit(self) -> Result<RepositoryImportCleanup, String> {
         Ok(RepositoryImportCleanup {
-            _previous: self.0.commit()?,
+            committed: self.prepared.commit()?,
+            limits: self.limits,
         })
+    }
+}
+impl RepositoryImportCleanup {
+    pub fn acknowledge(self, current: impl Fn() -> bool) -> Result<(), String> {
+        self.committed.acknowledge(self.limits, &current)
     }
 }
 impl CompletedRun {
@@ -106,7 +162,7 @@ impl CompletedRun {
     pub fn import_repository(&self, destination: &Path) -> Result<(), String> {
         self.prepare_repository_import(destination, || true)?
             .commit()
-            .map(drop)
+            .and_then(|committed| committed.acknowledge(|| true))
     }
     /// Stage the expensive copy without holding the authority lock; Stop is
     /// polled during inspection/copying. Only the final rename needs the fence.
@@ -116,13 +172,17 @@ impl CompletedRun {
         current: impl Fn() -> bool,
     ) -> Result<PreparedRepositoryImport, String> {
         self.verify_seal_current(&current)?;
-        let prepared = files::prepare_tree(&self.work, destination, self.limits, &current)?;
-        if Some(&prepared.digest) != self.receipt.output_id.as_ref() {
-            return Err(
-                "The sealed command snapshot changed during import. No changes imported.".into(),
-            );
-        }
-        Ok(PreparedRepositoryImport(prepared))
+        let prepared = repository_import::prepare(
+            &self.work,
+            destination,
+            self.limits,
+            &self.receipt,
+            &current,
+        )?;
+        Ok(PreparedRepositoryImport {
+            prepared,
+            limits: self.limits,
+        })
     }
     pub fn verify_seal(&self) -> Result<(), String> {
         self.verify_seal_current(&|| true)
@@ -144,6 +204,8 @@ impl CompletedRun {
 
 /// The caller supplies a trusted resource root, never a model-selected program
 /// or host PATH. `current` is polled without waiting for the execution lock.
+/// `launch` must dispatch its single-use resume action under the owning native
+/// generation fence. Expensive staging and token validation precede that action.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
     resource_root: &Path,
@@ -154,6 +216,7 @@ pub fn run(
     limits: Limits,
     binding: Binding,
     current: impl Fn() -> bool,
+    launch: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<CompletedRun, String> {
     if script.trim().is_empty()
         || script.len() > 8192
@@ -180,11 +243,20 @@ pub fn run(
             limits,
             binding,
             current,
+            launch,
         )
     }
     #[cfg(not(windows))]
     {
-        let _ = (resource_root, input, network, limits, binding, current);
+        let _ = (
+            resource_root,
+            input,
+            network,
+            limits,
+            binding,
+            current,
+            launch,
+        );
         Err("Native code execution requires Windows x64.".into())
     }
 }

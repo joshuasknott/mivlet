@@ -10,6 +10,93 @@ use std::{
 };
 
 const LIMIT: usize = 64 * 1024;
+
+#[cfg(all(test, windows))]
+pub(in crate::local_computer) struct NativeSentinel(std::process::Child);
+#[cfg(all(test, windows))]
+impl NativeSentinel {
+    pub(in crate::local_computer) fn new() -> Self {
+        Self(
+            Command::new(execution_resources().unwrap().join("node/node.exe"))
+                .args(["-e", "setTimeout(()=>{},120000)"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        )
+    }
+    pub(in crate::local_computer) fn assert_alive(&mut self) {
+        assert!(
+            self.0.try_wait().unwrap().is_none(),
+            "Stop killed an unrelated sentinel process"
+        );
+    }
+}
+#[cfg(all(test, windows))]
+impl Drop for NativeSentinel {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+#[cfg(all(test, windows))]
+pub(in crate::local_computer) fn native_work(
+    binding: &mivlet_windows_executor::Binding,
+) -> Option<PathBuf> {
+    let expected = serde_json::to_value(binding).unwrap();
+    std::fs::read_dir(mivlet_windows_executor::setup::ready().unwrap())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            std::fs::read(path.join("prepared.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .is_some_and(|value| value["binding"] == expected)
+        })
+        .map(|path| path.join("work"))
+}
+#[cfg(all(test, windows))]
+pub(in crate::local_computer) fn stop_after_native_ready(
+    binding: &mivlet_windows_executor::Binding,
+    stop: impl FnOnce(),
+) {
+    use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+    use windows_sys::Win32::{Foundation::*, System::Threading::*};
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let (work, pid) = loop {
+        if let Some(work) = native_work(binding) {
+            if let Ok(bytes) = std::fs::read(work.join("native-stop-ready.json")) {
+                if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    break (work, value["pid"].as_u64().unwrap() as u32);
+                }
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Native command never signalled actual execution"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    // Retain the exact child's handle before Stop; PID reuse cannot turn this
+    // into a probe of an unrelated process. This helper never kills by PID.
+    let descendant = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
+    assert!(
+        !descendant.is_null(),
+        "Cannot observe the actual detached descendant"
+    );
+    stop();
+    let status = unsafe { WaitForSingleObject(descendant, 5000) };
+    unsafe {
+        CloseHandle(descendant);
+    }
+    assert_eq!(status, WAIT_OBJECT_0, "Detached descendant survived Stop");
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(!work.join("late.txt").exists());
+}
+#[cfg(all(test, windows))]
+pub(in crate::local_computer) const NATIVE_STOP_SCRIPT: &str = r#"const fs=require('fs'),cp=require('child_process'); const child=cp.spawn(process.execPath,['-e',"setTimeout(()=>require('fs').writeFileSync('late.txt','escape'),4000)"],{detached:true,stdio:'ignore'});child.unref();fs.writeFileSync('native-stop-ready.json',JSON.stringify({pid:child.pid}));setTimeout(()=>{},60000);"#;
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandResult {
@@ -228,6 +315,7 @@ pub(in crate::local_computer) fn native_run(
         },
         ticket.execution_binding(),
         || ticket.check().is_ok(),
+        |launch| ticket.with_current(launch),
     )?;
     let receipt = completed.receipt();
     let safe = crate::secret_redaction::redact_secret_text_or_omit(&receipt.output);

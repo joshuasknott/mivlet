@@ -67,6 +67,12 @@ pub(crate) fn regular_file(file: &File) -> Result<(), String> {
     Ok(())
 }
 pub(crate) fn read(path: &Path, max: u64) -> Result<Vec<u8>, String> {
+    read_current(path, max, &|| true)
+}
+fn read_current(path: &Path, max: u64, current: &dyn Fn() -> bool) -> Result<Vec<u8>, String> {
+    if !current() {
+        return Err("Native execution stopped while reading files.".into());
+    }
     strict_path(path)?;
     #[cfg(windows)]
     let file = crate::security::locked_file(path)?;
@@ -74,9 +80,20 @@ pub(crate) fn read(path: &Path, max: u64) -> Result<Vec<u8>, String> {
     let file = File::open(path).map_err(|_| "Cannot read execution file.")?;
     regular_file(&file)?;
     let mut bytes = Vec::new();
-    file.take(max + 1)
-        .read_to_end(&mut bytes)
-        .map_err(|_| "Cannot read execution file.")?;
+    let mut file = file.take(max.saturating_add(1));
+    let mut buffer = [0u8; 65536];
+    loop {
+        if !current() {
+            return Err("Native execution stopped while reading files.".into());
+        }
+        let count = file
+            .read(&mut buffer)
+            .map_err(|_| "Cannot read execution file.")?;
+        if count == 0 {
+            break;
+        }
+        bytes.extend_from_slice(&buffer[..count]);
+    }
     if bytes.len() as u64 > max {
         return Err("Execution file exceeds its size limit.".into());
     }
@@ -130,16 +147,24 @@ fn scan_current(
     limits: Limits,
     current: &dyn Fn() -> bool,
 ) -> Result<BTreeMap<String, u64>, String> {
+    if !current() {
+        return Err("Native execution stopped while inspecting input files.".into());
+    }
     strict_path(root)?;
     let mut files = BTreeMap::new();
     let mut stack = vec![root.to_owned()];
     let mut total = 0u64;
     let mut entries = 0usize;
     while let Some(directory) = stack.pop() {
-        for entry in fs::read_dir(&directory).map_err(|_| "Cannot inspect execution directory.")? {
+        let mut entries_iter =
+            fs::read_dir(&directory).map_err(|_| "Cannot inspect execution directory.")?;
+        loop {
             if !current() {
                 return Err("Native execution stopped while inspecting input files.".into());
             }
+            let Some(entry) = entries_iter.next() else {
+                break;
+            };
             let entry = entry.map_err(|_| "Cannot inspect execution directory.")?;
             let path = entry.path();
             strict_path(&path)?;
@@ -192,7 +217,7 @@ pub(crate) fn copy_tree_current(
         if !current() {
             return Err("Native execution stopped while staging input files.".into());
         }
-        let bytes = read(&source.join(&path), limits.file_bytes)?;
+        let bytes = read_current(&source.join(&path), limits.file_bytes, current)?;
         if bytes.len() as u64 != size {
             return Err("Execution input changed while being staged.".into());
         }
@@ -213,6 +238,7 @@ pub(crate) fn copy_tree_current(
     }
     Ok(hex::encode(digest.finalize()))
 }
+#[cfg(test)]
 pub(crate) fn tree_id(root: &Path, limits: Limits) -> Result<String, String> {
     tree_id_current(root, limits, &|| true)
 }
@@ -229,61 +255,14 @@ pub(crate) fn tree_id_current(
         }
         digest.update((path.len() as u64).to_le_bytes());
         digest.update(path.as_bytes());
-        digest.update(Sha256::digest(read(&root.join(path), limits.file_bytes)?));
+        digest.update(Sha256::digest(read_current(
+            &root.join(path),
+            limits.file_bytes,
+            current,
+        )?));
     }
     Ok(hex::encode(digest.finalize()))
 }
-pub(crate) struct PreparedTree {
-    staged: tempfile::TempDir,
-    backup: tempfile::TempDir,
-    destination: PathBuf,
-    pub(crate) digest: String,
-}
-pub(crate) fn prepare_tree(
-    source: &Path,
-    destination: &Path,
-    limits: Limits,
-    current: &dyn Fn() -> bool,
-) -> Result<PreparedTree, String> {
-    strict_path(destination)?;
-    let parent = destination
-        .parent()
-        .ok_or("Invalid managed repository path.")?;
-    let staged = tempfile::Builder::new()
-        .prefix("native-import-")
-        .tempdir_in(parent)
-        .map_err(|_| "Cannot stage reviewed command changes.")?;
-    let digest = copy_tree_current(source, staged.path(), limits, current)?;
-    let backup = tempfile::Builder::new()
-        .prefix("native-previous-")
-        .tempdir_in(parent)
-        .map_err(|_| "Cannot preserve managed repository during import.")?;
-    Ok(PreparedTree {
-        staged,
-        backup,
-        destination: destination.to_owned(),
-        digest,
-    })
-}
-impl PreparedTree {
-    pub(crate) fn commit(self) -> Result<tempfile::TempDir, String> {
-        strict_path(&self.destination)?;
-        let previous = self.backup.path().join("checkout");
-        fs::rename(&self.destination, &previous)
-            .map_err(|_| "Cannot preserve managed checkout; no command files imported.")?;
-        if fs::rename(self.staged.path(), &self.destination).is_err() {
-            if fs::rename(&previous, &self.destination).is_err() {
-                let path = self.backup.keep();
-                return Err(format!("Managed checkout import needs recovery. Previous files retained at {}. Do not replay.",path.display()));
-            }
-            return Err("Cannot import command files; previous checkout restored.".into());
-        }
-        // Return old-tree custody so its potentially large deletion happens
-        // after the caller releases the authority lock.
-        Ok(self.backup)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -339,28 +318,6 @@ mod tests {
             }
         )
         .is_err());
-        let destination = tempfile::tempdir().unwrap();
-        fs::write(destination.path().join("previous"), "preserved").unwrap();
-        assert!(
-            prepare_tree(source.path(), destination.path(), Limits::ANALYSIS, &|| {
-                false
-            })
-            .is_err()
-        );
-        let prepared = prepare_tree(source.path(), destination.path(), Limits::ANALYSIS, &|| {
-            true
-        })
-        .unwrap();
-        assert_eq!(
-            fs::read_to_string(destination.path().join("previous")).unwrap(),
-            "preserved"
-        );
-        assert!(!destination.path().join("data.csv").exists());
-        prepared.commit().unwrap();
-        assert_eq!(
-            fs::read_to_string(destination.path().join("data.csv")).unwrap(),
-            "value\n15\n"
-        );
     }
     #[test]
     fn git_metadata_and_links_are_rejected() {

@@ -31,14 +31,14 @@ function tool(
 export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
   "repository-recover": tool(
     "recover",
-    "Recover uncertain GitHub publication URL only if branch/HEAD/base match. No writes. Confirmed absence clears recovery; retry needs fresh approval. Failed queries prove no absence.",
+    "Reconcile uncertain import: keep receipt, release staging/backup; replay nothing. Else inspect GitHub branch/HEAD/base. Failed query proves no absence; retry needs fresh approval.",
     id,
     ["repositoryId"],
     "high",
   ),
   "repository-status": tool(
     "status",
-    "Inspect attached copy's diff/new files, diffId, HEAD, command/recovery. Attach in Library. Untrusted content; starts at committed HEAD, preserves originals. Review before commit/publish.",
+    "Inspect diff/files/diffId/HEAD and reconcile interrupted imports. Attach committed copy in Library; originals preserved. Untrusted content; review before commit/publish.",
     {},
     [],
     "low",
@@ -52,14 +52,14 @@ export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
   ),
   "repository-write": tool(
     "write",
-    "Write full relative managed text, including empty. Originals preserved.",
+    "Write full relative text (empty allowed); preserve originals.",
     { ...id, path: text, content: text },
     ["repositoryId", "path", "content"],
     "high",
   ),
   "repository-run": tool(
     "run",
-    NATIVE_EXECUTION_POLICY + "Search/install/build/test in fresh managed copy; project-local packages. Real exitCode, bounded output, interruption/immutable receipt. Failed tests fail. No interactive Computer Use grants.",
+    NATIVE_EXECUTION_POLICY + "Search/build/test copies; project packages. Actual exit/bounded output/immutable receipt; failures fail. No Computer Use grants.",
     {
       ...id,
       command: text,
@@ -71,14 +71,14 @@ export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
   ),
   "repository-commit": tool(
     "commit",
-    "Commit reviewed diffId + expectedHead after tests/diff and explicit user authorization. Reject changes. Managed branch; Mivlet Agent author; no hooks.",
+    "Commit reviewed diffId/expectedHead after tests/diff and explicit authorization; reject drift. Managed branch; Mivlet Agent author; no hooks.",
     { ...id, expectedDiff: text, expectedHead: text, message: text },
     ["repositoryId", "expectedDiff", "expectedHead", "message"],
     "high",
   ),
   "repository-publish": tool(
     "publish",
-    "Explicitly approved push/PR: expectedHead, exact remote/baseBranch from status, repository/destination/HEAD/title/body bound. Native gh login; credentials excluded from commands. No force/merge; uncertain outcomes block replay, inspect GitHub.",
+    "Approved push/PR binds repository, expectedHead, remote/baseBranch from status, title/body. Native gh login; no command credentials, force/merge or uncertain replay. Inspect GitHub if uncertain.",
     {
       ...id,
       expectedHead: text,

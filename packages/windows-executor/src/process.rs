@@ -341,6 +341,7 @@ pub(crate) fn run(
     limits: Limits,
     binding: Binding,
     current: impl Fn() -> bool,
+    launch: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<CompletedRun, String> {
     if !cfg!(target_arch = "x86_64") {
         return Err("Native execution supports Windows x64.".into());
@@ -354,11 +355,6 @@ pub(crate) fn run(
     let installation = setup::ready()?;
     let id = security::random_id()?;
     crate::custody::recover()?;
-    let directory = tempfile::Builder::new()
-        .prefix("run-")
-        .tempdir_in(&installation)
-        .map_err(|_| "Cannot prepare native execution snapshot.")?;
-    let root = directory.path();
     let command_id = {
         use sha2::{Digest, Sha256};
         hex::encode(Sha256::digest(
@@ -366,7 +362,9 @@ pub(crate) fn run(
                 .map_err(|_| "Invalid command identity.")?,
         ))
     };
-    let lease = crate::custody::begin(&installation, root, &id, &binding, &command_id, network)?;
+    let (directory, lease) =
+        crate::custody::prepare_run(&installation, &id, &binding, &command_id, network)?;
+    let root = directory.path();
     setup::ready()?;
     let work = root.join("work");
     let runtime_dir = root.join("runtime");
@@ -517,20 +515,44 @@ pub(crate) fn run(
     let output = Arc::new(Mutex::new((Vec::new(), false)));
     let readers = readers([stdout, stderr], output.clone());
     let start = Instant::now();
-    if unsafe { ResumeThread(thread.0) } == u32::MAX {
+    let mut resumed = false;
+    let launched = launch(&mut || {
+        if resumed {
+            return Err("The native launch action is single-use.".into());
+        }
+        resumed = true;
+        if unsafe { ResumeThread(thread.0) } == u32::MAX {
+            return Err(security::error("Resume restricted command"));
+        }
+        Ok(())
+    });
+    if let Err(error) = launched.and_then(|_| {
+        resumed
+            .then_some(())
+            .ok_or_else(|| "Native launch was not dispatched.".to_owned())
+    }) {
         job.stop()?;
-        return Err(security::error("Resume restricted command"));
+        for reader in readers {
+            let _ = reader.join();
+        }
+        return Err(error);
     }
+    let deadline = start + Duration::from_secs(seconds);
+    let control = || {
+        if !current() {
+            Err("stopped or stale generation".to_owned())
+        } else if Instant::now() >= deadline {
+            Err("timeout".to_owned())
+        } else {
+            Ok(())
+        }
+    };
     let mut reason = None;
     let mut code = None;
     let mut last_scan = Instant::now();
     loop {
-        if !current() {
-            reason = Some("stopped or stale generation".to_owned());
-            break;
-        }
-        if start.elapsed() >= Duration::from_secs(seconds) {
-            reason = Some("timeout".to_owned());
+        if let Err(error) = control() {
+            reason = Some(error);
             break;
         }
         let status = unsafe { WaitForSingleObject(process.0, 25) };
@@ -546,7 +568,7 @@ pub(crate) fn run(
             return Err(security::error("Observe native command"));
         }
         if last_scan.elapsed() >= Duration::from_millis(250) {
-            if let Err(error) = usage(root, limits) {
+            if let Err(error) = usage(root, limits, &control) {
                 reason = Some(error);
                 break;
             }
@@ -561,13 +583,30 @@ pub(crate) fn run(
             .join()
             .map_err(|_| "Command output reader stopped unexpectedly.")?;
     }
+    // Fast commands may finish before the first 250 ms sample. Inspect all
+    // writable storage once more after descendants have stopped, under the
+    // same cancellation/deadline control, before permitting a successful seal.
+    if reason.is_none() {
+        if let Err(error) = usage(root, limits, &control) {
+            reason = Some(error);
+        }
+    }
     let (bytes, truncated) = output
         .lock()
         .map_err(|_| "Command output is unavailable.")?
         .clone();
-    let interrupted = reason.is_some();
-    let output_id = if !interrupted && code == Some(0) {
-        Some(files::tree_id(&work, limits)?)
+    let output_id = if reason.is_none() && code == Some(0) {
+        match files::tree_id_current(&work, limits, &|| control().is_ok()) {
+            Ok(id) if control().is_ok() => Some(id),
+            result => {
+                reason = Some(control().err().unwrap_or_else(|| {
+                    result
+                        .err()
+                        .unwrap_or_else(|| "Output sealing interrupted.".into())
+                }));
+                None
+            }
+        }
     } else {
         None
     };
@@ -580,7 +619,7 @@ pub(crate) fn run(
         exit_code: code,
         output: String::from_utf8_lossy(&bytes).into_owned(),
         truncated,
-        interrupted,
+        interrupted: reason.is_some(),
         reason,
         elapsed_ms: start.elapsed().as_millis().min(u64::MAX as u128) as u64,
         network,
@@ -604,11 +643,35 @@ pub(crate) fn run(
         _lease: lease,
     })
 }
-fn usage(root: &Path, limits: Limits) -> Result<(), String> {
+#[cfg(test)]
+thread_local! { static IN_STORAGE_SCAN: std::cell::Cell<bool> = const { std::cell::Cell::new(false) }; }
+#[cfg(test)]
+pub(crate) fn in_storage_scan() -> bool {
+    IN_STORAGE_SCAN.with(|active| active.get())
+}
+#[cfg(test)]
+struct ScanGuard;
+#[cfg(test)]
+impl Drop for ScanGuard {
+    fn drop(&mut self) {
+        IN_STORAGE_SCAN.with(|active| active.set(false));
+    }
+}
+fn usage(
+    root: &Path,
+    limits: Limits,
+    control: &dyn Fn() -> Result<(), String>,
+) -> Result<(), String> {
+    #[cfg(test)]
+    let _scan = {
+        IN_STORAGE_SCAN.with(|active| active.set(true));
+        ScanGuard
+    };
     let mut stack = vec![root.join("work"), root.join("tmp"), root.join("home")];
     let mut bytes = 0u64;
     let mut count = 0usize;
     while let Some(path) = stack.pop() {
+        control()?;
         files::strict_path(&path)?;
         let metadata =
             fs::symlink_metadata(&path).map_err(|_| "Execution storage is unavailable.")?;
@@ -617,12 +680,20 @@ fn usage(root: &Path, limits: Limits) -> Result<(), String> {
             return Err("file count limit".into());
         }
         if metadata.is_dir() {
-            for entry in fs::read_dir(path).map_err(|_| "Execution storage is unavailable.")? {
+            let mut entries =
+                fs::read_dir(path).map_err(|_| "Execution storage is unavailable.")?;
+            loop {
+                control()?;
+                let Some(entry) = entries.next() else { break };
                 stack.push(
                     entry
                         .map_err(|_| "Execution storage is unavailable.")?
                         .path(),
                 );
+                // Bound queued entries as well as visited metadata under churn.
+                if count.saturating_add(stack.len()) > limits.file_count {
+                    return Err("file count limit".into());
+                }
             }
         } else {
             bytes = bytes.saturating_add(metadata.len());
@@ -631,5 +702,39 @@ fn usage(root: &Path, limits: Limits) -> Result<(), String> {
             }
         }
     }
+    control()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::cell::Cell;
+    #[test]
+    fn stop_and_deadline_interrupt_a_wide_storage_scan() {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["work", "home", "tmp"] {
+            fs::create_dir(root.path().join(name)).unwrap();
+        }
+        // Cancellation is triggered during enumeration, before all entries are
+        // even queued. A per-directory-only check cannot pass this regression.
+        for index in 0..8192 {
+            fs::write(root.path().join("home").join(index.to_string()), b"x").unwrap();
+        }
+        for reason in ["stopped or stale generation", "timeout"] {
+            let polls = Cell::new(0usize);
+            let error = usage(root.path(), Limits::CODING, &|| {
+                polls.set(polls.get() + 1);
+                if polls.get() == 128 {
+                    Err(reason.into())
+                } else {
+                    Ok(())
+                }
+            })
+            .unwrap_err();
+            assert_eq!(error, reason);
+            assert_eq!(polls.get(), 128);
+        }
+        usage(root.path(), Limits::CODING, &|| Ok(())).unwrap();
+    }
 }

@@ -6,14 +6,21 @@ use crate::{
     security::{self, wide, Capability},
 };
 use std::{
-    fs,
+    fs::{self, File, OpenOptions},
+    io::{Seek, SeekFrom, Write},
+    os::windows::{
+        fs::{MetadataExt, OpenOptionsExt},
+        io::AsRawHandle,
+    },
     path::{Path, PathBuf},
     ptr,
 };
 use windows_sys::Win32::{
     Foundation::*,
     Security::{Authorization::*, *},
+    Storage::FileSystem::*,
     System::Com::CoTaskMemFree,
+    System::SystemServices::MAXIMUM_ALLOWED,
     UI::Shell::*,
 };
 
@@ -62,12 +69,123 @@ fn ancestry(root: &Path) -> Vec<&Path> {
         .collect()
 }
 
-fn metadata_acl(path: &Path, sid: PSID, remove: bool) -> Result<(), String> {
+fn lock_directory(path: &Path, maintenance: bool) -> Result<File, String> {
+    let file = OpenOptions::new()
+        // Metadata-only opens do not participate in Windows delete sharing.
+        // A directory-read handle is necessary to pin the resolved ancestry.
+        // MAXIMUM_ALLOWED prevents SetSecurityInfo from propagating ACLs
+        // through pre-existing children. Setup modifies only held objects.
+        .access_mode(if maintenance {
+            MAXIMUM_ALLOWED
+        } else {
+            FILE_LIST_DIRECTORY | FILE_READ_ATTRIBUTES | SYNCHRONIZE | READ_CONTROL
+        })
+        .share_mode(FILE_SHARE_READ)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .map_err(|_| "Cannot hold stable native setup directory custody.")?;
+    let metadata = file
+        .metadata()
+        .map_err(|_| "Cannot inspect native setup directory.")?;
+    if !metadata.is_dir() || metadata.file_attributes() & FILE_ATTRIBUTE_REPARSE_POINT != 0 {
+        return Err("Native setup directories cannot be links or reparse points.".into());
+    }
+    Ok(file)
+}
+fn stable_ancestry(root: &Path, create: bool) -> Result<Vec<File>, String> {
+    let mut handles = Vec::new();
+    for path in ancestry(root) {
+        if !path
+            .try_exists()
+            .map_err(|_| "Cannot inspect native setup ancestry.")?
+        {
+            if !create {
+                break;
+            }
+            fs::create_dir(path).map_err(|_| "Cannot prepare native setup directory.")?;
+        }
+        // Parents remain pinned without write/delete sharing before child
+        // resolution, ACL modification or file creation. ACLs use these handles.
+        handles.push(lock_directory(path, true)?);
+    }
+    Ok(handles)
+}
+fn setup_file(path: &Path, create: bool) -> Result<Option<File>, String> {
+    let exists = match fs::symlink_metadata(path) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(_) => return Err("Cannot inspect native setup file.".into()),
+    };
+    if !exists && !create {
+        return Ok(None);
+    }
+    let file = OpenOptions::new()
+        .access_mode(MAXIMUM_ALLOWED)
+        .create_new(!exists)
+        .share_mode(0)
+        .custom_flags(FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_WRITE_THROUGH)
+        .open(path)
+        .map_err(|_| "Native setup file is active or cannot be held safely.")?;
+    // Validate the opened object before any truncation/write. Reparse and
+    // hardlink targets never receive elevated writes, even on first setup.
+    files::regular_file(&file)?;
+    Ok(Some(file))
+}
+fn write_stamp(file: &mut File) -> Result<(), String> {
+    file.set_len(0)
+        .and_then(|_| file.seek(SeekFrom::Start(0)))
+        .and_then(|_| file.write_all(b"1"))
+        .and_then(|_| file.sync_all())
+        .map_err(|_| "Cannot persist native setup file.".into())
+}
+fn private_acl(file: &File, owner: &str) -> Result<(), String> {
+    let mut sd = ptr::null_mut();
+    if unsafe {
+        ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            wide(format!(
+                "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{owner})(A;OICI;RC;;;OW)"
+            ))
+            .as_ptr(),
+            1,
+            &mut sd,
+            ptr::null_mut(),
+        )
+    } == 0
+    {
+        return Err("Cannot prepare native setup ACL.".into());
+    }
+    let mut present = 0;
+    let mut defaulted = 0;
+    let mut acl = ptr::null_mut();
+    unsafe {
+        GetSecurityDescriptorDacl(sd, &mut present, &mut acl, &mut defaulted);
+    }
+    let status = unsafe {
+        SetSecurityInfo(
+            file.as_raw_handle(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            acl,
+            ptr::null_mut(),
+        )
+    };
+    unsafe {
+        LocalFree(sd.cast());
+    }
+    if status != 0 {
+        return Err("Cannot apply native setup ACL to held directory.".into());
+    }
+    Ok(())
+}
+
+fn metadata_acl(file: &File, sid: PSID, remove: bool) -> Result<(), String> {
     let mut sd = ptr::null_mut();
     let mut old_acl = ptr::null_mut();
     let result = unsafe {
-        GetNamedSecurityInfoW(
-            wide(path).as_ptr(),
+        GetSecurityInfo(
+            file.as_raw_handle(),
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION,
             ptr::null_mut(),
@@ -103,8 +221,8 @@ fn metadata_acl(path: &Path, sid: PSID, remove: bool) -> Result<(), String> {
     let acl = if remove { revoked } else { updated };
     let status = if status == 0 {
         unsafe {
-            SetNamedSecurityInfoW(
-                wide(path).as_ptr(),
+            SetSecurityInfo(
+                file.as_raw_handle(),
                 SE_FILE_OBJECT,
                 DACL_SECURITY_INFORMATION,
                 ptr::null_mut(),
@@ -130,12 +248,12 @@ fn metadata_acl(path: &Path, sid: PSID, remove: bool) -> Result<(), String> {
     }
     Ok(())
 }
-fn verify_metadata(path: &Path, sid: PSID) -> Result<(), String> {
+fn verify_metadata(file: &File, sid: PSID) -> Result<(), String> {
     let mut sd = ptr::null_mut();
     let mut acl = ptr::null_mut();
     let result = unsafe {
-        GetNamedSecurityInfoW(
-            wide(path).as_ptr(),
+        GetSecurityInfo(
+            file.as_raw_handle(),
             SE_FILE_OBJECT,
             DACL_SECURITY_INFORMATION,
             ptr::null_mut(),
@@ -186,7 +304,7 @@ pub fn ready() -> Result<PathBuf, String> {
         .map_err(|_| "Set up native execution once to run coding and file analysis.".to_owned())?;
     let capability = traversal(&owner)?;
     for path in ancestry(&root) {
-        verify_metadata(path, capability.sid())?;
+        verify_metadata(&lock_directory(path, false)?, capability.sid())?;
     }
     // The stamp only records the version; ACL checks above establish authority.
     if files::read(&root.join("setup-version"), 16)? != b"1" {
@@ -201,52 +319,55 @@ pub fn configure(owner: &str, cleanup: bool) -> Result<(), String> {
         return Err("Native setup requires administrator approval.".into());
     }
     let root = root_for(owner)?;
-    let parent = root.parent().ok_or("Invalid native setup root.")?;
     let capability = traversal(owner)?;
-    let _maintenance = if root.exists() && root.join("maintenance.lock").exists() {
-        Some(crate::custody::installation(&root, true)?)
+    let handles = stable_ancestry(&root, !cleanup)?;
+    let mut maintenance = if root.exists() {
+        setup_file(&root.join("maintenance.lock"), !cleanup)?
+    } else {
+        None
+    };
+    let mut stamp = if root.exists() {
+        setup_file(&root.join("setup-version"), !cleanup)?
     } else {
         None
     };
     if cleanup {
         // Preserve all run/receipt data; cleanup only removes this installation's
         // exact capability ACEs and readiness stamp. Other apps/users are untouched.
-        if root.exists() {
-            files::strict_path(&root)?;
-            let _ = fs::remove_file(root.join("setup-version"));
+        if let Some(stamp) = &stamp {
+            let disposition = FILE_DISPOSITION_INFO { DeleteFile: true };
+            if unsafe {
+                SetFileInformationByHandle(
+                    stamp.as_raw_handle(),
+                    FileDispositionInfo,
+                    (&disposition as *const FILE_DISPOSITION_INFO).cast(),
+                    std::mem::size_of::<FILE_DISPOSITION_INFO>() as u32,
+                )
+            } == 0
+            {
+                return Err("Cannot remove verified native setup stamp.".into());
+            }
         }
-        for path in ancestry(&root).into_iter().rev().filter(|p| p.exists()) {
-            metadata_acl(path, capability.sid(), true)?;
+        for file in handles.iter().rev() {
+            metadata_acl(file, capability.sid(), true)?;
         }
         return Ok(());
     }
-    files::strict_path(&program_data()?)?;
-    fs::create_dir_all(parent).map_err(|_| "Cannot prepare native execution root.")?;
-    files::strict_path(parent)?;
-    fs::create_dir_all(&root).map_err(|_| "Cannot prepare native execution installation.")?;
-    files::strict_path(&root)?;
-    security::set_sddl(
-        &root,
-        &format!("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{owner})(A;OICI;RC;;;OW)"),
-        true,
+    let root_handle = handles.last().ok_or("Native setup root is unavailable.")?;
+    private_acl(root_handle, owner)?;
+    if let Some(file) = &mut maintenance {
+        private_acl(file, owner)?;
+        write_stamp(file)?;
+    }
+    private_acl(
+        stamp.as_ref().ok_or("Native setup stamp is unavailable.")?,
+        owner,
     )?;
-    if !root.join("maintenance.lock").exists() {
-        use std::io::Write;
-        let mut lease = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(root.join("maintenance.lock"))
-            .map_err(|_| "Cannot prepare execution maintenance lock.")?;
-        lease
-            .write_all(b"1")
-            .and_then(|_| lease.sync_all())
-            .map_err(|_| "Cannot persist execution maintenance lock.")?;
+    for file in &handles {
+        metadata_acl(file, capability.sid(), false)?;
+        verify_metadata(file, capability.sid())?;
     }
-    for path in ancestry(&root) {
-        metadata_acl(path, capability.sid(), false)?;
-        verify_metadata(path, capability.sid())?;
-    }
-    fs::write(root.join("setup-version"), b"1").map_err(|_| "Cannot finish native setup.")?;
+    write_stamp(stamp.as_mut().ok_or("Native setup stamp is unavailable.")?)?;
     Ok(())
 }
 
@@ -288,5 +409,93 @@ pub fn request_elevation(cleanup: bool) -> Result<(), String> {
         Ok(())
     } else {
         ready().map(|_| ())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn dacl(file: &File) -> String {
+        let mut sd = ptr::null_mut();
+        let mut text = ptr::null_mut();
+        assert_eq!(
+            unsafe {
+                GetSecurityInfo(
+                    file.as_raw_handle(),
+                    SE_FILE_OBJECT,
+                    DACL_SECURITY_INFORMATION,
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    ptr::null_mut(),
+                    &mut sd,
+                )
+            },
+            0
+        );
+        assert_ne!(
+            unsafe {
+                ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                    sd,
+                    1,
+                    DACL_SECURITY_INFORMATION,
+                    &mut text,
+                    ptr::null_mut(),
+                )
+            },
+            0
+        );
+        let value = unsafe { security::wide_string(text) };
+        unsafe {
+            LocalFree(text.cast());
+            LocalFree(sd.cast());
+        }
+        value
+    }
+    #[test]
+    fn privileged_acl_helper_changes_only_the_held_object() {
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("child"), b"existing child custody").unwrap();
+        let child = File::open(root.path().join("child")).unwrap();
+        let before = dacl(&child);
+        let held = lock_directory(root.path(), true).unwrap();
+        private_acl(&held, &security::user_sid().unwrap()).unwrap();
+        assert_eq!(
+            dacl(&child),
+            before,
+            "Privileged ACL update propagated to an unvalidated child"
+        );
+    }
+    #[test]
+    fn linked_setup_files_cannot_modify_a_sentinel() {
+        for name in ["setup-version", "maintenance.lock"] {
+            let root = tempfile::tempdir().unwrap();
+            let sentinel = root.path().join("sentinel");
+            fs::write(&sentinel, b"never truncate or elevate this target").unwrap();
+            fs::hard_link(&sentinel, root.path().join(name)).unwrap();
+            assert!(setup_file(&root.path().join(name), true).is_err());
+            assert_eq!(
+                fs::read(&sentinel).unwrap(),
+                b"never truncate or elevate this target"
+            );
+            fs::remove_file(root.path().join(name)).unwrap();
+            if std::os::windows::fs::symlink_file(&sentinel, root.path().join(name)).is_ok() {
+                assert!(setup_file(&root.path().join(name), true).is_err());
+                assert_eq!(
+                    fs::read(&sentinel).unwrap(),
+                    b"never truncate or elevate this target"
+                );
+            }
+        }
+    }
+    #[test]
+    fn setup_directory_custody_blocks_replacement() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("held");
+        fs::create_dir(&directory).unwrap();
+        let held = lock_directory(&directory, true).unwrap();
+        assert!(fs::rename(&directory, root.path().join("replacement")).is_err());
+        drop(held);
+        fs::rename(&directory, root.path().join("replacement")).unwrap();
     }
 }

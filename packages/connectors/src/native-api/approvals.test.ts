@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { buildToolApproval } from "./approvals";
 
 describe("buildToolApproval", () => {
+  it("binds recovery to the repository and discloses release of retained snapshots", () => {
+    const first = buildToolApproval("openai", "repository-recover", '{"repositoryId":"first"}');
+    const second = buildToolApproval("openai", "repository-recover", '{"repositoryId":"second"}');
+    expect(first.mode).toBe("full-access");
+    expect(first.riskLevel).toBe("high");
+    expect(first.confirmationPhrase).toBe("approve repository-recover");
+    expect(first.dataUsed.find(item => item.startsWith("Arguments SHA-256:"))).not.toBe(second.dataUsed.find(item => item.startsWith("Arguments SHA-256:")));
+    expect(first.consequence).toContain("release retained staging/backup");
+    expect(first.decisions).toEqual(["once", "modify", "deny"]);
+  });
   it("binds complete repository commands and publication destinations", () => {
     const args = { repositoryId: "repo", command: `${"echo x; ".repeat(60)}true`, network: false, timeoutSeconds: 30 };
     const approval = buildToolApproval("codex", "repository-run", JSON.stringify(args));
