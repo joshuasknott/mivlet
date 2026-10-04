@@ -80,6 +80,8 @@ ttf-parser = { version = "=0.25.1", default-features = false, features = ["std"]
 # Approval fingerprints must use the renderer's ECMAScript number spelling.
 ryu-js = "=1.0.3"
 png = "=0.17.16"
+# Native Office raster decoding only; no remote, vector, video or parallel codecs.
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg"] }
 crc32fast = "=1.5.0"
 # Relationship attributes must be decoded before deciding whether an OOXML
 # document reaches a host Office application.

@@ -35,7 +35,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
   "create-presentation": {
     name: "create-presentation",
     description:
-      "Create an editable macro-free 16:9 PPTX in this agent's private workspace. Provide short titles, optional paragraphs and at most five short bullets per slide; choose a light or dark theme. Mivlet rejects overfull slides, escapes text, and validates the passive Office package. Publish the verified file with computer-artifact. Use a new path for revisions; existing files are never overwritten.",
+      "Create passive editable 16:9 PPTX: light/dark, 1–30 slides, short text/bullets. Optional workspace PNG/JPEG with read-file digest/alt. Max 8 images, 4 MB each, 4096/side, 4M pixels, 16 MB normalized total; less text on image slides. New path; publish validated output with computer-artifact.",
     defaultMode: "full-access",
     defaultRisk: "high",
     parameters: JSON.stringify({
@@ -56,6 +56,16 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
             properties: {
               title: boundedText(120),
               body: boundedText(600),
+              image: {
+                type: "object",
+                properties: {
+                  path: { type: "string", minLength: 1, maxLength: 512 },
+                  sha256: { type: "string", pattern: "^[a-f0-9]{64}$" },
+                  alt: boundedText(240),
+                },
+                required: ["path", "sha256", "alt"],
+                additionalProperties: false,
+              },
               bullets: {
                 type: "array",
                 maxItems: 5,
@@ -144,7 +154,7 @@ export const OFFICE_TOOLS: Record<string, BackendTool> = {
   "create-document": {
     name: "create-document",
     description:
-      "Create one genuine macro-free DOCX in this agent's private Mivlet workspace from bounded headings, paragraphs, bullets and tables. Mivlet produces passive Office XML and validates the package before returning success. Read the file back or publish it with computer-artifact only after this tool reports validation success.",
+      "Create passive DOCX headings, paragraphs, bullets and tables at a new private workspace path. Read or publish with computer-artifact after validation succeeds.",
     defaultMode: "full-access",
     defaultRisk: "high",
     parameters: JSON.stringify({

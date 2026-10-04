@@ -311,3 +311,34 @@ executables, missing Stop support and exclusive generation-fenced launch
 reservations. These are native boundary tests. Ordinary agent launch/approval,
 real sign-in, packaged clean-machine behavior, broader DOM input and managed
 upload/download acceptance remain outstanding.
+
+## Native slide pictures
+
+The October 4 picture authoring check created a real two-slide PPTX through the
+native authoring/staging path. An independent `python-pptx`/Pillow reader verified
+the picture relationships, literal alt text, decoded pixels, metadata removal,
+aspect ratios and slide bounds, then edited text and saved/reopened the deck.
+The source PNG and original deck digests stayed unchanged. Native tests also
+cover JPEG EXIF orientation, corrupt/oversized rasters, source-digest changes,
+workspace traversal/junctions, files open for writing, unknown fields, dense
+slides, snapshot preservation and Stop preventing placement.
+
+The actual Office preview component displayed the native projection at 1280 and
+390 pixels, switched slides and preserved image proportions without overflow.
+Remote/linked, cropped, hidden, transformed and corrupt pictures are omitted;
+native regressions exercise the eight-picture and 4 MB thumbnail budgets.
+Model-facing Office replies contain an omission notice and no thumbnail payload.
+This is native generation, independent library round-trip and component QA,
+without a live provider, PowerPoint rendering or packaged application acceptance.
+
+To emit the same native fixture for independent inspection, set a disposable
+output directory explicitly:
+
+```powershell
+$env:MIVLET_OFFICE_QA_OUTPUT = 'C:/path/to/disposable/office-qa'
+cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml picture_deck_is_editable_passive --lib -- --nocapture
+Remove-Item Env:MIVLET_OFFICE_QA_OUTPUT
+```
+
+The test emits `pictures.pptx`, `pictures-preview.json` and `picture-source.png`.
+Fixtures do not establish live provider or arbitrary Office-file compatibility.

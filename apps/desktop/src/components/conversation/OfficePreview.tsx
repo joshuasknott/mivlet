@@ -55,6 +55,8 @@ export function OfficePreview({
             )
           ) : block.type === "chart" ? (
             <PreviewChart key={index} chart={block} />
+          ) : block.type === "image" ? (
+            <PreviewImage key={index} image={block} />
           ) : (
             <PreviewTable
               key={index}
@@ -72,6 +74,36 @@ export function OfficePreview({
         </p>
       )}
     </div>
+  );
+}
+
+type OfficeImage = Extract<
+  LocalComputerOfficePreview["sections"][number]["blocks"][number],
+  { type: "image" }
+>;
+
+function PreviewImage({ image }: { image: OfficeImage }) {
+  const valid =
+    image.dataUrl.length <= 1_500_000 &&
+    /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/.test(image.dataUrl) &&
+    Number.isInteger(image.width) &&
+    Number.isInteger(image.height) &&
+    image.width > 0 &&
+    image.height > 0 &&
+    image.width <= 512 &&
+    image.height <= 512;
+  if (!valid) return <p>Open the file to view this image.</p>;
+  return (
+    <figure className="office-preview__image">
+      <img
+        src={image.dataUrl}
+        alt={image.alt}
+        width={image.width}
+        height={image.height}
+        loading="lazy"
+        decoding="async"
+      />
+    </figure>
   );
 }
 

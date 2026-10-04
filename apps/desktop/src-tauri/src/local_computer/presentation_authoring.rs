@@ -1,7 +1,10 @@
-//! Declarative, editable 16:9 slides. No scripts, links, media or Office automation.
-use super::office_authoring::{escape_xml, root_relationships, validate_document_text, zip_files};
+//! Declarative, editable 16:9 slides with native raster snapshots. No external
+//! assets, scripts, active media or Office automation.
+use super::office_authoring::{escape_xml, root_relationships, validate_document_text, zip_bytes};
+use super::office_images::{self, ImageSource, Picture};
 use serde::Deserialize;
 use serde_json::Value;
+use std::path::Path;
 
 const A: &str = "http://schemas.openxmlformats.org/drawingml/2006/main";
 const P: &str = "http://schemas.openxmlformats.org/presentationml/2006/main";
@@ -32,14 +35,27 @@ struct Slide {
     body: Option<String>,
     #[serde(default)]
     bullets: Vec<String>,
+    image: Option<ImageSource>,
 }
 
-pub(super) fn create(arguments: &Value) -> Result<(String, Vec<u8>), String> {
+pub(super) fn create(
+    arguments: &Value,
+    workspace_root: &Path,
+) -> Result<(String, Vec<u8>), String> {
     let request: Presentation = serde_json::from_value(arguments.clone())
         .map_err(|_| "Presentation fields do not match the bounded authoring contract.")?;
     validate_document_text(&request.title, 160)?;
     if request.slides.is_empty() || request.slides.len() > 30 {
         return Err("A presentation needs between 1 and 30 slides.".into());
+    }
+    if request
+        .slides
+        .iter()
+        .filter(|slide| slide.image.is_some())
+        .count()
+        > 8
+    {
+        return Err("Use at most eight images in one presentation.".into());
     }
     for slide in &request.slides {
         validate_document_text(&slide.title, 120)?;
@@ -60,14 +76,39 @@ pub(super) fn create(arguments: &Value) -> Result<(String, Vec<u8>), String> {
             .chain(slide.bullets.iter())
             .map(|text| {
                 text.lines()
-                    .map(|line| line.chars().count().max(1).div_ceil(60))
+                    .map(|line| {
+                        line.chars()
+                            .count()
+                            .max(1)
+                            .div_ceil(if slide.image.is_some() { 28 } else { 60 })
+                    })
                     .sum::<usize>()
                     + 1
             })
             .sum::<usize>();
-        if lines > 17 {
+        if lines > if slide.image.is_some() { 12 } else { 17 } {
             return Err("This slide is too dense. Split its content into another slide.".into());
         }
+    }
+    let pictures = request
+        .slides
+        .iter()
+        .map(|slide| {
+            slide
+                .image
+                .as_ref()
+                .map(|source| office_images::snapshot(source, workspace_root))
+                .transpose()
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if pictures
+        .iter()
+        .flatten()
+        .map(|picture| picture.bytes.len())
+        .sum::<usize>()
+        > 16 * 1024 * 1024
+    {
+        return Err("Presentation images must total at most 16 MB after normalization.".into());
     }
     let mut content_types = String::from("<Types xmlns=\"http://schemas.openxmlformats.org/package/2006/content-types\"><Default Extension=\"rels\" ContentType=\"application/vnd.openxmlformats-package.relationships+xml\"/><Default Extension=\"xml\" ContentType=\"application/xml\"/><Override PartName=\"/ppt/presentation.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.presentation.main+xml\"/><Override PartName=\"/ppt/slideMasters/slideMaster1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideMaster+xml\"/><Override PartName=\"/ppt/slideLayouts/slideLayout1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.presentationml.slideLayout+xml\"/><Override PartName=\"/ppt/theme/theme1.xml\" ContentType=\"application/vnd.openxmlformats-officedocument.theme+xml\"/></Types>");
     let mut slide_ids = String::new();
@@ -77,8 +118,14 @@ pub(super) fn create(arguments: &Value) -> Result<(String, Vec<u8>), String> {
         "slideMasters/slideMaster1.xml".into(),
     )];
     content_types = content_types.replace("</Types>", "<Override PartName=\"/docProps/core.xml\" ContentType=\"application/vnd.openxmlformats-package.core-properties+xml\"/></Types>");
+    if pictures.iter().any(Option::is_some) {
+        content_types = content_types.replace(
+            "</Types>",
+            "<Default Extension=\"png\" ContentType=\"image/png\"/></Types>",
+        );
+    }
     let root_rels = root_relationships("ppt/presentation.xml").replace("</Relationships>", "<Relationship Id=\"rId2\" Type=\"http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties\" Target=\"docProps/core.xml\"/></Relationships>");
-    let mut parts = vec![
+    let mut parts: Vec<(String, String)> = vec![
         (
             "_rels/.rels".into(),
             root_rels,
@@ -119,7 +166,7 @@ pub(super) fn create(arguments: &Value) -> Result<(String, Vec<u8>), String> {
         content_types = content_types.replace("</Types>", &format!("{entry}</Types>"));
         parts.push((
             format!("ppt/slides/slide{number}.xml"),
-            slide_xml(slide, number, &request.theme),
+            slide_xml(slide, number, &request.theme, pictures[index].as_ref()),
         ));
         parts.push((
             format!("ppt/slides/_rels/slide{number}.xml.rels"),
@@ -129,6 +176,10 @@ pub(super) fn create(arguments: &Value) -> Result<(String, Vec<u8>), String> {
                 "../slideLayouts/slideLayout1.xml".into(),
             )]),
         ));
+        if pictures[index].is_some() {
+            let relationships = parts.last_mut().unwrap();
+            relationships.1 = relationships.1.replace("</Relationships>", &format!("<Relationship Id=\"rId2\" Type=\"{R}/image\" Target=\"../media/image{number}.png\"/></Relationships>"));
+        }
     }
     parts.push(("[Content_Types].xml".into(), content_types));
     parts.push((
@@ -136,7 +187,16 @@ pub(super) fn create(arguments: &Value) -> Result<(String, Vec<u8>), String> {
         rels(&relationships),
     ));
     parts.push(("ppt/presentation.xml".into(), format!("<p:presentation xmlns:a=\"{A}\" xmlns:r=\"{R}\" xmlns:p=\"{P}\"><p:sldMasterIdLst><p:sldMasterId id=\"2147483648\" r:id=\"rId1\"/></p:sldMasterIdLst><p:sldIdLst>{slide_ids}</p:sldIdLst><p:sldSz cx=\"12192000\" cy=\"6858000\" type=\"screen16x9\"/><p:notesSz cx=\"6858000\" cy=\"9144000\"/><p:defaultTextStyle><a:defPPr><a:defRPr lang=\"en-US\"/></a:defPPr></p:defaultTextStyle></p:presentation>")));
-    Ok((request.path, zip_files(parts)?))
+    let mut parts = parts
+        .into_iter()
+        .map(|(path, xml)| (path, xml.into_bytes()))
+        .collect::<Vec<_>>();
+    for (index, picture) in pictures.into_iter().enumerate() {
+        if let Some(picture) = picture {
+            parts.push((format!("ppt/media/image{}.png", index + 1), picture.bytes));
+        }
+    }
+    Ok((request.path, zip_bytes(parts)?))
 }
 
 fn rels(items: &[(String, &str, String)]) -> String {
@@ -173,10 +233,34 @@ fn paragraph(text: &str, size: usize, color: &str, bullet: bool, bold: bool) -> 
 }
 
 fn shape(id: usize, name: &str, y: usize, height: usize, paragraphs: &str) -> String {
-    format!("<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"685800\" y=\"{y}\"/><a:ext cx=\"10820400\" cy=\"{height}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap=\"square\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\"><a:normAutofit/></a:bodyPr><a:lstStyle/>{paragraphs}</p:txBody></p:sp>")
+    text_shape(id, name, (685800, y, 10820400, height), paragraphs)
 }
 
-fn slide_xml(slide: &Slide, number: usize, theme: &Theme) -> String {
+fn text_shape(
+    id: usize,
+    name: &str,
+    (x, y, width, height): (usize, usize, usize, usize),
+    paragraphs: &str,
+) -> String {
+    format!("<p:sp><p:nvSpPr><p:cNvPr id=\"{id}\" name=\"{name}\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr><p:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{width}\" cy=\"{height}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom><a:noFill/><a:ln><a:noFill/></a:ln></p:spPr><p:txBody><a:bodyPr wrap=\"square\" lIns=\"0\" tIns=\"0\" rIns=\"0\" bIns=\"0\"><a:normAutofit/></a:bodyPr><a:lstStyle/>{paragraphs}</p:txBody></p:sp>")
+}
+
+fn picture_xml(picture: &Picture, alt: &str, has_text: bool) -> String {
+    let (x, max_width) = if has_text {
+        (5943600u64, 5562600u64)
+    } else {
+        (685800, 10820400)
+    };
+    let (y, max_height) = (1645920u64, 4434840u64);
+    // Contain, never crop or stretch. Geometry derives only from decoded pixels.
+    let width = max_width.min(max_height * u64::from(picture.width) / u64::from(picture.height));
+    let height = width * u64::from(picture.height) / u64::from(picture.width);
+    let x = x + (max_width - width) / 2;
+    let y = y + (max_height - height) / 2;
+    format!("<p:pic><p:nvPicPr><p:cNvPr id=\"5\" name=\"Picture\" descr=\"{}\"/><p:cNvPicPr><a:picLocks noChangeAspect=\"1\"/></p:cNvPicPr><p:nvPr/></p:nvPicPr><p:blipFill><a:blip r:embed=\"rId2\"/><a:stretch><a:fillRect/></a:stretch></p:blipFill><p:spPr><a:xfrm><a:off x=\"{x}\" y=\"{y}\"/><a:ext cx=\"{width}\" cy=\"{height}\"/></a:xfrm><a:prstGeom prst=\"rect\"><a:avLst/></a:prstGeom></p:spPr></p:pic>", escape_xml(alt))
+}
+
+fn slide_xml(slide: &Slide, number: usize, theme: &Theme, picture: Option<&Picture>) -> String {
     let (background, ink, muted) = match theme {
         Theme::Light => ("F7F8FA", "17212E", "566577"),
         Theme::Dark => ("17212E", "F7F8FA", "BCC9D8"),
@@ -199,7 +283,26 @@ fn slide_xml(slide: &Slide, number: usize, theme: &Theme) -> String {
     if body.is_empty() {
         body = "<a:p/>".into();
     }
-    let body = shape(3, "Content", 1645920, 4434840, &body);
+    let body = text_shape(
+        3,
+        "Content",
+        (
+            685800,
+            1645920,
+            if picture.is_some() { 4800600 } else { 10820400 },
+            4434840,
+        ),
+        &body,
+    );
+    let picture = picture
+        .map(|picture| {
+            picture_xml(
+                picture,
+                &slide.image.as_ref().unwrap().alt,
+                slide.body.is_some() || !slide.bullets.is_empty(),
+            )
+        })
+        .unwrap_or_default();
     let footer = shape(
         4,
         "Slide number",
@@ -207,7 +310,7 @@ fn slide_xml(slide: &Slide, number: usize, theme: &Theme) -> String {
         274320,
         &paragraph(&number.to_string(), 1100, muted, false, false),
     );
-    format!("<p:sld xmlns:a=\"{A}\" xmlns:r=\"{R}\" xmlns:p=\"{P}\"><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"{background}\"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree>{}{title}{body}{footer}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>", group())
+    format!("<p:sld xmlns:a=\"{A}\" xmlns:r=\"{R}\" xmlns:p=\"{P}\"><p:cSld><p:bg><p:bgPr><a:solidFill><a:srgbClr val=\"{background}\"/></a:solidFill><a:effectLst/></p:bgPr></p:bg><p:spTree>{}{title}{body}{picture}{footer}</p:spTree></p:cSld><p:clrMapOvr><a:masterClrMapping/></p:clrMapOvr></p:sld>", group())
 }
 
 fn master() -> String {
@@ -249,7 +352,7 @@ mod tests {
 
     #[test]
     fn slides_are_editable_passive_packages_with_escaped_text_and_real_bullets() {
-        let (_, bytes) = create(&serde_json::json!({"path":"deck.pptx","title":"Review","theme":"dark","slides":[{"title":"A & B","body":"<untrusted>\nSecond line","bullets":["One","Two"]}]})).unwrap();
+        let (_, bytes) = create(&serde_json::json!({"path":"deck.pptx","title":"Review","theme":"dark","slides":[{"title":"A & B","body":"<untrusted>\nSecond line","bullets":["One","Two"]}]}), Path::new(".")).unwrap();
         assert!(super::super::artifacts::check_office(&bytes, "pptx").unwrap());
         let mut zip = zip::ZipArchive::new(std::io::Cursor::new(&bytes)).unwrap();
         let mut slide = String::new();
@@ -289,7 +392,8 @@ mod tests {
             serde_json::json!({"title":"Title", "bullets":vec!["bullet";6]}),
         ] {
             assert!(create(
-                &serde_json::json!({"path":"deck.pptx","title":"Review","slides":[slide]})
+                &serde_json::json!({"path":"deck.pptx","title":"Review","slides":[slide]}),
+                Path::new(".")
             )
             .is_err());
         }
