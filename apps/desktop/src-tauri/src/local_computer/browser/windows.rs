@@ -5,7 +5,7 @@ use std::{
     os::windows::{
         ffi::{OsStrExt, OsStringExt},
         fs::OpenOptionsExt,
-        io::AsRawHandle,
+        io::{AsRawHandle, FromRawHandle},
     },
     path::{Path, PathBuf},
 };
@@ -23,6 +23,84 @@ use windows_sys::Win32::{
         WindowsAndMessaging::SW_SHOWNOACTIVATE,
     },
 };
+
+#[path = "helper.rs"]
+mod helper;
+#[path = "pipes.rs"]
+mod pipes;
+
+pub(super) fn run_helper(arguments: &[std::ffi::OsString]) -> Result<(), String> {
+    helper::run(arguments)
+}
+
+#[cfg(debug_assertions)]
+pub(super) fn acceptance() -> Result<(), String> {
+    if std::env::var("MIVLET_OWNED_BROWSER_ACCEPTANCE").as_deref() != Ok("1") {
+        return Err(
+            "Set MIVLET_OWNED_BROWSER_ACCEPTANCE=1 for this disposable browser check.".into(),
+        );
+    }
+    let root = tempfile::Builder::new()
+        .prefix("mivlet-owned-browser-qa-")
+        .tempdir()
+        .map_err(|_| "QA storage unavailable.")?;
+    let profile = root.path().join("profile");
+    std::fs::create_dir(&profile).map_err(|_| "QA profile unavailable.")?;
+    let authority = super::super::authority::ComputerAuthority::load_with_plugins(
+        &root.path().join("authority"),
+        std::sync::Arc::new(std::sync::atomic::AtomicU8::new(
+            super::super::plugins::COMPUTER,
+        )),
+    )?;
+    let ticket = authority.begin_agent(1)?;
+    let mut process = BrowserProcess::launch(
+        installed_browser()?,
+        &profile,
+        vec![pin_directory(&profile)?],
+        &ticket,
+        &|| Ok(()),
+        &|_| Ok(()),
+    )?;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    let window = loop {
+        if let Some(window) = process.ready_window()? {
+            break window;
+        }
+        if std::time::Instant::now() >= deadline {
+            return Err("The disposable browser window did not become ready.".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    if profile.join("DevToolsActivePort").exists() {
+        return Err("The browser exposed a TCP debugging endpoint.".into());
+    }
+    let runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/cua-driver");
+    let driver =
+        super::super::cua::Driver::start(&runtime, (window.identity.pid, window.identity.hwnd))?;
+    driver.stop();
+    if !driver.wait_stopped(std::time::Duration::from_secs(5)) || !process.alive() {
+        return Err("Driver Stop did not preserve the owned browser.".into());
+    }
+    process
+        ._pipe
+        .as_mut()
+        .ok_or("The browser pipe was not retained.")?
+        .verify(&|| ticket.check())?;
+    let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, process.pid) };
+    if handle.is_null() {
+        return Err("The owned browser disappeared before cleanup.".into());
+    }
+    let held = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle) };
+    let product = process.product;
+    drop(process);
+    if unsafe { WaitForSingleObject(held.as_raw_handle(), 5000) }
+        != windows_sys::Win32::Foundation::WAIT_OBJECT_0
+    {
+        return Err("The browser survived owner cleanup.".into());
+    }
+    eprintln!("Owned {product}: native pipe protocol ready without TCP; driver Stop preserved page and pipe; owner shutdown closed browser.");
+    Ok(())
+}
 
 fn wide(value: &std::ffi::OsStr) -> Vec<u16> {
     value.encode_wide().chain(Some(0)).collect()
@@ -284,10 +362,14 @@ fn environment() -> Vec<u16> {
 pub(super) struct BrowserProcess {
     // Integers wrap native handles so the manager can cross Tauri worker threads.
     process: usize,
-    job: usize,
+    job: std::sync::Arc<BrowserJob>,
+    main_thread: Option<std::os::windows::io::OwnedHandle>,
     pid: u32,
     _image: File,
     _profile: Vec<File>,
+    _browser_process: Option<std::os::windows::io::OwnedHandle>,
+    _browser_image: Option<File>,
+    _pipe: Option<pipes::ControlPipe>,
     product: &'static str,
 }
 
@@ -296,7 +378,10 @@ impl BrowserProcess {
         self.product
     }
     pub(super) fn alive(&self) -> bool {
-        unsafe { WaitForSingleObject(self.process as HANDLE, 0) == WAIT_TIMEOUT }
+        (unsafe { WaitForSingleObject(self.process as HANDLE, 0) == WAIT_TIMEOUT })
+            && self._browser_process.as_ref().is_none_or(|process| unsafe {
+                WaitForSingleObject(process.as_raw_handle(), 0) == WAIT_TIMEOUT
+            })
     }
     pub(super) fn ready_window(
         &self,
@@ -312,33 +397,45 @@ impl BrowserProcess {
         image: BrowserImage,
         profile: &Path,
         pins: Vec<File>,
+        ticket: &super::super::authority::OperationTicket,
+        environment_check: &dyn Fn() -> Result<(), String>,
+        register: &dyn Fn(std::sync::Arc<dyn super::LaunchStop>) -> Result<(), String>,
     ) -> Result<Self, String> {
-        let mut profile_argument = std::ffi::OsString::from("--user-data-dir=");
-        profile_argument.push(profile);
-        let args: Vec<std::ffi::OsString> = [
-            "--no-first-run",
-            "--no-default-browser-check",
-            "--disable-sync",
-            "--disable-extensions",
-            "--disable-background-networking",
-            "--disable-component-update",
-            "--disable-default-apps",
-            "--hide-crash-restore-bubble",
-            "--new-window",
-            "about:blank",
-        ]
-        .into_iter()
-        .map(Into::into)
-        .chain(Some(profile_argument))
-        .collect();
-        let mut process = Self::spawn(image, &args, profile)?;
-        process._profile = pins;
-        Ok(process)
+        helper::launch(image, profile, pins, ticket, environment_check, register)
     }
+    #[cfg(test)]
     fn spawn(
         image: BrowserImage,
         args: &[std::ffi::OsString],
         directory: &Path,
+    ) -> Result<Self, String> {
+        Self::spawn_inheriting(image, args, directory, &[])
+    }
+    fn spawn_inheriting(
+        image: BrowserImage,
+        args: &[std::ffi::OsString],
+        directory: &Path,
+        inherited: &[HANDLE],
+    ) -> Result<Self, String> {
+        let mut process = Self::prepare(image, args, directory, inherited)?;
+        process.resume()?;
+        Ok(process)
+    }
+    fn resume(&mut self) -> Result<(), String> {
+        let thread = self
+            .main_thread
+            .take()
+            .ok_or("The browser helper already resumed.")?;
+        if unsafe { ResumeThread(thread.as_raw_handle()) } == u32::MAX {
+            return Err("The private browser launch was cancelled before resume.".into());
+        }
+        Ok(())
+    }
+    fn prepare(
+        image: BrowserImage,
+        args: &[std::ffi::OsString],
+        directory: &Path,
+        inherited: &[HANDLE],
     ) -> Result<Self, String> {
         let application = wide(image.path.as_os_str());
         let directory = wide(directory.as_os_str());
@@ -352,6 +449,11 @@ impl BrowserProcess {
             return Err("The browser launch is too large.".into());
         }
         let mut environment = environment();
+        let attributes = if inherited.is_empty() {
+            None
+        } else {
+            Some(HandleList::new(inherited)?)
+        };
         unsafe {
             let job = CreateJobObjectW(std::ptr::null(), std::ptr::null());
             if job.is_null() {
@@ -370,10 +472,20 @@ impl BrowserProcess {
                 return Err("Mivlet could not bind browser lifetime to this account.".into());
             }
             let startup = STARTUPINFOW {
-                cb: std::mem::size_of::<STARTUPINFOW>() as u32,
+                cb: if attributes.is_some() {
+                    std::mem::size_of::<STARTUPINFOEXW>()
+                } else {
+                    std::mem::size_of::<STARTUPINFOW>()
+                } as u32,
                 dwFlags: STARTF_USESHOWWINDOW,
                 wShowWindow: SW_SHOWNOACTIVATE as u16,
                 ..Default::default()
+            };
+            let extended = STARTUPINFOEXW {
+                StartupInfo: startup,
+                lpAttributeList: attributes
+                    .as_ref()
+                    .map_or(std::ptr::null_mut(), |list| list.pointer()),
             };
             let mut info = PROCESS_INFORMATION::default();
             if CreateProcessW(
@@ -381,11 +493,18 @@ impl BrowserProcess {
                 command.as_mut_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
-                0,
-                CREATE_SUSPENDED | CREATE_UNICODE_ENVIRONMENT,
+                i32::from(attributes.is_some()),
+                CREATE_NO_WINDOW
+                    | CREATE_SUSPENDED
+                    | CREATE_UNICODE_ENVIRONMENT
+                    | if attributes.is_some() {
+                        EXTENDED_STARTUPINFO_PRESENT
+                    } else {
+                        0
+                    },
                 environment.as_mut_ptr().cast(),
                 directory.as_ptr(),
-                &startup,
+                &extended.StartupInfo,
                 &mut info,
             ) == 0
             {
@@ -393,9 +512,7 @@ impl BrowserProcess {
                 return Err("Mivlet could not start its private browser.".into());
             }
             // No child can run/fork before it belongs to the account-owned job.
-            if AssignProcessToJobObject(job, info.hProcess) == 0
-                || ResumeThread(info.hThread) == u32::MAX
-            {
+            if AssignProcessToJobObject(job, info.hProcess) == 0 {
                 TerminateProcess(info.hProcess, 1);
                 CloseHandle(info.hThread);
                 CloseHandle(info.hProcess);
@@ -404,23 +521,90 @@ impl BrowserProcess {
                     "Mivlet could not supervise the private browser; it was closed.".into(),
                 );
             }
-            CloseHandle(info.hThread);
             Ok(Self {
                 process: info.hProcess as usize,
-                job: job as usize,
+                job: std::sync::Arc::new(BrowserJob(
+                    std::os::windows::io::OwnedHandle::from_raw_handle(job),
+                )),
+                main_thread: Some(std::os::windows::io::OwnedHandle::from_raw_handle(
+                    info.hThread,
+                )),
                 pid: info.dwProcessId,
                 _image: image.file,
                 _profile: Vec::new(),
+                _browser_process: None,
+                _browser_image: None,
+                _pipe: None,
                 product: image.product,
             })
+        }
+    }
+}
+
+struct HandleList {
+    storage: Vec<usize>,
+    _handles: Vec<HANDLE>,
+}
+impl HandleList {
+    fn pointer(&self) -> LPPROC_THREAD_ATTRIBUTE_LIST {
+        self.storage.as_ptr() as _
+    }
+    fn new(handles: &[HANDLE]) -> Result<Self, String> {
+        let mut bytes = 0;
+        unsafe {
+            InitializeProcThreadAttributeList(std::ptr::null_mut(), 1, 0, &mut bytes);
+        }
+        if bytes == 0 || bytes > 65536 {
+            return Err("The browser handle manifest is unavailable.".into());
+        }
+        let mut list = Self {
+            storage: vec![0; bytes.div_ceil(std::mem::size_of::<usize>())],
+            _handles: handles.to_vec(),
+        };
+        unsafe {
+            if InitializeProcThreadAttributeList(list.pointer(), 1, 0, &mut bytes) == 0 {
+                list.storage.clear();
+                return Err("The browser handle manifest is unavailable.".into());
+            }
+            if UpdateProcThreadAttribute(
+                list.pointer(),
+                0,
+                PROC_THREAD_ATTRIBUTE_HANDLE_LIST as usize,
+                list._handles.as_mut_ptr().cast(),
+                std::mem::size_of_val(list._handles.as_slice()),
+                std::ptr::null_mut(),
+                std::ptr::null(),
+            ) == 0
+            {
+                return Err("The browser handle manifest failed its closed-set check.".into());
+            }
+        }
+        Ok(list)
+    }
+}
+impl Drop for HandleList {
+    fn drop(&mut self) {
+        if !self.storage.is_empty() {
+            unsafe {
+                DeleteProcThreadAttributeList(self.pointer());
+            }
         }
     }
 }
 impl Drop for BrowserProcess {
     fn drop(&mut self) {
         unsafe {
-            CloseHandle(self.job as HANDLE);
+            TerminateJobObject(self.job.0.as_raw_handle(), 1);
             CloseHandle(self.process as HANDLE);
+        }
+    }
+}
+
+struct BrowserJob(std::os::windows::io::OwnedHandle);
+impl super::LaunchStop for BrowserJob {
+    fn stop(&self) {
+        unsafe {
+            TerminateJobObject(self.0.as_raw_handle(), 1);
         }
     }
 }
@@ -446,64 +630,82 @@ mod tests {
     use std::os::windows::ffi::OsStringExt;
 
     #[test]
+    fn native_stop_kills_the_suspended_preparation_before_its_main_thread_can_run() {
+        let root = tempfile::tempdir().unwrap();
+        let path = std::env::current_exe().unwrap();
+        let image = BrowserImage {
+            file: File::open(&path).unwrap(),
+            path,
+            product: "owned suspended fixture",
+        };
+        let mut process =
+            BrowserProcess::prepare(image, &["--list".into()], root.path(), &[]).unwrap();
+        let authority =
+            crate::local_computer::authority::ComputerAuthority::load(root.path()).unwrap();
+        let ticket = authority.begin_agent(1).unwrap();
+        let control = crate::local_computer::control::NativeControl::default();
+        let guard = control
+            .reserve_browser_launch(
+                "workspace-one",
+                "agent-one",
+                1,
+                "suspended-fixture",
+                authority,
+            )
+            .unwrap();
+        guard.attach(process.job.clone()).unwrap();
+        assert!(process.alive());
+        control.stop_scope("workspace-one", "agent-one", 1, "Stop before resume");
+        assert_eq!(
+            unsafe { WaitForSingleObject(process.process as HANDLE, 2000) },
+            windows_sys::Win32::Foundation::WAIT_OBJECT_0
+        );
+        let _ = process.resume();
+        assert!(!process.alive());
+        assert!(ticket.check().is_err());
+    }
+
+    #[test]
     #[ignore = "Opens one disposable private installed browser; explicit native acceptance only."]
     fn native_owned_browser_acceptance() {
         assert_eq!(
             std::env::var("MIVLET_OWNED_BROWSER_ACCEPTANCE").as_deref(),
             Ok("1")
         );
-        let profile = tempfile::Builder::new()
-            .prefix("mivlet-owned-browser-qa-")
-            .tempdir()
-            .unwrap();
-        let image =
-            installed_browser().expect("a protected installed Chrome/Edge and trusted publisher");
-        let product = image.product;
-        let process = BrowserProcess::launch(
-            image,
-            profile.path(),
-            vec![pin_directory(profile.path()).unwrap()],
-        )
-        .unwrap();
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
-        let window = loop {
-            if let Some(window) = process.ready_window().unwrap() {
-                break window;
+        let target = std::env::var_os("CARGO_TARGET_DIR")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target"));
+        let executable = target.join("debug/mivlet-desktop.exe");
+        assert!(
+            executable.is_file(),
+            "Build the current native desktop executable before this acceptance."
+        );
+        let mut command = std::process::Command::new(executable);
+        command
+            .arg("--check-owned-browser")
+            .env_clear()
+            .env("MIVLET_OWNED_BROWSER_ACCEPTANCE", "1");
+        for name in [
+            "SystemRoot",
+            "WINDIR",
+            "TEMP",
+            "TMP",
+            "LOCALAPPDATA",
+            "APPDATA",
+            "USERPROFILE",
+        ] {
+            if let Some(value) = std::env::var_os(name) {
+                command.env(name, value);
             }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "private browser window did not become ready"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(50));
-        };
-        assert!(
-            !profile.path().join("DevToolsActivePort").exists(),
-            "owned browser must not expose a debugging endpoint"
-        );
-        let runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/cua-driver");
-        let driver = crate::local_computer::cua::Driver::start(
-            &runtime,
-            (window.identity.pid, window.identity.hwnd),
-        )
-        .unwrap();
-        assert!(driver.alive());
-        driver.stop();
-        assert!(driver.wait_stopped(std::time::Duration::from_secs(5)));
-        assert!(
-            process.alive(),
-            "driver Stop killed the separately owned browser"
-        );
-        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, 0, process.pid) };
-        assert!(!handle.is_null());
-        drop(process);
-        let result = unsafe { WaitForSingleObject(handle, 5000) };
-        unsafe {
-            CloseHandle(handle);
         }
-        assert_eq!(result, windows_sys::Win32::Foundation::WAIT_OBJECT_0);
-        eprintln!("Owned {product}: private window ready without a debugging endpoint, driver Stop preserved it, owner shutdown closed it.");
+        let result = command.output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        eprintln!("{}", String::from_utf8_lossy(&result.stderr));
     }
-
     #[test]
     fn launch_arguments_preserve_spaces_quotes_and_trailing_slashes_without_a_shell() {
         let as_text =

@@ -165,7 +165,17 @@ Native code accepts only protected system installations, pins the executable,
 checks its Authenticode publisher, clears inherited provider/shell configuration,
 and assigns a suspended process to an account-owned job before allowing it to run.
 Root, scope and profile directory handles prevent replacement during its lifetime.
-No debugging TCP endpoint is enabled. The profile is independent of the user's
+No debugging TCP endpoint is enabled. A separate native helper runs before
+account/provider initialization and verifies its actual parent and executable.
+The main app's pipe handles are never inheritable; the helper pulls only its
+parent-owned local pipe clients and passes exactly two handles to Chromium.
+The account-owned job is attached to launch Stop while the helper is suspended,
+before it can start Chrome. Successful publication detaches this temporary Stop
+link, leaving browser ownership with the account. Parent I/O is overlapped and
+cancellable without holding the authority or response lock. A bounded, fixed
+`Browser.getVersion` probe proves the private pipe protocol before publication;
+no CDP methods or JavaScript are exposed to agents. The pipe stays native-owned
+across input-driver Stop. The profile is independent of the user's
 usual browser profile, but the window still shares the interactive Windows session.
 The published browser outlives the input driver and Stop for human takeover;
 unpublished cancelled launches are closed, and account/app shutdown closes the

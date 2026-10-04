@@ -7,6 +7,22 @@ fn main() {
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
         #[cfg(debug_assertions)]
+        Some("--check-owned-browser") => {
+            if let Err(error) = mivlet_desktop_lib::check_owned_browser() {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+            return;
+        }
+        Some("--mivlet-browser-child") => {
+            if !mivlet_desktop_lib::run_browser_child(
+                &std::env::args_os().skip(2).collect::<Vec<_>>(),
+            ) {
+                std::process::exit(2);
+            }
+            return;
+        }
+        #[cfg(debug_assertions)]
         Some("--check-connectors") => {
             mivlet_desktop_lib::check_connectors();
             return;

@@ -221,13 +221,17 @@ The opt-in native acceptance opened the actual protected, publisher-verified
 Google Chrome installation with a disposable private profile. It found the
 exact process-owned visible window and confirmed that no `DevToolsActivePort`
 was created. Starting and stopping the pinned Cua driver left that browser
-alive; releasing its account-owned process job closed it. The test made no
+alive; releasing its account-owned process job closed it. The subsequent sealed
+pipe acceptance used the actual native desktop executable, verified the fixed
+browser protocol before and after driver Stop, and confirmed owner cleanup.
+The test made no
 website requests, entered no credentials, and did not exercise a provider turn.
 
 Repeat this check only in a Windows interactive session:
 
 ```powershell
 $env:MIVLET_OWNED_BROWSER_ACCEPTANCE = '1'
+cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml --bin mivlet-desktop
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml native_owned_browser_acceptance --lib -- --ignored --nocapture
 Remove-Item Env:MIVLET_OWNED_BROWSER_ACCEPTANCE
 ```

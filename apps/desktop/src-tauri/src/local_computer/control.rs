@@ -71,10 +71,46 @@ struct BrowserLaunch {
     request: String,
     identity: Arc<()>,
     authority: Arc<ComputerAuthority>,
+    preparing: Option<Arc<dyn super::browser::LaunchStop>>,
 }
 pub(super) struct BrowserLaunchGuard<'a> {
     control: &'a NativeControl,
     identity: Arc<()>,
+}
+impl BrowserLaunchGuard<'_> {
+    pub(super) fn attach(&self, job: Arc<dyn super::browser::LaunchStop>) -> Result<(), String> {
+        let mut inner = self.control.inner.lock().map_err(|_| STALE)?;
+        let launch = inner
+            .launching
+            .as_mut()
+            .filter(|launch| Arc::ptr_eq(&launch.identity, &self.identity))
+            .ok_or(STALE)?;
+        launch.authority.check_generation(launch.key.generation)?;
+        if launch.preparing.is_some() {
+            return Err(STALE.into());
+        }
+        launch.preparing = Some(job);
+        Ok(())
+    }
+    pub(super) fn publish<T>(
+        &self,
+        ticket: OperationTicket,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        let mut inner = self.control.inner.lock().map_err(|_| STALE)?;
+        if !inner
+            .launching
+            .as_ref()
+            .is_some_and(|launch| Arc::ptr_eq(&launch.identity, &self.identity))
+        {
+            return Err(STALE.into());
+        }
+        ticket.commit(|| {
+            let result = operation()?;
+            inner.launching.as_mut().ok_or(STALE)?.preparing = None;
+            Ok(result)
+        })
+    }
 }
 impl Drop for BrowserLaunchGuard<'_> {
     fn drop(&mut self) {
@@ -195,6 +231,7 @@ impl NativeControl {
             request: request.into(),
             identity: identity.clone(),
             authority,
+            preparing: None,
         });
         inner.message = None;
         Ok(BrowserLaunchGuard {
@@ -327,6 +364,9 @@ impl NativeControl {
     pub(super) fn stop(&self, message: &str) {
         if let Ok(mut inner) = self.inner.lock() {
             if let Some(launch) = inner.launching.take() {
+                if let Some(job) = launch.preparing {
+                    job.stop();
+                }
                 launch.authority.revoke_and_drain_later();
             }
             if let Some(pending) = inner.pending.take() {
@@ -348,6 +388,9 @@ impl NativeControl {
                     && launch.key.generation == generation
             }) {
                 if let Some(launch) = inner.launching.take() {
+                    if let Some(job) = launch.preparing {
+                        job.stop();
+                    }
                     launch.authority.revoke_and_drain_later();
                 }
                 inner.message = Some(message.into());

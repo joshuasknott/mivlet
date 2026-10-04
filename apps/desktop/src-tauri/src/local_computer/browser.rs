@@ -11,6 +11,10 @@ use std::{collections::HashMap, sync::Mutex};
 #[path = "browser/windows.rs"]
 mod platform;
 
+pub(super) trait LaunchStop: Send + Sync {
+    fn stop(&self);
+}
+
 #[derive(Default)]
 pub(super) struct BrowserManager {
     closing: AtomicBool,
@@ -95,14 +99,21 @@ pub(crate) fn open(
             return Err("The browser profile escaped native custody.".into());
         }
         pins.push(platform::pin_directory(&profile)?);
-        let process = ticket.with_current(|| {
-            computers.ensure_open()?;
-            crate::account_session::ensure_current()?;
-            if computers.browsers.closing.load(Ordering::Acquire) {
-                return Err("This account's browsers are closing.".into());
-            }
-            platform::BrowserProcess::launch(image, &profile, pins)
-        })?;
+        let process = platform::BrowserProcess::launch(
+            image,
+            &profile,
+            pins,
+            &ticket,
+            &|| {
+                computers.ensure_open()?;
+                crate::account_session::ensure_current()?;
+                if computers.browsers.closing.load(Ordering::Acquire) {
+                    return Err("This account's browsers are closing.".into());
+                }
+                Ok(())
+            },
+            &|job| _launch.attach(job),
+        )?;
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         loop {
             ticket.check()?;
@@ -118,7 +129,7 @@ pub(crate) fn open(
         }
         let product = process.product();
         // A transition after launch discards the process rather than publishing it.
-        ticket.commit(|| {
+        _launch.publish(ticket, || {
             computers.ensure_open()?;
             crate::account_session::ensure_current()?;
             if computers.browsers.closing.load(Ordering::Acquire) {
@@ -127,6 +138,33 @@ pub(crate) fn open(
             processes.insert(scope.key, process);
             receipt(product, "opened")
         })
+    }
+}
+
+pub(crate) fn run_child(arguments: &[std::ffi::OsString]) -> bool {
+    #[cfg(windows)]
+    {
+        if !cfg!(target_arch = "x86_64") {
+            return false;
+        }
+        platform::run_helper(arguments).is_ok()
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = arguments;
+        false
+    }
+}
+
+#[cfg(debug_assertions)]
+pub(crate) fn check_owned_browser() -> Result<(), String> {
+    #[cfg(windows)]
+    {
+        platform::acceptance()
+    }
+    #[cfg(not(windows))]
+    {
+        Err("The owned browser check requires Windows.".into())
     }
 }
 
