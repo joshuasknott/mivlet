@@ -91,6 +91,36 @@ afterEach(() => {
 });
 
 describe("desktop MCP transport", () => {
+  it("settles a closed STDIO tool promptly while native dispatch is still waiting", async () => {
+    let finish!: (lines: string[]) => void;
+    runtime.execute.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const transport = (await createDesktopMcpTransport("workspace-a", "files"))!;
+    const { proposal, prepared } = await transport.prepareToolCall("read", {});
+    const permit = await transport.authorizeToolCall(proposal, { request: prepared.approval, decision: "once", decidedAt: "now" });
+    const pending = transport.executeAuthorizedToolCall(proposal, permit.permitId);
+    const result = expect(pending).rejects.toThrow("closed");
+    await transport.close();
+    await result;
+    finish([]);
+    await Promise.resolve();
+    expect(runtime.close).toHaveBeenCalledOnce();
+  });
+
+  it("rejects a late remote response after closure without notifying subscribers", async () => {
+    let finish!: (lines: string[]) => void;
+    runtime.execute.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const transport = (await createDesktopRemoteMcpTransport("workspace-a", "remote-tools"))!;
+    const handler = vi.fn(); transport.subscribe(handler);
+    const { proposal, prepared } = await transport.prepareToolCall("read", {});
+    const permit = await transport.authorizeToolCall(proposal, { request: prepared.approval, decision: "once", decidedAt: "now" });
+    const pending = transport.executeAuthorizedToolCall(proposal, permit.permitId);
+    const result = expect(pending).rejects.toThrow("closed");
+    await transport.close();
+    finish(['{"jsonrpc":"2.0","id":"native-mcp-tool-1","result":{"content":[{"type":"text","text":"late success"}]}}']);
+    await result;
+    expect(handler).not.toHaveBeenCalled();
+  });
+
   it.each([false, true])("reads correlated text resources through a native permit (remote: %s)", async remote => {
     runtime.execute.mockImplementation(async (_proposal, _permit, id) => {
       const frame = JSON.stringify({ jsonrpc: "2.0", id, result: { contents: [{ uri: "note://brief", text: "Resource evidence", mimeType: "text/plain" }] } });

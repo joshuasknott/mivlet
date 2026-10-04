@@ -33,16 +33,23 @@ const MCP_PROTOCOL_VERSION: &str = "2025-11-25";
 
 struct McpChild {
     child: Child,
-    stdin: Option<mpsc::Sender<String>>,
+    stdin: Option<mpsc::Sender<QueuedMcpFrame>>,
     workspace_id: String,
     owner_subject: String,
     connection_id: String,
     connection_revision: i64,
     initialized: bool,
     discovery_current: bool,
+    stop: SessionStop,
 }
 
 type ProcessMap = HashMap<String, McpChild>;
+
+struct QueuedMcpFrame {
+    frame: String,
+    connection_id: String,
+    connection_revision: i64,
+}
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DiscoveryKind {
@@ -91,6 +98,7 @@ struct McpRemoteSession {
     initialized: bool,
     busy: bool,
     poll_busy: bool,
+    stop: SessionStop,
 }
 
 #[derive(Clone)]
@@ -477,6 +485,7 @@ pub struct ExecuteMcpToolCallRequest {
 }
 
 include!("mcp_process/configuration.rs");
+include!("mcp_process/cancellation.rs");
 include!("mcp_process/discovery.rs");
 include!("mcp_process/remote_transport.rs");
 include!("mcp_process/tests.rs");

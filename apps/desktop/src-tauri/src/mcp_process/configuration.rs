@@ -214,6 +214,7 @@ pub fn open_remote_mcp_session(
                 initialized: false,
                 busy: false,
                 poll_busy: false,
+                stop: SessionStop::new(),
             },
         );
     Ok(OpenedRemoteMcpSession {
@@ -504,7 +505,7 @@ pub async fn send_remote_mcp_frame(
         session.busy = true;
         session.clone()
     };
-    let result = post_remote_mcp_frame(&snapshot, &request.frame).await;
+    let result = snapshot.stop.run(post_remote_mcp_frame(&snapshot, &request.frame)).await;
     if let Ok(response) = &result {
         for frame in &response.frames {
             observe_discovery_frame(&request.session_id, frame);
@@ -595,8 +596,10 @@ pub async fn poll_remote_mcp_messages(
         session.poll_busy = true;
         session.clone()
     };
-    tokio::time::sleep(Duration::from_millis(snapshot.retry_after_ms)).await;
-    let result = get_remote_mcp_messages(&snapshot).await;
+    let result = snapshot.stop.run(async {
+        tokio::time::sleep(Duration::from_millis(snapshot.retry_after_ms)).await;
+        get_remote_mcp_messages(&snapshot).await
+    }).await;
     if let Ok(polled) = &result {
         for frame in &polled.frames {
             observe_discovery_frame(&request.session_id, frame);
@@ -638,12 +641,17 @@ pub async fn close_remote_mcp_session(request: CloseMcpProcessRequest) -> Result
             .get(&request.session_id)
             .ok_or_else(|| "This remote MCP session is unavailable.".to_string())?;
         require_remote_session_owner(session, &scope)?;
+        session.stop.close();
         sessions
             .remove(&request.session_id)
             .expect("session existed")
     };
     if let Ok(mut proofs) = discovery_proofs().lock() {
         proofs.remove(&request.session_id);
+    }
+    drain_session_audits(&request.session_id);
+    if let Ok(mut permits) = tool_permits().lock() {
+        permits.retain(|_, permit| permit.session_id != request.session_id);
     }
     if session.server_session_id.is_some() {
         delete_remote_mcp_session(&session).await?;
@@ -949,12 +957,12 @@ pub async fn execute_approved_mcp_tool_call(
             audit_key.clone(),
             PendingMcpAudit {
                 tool_name: request.proposal.tool_name,
-                connection_id: context.connection_id,
+                connection_id: context.connection_id.clone(),
                 actor: scope.internal_user_id.clone(),
             },
         );
     if context.transport == "stdio" {
-        let sender = (|| -> Result<mpsc::Sender<String>, String> {
+        let sender = (|| -> Result<mpsc::Sender<QueuedMcpFrame>, String> {
             let map = process_map()
                 .lock()
                 .map_err(|_| "Mivlet could not access local MCP sessions.".to_string())?;
@@ -975,7 +983,7 @@ pub async fn execute_approved_mcp_tool_call(
                 return Err(error);
             }
         };
-        if sender.send(frame).await.is_ok() {
+        if sender.send(QueuedMcpFrame { frame, connection_id: context.connection_id, connection_revision: context.connection_revision }).await.is_ok() {
             return Ok(Vec::new());
         }
         if let Some(pending) = pending_audits()
@@ -1008,7 +1016,7 @@ pub async fn execute_approved_mcp_tool_call(
             return Err(error);
         }
     };
-    let response = post_remote_mcp_frame(&snapshot, &frame).await;
+    let response = snapshot.stop.run(post_remote_mcp_frame(&snapshot, &frame)).await;
     if let Ok(mut sessions) = remote_sessions().lock() {
         if let Some(session) = sessions.get_mut(&request.proposal.session_id) {
             session.busy = false;
@@ -1107,17 +1115,31 @@ pub async fn spawn_mcp_process(
 
     let session_id = random_session_id()?;
     let channel = format!("{MCP_EVENT_CHANNEL_PREFIX}{session_id}");
-    let (stdin_tx, mut stdin_rx) = mpsc::channel::<String>(64);
+    let (stdin_tx, mut stdin_rx) = mpsc::channel::<QueuedMcpFrame>(64);
+    let stop = SessionStop::new();
+    let writer_stop = stop.clone();
+    let writer_session_id = session_id.clone();
+    let writer_app = app.clone();
+    let writer_channel = channel.clone();
     tokio::spawn(async move {
         let mut stdin = stdin;
-        while let Some(frame) = stdin_rx.recv().await {
-            if stdin.write_all(frame.as_bytes()).await.is_err()
-                || stdin.write_all(b"\n").await.is_err()
-                || stdin.flush().await.is_err()
-            {
+        while let Some(queued) = stdin_rx.recv().await {
+            if require_stdio_dispatch(&writer_session_id, &queued).is_err() {
+                drain_session_audits(&writer_session_id);
+                break;
+            }
+            let frame = &queued.frame;
+            if writer_stop.run(async {
+                stdin.write_all(frame.as_bytes()).await.map_err(|_| "The MCP input pipe closed.")?;
+                stdin.write_all(b"\n").await.map_err(|_| "The MCP input pipe closed.")?;
+                stdin.flush().await.map_err(|_| "The MCP input pipe closed.".to_string())
+            }).await.is_err() {
+                drain_session_audits(&writer_session_id);
                 break;
             }
         }
+        writer_stop.close();
+        let _ = writer_app.emit(&writer_channel, "[MCP-CLOSED]");
     });
 
     let stdout_app = app.clone();
@@ -1172,6 +1194,7 @@ pub async fn spawn_mcp_process(
                 connection_revision: connection.connection_revision,
                 initialized: false,
                 discovery_current: false,
+                stop,
             },
         );
     Ok(SpawnedMcpProcess {
@@ -1193,7 +1216,7 @@ pub async fn write_mcp_frame(request: WriteMcpFrameRequest) -> Result<(), String
         None,
         crate::authorized_scope::ScopeAccess::Read,
     )?;
-    let (sender, initialized) = {
+    let (sender, initialized, connection_id, connection_revision) = {
         let map = process_map()
             .lock()
             .map_err(|_| "Mivlet could not access local MCP sessions.".to_string())?;
@@ -1207,10 +1230,12 @@ pub async fn write_mcp_frame(request: WriteMcpFrameRequest) -> Result<(), String
                 .clone()
                 .ok_or_else(|| "This local MCP session is closed.".to_string())?,
             process.initialized,
+            process.connection_id.clone(),
+            process.connection_revision,
         )
     };
     register_discovery_request(&request.session_id, &request.frame, initialized)?;
-    if sender.send(request.frame).await.is_err() {
+    if sender.send(QueuedMcpFrame { frame: request.frame, connection_id, connection_revision }).await.is_err() {
         mark_discovery_changed(&request.session_id);
         return Err("This local MCP session is closed.".into());
     }
@@ -1235,6 +1260,7 @@ pub async fn close_mcp_process(request: CloseMcpProcessRequest) -> Result<(), St
             .get(&request.session_id)
             .ok_or_else(|| "This local MCP session is unavailable.".to_string())?;
         require_session_owner(process, &scope)?;
+        process.stop.close();
         map.remove(&request.session_id)
             .ok_or_else(|| "This local MCP session is unavailable.".to_string())?
     };

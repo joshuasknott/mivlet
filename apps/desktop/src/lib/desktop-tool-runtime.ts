@@ -27,12 +27,8 @@ import type {
   ApprovalResolutionRequest,
   HostedBrowserSnapshot
 } from "@mivlet/protocol";
-import { assertConnectorToolSucceeded } from "./connector-errors";
-import { McpClient } from "./native-mcp-client";
 import {
-  normalizeMcpConnectedSourceSearch,
   type ApprovalGate,
-  type McpUntrustedToolResult,
   type ToolExecutor
 } from "@mivlet/connectors";
 import { actRuntimeHostedBrowser, inspectRuntimeHostedProcess, launchRuntimeHostedProcess, navigateRuntimeHostedBrowser, prepareRuntimeHostedBrowser, prepareRuntimeHostedBrowserAction, prepareRuntimeHostedProcess, toPublicHostedBrowserSnapshot } from "../runtime/domains/hosted-computer";
@@ -40,49 +36,12 @@ import { commitRuntimeCapabilityGrant, prepareRuntimeCapabilityGrant, resolveRun
 import { executeRuntimeToolCall } from "../runtime/domains/tools";
 import { checkRuntimeManagedTool } from "../runtime/domains/providers";
 import { executeRuntimeConnectorAction, prepareRuntimeConnectorToolAction } from "../runtime/domains/connectors";
-import type { RuntimeResolvedMcpCapabilityRoute, RuntimeMcpToolProposal } from "../runtime/domains/mcp";
-import { openConnectorTools } from "./connector-mcp";
+import type { RuntimeResolvedMcpCapabilityRoute } from "../runtime/domains/mcp";
 import { isLocalComputerTool } from "./computer-tools";
 import { CONNECTOR_READ_TOOLS } from "./connector-chat";
-import { remoteConnectorFor, remoteConnectorServerId } from "../components/marketplace/remote-connectors";
-import { customMcpServerReference } from "./custom-mcp";
-import {
-  createDesktopMcpTransport,
-  createDesktopRemoteMcpTransport,
-  type DesktopMcpTransportHandle
-} from "./mcp-transport";
 
-export interface DesktopToolExecutorOptions {
-  connectorIds?: readonly string[];
-  connectorAccessCurrent?: (connectorId: string) => boolean;
-  /** Connection identity selected now; mutations bind to the prepared account instead. */
-  connectorAccountCurrent?: (connectorId: string) => string | undefined;
-  workspaceId?: string;
-  localComputer?: {
-    workspaceId: string;
-    agentId: string;
-    ready: boolean;
-    generation?: number;
-    controller?: "agent" | "human" | "paused";
-  };
-  /** Current scope/authority, including during an in-flight approval. */
-  localComputerCurrent?: () => DesktopToolExecutorOptions["localComputer"];
-  prepareLocalComputer?: (tool: string) => Promise<void>;
-  shouldCancel?: () => boolean;
-  onExecuting?: (approval: ApprovalRequest, tool: string) => void;
-  hostedComputer?: {
-    workspaceId: string;
-    agentId: string;
-    deviceId: string;
-    ready: boolean;
-  };
-  queueApproval?: (
-    approval: ApprovalRequest,
-    tool: string,
-    argumentsJson: string
-  ) => void;
-  onHostedBrowserSnapshot?: (snapshot: HostedBrowserSnapshot) => void;
-}
+export type { DesktopToolExecutorOptions } from "./desktop-tool-options";
+import type { DesktopToolExecutorOptions } from "./desktop-tool-options";
 
 /**
  * Build the desktop ToolExecutor from a shared approval gate. The executor
@@ -99,8 +58,11 @@ export function createDesktopToolExecutor(
     let approval = sourceApproval;
     const toolName = approval.action.split(/\s+/)[0];
     const parsed = safeParseArgs(args);
-    const checkProviderCall = () => sourceApproval.id.startsWith("mivlet-shared-")
-      ? checkRuntimeManagedTool(sourceApproval.id, toolName, args) : Promise.resolve();
+    const checkProviderCall = async () => {
+      if (options.shouldCancel?.()) throw new Error("This task was cancelled.");
+      if (sourceApproval.id.startsWith("mivlet-shared-")) await checkRuntimeManagedTool(sourceApproval.id, toolName, args);
+      if (options.shouldCancel?.()) throw new Error("This task was cancelled.");
+    };
     await checkProviderCall();
     const nativeConnector = CONNECTOR_READ_TOOLS[toolName];
     const checkConnectorAccess = () => {
@@ -139,6 +101,7 @@ export function createDesktopToolExecutor(
     // Remote calls first prepare the exact native action. Only that preview is
     // approved; the generic dispatch wrapper is not a second user decision.
     if (toolName === "connector-tools" || toolName === "connector-call" || toolName === "connector-resource") {
+      const { runOfficialConnector } = await import("./connector-execution");
       return runOfficialConnector(gate, toolName, parsed, options, checkProviderCall);
     }
     if (
@@ -205,7 +168,8 @@ export function createDesktopToolExecutor(
     checkComputerAuthority();
     await checkProviderCall();
     if (mcpRoute) {
-      return runMcpSemanticRead(approval, parsed, options, mcpRoute);
+      const { runMcpSemanticRead } = await import("./mcp-semantic-execution");
+      return runMcpSemanticRead(options, mcpRoute, sessionId => runOnDesktop(approval, parsed, options, sessionId));
     }
     if (toolName === "run-shell" && hostedShellRequested && options.hostedComputer?.ready) {
       return runOnHostedComputer(gate, approval, parsed, options);
@@ -221,54 +185,6 @@ export function createDesktopToolExecutor(
     checkConnectorAccess();
     return result;
   };
-}
-
-async function runOfficialConnector(
-  gate: ApprovalGate, operation: string, parsed: Record<string, unknown>, options: DesktopToolExecutorOptions,
-  checkProviderCall: () => Promise<void>,
-): Promise<string> {
-  const connectorId = typeof parsed.connectorId === "string" ? parsed.connectorId : "";
-  const serverId = remoteConnectorFor(connectorId) ? remoteConnectorServerId(connectorId) : customMcpServerReference(connectorId);
-  const accessCurrent = () => !options.shouldCancel?.() && (options.connectorAccessCurrent
-    ? options.connectorAccessCurrent(connectorId) : options.connectorIds?.includes(connectorId));
-  if (!options.workspaceId || !serverId || !accessCurrent()) {
-    throw new Error("Connect this app in the workspace's Plugins page first.");
-  }
-  const connection = await openConnectorTools(options.workspaceId, serverId);
-  try {
-    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
-    const enabledTools = connection.tools.filter((tool) => connection.discovery.enabledTools.includes(tool.name));
-    if (operation === "connector-tools") {
-      const resources = connection.resources.filter(resource => connection.discovery.enabledResources.includes(resource.uri));
-      return JSON.stringify({ trust: "untrusted", instructionAuthority: "none", connectorId, tools: enabledTools, resources });
-    }
-    const toolName = typeof parsed.toolName === "string" ? parsed.toolName : "";
-    const input = parsed.input;
-    const uri = typeof parsed.uri === "string" ? parsed.uri : "";
-    const resourceRead = operation === "connector-resource";
-    if (resourceRead ? !connection.discovery.enabledResources.includes(uri) || !connection.resources.some(resource => resource.uri === uri)
-      : !enabledTools.some((tool) => tool.name === toolName) || !input || typeof input !== "object" || Array.isArray(input)) {
-      throw new Error("Choose an enabled connector tool and supply its input object.");
-    }
-    const { proposal, prepared } = resourceRead ? await connection.transport.prepareResourceRead(uri)
-      : await connection.transport.prepareToolCall(toolName, input as Record<string, unknown>);
-    // Only native policy can classify an exact official tool as a routine read.
-    // Missing flags (including older runtimes) retain the approval requirement.
-    if (prepared.requiresApproval !== false) {
-      if (!options.queueApproval) throw new Error("Connector actions require the workspace approval panel.");
-      options.queueApproval(prepared.approval, operation, JSON.stringify(resourceRead ? { connectorId, uri } : { connectorId, toolName, input }));
-      if (await gate.waitForDecision(prepared.approval) !== "granted") throw new Error("Connector action was denied.");
-    }
-    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
-    const permit = await connection.transport.authorizeToolCall(proposal, resolutionFor(prepared.approval));
-    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
-    await checkProviderCall();
-    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
-    const result = await connection.transport.executeAuthorizedToolCall(proposal, permit.permitId);
-    if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
-    assertConnectorToolSucceeded(result);
-    return JSON.stringify(result);
-  } finally { await connection.client.close().catch(() => undefined); }
 }
 
 /** Point Rust at the exact request whose native permit was already minted.
@@ -549,95 +465,6 @@ async function runOnDesktop(
   return result.output;
 }
 
-interface McpSemanticContinuation {
-  kind: "mcp-connected-source-search";
-  proposal: RuntimeMcpToolProposal;
-  permitId: string;
-  workspaceId: string;
-  query: string;
-  connectionId: string;
-  matchedGrantIds: string[];
-  degraded: boolean;
-  degradationReasons: string[];
-}
-
-function parseMcpContinuation(value: string): McpSemanticContinuation {
-  const parsed = JSON.parse(value) as Partial<McpSemanticContinuation>;
-  if (
-    parsed.kind !== "mcp-connected-source-search" ||
-    !parsed.proposal ||
-    typeof parsed.permitId !== "string" ||
-    typeof parsed.workspaceId !== "string" ||
-    typeof parsed.query !== "string" ||
-    typeof parsed.connectionId !== "string" ||
-    !Array.isArray(parsed.matchedGrantIds) ||
-    typeof parsed.degraded !== "boolean" ||
-    !Array.isArray(parsed.degradationReasons)
-  ) {
-    throw new Error("Mivlet returned an invalid MCP semantic continuation.");
-  }
-  return parsed as McpSemanticContinuation;
-}
-
-async function runMcpSemanticRead(
-  approval: ApprovalRequest,
-  parsed: Record<string, unknown>,
-  options: DesktopToolExecutorOptions,
-  route: RuntimeResolvedMcpCapabilityRoute
-): Promise<string> {
-  if (!options.workspaceId) throw new Error("MCP semantic search requires an active workspace.");
-  let transport: DesktopMcpTransportHandle | null = null;
-  try {
-    transport = route.transport === "stdio"
-      ? await createDesktopMcpTransport(options.workspaceId, route.configurationReference)
-      : await createDesktopRemoteMcpTransport(options.workspaceId, route.configurationReference);
-    if (!transport) throw new Error("MCP semantic search requires the desktop runtime.");
-    const client = new McpClient(transport);
-    const initialized = await client.initialize();
-    const tools = initialized.capabilities.tools ? await client.listTools() : [];
-    const resources = initialized.capabilities.resources ? await client.listResources() : [];
-    const discovery = await transport.recordDiscovery(
-      tools.map((tool) => tool.name),
-      resources.map((resource) => resource.uri)
-    );
-    const binding = discovery.capabilityBindings.find(
-      (candidate) => candidate.capabilityId === "knowledge.content.search"
-    );
-    if (!binding || binding.toolName !== route.toolName) {
-      throw new Error("The MCP connected-source binding changed during discovery.");
-    }
-    const prepared = await runOnDesktop(
-      approval,
-      parsed,
-      options,
-      transport.sessionId
-    );
-    const continuation = parseMcpContinuation(prepared);
-    const untrusted = await transport.executeAuthorizedToolCall(
-      continuation.proposal,
-      continuation.permitId
-    ) as McpUntrustedToolResult;
-    const result = normalizeMcpConnectedSourceSearch(untrusted, {
-      workspaceId: continuation.workspaceId,
-      query: continuation.query,
-      connectionId: continuation.connectionId,
-      matchedGrantIds: continuation.matchedGrantIds,
-      degraded: continuation.degraded,
-      degradationReasons: continuation.degradationReasons
-    });
-    return JSON.stringify({
-      capabilityId: "knowledge.content.search",
-      availability: continuation.degraded ? "degraded" : "available",
-      connectionId: continuation.connectionId,
-      connectorId: "mcp",
-      implementationEvidence: "adapter-validated",
-      matchedGrantIds: continuation.matchedGrantIds,
-      result
-    });
-  } finally {
-    await transport?.close().catch(() => undefined);
-  }
-}
 
 function safeParseArgs(args: string): Record<string, unknown> {
   try {

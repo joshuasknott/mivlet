@@ -180,6 +180,16 @@ enablement, revision, and single-use permit checks. Server annotations and tool
 name prefixes cannot grant read status. Other provider-owned runtimes still
 require their own tool integration.
 
+Each app-tool task owns its MCP session. Stop, loss of app access, human takeover
+or a changed agent generation closes that session and discards late results.
+Native closure cancels pending HTTP/token/response waits and prevents unsent
+STDIO frames from continuing. Queued frames retain their original Connection
+revision; changed permissions or reconnect require a fresh call. Remote dispatch
+rechecks account, endpoint, Connection revision and execution pause after token
+refresh. Account transitions cancel all MCP sessions before restarting.
+Closing a connection cannot undo actions already accepted by a provider; an
+interrupted external action requires reconciliation rather than automatic replay.
+
 An Approve click confirms the exact queued connector action without a second
 typed phrase; Work Freely resolves the same single-use receipt automatically.
 Native developer-connector writes are never automatically replayed after network

@@ -147,6 +147,7 @@ pub(crate) async fn restart(app: tauri::AppHandle) {
     crate::antigravity_acp::shutdown_account();
     crate::embedded_agent::shutdown_all();
     crate::embedded_mcp::shutdown_all();
+    crate::mcp_process::shutdown_all().await;
     if let Some(computers) =
         app.try_state::<std::sync::Arc<crate::local_computer::LocalComputerState>>()
     {

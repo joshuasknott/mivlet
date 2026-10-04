@@ -9,6 +9,32 @@
     }
 
     #[tokio::test]
+    async fn queued_dispatch_rejects_a_changed_connection_and_native_session_closure() {
+        let node = validate_executable(find_node().to_string_lossy().as_ref()).unwrap();
+        let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mcp-stdio-server.mjs");
+        let child = spawn_mcp_child(&node, &[fixture.to_string_lossy().to_string()], Path::new(env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let id = random_session_id().unwrap();
+        process_map().lock().unwrap().insert(id.clone(), McpChild {
+            child, stdin: None, workspace_id: "workspace-local".into(), owner_subject: "account-test".into(),
+            connection_id: "connection-current".into(), connection_revision: 2, initialized: true,
+            discovery_current: true, stop: SessionStop::new(),
+        });
+        let mut queued = QueuedMcpFrame {
+            frame: r#"{"jsonrpc":"2.0","id":"call","method":"tools/call","params":{"name":"echo","arguments":{"text":"never dispatched"}}}"#.into(),
+            connection_id: "connection-current".into(), connection_revision: 1,
+        };
+        let stale = require_stdio_dispatch(&id, &queued);
+        queued.connection_revision = 2;
+        process_map().lock().unwrap().get(&id).unwrap().stop.close();
+        let stopped = require_stdio_dispatch(&id, &queued);
+        let mut process = process_map().lock().unwrap().remove(&id).unwrap();
+        process.child.kill().await.unwrap();
+        assert!(stale.unwrap_err().contains("queued MCP Connection changed"));
+        assert!(stopped.unwrap_err().contains("MCP session was closed"));
+        assert!(require_stdio_dispatch(&id, &queued).unwrap_err().contains("MCP session is closed"));
+    }
+
+    #[tokio::test]
     async fn real_stdio_child_discovers_calls_and_closes() {
         let node = validate_executable(find_node().to_string_lossy().as_ref()).unwrap();
         let fixture =

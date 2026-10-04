@@ -450,11 +450,15 @@ async fn post_remote_mcp_frame(
     if let Some(server_session_id) = &session.server_session_id {
         request = request.header("MCP-Session-Id", server_session_id);
     }
-    let response = authorize_remote_request(request, session)
-        .await?
-        .send()
+    let request = authorize_remote_request(request, session).await?;
+    require_remote_dispatch(session)?;
+    if matches!(parsed.get("method").and_then(Value::as_str), Some("tools/call" | "resources/read")) {
+        crate::execution_control::ensure_active_execution_allowed()?;
+    }
+    let response = request.send()
         .await
         .map_err(|_| "Remote MCP request failed.".to_string())?;
+    require_remote_response(session)?;
     if response.status().is_redirection() {
         return Err("Remote MCP redirects are not followed.".into());
     }
@@ -523,6 +527,7 @@ async fn post_remote_mcp_frame(
         None
     };
     let body = read_remote_body(response, MAX_MCP_FRAME_BYTES).await?;
+    require_remote_response(session)?;
     let (frames, last_event_id, retry_after_ms) = match content_type.as_str() {
         "application/json" => (
             vec![canonical_remote_frame(
@@ -603,11 +608,12 @@ async fn get_remote_mcp_messages(session: &McpRemoteSession) -> Result<RemotePol
     if let Some(last_event_id) = &session.last_event_id {
         request = request.header("Last-Event-ID", last_event_id);
     }
-    let response = authorize_remote_request(request, session)
-        .await?
-        .send()
+    let request = authorize_remote_request(request, session).await?;
+    require_remote_dispatch(session)?;
+    let response = request.send()
         .await
         .map_err(|_| "Remote MCP listening request failed.".to_string())?;
+    require_remote_response(session)?;
     if response.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED {
         return Ok(RemotePollResponse {
             supported: false,
@@ -635,6 +641,7 @@ async fn get_remote_mcp_messages(session: &McpRemoteSession) -> Result<RemotePol
         return Err("Remote MCP listening returned an unsupported content type.".into());
     }
     let body = read_remote_body(response, MAX_MCP_FRAME_BYTES).await?;
+    require_remote_response(session)?;
     let parsed = parse_remote_sse(&body, false)?;
     Ok(RemotePollResponse {
         supported: true,
