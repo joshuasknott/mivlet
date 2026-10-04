@@ -2432,6 +2432,11 @@ fn account_binding_for_authentication(authentication: &AccountAuthenticationFact
 
 pub(crate) fn native_identity_generation_snapshot(
 ) -> Result<NativeIdentityGenerationSnapshot, String> {
+    native_identity_snapshot_with_expiry().map(|(snapshot, _)| snapshot)
+}
+
+fn native_identity_snapshot_with_expiry() -> Result<(NativeIdentityGenerationSnapshot, u64), String>
+{
     let generation = IDENTITY_GENERATION
         .lock()
         .map_err(|_| "Mivlet account state is unavailable.".to_string())?;
@@ -2448,10 +2453,84 @@ pub(crate) fn native_identity_generation_snapshot(
     let authentication = session.authentication.ok_or_else(|| {
         "Mivlet account identity facts are unavailable; sign in again.".to_string()
     })?;
-    Ok(NativeIdentityGenerationSnapshot {
-        account_binding: account_binding_for_authentication(&authentication),
-        generation: *generation,
-    })
+    Ok((
+        NativeIdentityGenerationSnapshot {
+            account_binding: account_binding_for_authentication(&authentication),
+            generation: *generation,
+        },
+        session.expires_at,
+    ))
+}
+
+pub(crate) struct NativeIdentityDispatch {
+    snapshot: NativeIdentityGenerationSnapshot,
+    expires_at: u64,
+}
+impl NativeIdentityDispatch {
+    pub(crate) fn capture() -> Result<Self, String> {
+        let (snapshot, expires_at) = native_identity_snapshot_with_expiry()?;
+        Ok(Self {
+            snapshot,
+            expires_at,
+        })
+    }
+    pub(crate) fn account_binding(&self) -> &str {
+        &self.snapshot.account_binding
+    }
+    /// Only cached generation/expiry checks here: never read secrets or wait
+    /// on an identity mutation while a native Stop/dispatch lock is held.
+    pub(crate) fn with_current<T>(
+        &self,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        try_identity_dispatch(
+            &IDENTITY_GENERATION,
+            self.snapshot.generation,
+            self.expires_at,
+            operation,
+        )
+    }
+}
+fn try_identity_dispatch<T>(
+    generation: &Mutex<u64>,
+    expected: u64,
+    expires_at: u64,
+    operation: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    let guard = generation
+        .try_lock()
+        .map_err(|_| "Account identity changed or is busy; no new browser input was dispatched.")?;
+    if *guard != expected || expires_at <= now_epoch() {
+        return Err(
+            "Account identity expired or changed; no new browser input was dispatched.".into(),
+        );
+    }
+    operation()
+}
+
+#[cfg(test)]
+mod dispatch_tests {
+    use super::*;
+    #[test]
+    fn identity_dispatch_never_waits_or_runs_after_change_or_expiry() {
+        let generation = Mutex::new(7);
+        let called = std::cell::Cell::new(0);
+        let operation = || {
+            called.set(called.get() + 1);
+            Ok(())
+        };
+        assert!(try_identity_dispatch(&generation, 6, now_epoch() + 60, operation).is_err());
+        assert!(
+            try_identity_dispatch(&generation, 7, now_epoch().saturating_sub(1), operation)
+                .is_err()
+        );
+        let guard = generation.lock().unwrap();
+        assert!(try_identity_dispatch(&generation, 7, now_epoch() + 60, operation).is_err());
+        assert_eq!(called.get(), 0);
+        drop(guard);
+        assert!(try_identity_dispatch(&generation, 7, now_epoch() + 60, operation).is_ok());
+        assert_eq!(called.get(), 1);
+    }
 }
 
 pub(crate) fn lock_native_identity_generation(

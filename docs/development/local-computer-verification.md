@@ -231,6 +231,11 @@ consumed tab reference and password field. It entered no credentials, made no
 external website requests, and did not exercise a provider turn or full native
 selected-window lease. Shared lease fences and provider tool availability have
 separate regression coverage; real account/provider acceptance remains pending.
+The navigation revision used the same installed-browser fixture with the production
+closed navigation command and a native generation dispatch fence. It navigated
+from the opaque blank tab, verified report contents by a fresh observation, and
+refused a reused navigation choice. This still does not establish a full native
+selected-window lease or live provider/account journey.
 
 Repeat this check only in a Windows interactive session:
 

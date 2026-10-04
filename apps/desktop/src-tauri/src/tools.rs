@@ -83,7 +83,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 37] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 38] = [
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -108,6 +108,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 37] = [
     "local-browser-open",
     "local-browser-tabs",
     "local-browser-observe",
+    "local-browser-navigate",
     "local-app-select",
     "local-app-action",
     "local-desktop-observe",
@@ -301,6 +302,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "web-fetch" => Some(("read-only", "medium")),
         "local-app-list" => Some(("read-only", "low")),
         "local-browser-open" => Some(("full-access", "high")),
+        "local-browser-navigate" => Some(("full-access", "high")),
         "local-browser-tabs" | "local-browser-observe" => Some(("read-only", "medium")),
         "local-app-select" => Some(("read-only", "medium")),
         "local-app-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
@@ -391,6 +393,7 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-browser-open"
             | "local-browser-tabs"
             | "local-browser-observe"
+            | "local-browser-navigate"
             | "local-app-select"
             | "local-app-action"
             | "local-desktop-observe"
@@ -1525,6 +1528,39 @@ pub async fn execute_tool_call(
         })
         .await
         .map_err(|_| "The browser observation stopped unexpectedly.")??;
+        return Ok(ToolResult { ok: true, output });
+    }
+    if tool == "local-browser-navigate" {
+        #[derive(Deserialize)]
+        #[serde(rename_all = "camelCase", deny_unknown_fields)]
+        struct Navigation {
+            navigation_ref: String,
+            origin: String,
+            url: String,
+        }
+        let value: Navigation = serde_json::from_value(arguments).map_err(|_| {
+            "Use a current navigationRef, its exact source origin and an HTTP(S) destination URL."
+        })?;
+        if value.navigation_ref.len() != 48
+            || !value
+                .navigation_ref
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit())
+            || value.origin.len() > 2048
+            || value.url.len() > 2048
+        {
+            return Err("Invalid browser navigation scope.".into());
+        }
+        let workspace = request
+            .workspace_id
+            .clone()
+            .ok_or("Browser navigation requires a workspace.")?;
+        let agent = request
+            .agent_id
+            .clone()
+            .ok_or("Browser navigation requires an agent.")?;
+        let computers = local_computers.inner().clone();
+        let output = tauri::async_runtime::spawn_blocking(move || crate::local_computer::browser::navigate(&computers, &workspace, &agent, computer_generation, &value.navigation_ref, &value.origin, &value.url)).await.map_err(|_| "Browser navigation stopped unexpectedly. Its outcome may be uncertain; do not replay it.")??;
         return Ok(ToolResult { ok: true, output });
     }
     if tool == "local-browser-open" {

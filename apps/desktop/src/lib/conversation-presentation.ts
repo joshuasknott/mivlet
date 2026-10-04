@@ -42,6 +42,7 @@ const toolLabels: Record<string, [string, string]> = {
   "local-app-list": ["Listing open applications", "Listed open applications"],
   "local-browser-tabs": ["Checking browser tabs", "Checked browser tabs"],
   "local-browser-observe": ["Reading the browser page", "Read the browser page"],
+  "local-browser-navigate": ["Opening a browser page", "Navigation sent; awaiting observation"],
   "local-app-select": ["Selecting an application window", "Selected an application window"],
   "local-app-observe": ["Checking the application", "Observed the application"],
   "local-app-action": ["Sending application input", "Input sent; awaiting observation"],

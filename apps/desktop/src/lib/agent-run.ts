@@ -334,8 +334,8 @@ export const INTERRUPTED_CHECKPOINT_INSTRUCTION = `A historical checkpoint from 
 const CHECKPOINT_MAX_CHARACTERS = 12_000;
 const CHECKPOINT_ITEM_MAX_CHARACTERS = 1_000;
 const CHECKPOINT_RESULT_LIMIT = 6;
-const CHECKPOINT_UNSAFE_LINE = /authorization:|bearer\s|cookie:|access[_-]?token|refresh[_-]?token|client[_-]?secret|\btoken\b|\bapproval\b|\bpermit\b|observation[_-]?id|element[_-]?ref|tab[_-]?ref|control[_-]?ref|active[_-]?tab|\bgeneration\b|request[_ -]?id|call[_ -]?id|run[_ -]?id|session[_ -]?id|updated[_ -]?at|observed[_ -]?at|expires[_ -]?at|github_pat_|ghp_|xox[aboprs]-|\bsk-[a-z0-9]/i;
-const CHECKPOINT_UNSAFE_KEY = /^(authorization|cookie|accessToken|refreshToken|clientSecret|token|approval|approvalId|permit|permitId|observationId|elementRef|tabRef|controlRef|activeTabRef|generation|requestId|callId|runId|sessionId|updatedAt|observedAt|expiresAt)$/i;
+const CHECKPOINT_UNSAFE_LINE = /authorization:|bearer\s|cookie:|access[_-]?token|refresh[_-]?token|client[_-]?secret|\btoken\b|\bapproval\b|\bpermit\b|observation[_-]?id|element[_-]?ref|tab[_-]?ref|navigation[_-]?ref|control[_-]?ref|active[_-]?tab|\bgeneration\b|request[_ -]?id|call[_ -]?id|run[_ -]?id|session[_ -]?id|updated[_ -]?at|observed[_ -]?at|expires[_ -]?at|github_pat_|ghp_|xox[aboprs]-|\bsk-[a-z0-9]/i;
+const CHECKPOINT_UNSAFE_KEY = /^(authorization|cookie|accessToken|refreshToken|clientSecret|token|approval|approvalId|permit|permitId|observationId|elementRef|tabRef|navigationRef|controlRef|activeTabRef|generation|requestId|callId|runId|sessionId|updatedAt|observedAt|expiresAt)$/i;
 const FRESH_OBSERVATION_TOOLS = new Set(["local-app-observe", "local-desktop-observe", "local-browser-tabs", "local-browser-observe"]);
 
 /** Build bounded, replay-safe evidence for an explicit child retry. */

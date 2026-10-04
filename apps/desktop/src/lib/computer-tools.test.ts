@@ -63,7 +63,7 @@ describe("conversation computer tools", () => {
     const previous = ["run-shell", "local-browser-action", "local-browser-observe"].map(name => ({ name, description: "old", parameters: "{}" }));
     const names = conversationComputerTools(previous, true, true, enabled).map(tool => tool.name);
     expect(names).not.toContain("run-shell");
-    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-observe", "local-browser-open", "local-browser-tabs"]);
+    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-observe", "local-browser-open", "local-browser-tabs", "local-browser-navigate"]);
     expect(conversationComputerTools(previous, true, true, enabled).find(tool => tool.name === "local-browser-observe")?.description).toContain("top-frame");
     expect(names).toContain("local-app-observe");
   });
@@ -72,7 +72,7 @@ describe("conversation computer tools", () => {
     const model = { id: "text-model", label: "Text model", available: true };
     for (const route of [provider, { ...provider, backendType: "native-api" }, { ...provider, backendType: "claude-agent", driverKind: "claude-agent" }] as BackendProvider[]) {
       const names = conversationToolsForModel([], true, route, model, enabled).map(tool => tool.name);
-      expect(names).toEqual(expect.arrayContaining(["local-browser-tabs", "local-browser-observe"]));
+      expect(names).toEqual(expect.arrayContaining(["local-browser-tabs", "local-browser-observe", "local-browser-navigate"]));
       expect(names).not.toContain("local-desktop-observe");
     }
   });
