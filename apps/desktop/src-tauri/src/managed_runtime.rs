@@ -26,6 +26,7 @@ use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
 
 use crate::models::{BackendModel, BackendVerifyResult};
+mod image_input;
 mod shared_tools;
 use shared_tools::{Dispatch, ToolBridge, ToolSpec};
 
@@ -74,6 +75,8 @@ struct ManagedAgentRequest {
 struct ManagedMessage {
     role: String,
     content: String,
+    #[serde(default)]
+    images: Vec<crate::user_images::UserImageInput>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -426,6 +429,9 @@ fn command_for_provider(
         "CLAUDE_CODE_USE_BEDROCK",
         "CLAUDE_CODE_USE_VERTEX",
         "CLAUDE_CODE_USE_FOUNDRY",
+        "ANTHROPIC_DEFAULT_SONNET_MODEL",
+        "ANTHROPIC_DEFAULT_OPUS_MODEL",
+        "ANTHROPIC_DEFAULT_HAIKU_MODEL",
     ] {
         command.env_remove(key);
     }
@@ -1485,7 +1491,7 @@ fn start_claude_turn(
     let path = find_executable(&provider_id)
         .ok_or_else(|| "Install the official Claude runtime first.".to_string())?;
     let workspace = workspace_dir(&app, &user_id, &provider_id)?;
-    let prompt = prompt_text(&request.request, &request.options);
+    let prompt = image_input::user_message(&request.request, &request.options)?;
     let tool_bridge = Arc::new(Mutex::new(ToolBridge::new(&request.request.tools)?));
     let mut command = command_for_provider(&app, &user_id, &provider_id, &path)?;
     command.args([
@@ -1589,13 +1595,7 @@ fn start_claude_turn(
                     );
                     break;
                 }
-                let message = json!({
-                    "type":"user",
-                    "session_id":"",
-                    "message":{"role":"user","content":[{"type":"text","text":prompt}]},
-                    "parent_tool_use_id":Value::Null
-                });
-                if write_json(&stdin, "claude", &message).is_err() {
+                if write_json(&stdin, "claude", &prompt).is_err() {
                     break;
                 }
                 prompt_sent = true;
@@ -2146,6 +2146,7 @@ pub fn start_managed_runtime_turn(
     request: ManagedTurnRequest,
 ) -> Result<(), String> {
     validate_provider_id(&request.provider_id)?;
+    image_input::validate_route(&request.provider_id, &request.request)?;
     let user_id = crate::backends::require_current_internal_user()?;
     if !crate::backends::connected_providers_for(&user_id)?
         .iter()
@@ -2168,6 +2169,16 @@ pub fn start_managed_runtime_turn(
 fn shared_tool_response(request_id: &str, response: Value) -> Value {
     json!({"type":"control_response","response":{"subtype":"success",
         "request_id":request_id,"response":{"mcp_response":response}}})
+}
+
+fn terminate_claude_turn(
+    child: &Arc<Mutex<crate::provider_process::SupervisedChild>>,
+) -> Result<(), String> {
+    child
+        .lock()
+        .map_err(|_| "The Claude process supervisor is unavailable.")?
+        .kill()
+        .map_err(|_| "The Claude process could not be stopped.".into())
 }
 
 #[derive(Deserialize)]
@@ -2357,13 +2368,9 @@ pub async fn interrupt_managed_runtime_turn(request_id: String) -> Result<(), St
             let _ = child.kill();
         }
     } else if provider_id == "claude" {
-        if let Some(stdin) = stdin.as_ref() {
-            write_json(
-                stdin,
-                "claude",
-                &json!({"type":"control_request","request_id":format!("mivlet-interrupt-{request_id}"),"request":{"subtype":"interrupt","cancel_queued":true}}),
-            )?;
-        }
+        // A payload writer may be blocked on stdin. Stop terminates the turn's
+        // supervised process tree independently of that writer or its mutex.
+        terminate_claude_turn(&child)?;
     } else if let (Some(stdin), Some(session_id)) = (stdin.as_ref(), session_id) {
         write_json(
             stdin,

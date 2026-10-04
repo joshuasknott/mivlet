@@ -5,7 +5,7 @@ import {
   collaborationToolSpecs,
   isCollaborationTool,
 } from "@mivlet/connectors/native-api/tools";
-import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
+import { supportsSharedComputerTools, supportsUserImageInput } from "@mivlet/connectors/native-api/computer-vision";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import type { NativeAgentRunControl } from "../hooks/useNativeAgent";
 import { useExecutionController } from "./useExecutionController";
@@ -213,11 +213,11 @@ export function ExecutionWorker({
         if (!images.ok) throw new Error(images.error);
         if (
           images.images.length &&
-          (provider.backendType !== "codex-app-server" ||
-            session.model.capabilities?.vision !== true)
+          !supportsUserImageInput(provider, { id: session.model.modelId,
+            available: true, capabilities: session.model.capabilities })
         )
           throw new Error(
-            "Image understanding requires a connected Codex model that supports images. Reattach the images with a compatible model.",
+            "Reattach images with a supported Codex/Claude model.",
           );
         controller.resetCancellation();
         const staged = await prepareExecutionAttachments(

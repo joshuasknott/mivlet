@@ -1,6 +1,14 @@
 import type { BackendModel, BackendProvider } from "@mivlet/protocol";
 import { catalogueCapabilities, resolveModelCapabilities } from "./model-catalogue";
 
+/** Composer pixels have their own audited path; this grants no screenshot tools. */
+export function supportsUserImageInput(provider: BackendProvider, model: Pick<BackendModel, "id" | "available" | "capabilities">): boolean {
+  if (provider.authState !== "connected" || !model.available) return false;
+  if (provider.backendType === "codex-app-server") return model.capabilities?.vision === true;
+  return provider.backendType === "claude-agent" && provider.driverKind === "claude-agent"
+    && ["sonnet", "opus", "haiku"].includes(model.id) && model.capabilities?.vision !== false;
+}
+
 /** Shared tools are implemented once; adapters only transport calls/results. */
 export function supportsSharedComputerTools(provider: BackendProvider | undefined): boolean {
   if (provider?.authState !== "connected" || !provider.capabilities.includes("tool-requests")) return false;

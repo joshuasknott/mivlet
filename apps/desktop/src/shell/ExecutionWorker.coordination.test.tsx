@@ -7,6 +7,7 @@ import type {
   CollaborationWorkItem,
   LocalProject,
   MivletAgentProfile,
+  NativeImageInput,
 } from "@mivlet/protocol";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 
@@ -29,6 +30,7 @@ const harness = vi.hoisted(() => {
     stopCurrentWork: vi.fn(async () => true),
   };
   return {
+    composerImageInputs: vi.fn(() => ({ ok: true, images: [] as NativeImageInput[] })),
     controller,
     run,
     prepareExecutionAttachments: vi.fn(async (attachments: unknown[]) => ({
@@ -87,7 +89,7 @@ vi.mock("../lib/builtin-plugins", () => ({
 }));
 
 vi.mock("../lib/composer-images", () => ({
-  composerImageInputs: () => ({ ok: true, images: [] }),
+  composerImageInputs: () => harness.composerImageInputs(),
 }));
 
 vi.mock("../lib/execution-attachments", () => ({
@@ -294,9 +296,33 @@ describe("ExecutionWorker coordination reachability", () => {
     harness.options = undefined;
     harness.resolveWorkAttachments.mockReset();
     harness.resolveWorkAttachments.mockReturnValue({ attachments: [] });
+    harness.composerImageInputs.mockReturnValue({ ok: true, images: [] });
   });
   afterEach(() => {
     cleanup();
+  });
+
+  it.each([true, false])("admits current images only when the executing managed route supports them (%s)", async supported => {
+    const setup = makeHarness();
+    const selected = { ...provider, id: "claude", backendType: "claude-agent", driverKind: "claude-agent",
+      models: [{ id: supported ? "sonnet" : "unknown", label: "Claude", available: true }] } as BackendProvider;
+    setup.session.model = providerModelOptions([{ provider: selected, models: selected.models }])[0]!;
+    const image: NativeImageInput = { id: "image-1", name: "pixel.png", mediaType: "image/png",
+      sizeBytes: 68, width: 1, height: 1, dataUrl: "data:image/png;base64,current-pixels" };
+    harness.composerImageInputs.mockReturnValue({ ok: true, images: [image] });
+    await act(async () => {
+      render(<ExecutionWorker session={setup.session as never} service={setup.service as never}
+        runtime={runtime(selected)} projects={[]} />);
+    });
+    if (supported) {
+      await waitFor(() => expect(harness.run).toHaveBeenCalled());
+      expect(harness.run.mock.calls[0]![0]).toMatchObject({ model: "sonnet", images: [image] });
+    } else {
+      await waitFor(() => expect(setup.service.released).toHaveBeenCalled());
+      expect(harness.run).not.toHaveBeenCalled();
+      expect(setup.commands).toContainEqual(expect.objectContaining({ action: "work-status", status: "failed",
+        reason: expect.stringContaining("Reattach images") }));
+    }
   });
 
   it("fails closed before Work binding when the automation occurrence claim is rejected", async () => {

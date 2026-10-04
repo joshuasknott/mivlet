@@ -66,6 +66,7 @@ mod secret_redaction;
 mod snapshot;
 mod store;
 pub mod tools;
+mod user_images;
 mod window_controls;
 
 /// reqwest is intentionally built without an implicit rustls provider. Install

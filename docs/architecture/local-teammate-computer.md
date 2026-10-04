@@ -269,6 +269,19 @@ checked again after waiting for approval. Ambient tools, MCP configuration and
 settings are disabled. Protocol fixtures establish framing and authority behavior;
 they do not establish a live Claude subscription run or screenshot delivery.
 
+Composer uploads use a separate path: Codex and the official Claude SDK aliases
+`sonnet`, `opus` and `haiku` accept current-message PNG/JPEG/WebP inputs. The native
+adapters share the four-image, 1 MB total, 8192-pixel bounds, local base64 format
+and declared byte/dimension checks. Claude sends inline `image.source` blocks in
+its initial SDK user message; Codex stages the same validated bytes for one turn.
+Historical pixels and unsupported managed routes fail before provider dispatch.
+Mivlet stores attachment metadata only; retries require reattachment. This path
+grants no screenshot tools. Claude Stop terminates its supervised turn directly,
+without waiting for a blocked stdin payload writer. Wire and real subprocess
+fixtures establish local framing and cancellation; live Claude account acceptance
+remains unverified. See the [SDK user-message transport](https://github.com/anthropics/claude-agent-sdk-python/blob/9c69ce7aced5cdf2aa1ac86fe62e877b4962de8b/src/claude_agent_sdk/_internal/query.py)
+and [Anthropic image content format](https://platform.claude.com/docs/en/build-with-claude/vision).
+
 Direct API sessions bind the installation identity, persisted provider route,
 model, workspace, agent and computer generation. Rust reconstructs completed
 provider tool calls from bounded SSE and issues opaque single-use approval IDs;
