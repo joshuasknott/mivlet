@@ -172,13 +172,13 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName.startsWith("repository-")) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName.startsWith("repository-")) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 
   const actionCore = `${toolName} ${dataUsed.join(" ")}`.trim().slice(0, 80);
-  const consequence = toolName === "repository-run" && isRegistered
-    ? `Run this exact Linux command in the attached repository sandbox. Windows and home files are unavailable. Network: ${parsed.network === true ? "enabled, including LAN access" : "disabled"}. Stop may leave partial files.`
+  const consequence = (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
+    ? `Run this exact Linux command in ${toolName === "workspace-run" ? "a copy of selected agent files" : "the attached repository sandbox"}. Windows and home files are unavailable. Network: ${parsed.network === true ? "enabled, including LAN access" : "disabled"}. ${toolName === "workspace-run" ? "Originals preserved; validated outputs only." : "Stop may leave partial files."}`
     : toolName === "repository-publish" && isRegistered
     ? "Push the reviewed commit to the attached GitHub origin and create a pull request. This publishes code and the PR description using your native GitHub CLI account."
     : toolName === "local-app-select" && isRegistered

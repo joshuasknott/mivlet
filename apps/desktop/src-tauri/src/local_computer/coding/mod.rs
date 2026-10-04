@@ -1,6 +1,6 @@
 //! Managed Git checkouts and isolated build execution. Never a desktop shell.
 mod git;
-mod process;
+pub(super) mod process;
 #[cfg(test)]
 mod tests;
 use super::{authority::OperationTicket, LocalComputerState};
@@ -310,7 +310,7 @@ fn execute_in(
     ticket.check()?;
     serde_json::to_string(&result).map_err(|_| "Invalid repository result.".into())
 }
-fn safe_path(path: &str) -> Result<(), String> {
+pub(super) fn safe_path(path: &str) -> Result<(), String> {
     if path.split(['/', '\\']).any(|part| {
         part.eq_ignore_ascii_case(".git")
             || part.eq_ignore_ascii_case(".env")

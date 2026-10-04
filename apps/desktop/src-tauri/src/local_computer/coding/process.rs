@@ -1,4 +1,4 @@
-//! Fixed native programs only. Repository commands run exclusively in Bubblewrap.
+//! Fixed native programs only. Linux commands run exclusively in Bubblewrap.
 use super::super::authority::OperationTicket;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -196,8 +196,31 @@ pub fn sandbox(
     network: bool,
     ticket: &OperationTicket,
 ) -> Result<Command, String> {
+    sandbox_config(root, script, network, ticket, false)
+}
+
+/// File analysis shares the execution boundary, with smaller resource limits.
+pub(in crate::local_computer) fn sandbox_files(
+    root: &Path,
+    script: &str,
+    network: bool,
+    ticket: &OperationTicket,
+) -> Result<Command, String> {
+    sandbox_config(root, script, network, ticket, true)
+}
+
+fn sandbox_config(
+    root: &Path,
+    script: &str,
+    network: bool,
+    ticket: &OperationTicket,
+    files: bool,
+) -> Result<Command, String> {
     if !cfg!(windows) {
-        return Err("Repository execution currently requires Windows with WSL Ubuntu, Bubblewrap and Python 3.".into());
+        return Err(
+            "Code execution currently requires Windows with WSL Ubuntu, Bubblewrap and Python 3."
+                .into(),
+        );
     }
     // Native launchers also stay outside the project cwd (including Windows
     // DLL search); only the Linux sandbox changes directory into /repo.
@@ -219,6 +242,11 @@ pub fn sandbox(
         );
     let linux = checked(convert, ticket).map_err(|_| "Install WSL Ubuntu with bubblewrap, python3 and your project's Linux build tools. No Windows shell fallback is available.")?;
     let mut cmd = command("wsl.exe", native_cwd)?;
+    let supervisor = if files {
+        format!("import resource\nresource.setrlimit(resource.RLIMIT_AS,(1073741824,1073741824))\nresource.setrlimit(resource.RLIMIT_CPU,(300,300))\nresource.setrlimit(resource.RLIMIT_FSIZE,(8388608,8388608))\nresource.setrlimit(resource.RLIMIT_NOFILE,(128,128))\n{SUPERVISOR}")
+    } else {
+        SUPERVISOR.to_owned()
+    };
     cmd.args([
         "--distribution",
         "Ubuntu",
@@ -226,7 +254,7 @@ pub fn sandbox(
         "/usr/bin/python3",
         "-I",
         "-c",
-        SUPERVISOR,
+        &supervisor,
         "/usr/bin/bwrap",
         "--unshare-all",
         "--die-with-parent",
@@ -247,6 +275,11 @@ pub fn sandbox(
         "/proc",
         "--dev",
         "/dev",
+    ]);
+    if files {
+        cmd.args(["--size", "67108864"]);
+    }
+    cmd.args([
         "--tmpfs",
         "/tmp",
         "--dir",

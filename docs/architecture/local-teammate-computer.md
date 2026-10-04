@@ -298,6 +298,34 @@ combining marks and overfull rows/charts are rejected with a clear alternative.
 This report contract does not imply arbitrary PDF editing, OCR, layout fidelity
 for existing documents, editable Office charts or a general code renderer.
 
+`workspace-run` provides projectless code execution through the same Windows
+WSL Ubuntu + Bubblewrap boundary as `repository-run`. The model selects up to
+32 relative input files and 16 passive output paths, an exact bounded command,
+network setting and 1–300 second timeout. This complete payload is approval
+digest bound, scoped to the saved agent/workspace and current generation.
+There is no host shell fallback or implicit network access. Network permission
+includes LAN access and may have external effects; interrupted runs are never
+automatically replayed.
+
+Only selected inputs are copied into a private temporary `/repo`. Originals,
+unselected workspace files, Windows mounts, user home and credentials remain
+outside the sandbox. File analysis applies per-process 1 GB address-space,
+300 CPU-second, 8 MB file and 128-descriptor limits; `/tmp` is 64 MB. This is
+the existing local Linux execution boundary, not a dedicated virtual machine
+or a guarantee against all resource exhaustion. Python3 and any used libraries
+are prerequisites. Optional network-enabled installs can write only inside
+the temporary environment; they cannot change `/usr` or the host runtime.
+
+Only successful commands can produce outputs. Each declared output is reopened
+with native handle/path validation, bounded to 8 MB (32 MB combined), checked
+against the artifact passive subset and copied to private staging. PNGs are
+fully decoded with the existing image bounds. Missing files, invalid formats,
+links or credential markers reject delivery. One generation-fenced directory
+rename imports the prepared set into a fresh `Generated/run-*` folder; Stop or
+timeout imports nothing, and existing files are never overwritten. Receipts
+include actual exit/interruption/output status and output path/size/SHA-256.
+The existing `read-file`, artifact publication, preview and Save flows apply.
+
 Composer attachments also accept DOCX, XLSX and PPTX up to the existing 2 MB
 upload limit. Original bytes are staged under the exact agent/workspace/generation
 and are not decoded or imported as text knowledge. Invalid archives fail admission

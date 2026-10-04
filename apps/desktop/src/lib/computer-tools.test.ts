@@ -19,7 +19,7 @@ describe("conversation computer tools", () => {
   it("hides native app tools when the bundled runtime is missing while preserving scoped files", () => {
     const prior = conversationComputerTools([connector], true, true, enabled);
     const names = conversationComputerTools(prior, true, true, enabled, false, false).map(tool => tool.name);
-    expect(names).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "create-spreadsheet", "create-document", "create-pdf", "computer-artifact"]));
+    expect(names).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "workspace-run", "create-spreadsheet", "create-document", "create-pdf", "computer-artifact"]));
     expect(names.some(name => name.startsWith("local-app-") || name.startsWith("local-desktop-"))).toBe(false);
   });
   it("requires a separate image API connection and Computer plugin even for previously discovered image tools", () => {

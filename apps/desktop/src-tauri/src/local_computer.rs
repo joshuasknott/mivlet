@@ -17,6 +17,7 @@ pub(crate) mod plugins;
 mod presentation_authoring;
 pub(crate) mod repositories;
 mod windows;
+pub(crate) mod workspace_execution;
 use authority::{ComputerAuthority, OperationTicket};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use chrono::Utc;

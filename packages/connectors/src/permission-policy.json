@@ -76,6 +76,7 @@
     "repository-read": "local-read",
     "repository-write": "local-write",
     "repository-run": "shell-execution",
+    "workspace-run": "shell-execution",
     "repository-commit": "local-write",
     "repository-publish": "connector-write",
     "repository-recover": "connector-write",
