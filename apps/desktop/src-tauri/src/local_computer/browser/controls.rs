@@ -206,6 +206,9 @@ fn point(quads: &Value, metrics: &Value) -> Result<(i32, i32), String> {
         .filter(|n| n.is_finite() && *n > 0.0 && *n <= 10000.0)
         .ok_or(STALE)?;
     if viewport["scale"].as_f64() != Some(1.0)
+        || viewport
+            .get("zoom")
+            .is_some_and(|zoom| zoom.as_f64() != Some(1.0))
         || viewport["offsetX"].as_f64() != Some(0.0)
         || viewport["offsetY"].as_f64() != Some(0.0)
         || values[0] != values[6]
@@ -239,6 +242,7 @@ pub(super) fn click(
     let choice = process.controls.remove(reference).ok_or(STALE)?;
     process.controls.clear();
     process.navigation.clear();
+    process.scroll = None;
     process.tabs = None;
     let (window, pages) = observations::targets(process, scope.0, check)?;
     if !pages.iter().any(|page| {
@@ -306,16 +310,36 @@ pub(super) fn click(
         Some(&choice.session),
         check,
     )?;
-    let (x, y) = point(&quads, &metrics)?;
+    let (x, y) = point(&quads, &metrics).inspect_err(|_| {
+        #[cfg(debug_assertions)]
+        if std::env::var("MIVLET_OWNED_BROWSER_ACCEPTANCE").as_deref() == Ok("1") {
+            eprintln!("Browser QA click: native visible geometry refused.");
+        }
+    })?;
+    let page_x = metrics["cssVisualViewport"]["pageX"]
+        .as_f64()
+        .ok_or(STALE)?;
+    let page_y = metrics["cssVisualViewport"]["pageY"]
+        .as_f64()
+        .ok_or(STALE)?;
+    let (hit_x, hit_y) = observations::document_point((x, y), (page_x, page_y))?;
     let hit = observations::call(
         process,
         Command::Hit,
-        json!({"x":x,"y":y,"includeUserAgentShadowDOM":false,"ignorePointerEventsNone":false}),
+        json!({"x":hit_x,"y":hit_y,"includeUserAgentShadowDOM":false,"ignorePointerEventsNone":false}),
         Some(&choice.session),
         check,
     )?;
     if hit["frameId"] != current.id || hit["backendNodeId"].as_u64() != Some(choice.control.backend)
     {
+        #[cfg(debug_assertions)]
+        if std::env::var("MIVLET_OWNED_BROWSER_ACCEPTANCE").as_deref() == Ok("1") {
+            eprintln!(
+                "Browser QA click hit: frame_matches={}, node_matches={}",
+                hit["frameId"] == current.id,
+                hit["backendNodeId"].as_u64() == Some(choice.control.backend)
+            );
+        }
         return Err(STALE.into());
     }
     let after = observations::frame(
@@ -344,6 +368,25 @@ pub(super) fn click(
         .visible(&after.id, &choice.session, check)?
     {
         return Err(HIDDEN.into());
+    }
+    let last_metrics = observations::call(
+        process,
+        Command::Layout,
+        json!({}),
+        Some(&choice.session),
+        check,
+    )?;
+    let last_quads = observations::call(
+        process,
+        Command::Quads,
+        json!({"backendNodeId":choice.control.backend}),
+        Some(&choice.session),
+        check,
+    )?;
+    if last_metrics["cssVisualViewport"] != metrics["cssVisualViewport"]
+        || last_quads["quads"] != quads["quads"]
+    {
+        return Err(STALE.into());
     }
     let verified = observations::frame(
         &observations::call(

@@ -1,6 +1,26 @@
 use super::*;
 
 #[test]
+fn hit_coordinates_add_only_bounded_native_scroll_offsets() {
+    assert_eq!(document_point((60, 40), (0.0, 0.0)).unwrap(), (60, 40));
+    assert_eq!(
+        document_point((60, 40), (500.0, 1200.0)).unwrap(),
+        (560, 1240)
+    );
+    assert_eq!(document_point((60, 40), (0.0, 1200.5)).unwrap(), (60, 1241));
+    for offsets in [
+        (f64::NAN, 0.0),
+        (0.0, f64::INFINITY),
+        (-1.0, 0.0),
+        (0.0, 10_000_001.0),
+    ] {
+        assert!(document_point((60, 40), offsets).is_err());
+    }
+    assert!(document_point((-1, 40), (0.0, 0.0)).is_err());
+    assert!(document_point((60, 10001), (0.0, 0.0)).is_err());
+}
+
+#[test]
 fn button_role_file_choosers_require_metadata_privacy_check_before_any_projection() {
     let nodes = vec![
         json!({"nodeId":"root","role":{"value":"RootWebArea"},"frameId":"frame","childIds":["file"]}),

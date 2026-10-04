@@ -2,7 +2,7 @@ import type { ToolExecutor } from "@mivlet/connectors";
 import { isLocalComputerTool } from "./computer-tools";
 
 const OBSERVATIONS = new Set(["local-app-observe", "local-desktop-observe", "local-browser-observe"]);
-const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "local-browser-click", "local-browser-navigate", "write-file"]);
+const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "local-browser-click", "local-browser-scroll", "local-browser-navigate", "write-file"]);
 type RecoveryClass = "stale-observation" | "loading" | "human-control" | "uncertain-effect" | "foreground-required";
 type PendingRecovery = { kind: RecoveryClass; tools: ReadonlySet<string>; target?: string };
 
@@ -198,7 +198,7 @@ function stableArguments(value: string): string {
     const visit = (item: unknown): unknown => {
       if (Array.isArray(item)) return item.map(visit);
       if (!item || typeof item !== "object") return item;
-      return Object.fromEntries(Object.entries(item).filter(([key]) => !["observationId", "elementRef", "controlRef", "navigationRef", "tabRef", "ref", "activeTabRef", "updatedAt", "observedAt", "expiresAt"].includes(key))
+      return Object.fromEntries(Object.entries(item).filter(([key]) => !["observationId", "elementRef", "controlRef", "scrollRef", "navigationRef", "tabRef", "ref", "activeTabRef", "updatedAt", "observedAt", "expiresAt"].includes(key))
         .sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, visit(nested)]));
     };
     return JSON.stringify(visit(JSON.parse(value)));

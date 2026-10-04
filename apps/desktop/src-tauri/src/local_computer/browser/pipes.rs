@@ -321,6 +321,7 @@ pub(super) enum Command {
     Layout,
     Hit,
     Click,
+    Scroll,
     IsolatedWorld,
     Visibility,
 }
@@ -339,6 +340,7 @@ impl Command {
             Self::Layout => "Page.getLayoutMetrics",
             Self::Hit => "DOM.getNodeForLocation",
             Self::Click => "Input.synthesizeTapGesture",
+            Self::Scroll => "Input.dispatchMouseEvent",
             Self::IsolatedWorld => "Page.createIsolatedWorld",
             Self::Visibility => "Runtime.evaluate",
         }
@@ -360,7 +362,10 @@ impl ControlPipe {
         session: Option<&str>,
         check: &dyn Fn() -> Result<(), String>,
     ) -> Result<serde_json::Value, String> {
-        if matches!(command, Command::Navigate | Command::Click) {
+        if matches!(
+            command,
+            Command::Navigate | Command::Click | Command::Scroll
+        ) {
             return Err("Browser input requires the native dispatch fence.".into());
         }
         if matches!(command, Command::IsolatedWorld | Command::Visibility) {
@@ -422,6 +427,22 @@ impl ControlPipe {
         dispatch: &super::super::super::control::NativeDispatch<'_>,
     ) -> Result<serde_json::Value, String> {
         self.exchange(Command::Click, params, Some(session), check, Some(dispatch))
+    }
+
+    pub(super) fn scroll(
+        &mut self,
+        params: serde_json::Value,
+        session: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<serde_json::Value, String> {
+        self.exchange(
+            Command::Scroll,
+            params,
+            Some(session),
+            check,
+            Some(dispatch),
+        )
     }
 
     fn exchange(

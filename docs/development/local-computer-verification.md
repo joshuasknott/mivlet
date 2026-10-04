@@ -269,6 +269,33 @@ This extends the bounded public-button path to multiple open tabs; it does not
 establish automatic tab switching, form editing, full native account/selection
 acceptance or transfer custody.
 
+The scrolling revision also passed in installed Chrome on October 4. An
+offscreen button first refused input. Fresh, single-use downward wheel requests
+changed native viewport positions, brought that button into view and allowed a
+click whose effect was independently read back. Upward scrolling also changed
+the viewport. An originally valid scroll choice was retained across a tab switch
+inside the fixture: its hidden tab refused input and offered no new scroll choice
+despite a spoofed page-world visibility getter. Stop retained the browser/pipe
+and owner cleanup closed it. This is the opt-in native fixture path, without a
+live account/provider, ordinary selected-window approval or packaged acceptance.
+
+This check exposed a real click bug after scrolling: native DOM hit testing was
+given viewport coordinates although Chromium's
+[DOM implementation](https://raw.githubusercontent.com/chromium/chromium/main/third_party/blink/renderer/core/inspector/inspector_dom_agent.cc)
+uses document coordinates. Native code now adds measured, bounded CSS page offsets
+for hit testing and retains viewport coordinates for input. Final viewport/quad
+changes and zoom refuse the click. Separate tests reject invalid scroll offsets,
+stale/reshaped viewports, editable/widget ancestors, unsupported DOM hits, expired
+choices and unfenced or replayed input; Stop interrupts response waits.
+
+Earlier runs either failed initial local navigation with an uncertain reply or
+reached scrolling and refused the incorrectly hit-tested click. None replayed
+input or weakened the fixture assertions. The debug-only HTTP server now handles
+up to 16 concurrent connections, bounds headers/timeouts and joins workers on
+Stop. Real socket tests exercise idle preconnects beyond the former 300 ms
+timeout alongside active requests. The prior intermittent navigation cause
+was not established; its production refusal/no-replay behavior is unchanged.
+
 Repeat this check only in a Windows interactive session:
 
 ```powershell

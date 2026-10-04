@@ -4,6 +4,34 @@ import { createComputerTaskExecutor } from "./computer-task-executor";
 
 const approval = (tool: string) => ({ action: `${tool} approved action` } as ApprovalRequest);
 describe("computer task execution bounds", () => {
+  it("does not replay uncertain scrolling using a fresh scroll ref", async () => {
+    const execute = vi.fn().mockRejectedValueOnce(new Error("Browser scroll outcome is uncertain. No input was replayed."));
+    const guarded = createComputerTaskExecutor(execute);
+    const action = '{"scrollRef":"old","origin":"https://example.test","direction":"down"}';
+    await expect(guarded(approval("local-browser-scroll"), action)).rejects.toThrow("uncertain");
+    execute.mockResolvedValue('{"viewport":{"pageY":480},"scrollRef":"new"}');
+    await guarded(approval("local-browser-observe"), '{}');
+    await expect(guarded(approval("local-browser-scroll"), action.replace("old", "new"))).rejects.toThrow("already has an uncertain outcome");
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+  it("bounds unchanged scrolling while preserving actual viewport progress", async () => {
+    let sequence = 0;
+    let pageY = 0;
+    const execute = vi.fn(async (request: ApprovalRequest) => request.action.startsWith("local-browser-observe")
+      ? JSON.stringify({ scrollRef: String(++sequence), viewport: { pageY }, content: "same" }) : '{"status":"scroll-dispatched"}');
+    const guarded = createComputerTaskExecutor(execute);
+    await guarded(approval("local-browser-observe"), '{}');
+    for (let step = 0; step < 4; step++) {
+      await guarded(approval("local-browser-scroll"), '{"direction":"down"}');
+      pageY += 480;
+      await guarded(approval("local-browser-observe"), '{}');
+    }
+    for (let step = 0; step < 3; step++) {
+      await guarded(approval("local-browser-scroll"), '{"direction":"down"}');
+      await guarded(approval("local-browser-observe"), '{}');
+    }
+    await expect(guarded(approval("local-browser-scroll"), '{}')).rejects.toThrow("unchanged");
+  });
   it("reconciles an uncertain browser click through page observation without replaying a fresh ref", async () => {
     const execute = vi.fn().mockRejectedValueOnce(new Error("Browser click outcome is uncertain. No input was replayed."));
     const guarded = createComputerTaskExecutor(execute);
