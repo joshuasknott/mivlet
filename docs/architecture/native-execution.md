@@ -63,8 +63,11 @@ or unimported result holds custody. Cleanup removes only its exact capability
 ACEs and readiness stamp, preserving receipts and user files. Declined UAC,
 enterprise policy, missing resources and ACL drift leave commands unavailable.
 Privileged setup pins every existing/created ancestry directory with no-follow
-handles and no write/delete sharing. ACL reads/writes use these held objects;
-MAXIMUM_ALLOWED prevents recursive ACL propagation through preplanted children.
+handles and no write/delete sharing. ACL reads use these held objects. DACL writes
+resolve each held handle's stable final path and use the non-propagating
+`SetFileSecurityW` setter while all ancestry/target handles remain pinned. The
+newer `SetSecurityInfo` can alter child inheritance flags even when ACE propagation
+is suppressed; disposable inherited-child tests preserve the complete child ACL.
 Both setup files are exclusively opened without truncation and checked for
 reparse points/hardlinks before ACL changes or writes. Removal uses the verified
 stamp handle. Runtime status hashing runs on a blocking worker, outside UI dispatch.
@@ -157,7 +160,7 @@ clean-machine and authenticated live provider-to-tool journeys remain unverified
 References informed the design; no source was copied:
 
 - [Microsoft AppContainer/LPAC launch and isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer).
-- [Microsoft directory moves](https://learn.microsoft.com/en-us/windows/win32/fileio/moving-directories) and [handle-based ACL updates and inheritance behavior](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo).
+- [Microsoft directory moves](https://learn.microsoft.com/en-us/windows/win32/fileio/moving-directories), [ACL updates and inheritance behavior](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo), and the [non-propagating file-security setter](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-setfilesecurityw). The older setter is intentional here because changing unvalidated children is outside privileged setup's authority; held handles prevent path replacement.
 - [Codex Windows sandbox](https://openai.com/index/building-codex-windows-sandbox/) and
   [Apache-2.0 public source at c2f7fe8](https://github.com/openai/codex/tree/c2f7fe89d87ce853900d0b5cb1f5dc4863e44d73/codex-rs/windows-sandbox-rs).
 

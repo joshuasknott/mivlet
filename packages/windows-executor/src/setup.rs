@@ -73,8 +73,7 @@ fn lock_directory(path: &Path, maintenance: bool) -> Result<File, String> {
     let file = OpenOptions::new()
         // Metadata-only opens do not participate in Windows delete sharing.
         // A directory-read handle is necessary to pin the resolved ancestry.
-        // MAXIMUM_ALLOWED prevents SetSecurityInfo from propagating ACLs
-        // through pre-existing children. Setup modifies only held objects.
+        // Keep write/delete sharing closed through ACL changes and file writes.
         .access_mode(if maintenance {
             MAXIMUM_ALLOWED
         } else {
@@ -120,6 +119,7 @@ fn setup_file(path: &Path, create: bool) -> Result<Option<File>, String> {
         return Ok(None);
     }
     let file = OpenOptions::new()
+        .write(true) // Rust requires write intent for create_new, even with an access_mode override.
         .access_mode(MAXIMUM_ALLOWED)
         .create_new(!exists)
         .share_mode(0)
@@ -138,6 +138,29 @@ fn write_stamp(file: &mut File) -> Result<(), String> {
         .and_then(|_| file.sync_all())
         .map_err(|_| "Cannot persist native setup file.".into())
 }
+fn set_file_dacl(file: &File, sd: PSECURITY_DESCRIPTOR) -> Result<(), String> {
+    // SetSecurityInfo can change existing children's inheritance flags even
+    // when MAXIMUM_ALLOWED suppresses ACE propagation. SetFileSecurityW is the
+    // documented non-propagating setter. Its path stays bound to this no-follow
+    // handle: setup holds all ancestry and the target without write/delete
+    // sharing, so neither replacement nor reparse redirection is possible.
+    let mut path = vec![0u16; 32768];
+    let length = unsafe {
+        GetFinalPathNameByHandleW(
+            file.as_raw_handle(),
+            path.as_mut_ptr(),
+            path.len() as u32,
+            FILE_NAME_NORMALIZED | VOLUME_NAME_DOS,
+        )
+    };
+    if length == 0 || length as usize >= path.len() {
+        return Err("Cannot resolve held native setup identity.".into());
+    }
+    if unsafe { SetFileSecurityW(path.as_ptr(), DACL_SECURITY_INFORMATION, sd) } == 0 {
+        return Err("Cannot apply native setup ACL to the pinned object.".into());
+    }
+    Ok(())
+}
 fn private_acl(file: &File, owner: &str) -> Result<(), String> {
     let mut sd = ptr::null_mut();
     if unsafe {
@@ -154,30 +177,11 @@ fn private_acl(file: &File, owner: &str) -> Result<(), String> {
     {
         return Err("Cannot prepare native setup ACL.".into());
     }
-    let mut present = 0;
-    let mut defaulted = 0;
-    let mut acl = ptr::null_mut();
-    unsafe {
-        GetSecurityDescriptorDacl(sd, &mut present, &mut acl, &mut defaulted);
-    }
-    let status = unsafe {
-        SetSecurityInfo(
-            file.as_raw_handle(),
-            SE_FILE_OBJECT,
-            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
-            ptr::null_mut(),
-            ptr::null_mut(),
-            acl,
-            ptr::null_mut(),
-        )
-    };
+    let result = set_file_dacl(file, sd);
     unsafe {
         LocalFree(sd.cast());
     }
-    if status != 0 {
-        return Err("Cannot apply native setup ACL to held directory.".into());
-    }
-    Ok(())
+    result
 }
 
 fn metadata_acl(file: &File, sid: PSID, remove: bool) -> Result<(), String> {
@@ -219,20 +223,24 @@ fn metadata_acl(file: &File, sid: PSID, remove: bool) -> Result<(), String> {
         status
     };
     let acl = if remove { revoked } else { updated };
-    let status = if status == 0 {
-        unsafe {
-            SetSecurityInfo(
-                file.as_raw_handle(),
-                SE_FILE_OBJECT,
-                DACL_SECURITY_INFORMATION,
-                ptr::null_mut(),
-                ptr::null_mut(),
-                acl,
-                ptr::null_mut(),
-            )
+    let result = if status == 0 {
+        let mut descriptor: SECURITY_DESCRIPTOR = unsafe { std::mem::zeroed() };
+        let descriptor = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
+        let mut control = 0;
+        let mut revision = 0;
+        let controls = SE_DACL_PROTECTED | SE_DACL_AUTO_INHERITED | SE_DACL_AUTO_INHERIT_REQ;
+        if unsafe { GetSecurityDescriptorControl(sd, &mut control, &mut revision) } == 0
+            || unsafe { InitializeSecurityDescriptor(descriptor, 1) } == 0
+            || unsafe { SetSecurityDescriptorDacl(descriptor, 1, acl, 0) } == 0
+            || unsafe { SetSecurityDescriptorControl(descriptor, controls, control & controls) }
+                == 0
+        {
+            Err("Cannot prepare scoped native setup ACL.".into())
+        } else {
+            set_file_dacl(file, descriptor)
         }
     } else {
-        status
+        Err(format!("Native metadata setup failed (Windows {status}). Administrator-approved setup is required."))
     };
     unsafe {
         LocalFree(sd);
@@ -243,10 +251,7 @@ fn metadata_acl(file: &File, sid: PSID, remove: bool) -> Result<(), String> {
             LocalFree(updated.cast());
         }
     }
-    if status != 0 {
-        return Err(format!("Native metadata setup failed (Windows {status}). Administrator-approved setup is required."));
-    }
-    Ok(())
+    result
 }
 fn verify_metadata(file: &File, sid: PSID) -> Result<(), String> {
     let mut sd = ptr::null_mut();
@@ -455,16 +460,40 @@ mod tests {
     #[test]
     fn privileged_acl_helper_changes_only_the_held_object() {
         let root = tempfile::tempdir().unwrap();
-        fs::write(root.path().join("child"), b"existing child custody").unwrap();
-        let child = File::open(root.path().join("child")).unwrap();
+        let owner = security::user_sid().unwrap();
+        let parent = lock_directory(root.path(), true).unwrap();
+        private_acl(&parent, &owner).unwrap();
+        // Explicitly inherit instead of relying on the machine's temp ACL.
+        // CI exposed propagation that a protected local temp child concealed.
+        let target = root.path().join("held");
+        fs::create_dir(&target).unwrap();
+        fs::write(target.join("child"), b"existing child custody").unwrap();
+        let child = File::open(target.join("child")).unwrap();
         let before = dacl(&child);
-        let held = lock_directory(root.path(), true).unwrap();
-        private_acl(&held, &security::user_sid().unwrap()).unwrap();
+        assert!(before.contains("ID;"), "Fixture must have inherited ACEs");
+        let held = lock_directory(&target, true).unwrap();
+        private_acl(&held, &owner).unwrap();
+        assert!(
+            dacl(&held).starts_with("D:P"),
+            "Custody DACL must stay protected"
+        );
         assert_eq!(
             dacl(&child),
             before,
             "Privileged ACL update propagated to an unvalidated child"
         );
+        let capability = traversal(&owner).unwrap();
+        for remove in [false, true] {
+            metadata_acl(&held, capability.sid(), remove).unwrap();
+            if !remove {
+                verify_metadata(&held, capability.sid()).unwrap();
+            }
+            assert_eq!(dacl(&child), before, "Traversal ACL update changed a child");
+            assert!(
+                dacl(&held).starts_with("D:P"),
+                "Traversal changed protection"
+            );
+        }
     }
     #[test]
     fn linked_setup_files_cannot_modify_a_sentinel() {
@@ -485,7 +514,20 @@ mod tests {
                     fs::read(&sentinel).unwrap(),
                     b"never truncate or elevate this target"
                 );
+                fs::remove_file(root.path().join(name)).unwrap();
             }
+            // The same exclusive no-follow custody must permit the intended
+            // ACL/write on a fresh regular stamp, without touching the sentinel.
+            let mut file = setup_file(&root.path().join(name), true).unwrap().unwrap();
+            private_acl(&file, &security::user_sid().unwrap()).unwrap();
+            write_stamp(&mut file).unwrap();
+            assert!(dacl(&file).starts_with("D:P"));
+            drop(file);
+            assert_eq!(fs::read(root.path().join(name)).unwrap(), b"1");
+            assert_eq!(
+                fs::read(&sentinel).unwrap(),
+                b"never truncate or elevate this target"
+            );
         }
     }
     #[test]
