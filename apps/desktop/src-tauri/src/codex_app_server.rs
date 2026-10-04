@@ -28,9 +28,6 @@ use url::Url;
 
 const CODEX_LOGIN_START_TIMEOUT: Duration = Duration::from_secs(20);
 const CODEX_LOGIN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
-const MAX_USER_IMAGES: usize = 4;
-const MAX_USER_IMAGE_BYTES: usize = 1024 * 1024;
-const MAX_USER_IMAGE_DIMENSION: u32 = 8192;
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -84,19 +81,7 @@ struct CodexMessage {
     role: String,
     content: String,
     #[serde(default)]
-    images: Vec<CodexImageInput>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct CodexImageInput {
-    id: String,
-    name: String,
-    media_type: String,
-    size_bytes: usize,
-    width: u32,
-    height: u32,
-    data_url: String,
+    images: Vec<crate::user_images::UserImageInput>,
 }
 
 const CODEX_CONTEXT_CHUNK_MAX_UTF8_BYTES: usize = 3 * 1024;
@@ -1061,35 +1046,15 @@ fn stage_codex_user_images(
     runtime_dir: &Path,
     request: &CodexTurnStartRequest,
 ) -> Result<(Option<tempfile::TempDir>, Vec<PathBuf>), String> {
-    let last_user = request
-        .request
-        .messages
-        .iter()
-        .rposition(|message| message.role == "user");
-    for (index, message) in request.request.messages.iter().enumerate() {
-        if !message.images.is_empty() && Some(index) != last_user {
-            return Err("Images may be attached only to the current user message.".to_string());
-        }
-    }
-    let images = last_user
-        .and_then(|index| request.request.messages.get(index))
-        .map(|message| message.images.as_slice())
-        .unwrap_or_default();
+    let images = crate::user_images::current_images(
+        request
+            .request
+            .messages
+            .iter()
+            .map(|message| (message.role.as_str(), message.images.as_slice())),
+    )?;
     if images.is_empty() {
         return Ok((None, Vec::new()));
-    }
-    if images.len() > MAX_USER_IMAGES {
-        return Err(format!(
-            "Attach no more than {MAX_USER_IMAGES} images to one message."
-        ));
-    }
-    let total_bytes = images.iter().try_fold(0usize, |total, image| {
-        total
-            .checked_add(image.size_bytes)
-            .ok_or("Attached image sizes are invalid.".to_string())
-    })?;
-    if total_bytes > MAX_USER_IMAGE_BYTES {
-        return Err("Attached images must total no more than 1 MB.".to_string());
     }
     let temp_dir = tempfile::Builder::new()
         .prefix("mivlet-user-images-")
@@ -1097,145 +1062,14 @@ fn stage_codex_user_images(
         .map_err(|_| "Mivlet could not prepare attached images.".to_string())?;
     let mut paths = Vec::with_capacity(images.len());
     for (index, image) in images.iter().enumerate() {
-        if image.id.trim().is_empty()
-            || image.id.len() > 160
-            || image.name.trim().is_empty()
-            || image.name.len() > 256
-            || image.size_bytes == 0
-            || image.size_bytes > MAX_USER_IMAGE_BYTES
-            || image.width == 0
-            || image.height == 0
-            || image.width > MAX_USER_IMAGE_DIMENSION
-            || image.height > MAX_USER_IMAGE_DIMENSION
-        {
-            return Err("An attached image has invalid metadata.".to_string());
-        }
-        let (header, extension) = match image.media_type.as_str() {
-            "image/png" => ("data:image/png;base64,", "png"),
-            "image/jpeg" => ("data:image/jpeg;base64,", "jpg"),
-            "image/webp" => ("data:image/webp;base64,", "webp"),
-            _ => return Err("Attach only PNG, JPEG, or WebP images.".to_string()),
-        };
-        let payload = image
-            .data_url
-            .strip_prefix(header)
-            .ok_or("An attached image has an invalid local payload.".to_string())?;
-        if image.data_url.len() > 1_500_000 {
-            return Err("An attached image exceeds the supported request size.".to_string());
-        }
-        let bytes = STANDARD
-            .decode(payload)
-            .map_err(|_| "An attached image has an invalid local payload.".to_string())?;
-        if bytes.len() != image.size_bytes
-            || image_dimensions(&bytes, &image.media_type) != Some((image.width, image.height))
-        {
-            return Err(
-                "An attached image does not match its declared format or size.".to_string(),
-            );
-        }
-        let path = temp_dir.path().join(format!("image-{index}.{extension}"));
-        fs::write(&path, &bytes)
+        let path = temp_dir
+            .path()
+            .join(format!("image-{index}.{}", image.extension));
+        fs::write(&path, &image.bytes)
             .map_err(|_| "Mivlet could not stage an attached image.".to_string())?;
         paths.push(path);
     }
     Ok((Some(temp_dir), paths))
-}
-
-fn image_dimensions(bytes: &[u8], media_type: &str) -> Option<(u32, u32)> {
-    match media_type {
-        "image/png" => png_dimensions(bytes),
-        "image/jpeg" => jpeg_dimensions(bytes),
-        "image/webp" => webp_dimensions(bytes),
-        _ => None,
-    }
-}
-
-fn png_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    if bytes.len() < 24 || !bytes.starts_with(b"\x89PNG\r\n\x1a\n") || &bytes[12..16] != b"IHDR" {
-        return None;
-    }
-    let width = u32::from_be_bytes(bytes[16..20].try_into().ok()?);
-    let height = u32::from_be_bytes(bytes[20..24].try_into().ok()?);
-    (width > 0 && height > 0).then_some((width, height))
-}
-
-fn jpeg_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    if !bytes.starts_with(&[0xff, 0xd8]) {
-        return None;
-    }
-    let mut offset = 2usize;
-    while offset < bytes.len() {
-        while bytes.get(offset) == Some(&0xff) {
-            offset += 1;
-        }
-        let marker = *bytes.get(offset)?;
-        offset += 1;
-        if marker == 0xd9 || marker == 0xda {
-            return None;
-        }
-        if marker == 0x01 || (0xd0..=0xd7).contains(&marker) {
-            continue;
-        }
-        let length = u16::from_be_bytes(bytes.get(offset..offset + 2)?.try_into().ok()?) as usize;
-        if length < 2 || offset.checked_add(length)? > bytes.len() {
-            return None;
-        }
-        if matches!(
-            marker,
-            0xc0 | 0xc1
-                | 0xc2
-                | 0xc3
-                | 0xc5
-                | 0xc6
-                | 0xc7
-                | 0xc9
-                | 0xca
-                | 0xcb
-                | 0xcd
-                | 0xce
-                | 0xcf
-        ) {
-            if length < 7 {
-                return None;
-            }
-            let height = u16::from_be_bytes(bytes[offset + 3..offset + 5].try_into().ok()?) as u32;
-            let width = u16::from_be_bytes(bytes[offset + 5..offset + 7].try_into().ok()?) as u32;
-            return (width > 0 && height > 0).then_some((width, height));
-        }
-        offset += length;
-    }
-    None
-}
-
-fn webp_dimensions(bytes: &[u8]) -> Option<(u32, u32)> {
-    if bytes.len() < 30 || !bytes.starts_with(b"RIFF") || &bytes[8..12] != b"WEBP" {
-        return None;
-    }
-    let declared = u32::from_le_bytes(bytes[4..8].try_into().ok()?) as usize;
-    if declared.checked_add(8)? > bytes.len() {
-        return None;
-    }
-    match &bytes[12..16] {
-        b"VP8X" => {
-            let width = 1 + u32::from_le_bytes([bytes[24], bytes[25], bytes[26], 0]);
-            let height = 1 + u32::from_le_bytes([bytes[27], bytes[28], bytes[29], 0]);
-            Some((width, height))
-        }
-        b"VP8 " if bytes.len() >= 30 && &bytes[23..26] == b"\x9d\x01\x2a" => {
-            let width = (u16::from_le_bytes(bytes[26..28].try_into().ok()?) & 0x3fff) as u32;
-            let height = (u16::from_le_bytes(bytes[28..30].try_into().ok()?) & 0x3fff) as u32;
-            (width > 0 && height > 0).then_some((width, height))
-        }
-        b"VP8L" if bytes[20] == 0x2f => {
-            let width = 1 + u32::from(bytes[21]) + (u32::from(bytes[22] & 0x3f) << 8);
-            let height = 1
-                + u32::from(bytes[22] >> 6)
-                + (u32::from(bytes[23]) << 2)
-                + (u32::from(bytes[24] & 0x0f) << 10);
-            Some((width, height))
-        }
-        _ => None,
-    }
 }
 
 fn turn_start_request(
