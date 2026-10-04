@@ -108,6 +108,7 @@ fn mime_for(extension: &str) -> Result<&'static str, String> {
         "xlsx" => Ok("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
         "pptx" => Ok("application/vnd.openxmlformats-officedocument.presentationml.presentation"),
         "pdf" => Ok("application/pdf"),
+        "json" => Ok("application/json"),
         "csv" => Ok("text/csv"),
         "txt" => Ok("text/plain"),
         "md" => Ok("text/markdown"),
@@ -545,6 +546,7 @@ pub(super) fn check_content(bytes: &[u8], extension: &str) -> Result<(), String>
     }
     let valid = match extension {
         "txt" | "md" | "csv" => !bytes.contains(&0) && std::str::from_utf8(bytes).is_ok(),
+        "json" => serde_json::from_slice::<serde_json::Value>(bytes).is_ok(),
         "png" => bytes.starts_with(b"\x89PNG\r\n\x1a\n"),
         "jpg" | "jpeg" => bytes.starts_with(b"\xff\xd8\xff"),
         "gif" => bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a"),
@@ -1028,7 +1030,7 @@ fn preview_bytes(artifact: &LocalComputerArtifact, bytes: &[u8]) -> ArtifactPrev
         office: None,
         truncated: false,
     };
-    if artifact.mime_type.starts_with("text/") {
+    if artifact.mime_type.starts_with("text/") || artifact.mime_type == "application/json" {
         let text = String::from_utf8_lossy(bytes);
         let mut end = text.len().min(256 * 1024);
         while !text.is_char_boundary(end) {
@@ -1248,6 +1250,30 @@ mod tests {
     }
 
     #[test]
+    fn json_preview_is_literal_bounded_utf8_and_export_preserves_original_bytes() {
+        let text = format!(
+            "{{\"label\":\"{}\",\"html\":\"<script>text only</script>\"}}",
+            "Δ".repeat(150_000)
+        );
+        let bytes = text.as_bytes();
+        check_content(bytes, "json").unwrap();
+        let receipt = artifact_receipt("Data", "json", bytes);
+        let preview = preview_bytes(&receipt.artifact, bytes);
+        assert_eq!(preview.mime_type, "application/json");
+        let visible = preview.text.unwrap();
+        assert!(preview.truncated);
+        assert!(visible.len() <= 256 * 1024);
+        assert!(text.starts_with(&visible));
+        assert!(preview.image_data_url.is_none());
+        assert!(preview.office.is_none());
+        let root = tempfile::tempdir().unwrap();
+        let destination = root.path().join("data.json");
+        let staged = stage_export(&destination, "json", bytes).unwrap();
+        assert!(commit_export(staged, &destination).unwrap());
+        assert_eq!(std::fs::read(destination).unwrap(), bytes);
+    }
+
+    #[test]
     fn previews_are_bounded_plain_text_or_raster_data() {
         let mut artifact = LocalComputerArtifact {
             kind: "computer-artifact".into(),
@@ -1309,6 +1335,7 @@ mod tests {
             "slides.pptx",
             "report.pdf",
             "data.csv",
+            "summary.json",
             "notes.md",
             "image.png",
         ] {
@@ -1322,6 +1349,16 @@ mod tests {
         assert!(check_content(b"text\0hidden", "txt").is_err());
         assert!(check_content(b"%PDF-1.7\nfixture", "pdf").is_err());
         assert!(check_content(b"hello,world\n1,2", "csv").is_ok());
+        assert!(check_content(br#"{"total":15,"items":[true,null,1.5]}"#, "json").is_ok());
+        for bytes in [
+            b"{invalid}".as_slice(),
+            b"NaN",
+            b"{} trailing",
+            b"\xff",
+            b"<script>alert(1)</script>",
+        ] {
+            assert!(check_content(bytes, "json").is_err());
+        }
         assert!(check_content(b"not a zip", "docx").is_err());
         assert!(check_content(b"<svg/>", "svg").is_err());
     }

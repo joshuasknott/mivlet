@@ -62,7 +62,7 @@ const TOOLS: Record<string, BackendTool> = {
   ...PDF_TOOLS,
   "computer-artifact": {
     name: "computer-artifact",
-    description: "Return a generated PDF, DOCX, XLSX, PPTX, raster image, CSV, Markdown, or text file from this agent's workspace as an openable conversation artifact. Use the relative workspace path after verifying the output. Mivlet accepts only its bounded, passive structural subset and copies the verified file into private immutable storage; macros, active or embedded content, browser profiles, executables, and host paths are forbidden.",
+    description: "Return a generated PDF, Office, raster image, JSON, CSV, Markdown or text file from this agent's workspace as an openable conversation artifact. Use the relative workspace path after verifying the output. Mivlet accepts only its bounded, passive structural subset and copies the verified file into private immutable storage; macros, active or embedded content, browser profiles, executables, and host paths are forbidden.",
     defaultMode: "read-only", defaultRisk: "low",
     parameters: JSON.stringify({ type: "object", properties: { path: { type: "string" } }, required: ["path"], additionalProperties: false }),
   },
