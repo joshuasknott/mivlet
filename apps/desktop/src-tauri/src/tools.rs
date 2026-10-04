@@ -83,12 +83,13 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 33] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 34] = [
     "repository-recover",
     "repository-status",
     "repository-read",
     "repository-write",
     "repository-run",
+    "workspace-run",
     "repository-commit",
     "repository-publish",
     "read-file",
@@ -221,6 +222,9 @@ pub(crate) fn execute_tool_outcome(
                 "Document authoring requires the scoped native workspace boundary.".into(),
             ))
         }
+        "workspace-run" => ToolOutcome::Done(Err(
+            "Workspace execution requires the scoped isolated-computer boundary.".into(),
+        )),
         "run-shell" => ToolOutcome::Done(Err(
             "Terminal commands require the asynchronous isolated-computer boundary.".into(),
         )),
@@ -281,7 +285,9 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
         "repository-status" | "repository-read" => Some(("read-only", "low")),
         "repository-write" | "repository-commit" => Some(("full-access", "high")),
-        "repository-run" | "repository-publish" => Some(("full-access", "critical")),
+        "repository-run" | "repository-publish" | "workspace-run" => {
+            Some(("full-access", "critical"))
+        }
         "repository-recover" => Some(("full-access", "high")),
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
@@ -365,6 +371,7 @@ fn is_computer_tool(tool: &str) -> bool {
     matches!(
         tool,
         "run-shell"
+            | "workspace-run"
             | "read-file"
             | "write-file"
             | "create-spreadsheet"
@@ -446,7 +453,11 @@ pub(crate) fn validate_tool_approval_binding(
         .collect::<std::collections::BTreeSet<_>>();
     if matches!(
         tool,
-        "create-spreadsheet" | "create-document" | "create-presentation" | "create-pdf"
+        "create-spreadsheet"
+            | "create-document"
+            | "create-presentation"
+            | "create-pdf"
+            | "workspace-run"
     ) || tool.starts_with("repository-")
     {
         let digest_entries = approved
@@ -1367,30 +1378,40 @@ pub async fn execute_tool_call(
     } else {
         0
     };
-    if tool.starts_with("repository-") {
+    if tool.starts_with("repository-") || tool == "workspace-run" {
         let workspace = request
             .workspace_id
             .clone()
-            .ok_or("Repository tools require a workspace.")?;
+            .ok_or("Code tools require a workspace.")?;
         let agent = request
             .agent_id
             .clone()
-            .ok_or("Repository tools require a saved agent.")?;
+            .ok_or("Code tools require a saved agent.")?;
         let computers = local_computers.inner().clone();
         let operation_tool = tool.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
-            crate::local_computer::coding::execute(
-                &computers,
-                &workspace,
-                &agent,
-                computer_generation,
-                &operation_tool,
-                arguments,
-            )
+            if operation_tool == "workspace-run" {
+                crate::local_computer::workspace_execution::execute(
+                    &computers,
+                    &workspace,
+                    &agent,
+                    computer_generation,
+                    arguments,
+                )
+            } else {
+                crate::local_computer::coding::execute(
+                    &computers,
+                    &workspace,
+                    &agent,
+                    computer_generation,
+                    &operation_tool,
+                    arguments,
+                )
+            }
         })
         .await
         .map_err(|_| {
-            "Repository operation stopped unexpectedly. Inspect status before retrying.".to_string()
+            "Code operation stopped unexpectedly. Inspect its outcome before retrying.".to_string()
         })
         .and_then(|result| result);
         audit_tool_outcome(
@@ -1400,13 +1421,8 @@ pub async fn execute_tool_call(
                 mode,
                 risk,
                 status: if result.is_ok() { "ok" } else { "failed" },
-                error_code: if result.is_ok() {
-                    ""
-                } else {
-                    "repository-operation"
-                },
-                message:
-                    "Repository operation completed; inspect its receipt for command exit status",
+                error_code: if result.is_ok() { "" } else { "code-operation" },
+                message: "Code operation completed; inspect its receipt for command exit status",
             },
             None,
         );
@@ -2013,7 +2029,7 @@ fn preview_tool_arguments(tool: &str, arguments: &serde_json::Value) -> String {
         | "create-document"
         | "create-presentation"
         | "create-pdf" => "path",
-        "run-shell" => "command",
+        "run-shell" | "workspace-run" => "command",
         "web-fetch" => "url",
         "generate-image" | "edit-image" => "title",
         _ => "query",
@@ -2400,6 +2416,44 @@ mod connector_authority_tests {
         )
         .is_err());
         assert_eq!(tool_policy(tool), Some(("full-access", "high")));
+        assert!(is_computer_tool(tool));
+    }
+
+    #[test]
+    fn workspace_execution_binds_command_inputs_outputs_network_and_timeout() {
+        let tool = "workspace-run";
+        let arguments = json!({"command":format!("{}echo original", "# long command\n".repeat(40)),"inputs":["data.csv"],"outputs":["report.csv"],"network":false,"timeoutSeconds":30});
+        let mut approved = request(tool);
+        approved.arguments = arguments.clone();
+        approved.approval.request.data_used = approval_argument_previews(tool, &arguments)
+            .unwrap()
+            .into_iter()
+            .chain(std::iter::once(argument_digest(&arguments).unwrap()))
+            .collect();
+        validate_tool_approval_binding(tool, &arguments, &approved.approval.request).unwrap();
+        for (field, changed) in [
+            (
+                "command",
+                json!(format!("{}echo changed", "# long command\n".repeat(40))),
+            ),
+            ("inputs", json!(["other.csv"])),
+            ("outputs", json!(["other.csv"])),
+            ("network", json!(true)),
+            ("timeoutSeconds", json!(300)),
+        ] {
+            let mut changed_arguments = arguments.clone();
+            changed_arguments[field] = changed;
+            assert!(
+                validate_tool_approval_binding(
+                    tool,
+                    &changed_arguments,
+                    &approved.approval.request
+                )
+                .is_err(),
+                "{field}"
+            );
+        }
+        assert_eq!(tool_policy(tool), Some(("full-access", "critical")));
         assert!(is_computer_tool(tool));
     }
 

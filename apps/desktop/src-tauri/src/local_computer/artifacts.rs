@@ -538,7 +538,7 @@ fn check_pdf(bytes: &[u8]) -> Result<bool, String> {
     checked_pdf(bytes).map(|_| true)
 }
 
-fn check_content(bytes: &[u8], extension: &str) -> Result<(), String> {
+pub(super) fn check_content(bytes: &[u8], extension: &str) -> Result<(), String> {
     mime_for(extension)?;
     if bytes.len() as u64 > MAX_BYTES {
         return Err("Artifacts must be at most 25 MB.".into());

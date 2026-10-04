@@ -43,6 +43,8 @@ export interface ToolRuntime {
   writeFile(path: string, content: string): Promise<number>;
   /** Author one passive Office package or PDF through a bounded runtime implementation. */
   authorOffice?(tool: "create-spreadsheet" | "create-document" | "create-presentation" | "create-pdf", input: Record<string, unknown>): Promise<string>;
+  /** Optional projectless execution boundary; never substitutes the host shell. */
+  runWorkspace?(input: Record<string, unknown>): Promise<string>;
   /** Run a command only when an isolated hosted runtime is explicitly supplied. */
   runShell(command: string): Promise<{ stdout: string; stderr: string; exitCode: number }>;
   /** Fetch a URL and return its text. Returns null on a fetch failure. */
@@ -345,6 +347,10 @@ async function dispatch(
         throw new Error("Bounded document authoring is unavailable in this runtime.");
       }
       return runtime.authorOffice(toolName, parsed);
+    }
+    case "workspace-run": {
+      if (!runtime.runWorkspace) throw new Error("Isolated workspace execution is unavailable in this runtime.");
+      return runtime.runWorkspace(parsed);
     }
     case "run-shell": {
       if (parsed.location !== "hosted") throw new Error("Shell execution requires an explicitly configured hosted computer.");
