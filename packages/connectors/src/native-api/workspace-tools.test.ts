@@ -14,7 +14,7 @@ it("shares projectless analysis with an explicit network consequence and exact p
   const first = buildToolApproval("openai", spec.name, argumentsJson);
   expect(first.consequence).toContain("Network: disabled");
   const network = buildToolApproval("claude-agent", spec.name, argumentsJson.replace('"network":false', '"network":true'));
-  expect(network.consequence).toContain("enabled, including LAN");
+  expect(network.consequence).toContain("internetClient capability; no private-network or loopback exemption");
   const digest = (approval: typeof first) => approval.dataUsed.find(item => item.startsWith("Arguments SHA-256:"));
   expect(digest(first)).not.toBe(digest(network));
   expect(digest(first)).not.toBe(digest(buildToolApproval("openai", spec.name, argumentsJson.replace("report.csv", "other.csv"))));

@@ -6,6 +6,18 @@ fn main() {
     // turns retain an inert helper so expired sessions cannot open a browser.
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
+        #[cfg(windows)]
+        Some("--mivlet-execution-setup") => {
+            let owner = args.next().unwrap_or_default();
+            let mode = args.next().unwrap_or_default();
+            if !matches!(mode.as_str(), "repair" | "cleanup")
+                || args.next().is_some()
+                || mivlet_windows_executor::setup::configure(&owner, mode == "cleanup").is_err()
+            {
+                std::process::exit(2);
+            }
+            return;
+        }
         #[cfg(debug_assertions)]
         Some("--check-owned-browser") => {
             if let Err(error) = mivlet_desktop_lib::check_owned_browser() {

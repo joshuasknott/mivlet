@@ -14,10 +14,15 @@ not included. The source repository, its index and its branches are untouched.
 Each agent has one selected repository; older copies remain on disk. This first
 version has no copy-management browser or automatic garbage collection.
 
-Commands require Windows, Git on the app's PATH, WSL distribution `Ubuntu`,
-`/usr/bin/bwrap`, `/usr/bin/python3`, and the project's Linux build tools under
-`/usr`. The app does not install these dependencies. Missing prerequisites fail
-closed. Windows-only builds are unsupported by this execution lane. Submodules,
+Commands require Windows x64 and native execution setup in Library. Git is
+required for attachment and review. Node 22.23.3/npm and Python 3.13.16/pip
+26.2.1 are bundled, pinned and checked before execution. Run Mivlet unelevated.
+Setup/repair asks Windows for administrator approval for bounded metadata ACLs;
+normal execution never elevates. Missing resources or changed permissions fail
+closed. Project dependencies may be installed into the staged work tree after
+network approval. Host PATH, globally installed packages, MSVC, Rust, .NET and
+other host toolchains are not implicitly exposed; projects needing those tools
+need a separately reviewed, pinned runtime extension. Submodules,
 Git LFS materialization and borrowed Git object stores are not supported.
 
 Repository tools require Computer Use to be enabled and a provider route that
@@ -36,13 +41,20 @@ Redaction is defense in depth, not a guarantee that arbitrary project secrets
 will be detected: only attach repositories whose committed files may be shared
 with the selected model and any explicitly approved command network destinations.
 
-`repository-run` executes an explicit command inside a Bubblewrap namespace in
-WSL. Only the checkout is writable persistent storage. `/usr` is read-only;
-home and temporary storage are fresh; Windows drives, host home directories,
-Git metadata and provider credentials are absent. Git metadata stays beside the
-checkout, outside the namespace. The environment is cleared. Network is off by
-default. Explicit network access shares WSL networking, including reachable local
-services; it is not an internet-only allowlist.
+`repository-run` executes an explicit Windows `cmd` batch command through the
+shared `packages/windows-executor` boundary, also used by `workspace-run`.
+Each run receives a unique Less Privileged AppContainer package SID, a fresh
+copy of the checkout, fresh home/temp and read-only verified runtime. Windows
+dual-principal access checks deny host files, credential services, unselected
+workspace data and Git metadata. No provider shell, host PATH or credential
+environment is inherited. Git metadata remains beside the managed checkout,
+outside the execution snapshot. See [native execution](native-execution.md)
+for enforcement, setup and limitations.
+
+Network is off by default. Explicit approval grants Windows `internetClient`,
+without private-network capability or loopback exemption. Windows classifies
+network destinations; this is not an IP/domain allowlist. Network access can
+have external effects, including disclosure of selected project content.
 
 Each run has a 1–900 second timeout and a combined 64 KiB output limit. The result
 records its actual exit code, interruption and truncation. Output appears after
@@ -51,11 +63,14 @@ receipt is associated with the resulting tree hash, and the UI identifies later
 edits as unverified. An exit code of zero does not prove that the command was an
 appropriate test; the agent and reviewer must choose the project's real checks.
 
-Stop revokes the existing workspace/agent generation. A private lifetime pipe
-ends the WSL supervisor and its PID namespace; the native launcher also belongs
-to a kill-on-close Windows job. A per-repository lock excludes competing file,
+Stop revokes the existing workspace/agent generation. Atomic kill-on-close job
+membership contains all descendants before the first instruction; Stop and
+timeout terminate the job and verify that it is empty. A per-repository lock excludes competing file,
 command, commit and publication operations. Interrupted commands retain their
-receipt/state and are never automatically replayed.
+receipt/state and are never automatically replayed. Failed/stopped command
+snapshots are discarded, so their partial file writes never update the managed
+checkout. Successful snapshots are validated, hash-checked and imported while
+the operation's generation remains current. Source checkouts stay untouched.
 
 ## Commits and publication
 
@@ -105,7 +120,7 @@ stale review rejection, exact commits, generation revocation and recovery locks.
 The permit test `repository_permits_bind_full_payload_scope_generation_and_consume_once`
 covers substitution and replay at the native approval boundary.
 
-On a configured Windows/WSL machine, explicitly run
+On a configured unelevated Windows machine, explicitly run
 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml native_coding_acceptance -- --ignored --nocapture`.
 It uses the production native service on a temporary repository: a real failing
 Node test, scoped fix, passing test, diff, timeout/output limits and Stop of a

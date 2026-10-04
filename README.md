@@ -33,10 +33,10 @@ a deployed or production-validated service.
 ### Implemented locally
 
 - Managed coding repositories for named agents: attach a local Git repository,
-  edit a separate copy, run Linux checks in a WSL/Bubblewrap sandbox, review
+  edit a separate copy, run native Windows checks in a restricted snapshot, review
   the actual diff, commit an approved snapshot and optionally open a GitHub PR.
-  Requires Windows, Git, WSL Ubuntu with Bubblewrap/Python and project build
-  tools; publication additionally requires GitHub CLI login. Available through
+  Requires Windows x64, Git and one-time native execution setup in Library.
+  Node/npm and isolated Python/pip are bundled; publication additionally requires GitHub CLI login. Available through
   Codex, Claude SDK and direct API routes that bridge Mivlet tools. See the
   [coding workflow and its limits](docs/architecture/coding-workflow.md).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent

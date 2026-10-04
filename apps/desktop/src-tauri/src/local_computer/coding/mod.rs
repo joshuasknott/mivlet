@@ -281,14 +281,36 @@ fn execute_in(
             if !(1..=900).contains(&timeout) {
                 return Err("Command timeout must be 1–900 seconds.".into());
             }
-            let command = process::sandbox(&root, script, input.network.unwrap_or(false), ticket)?;
             repo.operation =
                 "command running; if interrupted inspect changes before continuing".into();
             repo.last_result = None;
             repo.last_command = Some(script.to_owned());
             repo.command_diff_id = None;
             save(directory, &repo)?;
-            let result = process::run(command, ticket, timeout)?;
+            let (result, completed) = match process::native_run(
+                &root,
+                script,
+                input.network.unwrap_or(false),
+                timeout,
+                false,
+                ticket,
+            ) {
+                Ok(value) => value,
+                Err(error) => {
+                    repo.operation =
+                        "command unavailable or interrupted; no snapshot imported".into();
+                    repo.last_result = Some(process::CommandResult {
+                        interrupted: true,
+                        output: crate::secret_redaction::redact_secret_text_or_omit(&error),
+                        ..Default::default()
+                    });
+                    save(directory, &repo)?;
+                    return Err(error);
+                }
+            };
+            if result.exit_code == Some(0) && !result.interrupted {
+                ticket.with_current(|| completed.import_repository(&root))?;
+            }
             repo.operation = if result.interrupted {
                 "command interrupted; inspect changes before continuing"
             } else {

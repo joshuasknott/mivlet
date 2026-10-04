@@ -206,7 +206,7 @@ fn recovery_and_repository_lock_are_visible() {
 }
 
 #[test]
-#[ignore = "Requires Windows WSL Ubuntu with Bubblewrap, Python 3 and Node; run explicitly for native acceptance"]
+#[ignore = "Requires Windows native execution setup and bundled runtime; run explicitly for native acceptance"]
 fn native_coding_acceptance() {
     let (_temp, directory, authority, repo) = fixture();
     let ticket = authority.begin_agent(1).unwrap();
@@ -230,7 +230,7 @@ fn native_coding_acceptance() {
         "repository-write",
         json!({"repositoryId": repo.id, "path": "sum.js", "content": "module.exports = (a, b) => a + b;\n"}),
     );
-    let success = run("node test.js && test ! -e /mnt/c && test ! -e /repo/.git && test ! -e /home/agent/.ssh && test -z \"$USERPROFILE\"");
+    let success = run("node test.js && node -e \"const a=require('assert'); a(!require('fs').existsSync('.git')); a(!process.env.OPENAI_API_KEY); a(process.env.USERPROFILE.includes('MivletExecution'))\"");
     assert_eq!(success["exitCode"], 0, "{success}");
     assert!(success["output"]
         .as_str()
@@ -246,12 +246,16 @@ fn native_coding_acceptance() {
     assert_eq!(bounded["truncated"], true);
     assert!(bounded["output"].as_str().unwrap().len() <= 65536);
     let missing = run("mivlet_nonexistent_build_tool");
-    assert_eq!(missing["exitCode"], 127);
+    assert_eq!(missing["exitCode"], 1);
+    assert!(missing["output"]
+        .as_str()
+        .unwrap()
+        .contains("mivlet_nonexistent_build_tool"));
     let timed = call(
         &directory,
         &ticket,
         "repository-run",
-        json!({"repositoryId": repo.id, "command": "(sleep 4; echo escaped > timeout.txt) & wait", "network": false, "timeoutSeconds": 1}),
+        json!({"repositoryId": repo.id, "command": "node -e \"setTimeout(()=>require('fs').writeFileSync('timeout.txt','escape'),4000)\"", "network": false, "timeoutSeconds": 1}),
     );
     assert_eq!(timed["interrupted"], true);
     std::thread::sleep(std::time::Duration::from_secs(4));
@@ -264,7 +268,7 @@ fn native_coding_acceptance() {
         std::thread::sleep(std::time::Duration::from_secs(3));
         authority2.revoke(1).unwrap();
     });
-    assert!(execute_in(&directory, &ticket, "repository-run", json!({"repositoryId": repo.id, "command": "(sleep 5; echo escaped > late.txt) & wait", "network": false, "timeoutSeconds": 30})).is_err());
+    assert!(execute_in(&directory, &ticket, "repository-run", json!({"repositoryId": repo.id, "command": "node -e \"setTimeout(()=>require('fs').writeFileSync('late.txt','escape'),5000)\"", "network": false, "timeoutSeconds": 30})).is_err());
     stopper.join().unwrap();
     std::thread::sleep(std::time::Duration::from_secs(4));
     assert!(!checkout(&directory, &repo)

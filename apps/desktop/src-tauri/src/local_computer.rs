@@ -7,6 +7,7 @@ pub(crate) mod coding;
 pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;
+pub(crate) mod execution_setup;
 pub(crate) mod office_authoring;
 pub(crate) mod office_images;
 pub(crate) mod office_inspection;
@@ -180,6 +181,11 @@ impl LocalComputerState {
             .path()
             .resource_dir()
             .map_err(|_| "Mivlet resources are unavailable.")?;
+        coding::process::configure_execution_resources(if cfg!(debug_assertions) {
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/execution-runtime/runtime")
+        } else {
+            resources.join("resources/execution-runtime/runtime")
+        })?;
         Ok(Self {
             native: control::NativeControl::default(),
             browsers: browser::BrowserManager::default(),

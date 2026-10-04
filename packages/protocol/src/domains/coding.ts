@@ -4,6 +4,23 @@ export interface RepositoryCommandResult {
   output: string;
   truncated: boolean;
   interrupted: boolean;
+  execution?: NativeExecutionReceipt;
+}
+export interface NativeExecutionReceipt {
+  runId: string;
+  executor: string;
+  runtimeId: string;
+  inputId: string;
+  outputId: string | null;
+  commandId: string;
+  binding: { scopeId: string; generation: number; operationId: number };
+  elapsedMs: number;
+  network: boolean;
+  reason: string | null;
+}
+export interface NativeExecutionStatus {
+  available: boolean;
+  message: string | null;
 }
 export interface CodingRepository {
   id: string;

@@ -466,23 +466,25 @@ combining marks and overfull rows/charts are rejected with a clear alternative.
 This report contract does not imply arbitrary PDF editing, OCR, layout fidelity
 for existing documents, editable Office charts or a general code renderer.
 
-`workspace-run` provides projectless code execution through the same Windows
-WSL Ubuntu + Bubblewrap boundary as `repository-run`. The model selects up to
+`workspace-run` provides projectless code execution through the same native
+Windows LPAC boundary as `repository-run`. The model selects up to
 32 relative input files and 16 passive output paths, an exact bounded command,
 network setting and 1–300 second timeout. This complete payload is approval
 digest bound, scoped to the saved agent/workspace and current generation.
 There is no host shell fallback or implicit network access. Network permission
-includes LAN access and may have external effects; interrupted runs are never
+requests Windows internetClient capability and may have external effects; interrupted runs are never
 automatically replayed.
 
-Only selected inputs are copied into a private temporary `/repo`. Originals,
-unselected workspace files, Windows mounts, user home and credentials remain
-outside the sandbox. File analysis applies per-process 1 GB address-space,
-300 CPU-second, 8 MB file and 128-descriptor limits; `/tmp` is 64 MB. This is
-the existing local Linux execution boundary, not a dedicated virtual machine
-or a guarantee against all resource exhaustion. Python3 and any used libraries
-are prerequisites. Optional network-enabled installs can write only inside
-the temporary environment; they cannot change `/usr` or the host runtime.
+Only selected inputs are copied into a private temporary work tree. Originals,
+unselected workspace files, host home and credentials remain outside its access
+rights. Windows kernel job limits enforce 1 GiB aggregate committed memory,
+32 processes and the requested CPU/wall timeout. A 250 ms storage watchdog
+bounds work/home/temp to 64 MiB total, 8 MiB per file and 4096 entries; writes
+can briefly exceed these thresholds. This is process isolation, not a virtual
+machine or NTFS quota. Node/npm and isolated Python/pip are bundled. Network
+approved dependency installs must target the work tree; Python uses
+`python -m pip install --target .python-packages`. The runtime is read-only.
+See [native execution](native-execution.md) for setup and evidence boundaries.
 
 Only successful commands can produce outputs. Each declared output is reopened
 with native handle/path validation, bounded to 8 MB (32 MB combined), checked

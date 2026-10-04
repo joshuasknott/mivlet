@@ -10,7 +10,7 @@ describe("buildToolApproval", () => {
     expect(digest(approval)).toMatch(/[a-f0-9]{64}$/);
     expect(digest(changed)).not.toBe(digest(approval));
     expect(approval.consequence).toContain("Network: disabled");
-    expect(buildToolApproval("codex", "repository-run", JSON.stringify({ ...args, network: true })).consequence).toContain("LAN access");
+    expect(buildToolApproval("codex", "repository-run", JSON.stringify({ ...args, network: true })).consequence).toContain("internetClient capability; no private-network or loopback exemption");
     expect(buildToolApproval("codex", "repository-publish", JSON.stringify({ repositoryId: "repo", remote: "https://github.com/example/test.git", baseBranch: "main" })).dataUsed).toContain("remote: https://github.com/example/test.git");
   });
   it("matches native canonical JSON for nested input independent of provider key order", () => {

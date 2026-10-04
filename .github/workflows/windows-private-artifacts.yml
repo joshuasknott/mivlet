@@ -47,6 +47,9 @@ jobs:
         run: cargo install cargo-audit --version 0.22.2 --locked
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
+      - run: cargo fmt --manifest-path packages/windows-executor/Cargo.toml --check
+      - run: cargo test --manifest-path packages/windows-executor/Cargo.toml --locked
+      - run: cargo clippy --manifest-path packages/windows-executor/Cargo.toml --all-targets -- -D warnings
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check

@@ -7,6 +7,7 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-computer";
 import type { RightPanelTab } from "./right-panel-state";
 import { RepositoryFiles } from "./RepositoryFiles";
+import { NativeExecutionSetup } from "./NativeExecutionSetup";
 
 export function WorkspaceLibrary({
   workspaceId,
@@ -82,6 +83,7 @@ export function WorkspaceLibrary({
           Refresh
         </button>
       </header>
+      <NativeExecutionSetup />
       <RepositoryFiles workspaceId={workspaceId} agents={agents} />
       <label className="workspace-library__search">
         <MagnifyingGlass size={17} aria-hidden="true" />

@@ -1,0 +1,132 @@
+# Native Windows execution
+
+`repository-run` and `workspace-run` use one Mivlet-owned Windows x64 executor.
+Every provider route that bridges Mivlet tools reaches this same boundary. It
+does not invoke a provider shell or alter Computer Use window grants, leases or
+foreground/background delivery. WSL/Ubuntu/Bubblewrap are not prerequisites for
+these tools. The separate experimental Grok bridge is unchanged.
+
+## Security identity and launch
+
+Each execution has a random, ephemeral Less Privileged AppContainer package SID.
+This is a dedicated Windows security principal, not a persistent local login
+with a password. LPAC checks intersect host-user rights with explicit package or
+capability grants and opt out of ALL_APPLICATION_PACKAGES. Mivlet verifies the
+suspended child's AppContainer SID and performs positive/negative AccessCheck
+probes before resuming it. Query class 46 is not relied on: this host rejects it
+with ERROR_INVALID_PARAMETER. No command starts when verification fails.
+
+The only grants are the per-run work/home/temp trees (modify), pinned runtime and
+batch file (read/execute), fixed ancestry metadata (traverse/read attributes,
+without directory listing or content), system registryRead and optionally
+internetClient. RegistryRead supports Winsock and system runtime initialization;
+it does not grant arbitrary host-user registry access. The normal AppContainer
+profile directory is sealed read-only. Windows still creates its private package
+registry namespace; registry growth is not covered by the filesystem watchdog.
+
+Windows denies access to unselected files, host credentials, other package
+namespaces and higher-integrity processes. Credential Manager and DPAPI canary
+denials are tested with actual native APIs. An executed process can access any
+data deliberately selected into its snapshot; attach only shareable committed
+project content. Output redaction is additional protection, not secret detection.
+
+The environment is constructed from scratch. No host PATH, provider connection,
+Git credential pipe or native-store handle is inherited. An explicit handle list
+contains only empty stdin and bounded stdout/stderr pipes. A private desktop and
+job UI restrictions prevent this lane from becoming interactive Computer Use.
+
+The job is attached atomically during suspended process creation, has no breakaway
+permission, and kills all descendants on Stop, timeout, host death or parent exit.
+Mivlet verifies that no job processes remain before inspecting outputs. Memory,
+process count and aggregate CPU time are kernel limits; wall time and storage
+are watchdogs. Analysis uses 1 GiB/32 processes/64 MiB storage; coding uses
+2 GiB/64 processes/2 GiB storage. Combined output is capped at 64 KiB. The disk
+watchdog is not a hard quota and cannot eliminate every resource exhaustion risk.
+
+## Setup and runtimes
+
+Library exposes setup, inspection, repair and removal of setup permissions.
+The same installed Mivlet executable has a fixed setup entry point invoked
+through Windows UAC. It accepts only the requesting user SID and repair/cleanup.
+It changes the exact installation capability ACE on the fixed ProgramData
+ancestry, creates private custody storage, and verifies each grant. No local user
+passwords, services, scheduled tasks, firewall exemptions or project ACL grants
+are provisioned. Maintenance takes an exclusive lease and fails while any run
+or unimported result holds custody. Cleanup removes only its exact capability
+ACEs and readiness stamp, preserving receipts and user files. Declined UAC,
+enterprise policy, missing resources and ACL drift leave commands unavailable.
+
+The bundle includes official Node 22.23.3/npm, Python 3.13.16 embeddable and
+pip 26.2.1. `prepare-execution-runtime.mjs` verifies pinned upstream archives and
+preserves their notices; `files.json` is compiled into the executor as the trust
+anchor. Every staged file is re-opened with path, reparse/hardlink, size and hash
+validation. Release resources resolve from Tauri's resource directory, never
+the current working directory or model-provided paths. Python's `_pth` excludes
+host/user site discovery and permits work/.python-packages. Projects can use
+`npm install`, `npm run build`, `npm test` or `python -m pip install --target
+.python-packages` with explicit network approval. Other host toolchains require
+a reviewed pinned extension and currently fail as missing commands.
+
+## Results and recovery
+
+Fresh snapshots exclude Git custody and reject links, reparse paths, hardlinks,
+aliases and oversized entries. Originals are never changed. Successful commands
+seal a tree hash; repository import verifies it again and uses a staged rename
+with rollback. Analysis reopens only declared passive outputs, validates content
+and imports the set through its existing generation-fenced transaction.
+
+Private crash journals are persisted before runtime staging. Exclusive run
+leases distinguish live custody from abandoned staging. The anonymous job dies
+when the native host exits. The next execution reconciles abandoned profiles and
+staging, records uncertainty and never replays a command or imports leftovers.
+Unexpected links or invalid recovery journals block cleanup for inspection.
+
+Append-only receipts record run/runtime/input/output/command digests, an opaque
+authority scope, operation/generation, actual exit/interruption, bounds and
+network policy. Raw command output is not persisted in the executor journal;
+the native desktop redacts the returned output. Receipts do not assert that the
+chosen check was appropriate or that external effects were undone. Existing
+single-use request/agent/workspace approvals and publication uncertainty remain
+authoritative. Commit/push/PR tools retain reviewed tree and HEAD checks and keep
+credentials in the separate native publication adapter.
+
+## Verification and references
+
+Prepare resources with `node apps/desktop/scripts/prepare-execution-runtime.mjs`.
+Run ordinary core tests/Clippy plus the desktop suites. On an unelevated configured
+machine, run `cargo test --manifest-path packages/windows-executor/Cargo.toml
+native_ -- --ignored --nocapture --test-threads=1`, then the desktop
+`native_coding_acceptance` and `native_workspace_execution_acceptance` tests.
+These are actual local process/service checks. Live authenticated model/app,
+installed packaging and a clean-machine/enterprise-policy rehearsal are separate
+evidence and must not be inferred from them.
+
+Local acceptance on October 4, 2026 used Windows x64, bounded elevated setup and
+ordinary unelevated commands:
+
+| Evidence | Result and boundary |
+| --- | --- |
+| Repository native acceptance | A real Node test failed, a scoped edit fixed it, a second command passed and the Git diff reflected the change. Original checkout remained intact; Stop killed a detached descendant. No external publication. |
+| Projectless native acceptance | Python read selected CSV copies, computed 15 and imported a validated CSV. Host/network reads were denied; originals remained intact; Stop/timeout imported nothing. |
+| Core isolation acceptance | Unselected file read/write, Credential Manager and DPAPI denied under the actual child token; output capped; sealed-tree tampering rejected. |
+| Approved network/toolchain | Bundled npm built/tested a staged project, pip ran and explicitly enabled public HTTPS returned 200. This does not establish an IP/domain allowlist. |
+| Actual host death/restart | Supervisor terminated only its own host; kill-on-close ended its detached child. Recovery preserved an uncertain receipt with command/scope binding, imported nothing and removed abandoned staging. A supplied host environment canary did not reach the command. |
+| UI | Production setup component rendered in a browser fixture with simulated IPC: setup/repair/removal/declined responses, narrow wrapping and keyboard focus. This is separate from Windows UAC and authenticated native UI evidence. |
+
+Run these acceptance supervisors serially: any subsequent execution legitimately
+recovers abandoned staging, which would otherwise interfere with the host-death
+test's explicit restart step. Python 3.13 currently prints a restricted-path
+resolution warning while executing successfully; the CSV and pip assertions
+check actual results, not the absence of that warning. Installed-bundle,
+clean-machine and authenticated live provider-to-tool journeys remain unverified.
+
+References informed the design; no source was copied:
+
+- [Microsoft AppContainer/LPAC launch and isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer).
+- [Codex Windows sandbox](https://openai.com/index/building-codex-windows-sandbox/) and
+  [Apache-2.0 public source at c2f7fe8](https://github.com/openai/codex/tree/c2f7fe89d87ce853900d0b5cb1f5dc4863e44d73/codex-rs/windows-sandbox-rs).
+
+Codex's broad-read restricted-user policy is not used as proof of Mivlet's secret
+isolation. The LPAC intersection and actual denial probes establish this lane's
+stronger file/credential boundary on tested Windows builds. This design still
+trusts Windows, its system components and the native Mivlet application.

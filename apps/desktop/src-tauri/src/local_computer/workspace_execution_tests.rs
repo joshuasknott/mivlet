@@ -159,12 +159,12 @@ fn structured_outputs_require_valid_json_and_keep_original_bytes() {
 }
 
 #[test]
-#[ignore = "Requires Windows WSL Ubuntu with Bubblewrap and Python3; real projectless execution acceptance"]
+#[ignore = "Requires Windows native execution setup and bundled runtime; real projectless execution acceptance"]
 fn native_workspace_execution_acceptance() {
     let (_temp, root, authority) = fixture();
     fs::write(root.join("data.csv"), "name,value\nAlpha,6\nBeta,9\n").unwrap();
     fs::write(root.join("private.txt"), "unselected data").unwrap();
-    fs::write(root.join("analysis.py"), "import csv,os,resource,socket\nassert not os.path.exists('/mnt/c')\nassert not os.path.exists('/repo/private.txt')\nassert not os.path.exists('/home/agent/.ssh')\nassert 'USERPROFILE' not in os.environ\nassert resource.getrlimit(resource.RLIMIT_FSIZE)==(8388608,8388608)\nassert resource.getrlimit(resource.RLIMIT_AS)==(1073741824,1073741824)\ntry:\n socket.create_connection(('1.1.1.1',443),timeout=0.2)\n raise AssertionError('network unexpectedly available')\nexcept OSError: pass\nwith open('data.csv') as f: total=sum(int(row['value']) for row in csv.DictReader(f))\nwith open('report.csv','w') as f: f.write('total\\n'+str(total)+'\\n')\nwith open('data.csv','w') as f: f.write('changed inside snapshot')\nprint('actual CSV total',total)\n").unwrap();
+    fs::write(root.join("analysis.py"), "import csv,os,socket\nassert not os.path.exists('private.txt')\nassert 'OPENAI_API_KEY' not in os.environ\nassert 'MivletExecution' in os.environ['USERPROFILE']\ntry:\n socket.create_connection(('1.1.1.1',443),timeout=0.2)\n raise AssertionError('network unexpectedly available')\nexcept OSError: pass\nwith open('data.csv') as f: total=sum(int(row['value']) for row in csv.DictReader(f))\nwith open('report.csv','w',newline='') as f: f.write('total\\n'+str(total)+'\\n')\nwith open('data.csv','w') as f: f.write('changed inside snapshot')\nprint('actual CSV total',total)\n").unwrap();
     let mut arguments = request("python3 analysis.py");
     arguments["inputs"] = json!(["data.csv", "analysis.py"]);
     arguments["outputs"] = json!(["report.csv"]);
@@ -190,14 +190,16 @@ fn native_workspace_execution_acceptance() {
         &execute_in(
             &root,
             authority.begin_agent(1).unwrap(),
-            request("printf partial > partial.txt; exit 7"),
+            request("echo partial > partial.txt & exit /b 7"),
         )
         .unwrap(),
     )
     .unwrap();
     assert_eq!(failed["command"]["exitCode"], 7);
     assert_eq!(failed["outputs"], json!([]));
-    let mut timed = request("(sleep 4; echo escaped > late.txt) & wait");
+    let mut timed = request(
+        "node -e \"setTimeout(()=>require('fs').writeFileSync('late.txt','escape'),4000)\"",
+    );
     timed["timeoutSeconds"] = json!(1);
     let timeout: Value =
         serde_json::from_str(&execute_in(&root, authority.begin_agent(1).unwrap(), timed).unwrap())
@@ -212,7 +214,9 @@ fn native_workspace_execution_acceptance() {
     assert!(execute_in(
         &root,
         authority.begin_agent(1).unwrap(),
-        request("(sleep 4; echo escaped > late.txt) & wait")
+        request(
+            "node -e \"setTimeout(()=>require('fs').writeFileSync('late.txt','escape'),4000)\""
+        )
     )
     .is_err());
     stop.join().unwrap();

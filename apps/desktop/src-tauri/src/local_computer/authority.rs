@@ -214,6 +214,16 @@ impl ComputerAuthority {
     }
 }
 impl OperationTicket {
+    pub(crate) fn execution_binding(&self) -> mivlet_windows_executor::Binding {
+        use sha2::{Digest, Sha256};
+        mivlet_windows_executor::Binding {
+            scope_id: hex::encode(Sha256::digest(
+                self.authority.path.to_string_lossy().as_bytes(),
+            )),
+            generation: self.generation,
+            operation_id: self.id,
+        }
+    }
     pub(crate) fn cancellation(&self) -> Arc<AtomicBool> {
         self.cancellation.clone()
     }

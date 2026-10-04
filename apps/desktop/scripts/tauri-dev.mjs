@@ -1,4 +1,5 @@
 import "./prepare-cua-driver.mjs";
+import "./prepare-execution-runtime.mjs";
 import "../../../packages/agent-host/scripts/build.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
