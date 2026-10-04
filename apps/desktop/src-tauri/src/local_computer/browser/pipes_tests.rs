@@ -1,4 +1,86 @@
 use super::*;
+
+#[test]
+fn visibility_probe_accepts_only_a_plain_known_state_without_exceptions() {
+    use serde_json::json;
+    assert!(visibility(&json!({"result":{"type":"string","value":"visible"}})).unwrap());
+    assert!(!visibility(&json!({"result":{"type":"string","value":"hidden"}})).unwrap());
+    for value in [
+        json!({}),
+        json!({"result":{"type":"string","value":"visible"},"exceptionDetails":{}}),
+        json!({"result":{"type":"object","value":"visible"}}),
+        json!({"result":{"type":"string","value":"prerender"}}),
+        json!({"result":{"type":"string","objectId":"private-object"}}),
+    ] {
+        assert!(visibility(&value).is_err());
+    }
+}
+
+#[test]
+fn visibility_wire_is_fixed_and_caller_expressions_never_reach_the_browser() {
+    use serde_json::{json, Value};
+    let input = Pair::new(false).unwrap();
+    let mut output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    for method in [Command::Visibility, Command::IsolatedWorld] {
+        assert!(control
+            .read_command(
+                method,
+                json!({"expression":"untrusted()","grantUniveralAccess":true}),
+                Some("session"),
+                &|| Ok(())
+            )
+            .is_err());
+    }
+    let mut available = 0;
+    assert_ne!(
+        unsafe {
+            PeekNamedPipe(
+                input.child.as_raw_handle(),
+                std::ptr::null_mut(),
+                0,
+                std::ptr::null_mut(),
+                &mut available,
+                std::ptr::null_mut(),
+            )
+        },
+        0
+    );
+    assert_eq!(available, 0);
+    let worker = std::thread::spawn(move || {
+        let mut reader = Framed::new(input.child);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let first: Value =
+            serde_json::from_slice(&reader.read(deadline, &|| Ok(())).unwrap()).unwrap();
+        assert_eq!(first["method"], "Page.createIsolatedWorld");
+        assert_eq!(first["params"]["frameId"], "native-frame");
+        assert_eq!(first["params"]["grantUniveralAccess"], false);
+        assert_eq!(
+            first["params"]["contentSecurityPolicy"],
+            "default-src 'none'; script-src 'none'"
+        );
+        output.child.write_all(format!("{}\0",json!({"id":first["id"],"sessionId":"session","result":{"executionContextId":17}})).as_bytes()).unwrap();
+        let second: Value =
+            serde_json::from_slice(&reader.read(deadline, &|| Ok(())).unwrap()).unwrap();
+        assert_eq!(second["method"], "Runtime.evaluate");
+        assert_eq!(second["params"]["expression"], "document.visibilityState");
+        assert_eq!(second["params"]["contextId"], 17);
+        for (field, expected) in [
+            ("allowUnsafeEvalBlockedByCSP", false),
+            ("userGesture", false),
+            ("includeCommandLineAPI", false),
+            ("awaitPromise", false),
+            ("throwOnSideEffect", true),
+        ] {
+            assert_eq!(second["params"][field], expected);
+        }
+        output.child.write_all(format!("{}\0",json!({"id":second["id"],"sessionId":"session","result":{"result":{"type":"string","value":"hidden"}}})).as_bytes()).unwrap();
+    });
+    assert!(!control
+        .visible("native-frame", "session", &|| Ok(()))
+        .unwrap());
+    worker.join().unwrap();
+}
 use std::{
     io::Write,
     sync::{

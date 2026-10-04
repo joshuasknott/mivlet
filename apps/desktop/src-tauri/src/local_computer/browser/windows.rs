@@ -34,6 +34,9 @@ mod navigation;
 mod observations;
 #[path = "pipes.rs"]
 mod pipes;
+#[cfg(debug_assertions)]
+#[path = "tab_acceptance.rs"]
+mod tab_acceptance;
 
 pub(super) fn run_helper(arguments: &[std::ffi::OsString]) -> Result<(), String> {
     helper::run(arguments)

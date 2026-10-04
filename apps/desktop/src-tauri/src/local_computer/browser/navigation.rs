@@ -136,13 +136,31 @@ pub(super) fn navigate(
     check()?;
     let result = process._pipe.as_mut().ok_or("The browser's native connection is unavailable.")?.navigate(
         json!({"url":destination.as_str(), "frameId":choice.frame.id, "referrerPolicy":"noReferrer"}), &choice.session, check, dispatch
-    ).map_err(|_| UNKNOWN)?;
+    ).map_err(|error| {
+        #[cfg(debug_assertions)]
+        if std::env::var("MIVLET_OWNED_BROWSER_ACCEPTANCE").as_deref() == Ok("1") {
+            eprintln!("Browser QA navigation transport: {error}");
+        }
+        let _ = error;
+        UNKNOWN
+    })?;
     if result["errorText"]
         .as_str()
         .is_some_and(|value| !value.is_empty())
         || result["isDownload"].as_bool() == Some(true)
         || result["frameId"] != choice.frame.id
     {
+        #[cfg(debug_assertions)]
+        if std::env::var("MIVLET_OWNED_BROWSER_ACCEPTANCE").as_deref() == Ok("1") {
+            eprintln!(
+                "Browser QA navigation reply: error={}, download={}, frame_matches={}",
+                result["errorText"]
+                    .as_str()
+                    .is_some_and(|text| !text.is_empty()),
+                result["isDownload"] == true,
+                result["frameId"] == choice.frame.id
+            );
+        }
         return Err(UNKNOWN.into());
     }
     check().map_err(|_| UNKNOWN)?;

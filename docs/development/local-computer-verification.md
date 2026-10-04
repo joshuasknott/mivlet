@@ -253,6 +253,22 @@ while a dispatched click waits, with no replay. This proves the bounded sole-tab
 button path, not form editing, arbitrary controls, full selected-window/account
 acceptance or managed downloads/uploads.
 
+The visible-tab revision extended this native fixture to two tabs in the same
+private Chrome window. Both fixture pages override their main-world visibility
+getter to return `visible`. Mivlet's fixed isolated-world probe still refused an
+originally valid control after its tab became hidden, offered no controls in that
+hidden observation, and verified a single click in the visible second tab by a
+fresh structured observation. Field privacy, outside-origin and consumed-reference
+checks, driver Stop retention and owner cleanup also passed. The probe's actual
+wire flags and refusal of caller expressions are covered by native pipe tests.
+Two earlier fresh-profile checks stopped on uncertain navigation without replay;
+a later fresh-profile check completed the entire two-tab contract. Their cause
+was not established. Safe opt-in diagnostics record only native transport errors
+and navigation reply booleans, never raw page content or browser error bodies.
+This extends the bounded public-button path to multiple open tabs; it does not
+establish automatic tab switching, form editing, full native account/selection
+acceptance or transfer custody.
+
 Repeat this check only in a Windows interactive session:
 
 ```powershell

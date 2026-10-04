@@ -200,9 +200,9 @@ Credential-shaped output is refused. Page text remains explicitly untrusted.
 Reads invalidate older desktop action observations. A cancelled or malformed pipe
 exchange disables further agent commands while keeping the pipe handles alive for
 human use; close that private window and open a fresh browser to resume agent reads.
-Form editing, multi-tab DOM input and native upload/download custody remain pending.
+Form editing, automatic tab switching and native upload/download custody remain pending.
 
-For a sole HTTP(S) tab, observation also exposes a bounded subset of named,
+For a visible HTTP(S) tab, observation also exposes a bounded subset of named,
 enabled top-frame buttons and HTTP links as opaque `controlRef` choices.
 At most 32 candidate controls are inspected; `controlsPartial` explicitly marks
 this limited subset rather than claiming complete page interaction coverage.
@@ -217,8 +217,17 @@ or changing focus. The current hit-test must identify that exact backend node in
 the top frame; overlays, child-only hit targets, fragmented/rotated/offscreen
 controls and viewport zoom fail closed. One complete fixed mouse tap starts in
 one bounded fenced pipe write; no caller selector, coordinates, script, separate
-down/up writes or automatic replay are available. Tab multiplicity is checked
-again before dispatch. The result states dispatch only and requires a fresh
+down/up writes or automatic replay are available. Other tabs may remain open;
+the exact target must still be present in the sole selected browser window.
+A fixed `document.visibilityState` read in a private isolated world checks that
+this tab is visible before control discovery and twice before input. Page-world
+getter overrides cannot supply this state. The private probe grants no universal
+access, sets a restrictive world CSP, disables CSP bypass, command-line APIs and
+user gestures, rejects side effects/exceptions, and accepts only `visible` or
+`hidden`. It exposes no caller expression or general debugging interface and
+does not activate tabs. A fresh frame/loader/URL check follows the final probe.
+Hidden tabs offer no controls, and previously issued hidden-tab choices fail
+before input. The result states dispatch only and requires a fresh
 observation. Button activation may submit data and browser-managed downloads may
 occur, but this path imports no file. Downloads/file-picker/editable/custom DOM
 controls and private pages require another supported workflow or human control.

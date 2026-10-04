@@ -1,5 +1,6 @@
 //! Exact selected-window, origin-bounded browser reads. CDP identifiers and
-//! field values stay native. This module sends no page input or JavaScript.
+//! field values stay native. Visibility uses one fixed isolated-world read;
+//! no page input or caller-provided JavaScript is exposed.
 use super::{pipes::Command, BrowserProcess};
 use serde_json::{json, Value};
 use std::{
@@ -499,8 +500,13 @@ pub(super) fn observe(
         &call(process, Command::Frames, json!({}), Some(&session), check)?,
         &origin,
     )?;
+    let visible = process
+        ._pipe
+        .as_mut()
+        .ok_or(STALE)?
+        .visible(&before.id, &session, check)?;
     let (nodes, content) = checked_tree(process, &session, &before, check)?;
-    let (controls, choices) = if pages.len() == 1 {
+    let (controls, choices) = if visible {
         super::controls::capture(
             process,
             (hwnd, generation, window),
@@ -523,7 +529,7 @@ pub(super) fn observe(
     }
     check()?;
     process.controls = choices;
-    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"controlScope":"sole-tab-buttons-http-links","controlExpiresSeconds":30,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
 pub(super) fn checked_tree(
@@ -636,12 +642,19 @@ pub(super) fn acceptance(
                     let private =
                         String::from_utf8_lossy(&request[..count]).starts_with("GET /private ");
                     let file = String::from_utf8_lossy(&request[..count]).starts_with("GET /file ");
+                    let second =
+                        String::from_utf8_lossy(&request[..count]).starts_with("GET /second ");
                     let body = if file {
                         "<!doctype html><title>Private file step</title><label>Choose file<input type=file></label>"
                     } else if private {
                         "<!doctype html><title>Private step</title><label>Password<input type=password value='Hidden password delta'></label>"
                     } else {
-                        "<!doctype html><title>Mivlet browser fixture</title><h1>Quarterly report</h1><p>Revenue 42</p><button onclick=\"document.getElementById('result').textContent='Activated once'\">Activate once</button><p id=result>Not activated</p><label>Notes<input value='Hidden entry alpha'></label><textarea>Hidden entry beta</textarea><div contenteditable=true>Hidden entry gamma</div><iframe srcdoc=\"<p>Hidden subframe epsilon</p>\"></iframe>"
+                        "<!doctype html><title>Mivlet browser fixture</title><script>Object.defineProperty(Document.prototype,'visibilityState',{get:()=> 'visible'});</script><h1>Quarterly report</h1><p>Revenue 42</p><button onclick=\"document.getElementById('result').textContent='Activated once'\">Activate once</button><button onclick=\"window.open('/second','_blank')\">Open second tab</button><p id=result>Not activated</p><label>Notes<input value='Hidden entry alpha'></label><textarea>Hidden entry beta</textarea><div contenteditable=true>Hidden entry gamma</div><iframe srcdoc=\"<p>Hidden subframe epsilon</p>\"></iframe>"
+                    };
+                    let body = if second {
+                        body.replace("Mivlet browser fixture", "Second tab fixture")
+                    } else {
+                        body.to_string()
                     };
                     let _=write!(stream,"HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",body.len(),body);
                 } else {
@@ -673,7 +686,8 @@ pub(super) fn acceptance(
             &url,
             check,
             dispatch,
-        )?;
+        )
+        .map_err(|error| format!("Browser QA {path} navigation: {error}"))?;
         if !result.contains("navigation-dispatched") {
             return Err("Browser QA navigation was not dispatched.".into());
         }
@@ -777,7 +791,8 @@ pub(super) fn acceptance(
             }
         }
     }
-    eprintln!("Owned browser DOM fixture: document-bound navigation and sole-tab public button click each dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed refs, password field and file chooser refused.");
+    super::tab_acceptance::run(process, hwnd, &origin, check, dispatch)?;
+    eprintln!("Owned browser DOM fixture: document-bound navigation and visible-tab public button click each dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed refs, password field and file chooser refused.");
     Ok(())
 }
 
