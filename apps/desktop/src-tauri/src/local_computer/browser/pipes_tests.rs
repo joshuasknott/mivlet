@@ -106,3 +106,47 @@ fn mismatched_protocol_response_is_rejected_without_echoing_its_content() {
     let error = control.verify(&|| Ok(())).unwrap_err();
     assert!(!error.contains("private-content"));
 }
+
+#[test]
+fn read_protocol_discards_private_events_and_checks_the_exact_session() {
+    let input = Pair::new(false).unwrap();
+    let mut output = Pair::new(true).unwrap();
+    output.child.write_all(b"{\"method\":\"Target.attachedToTarget\",\"params\":{\"private\":\"never export\"}}\0{\"id\":1,\"sessionId\":\"session-one\",\"result\":{\"nodes\":[]}}\0").unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    assert_eq!(
+        control
+            .read_command(
+                ReadCommand::Accessibility,
+                serde_json::json!({}),
+                Some("session-one"),
+                &|| Ok(())
+            )
+            .unwrap(),
+        serde_json::json!({"nodes":[]})
+    );
+}
+#[test]
+fn cancelled_protocol_is_never_reused_and_does_not_close_browser_handles() {
+    let input = Pair::new(false).unwrap();
+    let output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    assert!(control
+        .read_command(ReadCommand::Targets, serde_json::json!({}), None, &|| Err(
+            "stopped".into()
+        ))
+        .is_err());
+    let error = control
+        .read_command(
+            ReadCommand::Targets,
+            serde_json::json!({}),
+            None,
+            &|| Ok(()),
+        )
+        .unwrap_err();
+    assert!(error.contains("page remains yours"));
+    let mut flags = 0;
+    assert_ne!(
+        unsafe { GetHandleInformation(control.input.as_raw_handle(), &mut flags) },
+        0
+    );
+}

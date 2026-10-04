@@ -257,6 +257,35 @@ pub(super) struct ControlPipe {
     pub input: File,
     pub output: Framed,
     sequence: u32,
+    interrupted: bool,
+}
+
+/// This is the complete native read surface. No method name comes from an agent.
+pub(super) enum ReadCommand {
+    Version,
+    Targets,
+    Window,
+    Attach,
+    Frames,
+    Accessibility,
+    DescribeNode,
+    #[cfg(debug_assertions)]
+    FixtureNavigate,
+}
+impl ReadCommand {
+    fn method(&self) -> &'static str {
+        match self {
+            Self::Version => "Browser.getVersion",
+            Self::Targets => "Target.getTargets",
+            Self::Window => "Browser.getWindowForTarget",
+            Self::Attach => "Target.attachToTarget",
+            Self::Frames => "Page.getFrameTree",
+            Self::Accessibility => "Accessibility.getFullAXTree",
+            Self::DescribeNode => "DOM.describeNode",
+            #[cfg(debug_assertions)]
+            Self::FixtureNavigate => "Page.navigate",
+        }
+    }
 }
 impl ControlPipe {
     pub(super) fn new(input: File, output: File) -> Self {
@@ -264,21 +293,67 @@ impl ControlPipe {
             input,
             output: Framed::new(output),
             sequence: 0,
+            interrupted: false,
         }
+    }
+    pub(super) fn read_command(
+        &mut self,
+        command: ReadCommand,
+        params: serde_json::Value,
+        session: Option<&str>,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<serde_json::Value, String> {
+        if self.interrupted {
+            return Err("The browser's private connection was interrupted. The page remains yours; close its window and open a fresh Mivlet browser to resume agent reads.".into());
+        }
+        let result = (|| {
+            self.sequence = self.sequence.checked_add(1).ok_or(FAILURE)?;
+            let mut message =
+                serde_json::json!({"id":self.sequence,"method":command.method(),"params":params});
+            if let Some(session) = session {
+                message["sessionId"] = session.into();
+            }
+            let deadline = Instant::now() + Duration::from_secs(5);
+            write(&self.input, message.to_string().as_bytes(), deadline, check)?;
+            // Protocol events are private and bounded; only the exact reply is consumed.
+            for _ in 0..64 {
+                let mut response: serde_json::Value =
+                    serde_json::from_slice(&self.output.read(deadline, check)?)
+                        .map_err(|_| FAILURE)?;
+                if response.get("id").is_none() && response["method"].is_string() {
+                    continue;
+                }
+                if response["id"]
+                    .as_u64()
+                    .is_some_and(|id| id < self.sequence.into())
+                {
+                    continue;
+                }
+                if response["id"].as_u64() != Some(self.sequence.into())
+                    || response.get("error").is_some()
+                    || response["sessionId"].as_str() != session
+                    || !response["result"].is_object()
+                {
+                    return Err(FAILURE.into());
+                }
+                check()?;
+                return Ok(response["result"].take());
+            }
+            Err(FAILURE.into())
+        })();
+        if result.is_err() {
+            // A cancelled partial frame cannot be replayed or reused by a later turn.
+            // Keep both handles alive so loss of control does not close the user's page.
+            self.interrupted = true;
+        }
+        result
     }
     /// Only a fixed native readiness probe; no public CDP method or JavaScript surface.
     pub(super) fn verify(&mut self, check: &dyn Fn() -> Result<(), String>) -> Result<(), String> {
-        self.sequence = self.sequence.checked_add(1).ok_or(FAILURE)?;
-        let message =
-            serde_json::json!({"id":self.sequence,"method":"Browser.getVersion"}).to_string();
-        let deadline = Instant::now() + Duration::from_secs(5);
-        write(&self.input, message.as_bytes(), deadline, check)?;
-        let response: serde_json::Value =
-            serde_json::from_slice(&self.output.read(deadline, check)?).map_err(|_| FAILURE)?;
-        let product = response["result"]["product"].as_str().unwrap_or("");
-        if response["id"].as_u64() != Some(self.sequence.into())
-            || response.get("error").is_some()
-            || response["result"]["protocolVersion"] != "1.3"
+        let response =
+            self.read_command(ReadCommand::Version, serde_json::json!({}), None, check)?;
+        let product = response["product"].as_str().unwrap_or("");
+        if response["protocolVersion"] != "1.3"
             || product.len() > 100
             || !product.starts_with("Chrome/")
         {

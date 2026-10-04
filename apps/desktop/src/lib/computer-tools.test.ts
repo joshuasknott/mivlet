@@ -59,12 +59,22 @@ describe("conversation computer tools", () => {
     const previous = conversationComputerTools([], true, true, enabled);
     expect(conversationComputerTools(previous, true, true).map(tool => tool.name)).toEqual(["web-fetch"]);
   });
-  it("removes retired browser and local shell tools, including stale discoveries", () => {
+  it("replaces stale browser specifications and removes retired action and shell tools", () => {
     const previous = ["run-shell", "local-browser-action", "local-browser-observe"].map(name => ({ name, description: "old", parameters: "{}" }));
     const names = conversationComputerTools(previous, true, true, enabled).map(tool => tool.name);
     expect(names).not.toContain("run-shell");
-    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-open"]);
+    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-observe", "local-browser-open", "local-browser-tabs"]);
+    expect(conversationComputerTools(previous, true, true, enabled).find(tool => tool.name === "local-browser-observe")?.description).toContain("top-frame");
     expect(names).toContain("local-app-observe");
+  });
+  it("offers the same text browser reads through Codex, Claude and direct API routes", () => {
+    const provider = { backendType: "codex-app-server", authState: "connected", capabilities: ["tool-requests"] } as BackendProvider;
+    const model = { id: "text-model", label: "Text model", available: true };
+    for (const route of [provider, { ...provider, backendType: "native-api" }, { ...provider, backendType: "claude-agent", driverKind: "claude-agent" }] as BackendProvider[]) {
+      const names = conversationToolsForModel([], true, route, model, enabled).map(tool => tool.name);
+      expect(names).toEqual(expect.arrayContaining(["local-browser-tabs", "local-browser-observe"]));
+      expect(names).not.toContain("local-desktop-observe");
+    }
   });
   it("does not advertise unavailable computers", () => {
     expect(conversationComputerTools([connector], false).map((tool) => tool.name)).toEqual(["gmail-read", "web-fetch"]);

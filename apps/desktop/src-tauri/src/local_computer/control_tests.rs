@@ -4,6 +4,20 @@ use super::super::desktop_tools;
 use super::*;
 
 struct BrowserStopFixture(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+#[test]
+fn native_browser_read_never_runs_without_the_exact_selected_window_lease() {
+    let root = tempfile::tempdir().unwrap();
+    let authority = ComputerAuthority::load(root.path()).unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    let control = NativeControl::default();
+    let called = std::cell::Cell::new(false);
+    let result = control.read_native("workspace-one", "agent-one", 1, &ticket, |_, _| {
+        called.set(true);
+        Ok(())
+    });
+    assert!(result.is_err());
+    assert!(!called.get());
+}
 impl super::super::browser::LaunchStop for BrowserStopFixture {
     fn stop(&self) {
         self.0.fetch_add(1, Ordering::AcqRel);

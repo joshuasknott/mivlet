@@ -156,6 +156,48 @@ pub(crate) fn run_child(arguments: &[std::ffi::OsString]) -> bool {
     }
 }
 
+pub(crate) fn read(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    arguments: Option<(&str, &str)>,
+) -> Result<String, String> {
+    computers.validate_target(workspace, agent)?;
+    let ticket = computers
+        .authority_for(workspace, agent)?
+        .begin_agent(generation)?;
+    #[cfg(not(windows))]
+    {
+        let _ = (arguments, ticket);
+        Err("Mivlet browser reads require Windows x64.".into())
+    }
+    #[cfg(windows)]
+    {
+        let scope = computers.scope(workspace, agent)?;
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+        let result = computers.native.read_native(workspace, agent, generation, &ticket, |window, lease_check| {
+            let check = || {
+                lease_check()?;
+                computers.ensure_open()?;
+                crate::account_session::ensure_current()?;
+                if computers.browsers.closing.load(Ordering::Acquire) || std::time::Instant::now() >= deadline {
+                    return Err("The browser read stopped or reached its time limit. No browser input was sent.".into());
+                }
+                Ok(())
+            };
+            check()?;
+            let mut processes = computers.browsers.processes.lock().map_err(|_| "The owned browser is unavailable.")?;
+            let process = processes.get_mut(&scope.key).filter(|process| process.alive()).ok_or("Select this agent's Mivlet-owned browser before reading its tabs. Ordinary browser profiles are not available through this tool.")?;
+            match arguments {
+                Some((reference, origin)) => process.observe_tab(window.identity.hwnd, generation, reference, origin, &check),
+                None => process.tabs(window.identity.hwnd, generation, &check),
+            }
+        });
+        ticket.finish(result)
+    }
+}
+
 #[cfg(debug_assertions)]
 pub(crate) fn check_owned_browser() -> Result<(), String> {
     #[cfg(windows)]

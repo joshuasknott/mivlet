@@ -181,6 +181,25 @@ The published browser outlives the input driver and Stop for human takeover;
 unpublished cancelled launches are closed, and account/app shutdown closes the
 owned browser job. DOM control and native upload/download custody remain pending.
 
+Shared `local-browser-tabs` and `local-browser-observe` provide text reads in the
+agent's owned browser through the same selected-window lease and global approval
+policy. A sole visible native main window and a sole Chromium window identity must
+agree; extra or minimized tab windows fail closed. Owned menus/tooltips are not
+read, and popup password metadata pauses observation. Native tab references expire after
+60 seconds, bind the window and generation, and are consumed once. The observation
+request names one exact HTTP(S) origin. Native code checks its live URL and security
+origin, frame and loader before and after reading. It never exposes raw target or
+session identifiers, debugging methods, JavaScript, field values or subframes.
+
+The read projection bounds the tree to 2,000 nodes, its output to 200 labels and
+16,000 text characters, and the operation to 15 seconds. Editable descendants are
+omitted, including editable field names that may embed entered values. Native field metadata pauses reads for password, OTP or payment fields;
+credential-shaped output is refused. Page text remains explicitly untrusted.
+Reads invalidate older desktop action observations. A cancelled or malformed pipe
+exchange disables further agent commands while keeping the pipe handles alive for
+human use; close that private window and open a fresh browser to resume agent reads.
+DOM actions and native upload/download custody remain pending.
+
 The driver is private to Rust; React receives no driver methods, process handles,
 raw accessibility tokens or screenshots. Native code only exposes:
 
