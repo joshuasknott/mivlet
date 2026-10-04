@@ -53,6 +53,15 @@ pub(crate) struct VerifiedImageArtifact {
     pub(crate) mime_type: String,
 }
 
+/// Receipt-verified passive bytes for an exact, approved native connector upload.
+/// No host path, bearer credential or byte payload is exposed to JavaScript.
+pub(crate) struct VerifiedUploadArtifact {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) file_name: String,
+    pub(crate) mime_type: String,
+    pub(crate) sha256: String,
+}
+
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OpenArtifactRequest {
@@ -915,6 +924,35 @@ fn verified_artifact(
         request.expected_generation,
     )?;
     Ok((receipt, bytes))
+}
+
+pub(crate) fn verified_upload_artifact(
+    computers: &LocalComputerState,
+    workspace_id: &str,
+    agent_id: &str,
+    expected_generation: u64,
+    artifact_id: &str,
+) -> Result<VerifiedUploadArtifact, String> {
+    let (receipt, bytes) = verified_artifact(
+        computers,
+        &OpenArtifactRequest {
+            workspace_id: workspace_id.into(),
+            agent_id: agent_id.into(),
+            expected_generation,
+            artifact_id: artifact_id.into(),
+        },
+    )?;
+    // Drive's one-request multipart contract is for small files. Larger files
+    // require a separately audited resumable workflow, never implicit retries.
+    if bytes.len() > 5 * 1024 * 1024 {
+        return Err("Drive uploads support deliverables up to 5 MB. Save this larger file and upload it manually.".into());
+    }
+    Ok(VerifiedUploadArtifact {
+        bytes,
+        file_name: receipt.export_name,
+        mime_type: receipt.artifact.mime_type,
+        sha256: receipt.sha256,
+    })
 }
 
 /// Load an immutable, scoped raster artifact for an approved provider edit.

@@ -75,19 +75,19 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   ...Object.values(PDF_TOOLS),
   {
     name: "computer-artifact",
-    description: "Return a generated PDF, Office, raster image, JSON, CSV, Markdown or text file from this agent's workspace as an openable conversation artifact. Use the relative workspace path after verifying the output. Mivlet accepts only its bounded, passive structural subset and copies the verified file into private immutable storage; macros, active or embedded content, browser profiles, executables, and host paths are forbidden.",
+    description: "Publish a verified generated PDF, Office, raster, JSON, CSV, Markdown or text file from this agent's workspace as a conversation artifact. Use its relative path. Only bounded passive content is copied into immutable storage; no macros, active/embedded content, browser profiles, executables or host files.",
     defaultMode: "read-only", defaultRisk: "low",
     parameters: toolParameters({ path: textParameter }, ["path"], true),
   },
   {
     name: "generate-image",
-    description: "Generate exactly one PNG through the user's separate metered direct OpenAI API connection, then return an immutable Mivlet image artifact. Requires a visible exact approval naming gpt-image-2, size, quality, prompt, and title. This does not use or change the conversation's chat model route.",
+    description: "Generate one immutable PNG artifact using the separate metered direct OpenAI API connection, independent of the chat route. Exact approval names gpt-image-2, size, quality, prompt and title.",
     defaultMode: "full-access", defaultRisk: "high",
     parameters: toolParameters(imageParameters, ["prompt", "model", "size", "quality", "title"], true)
   },
   {
     name: "edit-image",
-    description: "Edit one existing verified PNG, JPEG, or WebP Mivlet artifact through the user's separate metered direct OpenAI API connection, then return one immutable PNG artifact. Requires a visible exact approval naming the source artifact, gpt-image-2, size, quality, prompt, and title. This does not use or change the conversation's chat model route.",
+    description: "Edit a verified PNG/JPEG/WebP artifact using the separate metered direct OpenAI API connection, independent of the chat route; return one immutable PNG. Exact approval names sourceArtifactId, gpt-image-2, size, quality, prompt and title.",
     defaultMode: "full-access", defaultRisk: "high",
     parameters: toolParameters({
         sourceArtifactId: { type: "string", pattern: "^artifact-[0-9a-f]{64}$" },
@@ -96,7 +96,7 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   },
   {
     name: "connector-action",
-    description: "Perform a supported native connector write after an exact user approval. Use only actions advertised for the selected connector. Payload values must be strings; serialize nested objects/arrays as JSON strings. Gmail uses to, subject, body, optional cc/bcc/threadId; Drive uses name/content/mimeType or fileId and change fields; Calendar uses calendarId, title, start, end, timezone, optional eventId/attendees. Never include credentials. Calendar create-draft/update-draft create/update real events; sending, deleting and sharing affect external data.",
+    description: "Perform an advertised native connector write after exact approval. String payload values; encode nested objects/arrays as JSON strings. Drive upload-artifact uses artifactId and destinationFolderId (root allowed), max 5 MB; other Drive actions use name/content/mimeType or fileId. Gmail: to/subject/body, optional cc/bcc/threadId. Calendar: calendarId/title/start/end/timezone, optional eventId/attendees; draft actions write real events. Never include credentials.",
     defaultMode: "full-access", defaultRisk: "critical",
     parameters: toolParameters({ connectorId: textParameter, action: textParameter, payload: { type: "object", additionalProperties: textParameter } }, ["connectorId", "action", "payload"], true)
   },

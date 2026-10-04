@@ -515,6 +515,7 @@ async fn send_raw_json(
     crate::ensure_rustls_provider();
     let client = reqwest::Client::builder()
         .timeout(REQUEST_TIMEOUT)
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|_| {
             error(
@@ -1312,7 +1313,8 @@ async fn execute_drive_action(
                     .get("mimeType")
                     .map(String::as_str)
                     .unwrap_or("text/plain");
-                let (content_type, body) = drive_multipart_body(&metadata, mime_type, content)?;
+                let (content_type, body) =
+                    drive_multipart_body(&metadata, mime_type, content.as_bytes())?;
                 let mut url = api_url(DRIVE_UPLOAD_API, "files")?;
                 url.query_pairs_mut().append_pair("uploadType", "multipart");
                 let value = send_raw_json(
@@ -1412,7 +1414,7 @@ async fn execute_drive_action(
 fn drive_multipart_body(
     metadata: &Value,
     mime_type: &str,
-    content: &str,
+    content: &[u8],
 ) -> Result<(String, Vec<u8>), ConnectorCommandError> {
     if mime_type.contains(['\r', '\n']) {
         return Err(error(
@@ -1422,7 +1424,22 @@ fn drive_multipart_body(
             false,
         ));
     }
-    let boundary = "mivlet-google-drive-upload";
+    let mut nonce = [0u8; 24];
+    getrandom::fill(&mut nonce).map_err(|_| {
+        error(
+            "google-drive",
+            "provider-unavailable",
+            "Drive upload boundary is unavailable.",
+            false,
+        )
+    })?;
+    let boundary = format!(
+        "mivlet-{}",
+        nonce
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    );
     let metadata = serde_json::to_string(metadata).map_err(|_| {
         error(
             "google-drive",
@@ -1431,13 +1448,78 @@ fn drive_multipart_body(
             false,
         )
     })?;
-    let body = format!(
-        "--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata}\r\n--{boundary}\r\nContent-Type: {mime_type}\r\n\r\n{content}\r\n--{boundary}--\r\n"
-    );
-    Ok((
-        format!("multipart/related; boundary={boundary}"),
-        body.into_bytes(),
-    ))
+    if content
+        .windows(boundary.len())
+        .any(|slice| slice == boundary.as_bytes())
+        || metadata.contains(&boundary)
+    {
+        return Err(error(
+            "google-drive",
+            "invalid-request",
+            "Drive multipart data conflicts with its boundary. Prepare again.",
+            false,
+        ));
+    }
+    let mut body = format!("--{boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n{metadata}\r\n--{boundary}\r\nContent-Type: {mime_type}\r\n\r\n").into_bytes();
+    body.extend_from_slice(content);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    Ok((format!("multipart/related; boundary={boundary}"), body))
+}
+
+pub(crate) async fn upload_artifact(
+    app: &tauri::AppHandle,
+    action: &ConnectorActionRequest,
+    expected_connection: &str,
+    artifact: &crate::local_computer::artifacts::VerifiedUploadArtifact,
+    require_current: impl Fn() -> Result<(), ConnectorCommandError>,
+) -> Result<ConnectorActionResult, ConnectorCommandError> {
+    require_current()?;
+    let (_, tokens) =
+        authorized_tokens_for_connection(app, "google-drive", Some(expected_connection)).await?;
+    require_scope("google-drive", &tokens, &[DRIVE_FILE])?;
+    let metadata = json!({"name": artifact.file_name, "mimeType": artifact.mime_type,
+        "parents": [required("google-drive", &action.payload, "destinationFolderId")?]});
+    let (content_type, body) =
+        drive_multipart_body(&metadata, &artifact.mime_type, &artifact.bytes)?;
+    // This new native artifact path has a fixed official egress origin. Existing
+    // text connector development overrides cannot redirect deliverable bytes.
+    let mut url = Url::parse("https://www.googleapis.com/upload/drive/v3/files")
+        .expect("fixed Google Drive upload URL");
+    url.query_pairs_mut()
+        .append_pair("uploadType", "multipart")
+        .append_pair("fields", "id");
+    require_current()?;
+    let value = send_raw_json(
+        &new_call_id("google-drive"),
+        "google-drive",
+        &tokens,
+        Method::POST,
+        url,
+        &content_type,
+        body,
+    )
+    .await
+    .map_err(upload_failure)?;
+    let resource_id = string(&value, "id")
+        .filter(|id| !id.is_empty())
+        .ok_or_else(|| maybe_applied_error("google-drive", &Method::POST))?;
+    Ok(ConnectorActionResult {
+        request_id: action.id.clone(),
+        connector_id: "google-drive".into(),
+        action: action.action.clone(),
+        status: "completed".into(),
+        message: "The exact approved deliverable was uploaded to Google Drive.".into(),
+        provider_resource_id: Some(resource_id),
+    })
+}
+
+fn upload_failure(failure: ConnectorCommandError) -> ConnectorCommandError {
+    if matches!(failure.code.as_str(), "provider-unavailable" | "cancelled") {
+        // A lost/malformed response does not prove that a POST was unapplied.
+        maybe_applied_error("google-drive", &Method::POST)
+    } else {
+        failure
+    }
 }
 
 fn safe_header(value: &str) -> Result<&str, ConnectorCommandError> {
@@ -2362,6 +2444,67 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn binary_multipart_preserves_every_byte_and_mutations_never_retry() {
+        let data = (0u8..=255).collect::<Vec<_>>();
+        let (content_type, body) = drive_multipart_body(
+            &json!({"name":"Report.pdf", "mimeType":"application/pdf", "parents":["folder-1"]}),
+            "application/pdf",
+            &data,
+        )
+        .unwrap();
+        assert!(body.windows(data.len()).any(|value| value == data));
+        assert!(
+            drive_multipart_body(&json!({}), "application/pdf\r\nInjected: bad", &data).is_err()
+        );
+        let (other_type, _) = drive_multipart_body(&json!({}), "application/pdf", &data).unwrap();
+        assert_ne!(content_type, other_type);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let expected = body.clone();
+        let server = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut received = Vec::new();
+            let mut buffer = [0u8; 4096];
+            loop {
+                let count = stream.read(&mut buffer).await.unwrap();
+                assert!(count > 0);
+                received.extend_from_slice(&buffer[..count]);
+                if let Some(end) = received.windows(4).position(|value| value == b"\r\n\r\n") {
+                    let header = String::from_utf8(received[..end].to_vec()).unwrap();
+                    if received.len() >= end + 4 + expected.len() {
+                        assert_eq!(&received[end + 4..], expected);
+                        assert!(header
+                            .to_lowercase()
+                            .contains("authorization: bearer test-token"));
+                        break;
+                    }
+                }
+            }
+            stream.write_all(b"HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").await.unwrap();
+            assert!(
+                tokio::time::timeout(Duration::from_millis(200), listener.accept())
+                    .await
+                    .is_err(),
+                "mutation must never retry"
+            );
+        });
+        let result = send_raw_json(
+            "binary-upload-test",
+            "google-drive",
+            &tokens(&[DRIVE_FILE]),
+            Method::POST,
+            Url::parse(&format!("http://{address}/upload")).unwrap(),
+            &content_type,
+            body,
+        )
+        .await
+        .unwrap_err();
+        assert!(!result.retryable);
+        assert!(result.message.contains("verify") || result.message.contains("Verify"));
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn mocked_http_contract_rejects_malformed_and_honors_cancellation() {
         let (bad_url, _) = mock_response("200 OK", "not-json", 0).await;
         let malformed = send_json(
@@ -2390,7 +2533,55 @@ mod tests {
         assert_eq!(cancelled.code, "cancelled");
     }
 
+    #[tokio::test]
+    async fn raw_uploads_do_not_follow_redirects_to_another_origin() {
+        let escaped = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let location = format!("http://{}/escape", escaped.local_addr().unwrap());
+        let (url, request) = mock_response(
+            &format!("307 Temporary Redirect\r\nLocation: {location}"),
+            "",
+            0,
+        )
+        .await;
+        assert!(send_raw_json(
+            "redirect-upload-test",
+            "google-drive",
+            &tokens(&[DRIVE_FILE]),
+            Method::POST,
+            url,
+            "application/pdf",
+            b"approved upload bytes".to_vec()
+        )
+        .await
+        .is_err());
+        request.await.unwrap();
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), escaped.accept())
+                .await
+                .is_err()
+        );
+    }
+
     static ENV_LOCK: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+    #[test]
+    fn uncertain_upload_responses_require_verification_and_never_offer_retry() {
+        for code in ["provider-unavailable", "cancelled"] {
+            let failure = upload_failure(error("google-drive", code, "lost upload response", true));
+            assert!(!failure.retryable);
+            assert!(failure.message.to_lowercase().contains("verify"));
+        }
+        assert_eq!(
+            upload_failure(error(
+                "google-drive",
+                "permission-denied",
+                "reconnect",
+                false
+            ))
+            .code,
+            "permission-denied"
+        );
+    }
 
     #[test]
     fn test_has_any_scope_suffix_matching() {

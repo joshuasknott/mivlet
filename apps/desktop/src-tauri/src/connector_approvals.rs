@@ -139,6 +139,8 @@ fn connector_target_summary(action: &ConnectorActionRequest, account_id: &str) -
         "google-drive" => &[
             "fileId",
             "name",
+            "filename",
+            "artifactId",
             "destinationFolderId",
             "parents",
             "recipient",
@@ -241,6 +243,12 @@ pub(crate) fn record_pending_connector_action(
             value(&["recurrence"], "(none)"),
             action.payload.keys().cloned().collect::<Vec<_>>().join(", "),
             action.action,
+        ),
+        "google-drive" if action.action == "google-drive.upload-artifact" => format!(
+            "Account: {account_label}\nDeliverable: {}\nDestination folder: {}\nType: {}\nSize: {} bytes\nSHA-256: {}\nAction: Upload a new file",
+            value(&["filename"], "(missing)"), value(&["destinationFolderId"], "(missing)"),
+            value(&["mimeType"], "(missing)"), value(&["sizeBytes"], "(missing)"),
+            value(&["sha256"], "(missing)"),
         ),
         "google-drive" => format!(
             "Account: {account_label}\nFile/folder: {}\nDestination: {}\nRecipients: {}\nProposed change: {}\nName/content preview: {}",
@@ -439,6 +447,50 @@ mod tests {
         assert!(verify_prepared_connector_action(&path, &prepared).is_ok());
         assert!(verify_prepared_connector_action(&path, &action("attacker@example.com")).is_err());
         let _ = fs::remove_file(path);
+    }
+
+    #[test]
+    fn upload_preview_shows_exact_file_destination_and_hash_and_rejects_rebinding() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut upload = action("unused");
+        upload.connector_id = "google-drive".into();
+        upload.action = "google-drive.upload-artifact".into();
+        upload.payload = BTreeMap::from([
+            ("filename".into(), "Report.pdf".into()),
+            ("destinationFolderId".into(), "folder-1".into()),
+            ("sizeBytes".into(), "123".into()),
+            ("mimeType".into(), "application/pdf".into()),
+            ("sha256".into(), "a".repeat(64)),
+            ("sourceAgentId".into(), "agent-1".into()),
+            ("sourceGeneration".into(), "7".into()),
+            ("sourceConnectionRevision".into(), "4".into()),
+        ]);
+        let path = directory.path().join("approvals.json");
+        let record =
+            record_pending_connector_action(&path, &upload, "account-1", "selected@example.test")
+                .unwrap();
+        for value in [
+            "selected@example.test",
+            "Report.pdf",
+            "folder-1",
+            "123 bytes",
+            "application/pdf",
+            &"a".repeat(64),
+        ] {
+            assert!(record.preview.contains(value));
+        }
+        verify_prepared_connector_action(&path, &upload).unwrap();
+        for key in [
+            "sha256",
+            "destinationFolderId",
+            "sourceAgentId",
+            "sourceGeneration",
+            "sourceConnectionRevision",
+        ] {
+            let mut changed = upload.clone();
+            changed.payload.insert(key.into(), "different".into());
+            assert!(verify_prepared_connector_action(&path, &changed).is_err());
+        }
     }
 
     /// The Gmail send approval preview must surface every field a user needs to

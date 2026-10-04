@@ -151,7 +151,7 @@ pub const CONNECTOR_AUTH_STATES: [&str; 9] = [
     "error",
     "unavailable",
 ];
-pub const CONNECTOR_ACTIONS: [&str; 36] = [
+pub const CONNECTOR_ACTIONS: [&str; 37] = [
     "vercel.promote",
     "vercel.rollback",
     "vercel.create-deployment",
@@ -164,6 +164,7 @@ pub const CONNECTOR_ACTIONS: [&str; 36] = [
     "linear.update-issue",
     "linear.comment",
     "google-drive.create-file",
+    "google-drive.upload-artifact",
     "google-drive.update-file",
     "google-drive.move-file",
     "google-drive.rename-file",

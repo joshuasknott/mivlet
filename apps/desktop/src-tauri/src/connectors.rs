@@ -4,6 +4,7 @@
 //! delegated to `connector_auth`; secrets never enter this module or JavaScript.
 
 use std::collections::{BTreeMap, BTreeSet};
+mod drive_artifacts;
 
 use crate::approvals::resolve_approval;
 use crate::collaboration_connectors;
@@ -299,6 +300,7 @@ const CATALOG: &[ConnectorCatalogEntry] = &[
         setup_message: "Enable the Drive API, create a desktop OAuth client, and set its client id and secret in Mivlet's local environment.",
         actions: &[
             "google-drive.create-file",
+            "google-drive.upload-artifact",
             "google-drive.update-file",
             "google-drive.move-file",
             "google-drive.rename-file",
@@ -405,6 +407,12 @@ fn require_connector(
 
 fn action_policy(action: &str) -> Option<ConnectorActionPolicy> {
     let policy = match action {
+        "google-drive.upload-artifact" => ConnectorActionPolicy {
+            label: "Upload Deliverable",
+            mode: "full-access", risk_level: "high",
+            consequence: "Creates a new file in the selected Google Drive folder using the exact approved deliverable bytes.",
+            confirmation_phrase: None,
+        },
         "vercel.promote" => ConnectorActionPolicy {
             label: "Promote",
             mode: "full-access",
@@ -703,6 +711,7 @@ pub(crate) fn connection_has_disallowed_github_scope(connection: &ConnectorConne
 fn action_required_scopes(action: &str) -> &'static [&'static str] {
     match action {
         "google-drive.create-file"
+        | "google-drive.upload-artifact"
         | "google-drive.update-file"
         | "google-drive.move-file"
         | "google-drive.rename-file"
@@ -2170,8 +2179,15 @@ pub fn prepare_connector_tool_action(
     action: String,
     payload: BTreeMap<String, String>,
     workspace_id: String,
+    artifact_source: Option<drive_artifacts::ArtifactSource>,
+    local_computers: tauri::State<'_, std::sync::Arc<crate::local_computer::LocalComputerState>>,
 ) -> Result<serde_json::Value, ConnectorCommandError> {
     require_connector_workspace(Some(workspace_id.clone()))?;
+    let payload = if action == drive_artifacts::ACTION && connector_id == "google-drive" {
+        drive_artifacts::prepare(&local_computers, &workspace_id, artifact_source, payload)?
+    } else {
+        payload
+    };
     let request = connector_tool_action_request(connector_id, action, payload)?;
     let action = prepare_connector_action(app.clone(), request, Some(workspace_id.clone()))?;
     let record = verify_prepared_connector_action(
@@ -2315,6 +2331,7 @@ pub async fn execute_approved_connector_action(
     app: tauri::AppHandle,
     request: ConnectorActionExecutionRequest,
     workspace_id: Option<String>,
+    local_computers: tauri::State<'_, std::sync::Arc<crate::local_computer::LocalComputerState>>,
 ) -> Result<ConnectorActionResult, ConnectorCommandError> {
     require_connector_workspace(workspace_id.clone())?;
     let (action, resolution) = validate_connector_execution_request(request)?;
@@ -2364,6 +2381,15 @@ pub async fn execute_approved_connector_action(
         &record,
         current_account_id.as_deref(),
     )?;
+    let artifact_upload = if action.action == drive_artifacts::ACTION {
+        Some(drive_artifacts::Upload::admit(
+            &local_computers,
+            scope.data.workspace_id(),
+            &action,
+        )?)
+    } else {
+        None
+    };
 
     if matches!(
         action.connector_id.as_str(),
@@ -2399,7 +2425,12 @@ pub async fn execute_approved_connector_action(
         action.connector_id.as_str(),
         "google-drive" | "gmail" | "google-calendar"
     ) {
-        match crate::google::execute_action(&app, &action, &expected_connection_id).await {
+        let result = if let Some(upload) = artifact_upload {
+            upload.execute(&app, &action, &expected_connection_id).await
+        } else {
+            crate::google::execute_action(&app, &action, &expected_connection_id).await
+        };
+        match result {
             Ok(result) => {
                 update_connector_action_result(
                     &records_path,
@@ -2655,6 +2686,16 @@ mod workspace_scope_tests {
         assert!(drive.scopes.iter().any(|(id, _, access, required)| {
             *id == "https://www.googleapis.com/auth/drive.file" && *access == "write" && *required
         }));
+        assert!(drive.actions.contains(&drive_artifacts::ACTION));
+        assert_eq!(
+            action_required_scopes(drive_artifacts::ACTION),
+            DRIVE_FILE_ACTION_SCOPES
+        );
+        let upload_policy = action_policy(drive_artifacts::ACTION).unwrap();
+        assert_eq!(
+            (upload_policy.mode, upload_policy.risk_level),
+            ("full-access", "high")
+        );
         let vercel = CATALOG.iter().find(|entry| entry.id == "vercel").unwrap();
         assert!(vercel.scopes.iter().any(|(id, _, access, required)| {
             *id == "deployment:write" && *access == "write" && *required

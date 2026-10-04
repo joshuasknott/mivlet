@@ -35,9 +35,9 @@ import { actRuntimeHostedBrowser, inspectRuntimeHostedProcess, launchRuntimeHost
 import { commitRuntimeCapabilityGrant, prepareRuntimeCapabilityGrant, resolveRuntimeMcpCapabilityRoute, type RuntimeCapabilityGrantProposal } from "../runtime/domains/mcp";
 import { executeRuntimeToolCall } from "../runtime/domains/tools";
 import { checkRuntimeManagedTool } from "../runtime/domains/providers";
-import { executeRuntimeConnectorAction, prepareRuntimeConnectorToolAction } from "../runtime/domains/connectors";
 import type { RuntimeResolvedMcpCapabilityRoute } from "../runtime/domains/mcp";
-import { isLocalComputerTool } from "./computer-tools";
+import { isLocalComputerTool, computerAuthorityCurrent } from "./computer-tools";
+import { executeRuntimeConnectorAction, prepareRuntimeConnectorToolAction } from "../runtime/domains/connectors";
 import { CONNECTOR_READ_TOOLS } from "./connector-chat";
 
 export type { DesktopToolExecutorOptions } from "./desktop-tool-options";
@@ -75,27 +75,40 @@ export function createDesktopToolExecutor(
       const connectorId = typeof parsed.connectorId === "string" ? parsed.connectorId : "";
       const action = typeof parsed.action === "string" ? parsed.action : "";
       const payload = parsed.payload;
-      const accessCurrent = () => options.connectorAccessCurrent
-        ? options.connectorAccessCurrent(connectorId) : options.connectorIds?.includes(connectorId);
+      const accessCurrent = () => !options.shouldCancel?.() && (options.connectorAccessCurrent
+        ? options.connectorAccessCurrent(connectorId) : options.connectorIds?.includes(connectorId));
       if (!options.workspaceId || !accessCurrent()) throw new Error("Select or mention this connected app first.");
       if (!action || !payload || typeof payload !== "object" || Array.isArray(payload)
-        || Object.values(payload).some((value) => typeof value !== "string")) throw new Error("Supply an action and a payload of string values.");
-      const prepared = await prepareRuntimeConnectorToolAction(options.workspaceId, connectorId, action, payload as Record<string, string>);
+        || Object.values(payload).some(value => typeof value !== "string")) throw new Error("Supply an action and a payload of string values.");
+      const uploadSource = action === "google-drive.upload-artifact"
+        ? { ...(options.localComputerCurrent?.() ?? options.localComputer) } : undefined;
+      const checkUploadSource = () => {
+        if (uploadSource && (!computerAuthorityCurrent(uploadSource, options.localComputerCurrent?.() ?? options.localComputer)
+          || uploadSource.workspaceId !== options.workspaceId || !uploadSource.agentId)) {
+          throw new Error("Computer control changed. Use the saved agent's current computer to upload this deliverable.");
+        }
+      };
+      checkUploadSource();
+      const prepared = await prepareRuntimeConnectorToolAction(options.workspaceId, connectorId, action, payload as Record<string, string>,
+        ...(uploadSource ? [{ agentId: uploadSource.agentId!, generation: uploadSource.generation! }] as const : [] as const)
+      );
       if (!prepared || !options.queueApproval) throw new Error("Connector actions require the desktop runtime.");
       if (!prepared.connectionId) throw new Error("Connect this account before approving a connector action.");
       const preparedConnectionId = prepared.connectionId;
-      const accountUnchanged = () => !options.connectorAccountCurrent
-        || options.connectorAccountCurrent(connectorId) === preparedConnectionId;
-      if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
-      if (!accountUnchanged()) throw new Error("The connected account changed.");
-      options.queueApproval(prepared.action.approval, "connector-action", JSON.stringify({ preview: prepared.preview, payload }));
+      const checkCurrent = () => {
+        if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+        if (options.connectorAccountCurrent && options.connectorAccountCurrent(connectorId) !== preparedConnectionId) throw new Error("The connected account changed.");
+        checkUploadSource();
+      };
+      checkCurrent();
+      options.queueApproval(prepared.action.approval, "connector-action", JSON.stringify({ preview: prepared.preview, payload: prepared.action.payload }));
       if (await gate.waitForDecision(prepared.action.approval) !== "granted") throw new Error("Connector action was denied.");
-      if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
-      if (!accountUnchanged()) throw new Error("The connected account changed.");
+      checkCurrent();
       await checkProviderCall();
+      checkCurrent();
       const result = await executeRuntimeConnectorAction({ action: prepared.action, approval: resolutionFor(prepared.action.approval) });
       if (!result) throw new Error("Connector execution is unavailable.");
-      if (!accessCurrent()) throw new Error("The workspace or connector access changed.");
+      checkCurrent();
       return JSON.stringify({ trust: "untrusted", instructionAuthority: "none", result });
     }
     // Remote calls first prepare the exact native action. Only that preview is
@@ -124,9 +137,7 @@ export function createDesktopToolExecutor(
       if (options.shouldCancel?.()) throw new Error("This task was cancelled. Refresh the computer before continuing.");
       if (!admittedComputer) return;
       const current = options.localComputerCurrent?.() ?? options.localComputer;
-      if (!current?.ready || !Number.isSafeInteger(admittedComputer.generation) || admittedComputer.controller !== "agent"
-        || current.workspaceId !== admittedComputer.workspaceId || current.agentId !== admittedComputer.agentId
-        || current.generation !== admittedComputer.generation || current.controller !== "agent") {
+      if (!computerAuthorityCurrent(admittedComputer, current)) {
         throw new Error("Computer control changed or is paused. Wait for the user to return control, then observe the current state before acting.");
       }
     };
