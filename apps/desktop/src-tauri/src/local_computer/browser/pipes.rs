@@ -321,6 +321,8 @@ pub(super) enum Command {
     Layout,
     Hit,
     Click,
+    IsolatedWorld,
+    Visibility,
 }
 impl Command {
     fn method(&self) -> &'static str {
@@ -337,6 +339,8 @@ impl Command {
             Self::Layout => "Page.getLayoutMetrics",
             Self::Hit => "DOM.getNodeForLocation",
             Self::Click => "Input.synthesizeTapGesture",
+            Self::IsolatedWorld => "Page.createIsolatedWorld",
+            Self::Visibility => "Runtime.evaluate",
         }
     }
 }
@@ -359,7 +363,39 @@ impl ControlPipe {
         if matches!(command, Command::Navigate | Command::Click) {
             return Err("Browser input requires the native dispatch fence.".into());
         }
+        if matches!(command, Command::IsolatedWorld | Command::Visibility) {
+            return Err("Only the fixed native visibility probe may create or evaluate its private context.".into());
+        }
         self.exchange(command, params, session, check, None)
+    }
+
+    /// Only this fixed read may evaluate code. It exposes no caller expression,
+    /// command-line API, user gesture, page values, CSP bypass or universal access.
+    pub(super) fn visible(
+        &mut self,
+        frame: &str,
+        session: &str,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let world = self.exchange(
+            Command::IsolatedWorld,
+            serde_json::json!({"frameId":frame,"worldName":"mivlet-native-visibility-v1", "grantUniveralAccess":false,
+                "contentSecurityPolicy":"default-src 'none'; script-src 'none'"}),
+            Some(session), check, None,
+        )?;
+        let context = world["executionContextId"]
+            .as_u64()
+            .filter(|id| *id > 0 && *id <= i32::MAX as u64)
+            .ok_or("The browser visibility context is unavailable.")?;
+        let result = self.exchange(
+            Command::Visibility,
+            serde_json::json!({"expression":"document.visibilityState","contextId":context,
+                "returnByValue":true,"includeCommandLineAPI":false,"silent":true,"userGesture":false,
+                "awaitPromise":false,"throwOnSideEffect":true,"timeout":100,"disableBreaks":true,
+                "replMode":false,"allowUnsafeEvalBlockedByCSP":false}),
+            Some(session), check, None,
+        )?;
+        visibility(&result)
     }
 
     pub(super) fn navigate(
@@ -459,5 +495,20 @@ impl ControlPipe {
             );
         }
         check()
+    }
+}
+
+fn visibility(value: &serde_json::Value) -> Result<bool, String> {
+    if value.get("exceptionDetails").is_some() || value["result"]["type"] != "string" {
+        return Err(
+            "The browser could not verify its visible tab. No input was dispatched.".into(),
+        );
+    }
+    match value["result"]["value"].as_str() {
+        Some("visible") => Ok(true),
+        Some("hidden") => Ok(false),
+        _ => Err(
+            "The browser returned an unsupported visibility state. No input was dispatched.".into(),
+        ),
     }
 }

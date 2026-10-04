@@ -13,7 +13,7 @@ use std::{
 
 const STALE: &str = "The browser control is stale or changed. List tabs and observe again before choosing a new action. No browser input was dispatched.";
 const UNKNOWN: &str = "Browser click outcome is uncertain. It may have changed the page, submitted data or started a browser-managed download. No input was replayed and no Mivlet artifact was imported. Observe the current state before choosing another action.";
-const SOLE: &str = "Browser clicks require the sole tab in the selected foreground owned window. Close extra tabs and observe again; no browser input was dispatched.";
+const HIDDEN: &str = "The observed browser tab is no longer visible. Select it yourself and observe again; no browser input was dispatched.";
 
 #[derive(Clone, PartialEq, Eq)]
 struct Control {
@@ -241,11 +241,9 @@ pub(super) fn click(
     process.navigation.clear();
     process.tabs = None;
     let (window, pages) = observations::targets(process, scope.0, check)?;
-    if pages.len() != 1 {
-        return Err(SOLE.into());
-    }
-    if pages[0]["targetId"] != choice.target || pages[0]["url"].as_str() != Some(&choice.frame.url)
-    {
+    if !pages.iter().any(|page| {
+        page["targetId"] == choice.target && page["url"].as_str() == Some(&choice.frame.url)
+    }) {
         return Err(STALE.into());
     }
     let current = observations::frame(
@@ -259,6 +257,14 @@ pub(super) fn click(
         origin,
     )?;
     choice.check(scope.0, scope.1, window, origin, name, &current)?;
+    if !process
+        ._pipe
+        .as_mut()
+        .ok_or(STALE)?
+        .visible(&current.id, &choice.session, check)?
+    {
+        return Err(HIDDEN.into());
+    }
     let (nodes, _) = observations::checked_tree(process, &choice.session, &current, check)?;
     if !observations::reachable(&nodes, &current.id, false)?
         .iter()
@@ -324,13 +330,32 @@ pub(super) fn click(
     )?;
     choice.check(scope.0, scope.1, window, origin, name, &after)?;
     let (last_window, last_pages) = observations::targets(process, scope.0, check)?;
-    if last_pages.len() != 1
-        || last_window != window
-        || last_pages[0]["targetId"] != choice.target
-        || last_pages[0]["url"].as_str() != Some(&after.url)
+    if last_window != window
+        || !last_pages.iter().any(|page| {
+            page["targetId"] == choice.target && page["url"].as_str() == Some(&after.url)
+        })
     {
         return Err(STALE.into());
     }
+    if !process
+        ._pipe
+        .as_mut()
+        .ok_or(STALE)?
+        .visible(&after.id, &choice.session, check)?
+    {
+        return Err(HIDDEN.into());
+    }
+    let verified = observations::frame(
+        &observations::call(
+            process,
+            Command::Frames,
+            json!({}),
+            Some(&choice.session),
+            check,
+        )?,
+        origin,
+    )?;
+    choice.check(scope.0, scope.1, window, origin, name, &verified)?;
     check()?;
     // One complete, fixed mouse gesture in one bounded fenced write. No separate
     // down/up writes, focus change, scroll, caller coordinates or replay.
