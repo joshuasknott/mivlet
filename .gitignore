@@ -27,6 +27,7 @@ apps/desktop/src-tauri/resources/agent-host/mivlet-agent-host.exe
 apps/desktop/src-tauri/resources/agent-host/runtime.json
 apps/desktop/src-tauri/resources/agent-host/THIRD_PARTY_NOTICES.txt
 packages/agent-host/*.bun-build
+apps/desktop/src-tauri/resources/execution-runtime/runtime/
 
 # local wrangler/d1 state
 .wrangler/

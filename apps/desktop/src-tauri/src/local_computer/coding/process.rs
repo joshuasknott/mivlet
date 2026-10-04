@@ -1,15 +1,102 @@
-//! Fixed native programs only. Linux commands run exclusively in Bubblewrap.
+//! Trusted Git/publication programs and the shared restricted Windows executor.
 use super::super::authority::OperationTicket;
 use serde::{Deserialize, Serialize};
 use std::{
     io::Read,
-    path::Path,
+    path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, OnceLock},
     time::{Duration, Instant},
 };
 
 const LIMIT: usize = 64 * 1024;
+
+#[cfg(all(test, windows))]
+pub(in crate::local_computer) struct NativeSentinel(std::process::Child);
+#[cfg(all(test, windows))]
+impl NativeSentinel {
+    pub(in crate::local_computer) fn new() -> Self {
+        Self(
+            Command::new(execution_resources().unwrap().join("node/node.exe"))
+                .args(["-e", "setTimeout(()=>{},120000)"])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap(),
+        )
+    }
+    pub(in crate::local_computer) fn assert_alive(&mut self) {
+        assert!(
+            self.0.try_wait().unwrap().is_none(),
+            "Stop killed an unrelated sentinel process"
+        );
+    }
+}
+#[cfg(all(test, windows))]
+impl Drop for NativeSentinel {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+#[cfg(all(test, windows))]
+pub(in crate::local_computer) fn native_work(
+    binding: &mivlet_windows_executor::Binding,
+) -> Option<PathBuf> {
+    let expected = serde_json::to_value(binding).unwrap();
+    std::fs::read_dir(mivlet_windows_executor::setup::ready().unwrap())
+        .unwrap()
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .find(|path| {
+            std::fs::read(path.join("prepared.json"))
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<serde_json::Value>(&bytes).ok())
+                .is_some_and(|value| value["binding"] == expected)
+        })
+        .map(|path| path.join("work"))
+}
+#[cfg(all(test, windows))]
+pub(in crate::local_computer) fn stop_after_native_ready(
+    binding: &mivlet_windows_executor::Binding,
+    stop: impl FnOnce(),
+) {
+    use windows_sys::Win32::Storage::FileSystem::SYNCHRONIZE;
+    use windows_sys::Win32::{Foundation::*, System::Threading::*};
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let (work, pid) = loop {
+        if let Some(work) = native_work(binding) {
+            if let Ok(bytes) = std::fs::read(work.join("native-stop-ready.json")) {
+                if let Ok(value) = serde_json::from_slice::<serde_json::Value>(&bytes) {
+                    break (work, value["pid"].as_u64().unwrap() as u32);
+                }
+            }
+        }
+        assert!(
+            Instant::now() < deadline,
+            "Native command never signalled actual execution"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    };
+    // Retain the exact child's handle before Stop; PID reuse cannot turn this
+    // into a probe of an unrelated process. This helper never kills by PID.
+    let descendant = unsafe { OpenProcess(SYNCHRONIZE, 0, pid) };
+    assert!(
+        !descendant.is_null(),
+        "Cannot observe the actual detached descendant"
+    );
+    stop();
+    let status = unsafe { WaitForSingleObject(descendant, 5000) };
+    unsafe {
+        CloseHandle(descendant);
+    }
+    assert_eq!(status, WAIT_OBJECT_0, "Detached descendant survived Stop");
+    std::thread::sleep(Duration::from_secs(4));
+    assert!(!work.join("late.txt").exists());
+}
+#[cfg(all(test, windows))]
+pub(in crate::local_computer) const NATIVE_STOP_SCRIPT: &str = r#"const fs=require('fs'),cp=require('child_process'); const child=cp.spawn(process.execPath,['-e',"setTimeout(()=>require('fs').writeFileSync('late.txt','escape'),4000)"],{detached:true,stdio:'ignore'});child.unref();fs.writeFileSync('native-stop-ready.json',JSON.stringify({pid:child.pid}));setTimeout(()=>{},60000);"#;
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandResult {
@@ -19,10 +106,12 @@ pub struct CommandResult {
     pub interrupted: bool,
     #[serde(default)]
     pub redacted: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution: Option<serde_json::Value>,
 }
 
 pub fn command(program: &str, cwd: &Path) -> Result<Command, String> {
-    if !matches!(program, "git" | "gh" | "wsl.exe") {
+    if !matches!(program, "git" | "gh") {
         return Err("Unsupported native coding program.".into());
     }
     // Never search the project cwd for an executable planted by repository code.
@@ -109,8 +198,7 @@ fn capture(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     let mut child = crate::provider_process::SupervisedChild::spawn(command)?;
-    // Closing this pipe also stops the Linux process tree via the fixed supervisor.
-    let input = child.stdin.take();
+    drop(child.stdin.take());
     let output = Arc::new(Mutex::new((Vec::new(), false)));
     let readers: Vec<_> = [
         Box::new(child.stdout.take().ok_or("Missing stdout")?) as Box<dyn Read + Send>,
@@ -143,12 +231,6 @@ fn capture(
             break (status.code(), false);
         }
         if ticket.check().is_err() || start.elapsed() >= Duration::from_secs(timeout) {
-            drop(input);
-            // Give the Linux supervisor time to reap its namespace before terminating WSL.
-            let deadline = Instant::now() + Duration::from_secs(3);
-            while Instant::now() < deadline && child.try_wait().ok().flatten().is_none() {
-                std::thread::sleep(Duration::from_millis(25));
-            }
             child.terminate();
             break (None, true);
         }
@@ -166,6 +248,7 @@ fn capture(
         truncated: out.1,
         redacted: false,
         output: String::from_utf8_lossy(&out.0).into_owned(),
+        execution: None,
     })
 }
 
@@ -186,136 +269,69 @@ pub fn checked(command: Command, ticket: &OperationTicket) -> Result<String, Str
     Ok(result.output.trim().to_owned())
 }
 
-// stdin is a private lifetime pipe, not model input. EOF on Stop/crash kills the
-// PID namespace; children cannot detach from it. No WSL host shell is invoked.
-const SUPERVISOR: &str = "import os,subprocess,sys,threading\np=subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL)\ndef stop():\n os.read(0,1)\n try: p.kill()\n except ProcessLookupError: pass\nthreading.Thread(target=stop,daemon=True).start()\nsys.exit(p.wait())\n";
+static EXECUTION_RESOURCES: OnceLock<PathBuf> = OnceLock::new();
 
-pub fn sandbox(
-    root: &Path,
-    script: &str,
-    network: bool,
-    ticket: &OperationTicket,
-) -> Result<Command, String> {
-    sandbox_config(root, script, network, ticket, false)
-}
-
-/// File analysis shares the execution boundary, with smaller resource limits.
-pub(in crate::local_computer) fn sandbox_files(
-    root: &Path,
-    script: &str,
-    network: bool,
-    ticket: &OperationTicket,
-) -> Result<Command, String> {
-    sandbox_config(root, script, network, ticket, true)
-}
-
-fn sandbox_config(
-    root: &Path,
-    script: &str,
-    network: bool,
-    ticket: &OperationTicket,
-    files: bool,
-) -> Result<Command, String> {
-    if !cfg!(windows) {
-        return Err(
-            "Code execution currently requires Windows with WSL Ubuntu, Bubblewrap and Python 3."
-                .into(),
-        );
-    }
-    // Native launchers also stay outside the project cwd (including Windows
-    // DLL search); only the Linux sandbox changes directory into /repo.
-    let native_cwd = root.parent().ok_or("Invalid managed checkout path.")?;
-    let mut convert = command("wsl.exe", native_cwd)?;
-    let windows_path = root.to_string_lossy();
-    convert
-        .args([
-            "--distribution",
-            "Ubuntu",
-            "--exec",
-            "/usr/bin/wslpath",
-            "-u",
-        ])
-        .arg(
-            windows_path
-                .strip_prefix("\\\\?\\")
-                .unwrap_or(&windows_path),
-        );
-    let linux = checked(convert, ticket).map_err(|_| "Install WSL Ubuntu with bubblewrap, python3 and your project's Linux build tools. No Windows shell fallback is available.")?;
-    let mut cmd = command("wsl.exe", native_cwd)?;
-    let supervisor = if files {
-        format!("import resource\nresource.setrlimit(resource.RLIMIT_AS,(1073741824,1073741824))\nresource.setrlimit(resource.RLIMIT_CPU,(300,300))\nresource.setrlimit(resource.RLIMIT_FSIZE,(8388608,8388608))\nresource.setrlimit(resource.RLIMIT_NOFILE,(128,128))\n{SUPERVISOR}")
+pub(crate) fn configure_execution_resources(path: PathBuf) -> Result<(), String> {
+    if let Some(existing) = EXECUTION_RESOURCES.get() {
+        if existing != &path {
+            return Err("Native execution resources changed during this process.".into());
+        }
     } else {
-        SUPERVISOR.to_owned()
+        let _ = EXECUTION_RESOURCES.set(path);
+    }
+    Ok(())
+}
+
+pub(crate) fn execution_resources() -> Result<PathBuf, String> {
+    if let Some(path) = EXECUTION_RESOURCES.get() {
+        return Ok(path.clone());
+    }
+    if cfg!(debug_assertions) {
+        Ok(PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/execution-runtime/runtime"))
+    } else {
+        Err("Native execution resources are unavailable. Repair Mivlet.".into())
+    }
+}
+
+pub(in crate::local_computer) fn native_run(
+    root: &Path,
+    script: &str,
+    network: bool,
+    timeout: u64,
+    files: bool,
+    ticket: &OperationTicket,
+) -> Result<(CommandResult, mivlet_windows_executor::CompletedRun), String> {
+    ticket.check()?;
+    let completed = mivlet_windows_executor::run(
+        &execution_resources()?,
+        root,
+        script,
+        network,
+        timeout,
+        if files {
+            mivlet_windows_executor::Limits::ANALYSIS
+        } else {
+            mivlet_windows_executor::Limits::CODING
+        },
+        ticket.execution_binding(),
+        || ticket.check().is_ok(),
+        |launch| ticket.with_current(launch),
+    )?;
+    let receipt = completed.receipt();
+    let safe = crate::secret_redaction::redact_secret_text_or_omit(&receipt.output);
+    let redacted = safe != receipt.output;
+    let mut metadata =
+        serde_json::to_value(receipt).map_err(|_| "Invalid native execution receipt.")?;
+    if let Some(object) = metadata.as_object_mut() {
+        object.remove("output");
+    }
+    let result = CommandResult {
+        exit_code: receipt.exit_code,
+        output: safe,
+        truncated: receipt.truncated,
+        interrupted: receipt.interrupted,
+        redacted,
+        execution: Some(metadata),
     };
-    cmd.args([
-        "--distribution",
-        "Ubuntu",
-        "--exec",
-        "/usr/bin/python3",
-        "-I",
-        "-c",
-        &supervisor,
-        "/usr/bin/bwrap",
-        "--unshare-all",
-        "--die-with-parent",
-        "--new-session",
-        "--ro-bind",
-        "/usr",
-        "/usr",
-        "--symlink",
-        "usr/bin",
-        "/bin",
-        "--symlink",
-        "usr/lib",
-        "/lib",
-        "--symlink",
-        "usr/lib64",
-        "/lib64",
-        "--proc",
-        "/proc",
-        "--dev",
-        "/dev",
-    ]);
-    if files {
-        cmd.args(["--size", "67108864"]);
-    }
-    cmd.args([
-        "--tmpfs",
-        "/tmp",
-        "--dir",
-        "/home",
-        "--dir",
-        "/home/agent",
-        "--clearenv",
-        "--setenv",
-        "HOME",
-        "/home/agent",
-        "--setenv",
-        "PATH",
-        "/usr/bin:/bin",
-        "--setenv",
-        "LANG",
-        "C.UTF-8",
-        "--setenv",
-        "CI",
-        "1",
-        "--bind",
-        &linux,
-        "/repo",
-        "--chdir",
-        "/repo",
-    ]);
-    if network {
-        cmd.args([
-            "--share-net",
-            "--ro-bind",
-            "/etc/resolv.conf",
-            "/etc/resolv.conf",
-            "--ro-bind",
-            "/etc/ssl/certs",
-            "/etc/ssl/certs",
-        ]);
-    }
-    cmd.args(["--", "/bin/sh", "-c", script]);
-    Ok(cmd)
+    Ok((result, completed))
 }

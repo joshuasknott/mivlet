@@ -15,6 +15,21 @@ test("repository release versions are aligned", async () => {
   assert.equal(await assertReleaseVersionAlignment(), "0.1.0");
 });
 
+test("execution resources are bundled with fixed executable and Python search paths", async () => {
+  const desktop = new URL("../../apps/desktop/src-tauri/", import.meta.url);
+  const config = JSON.parse(await readFile(new URL("tauri.conf.json", desktop), "utf8"));
+  assert.ok(config.bundle.resources.includes("resources/execution-runtime/**/*"));
+  const inventory = JSON.parse(await readFile(new URL("resources/execution-runtime/files.json", desktop), "utf8"));
+  for (const path of ["node/node.exe", "node/node_modules/npm/bin/npm-cli.js", "python/python.exe", "python/python3.exe", "python/python313._pth", "python/LICENSE.txt", "node/LICENSE"]) {
+    assert.match(inventory.files[path], /^[a-f0-9]{64}$/, path);
+  }
+  const native = await readFile(new URL("src/local_computer.rs", desktop), "utf8");
+  assert.match(native,/resources\.join\("resources\/execution-runtime\/runtime"\)/);
+  const preparation = await readFile(new URL("../scripts/prepare-execution-runtime.mjs", desktop), "utf8");
+  assert.match(preparation,/hash\(bytes\) !== source\.sha256/);
+  assert.ok(!preparation.includes("import site\\n"));
+});
+
 test("Mivlet installers retain the existing Windows upgrade and data identities", async () => {
   const desktop = new URL("../../apps/desktop/src-tauri/", import.meta.url);
   const config = JSON.parse(await readFile(new URL("tauri.conf.json", desktop), "utf8"));

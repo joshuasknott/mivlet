@@ -2571,6 +2571,7 @@ dependencies = [
  "jsonwebtoken",
  "keyring",
  "lopdf",
+ "mivlet-windows-executor",
  "png 0.17.16",
  "quick-xml 0.42.0",
  "regex",
@@ -2592,6 +2593,19 @@ dependencies = [
  "windows",
  "windows-sys 0.61.2",
  "zip",
+]
+
+[[package]]
+name = "mivlet-windows-executor"
+version = "0.1.0"
+dependencies = [
+ "getrandom 0.3.4",
+ "hex",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tempfile",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

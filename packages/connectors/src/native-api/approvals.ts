@@ -178,9 +178,11 @@ export function buildToolApproval(
 
   const actionCore = `${toolName} ${dataUsed.join(" ")}`.trim().slice(0, 80);
   const consequence = (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
-    ? `Run this exact Linux command in ${toolName === "workspace-run" ? "a copy of selected agent files" : "the attached repository sandbox"}. Windows and home files are unavailable. Network: ${parsed.network === true ? "enabled, including LAN access" : "disabled"}. ${toolName === "workspace-run" ? "Originals preserved; validated outputs only." : "Stop may leave partial files."}`
+    ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
     : toolName === "repository-publish" && isRegistered
-    ? "Push the reviewed commit to the attached GitHub origin and create a pull request. This publishes code and the PR description using your native GitHub CLI account."
+    ? "Push reviewed code and create its pull request on the attached GitHub origin using your native GitHub CLI account."
+    : toolName === "repository-recover" && isRegistered
+    ? "Reconcile command-import files and release retained staging/backup, or inspect uncertain GitHub publication. Keep uncertainty receipts; replay nothing."
     : toolName === "local-app-select" && isRegistered
     ? parsed.deliveryMode === "foreground"
       ? "Bring the selected Windows app forward and allow approved actions to use its foreground window. This may interrupt your work."

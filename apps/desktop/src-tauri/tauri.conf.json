@@ -50,6 +50,7 @@
     "resources": [
       "resources/cua-driver/**/*",
       "resources/agent-host/**/*",
+      "resources/execution-runtime/**/*",
       "resources/pdfjs-notices/**/*",
       "resources/pdf-fonts/README.md"
     ],

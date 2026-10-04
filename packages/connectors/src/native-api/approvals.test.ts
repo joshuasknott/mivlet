@@ -2,6 +2,16 @@ import { describe, expect, it } from "vitest";
 import { buildToolApproval } from "./approvals";
 
 describe("buildToolApproval", () => {
+  it("binds recovery to the repository and discloses release of retained snapshots", () => {
+    const first = buildToolApproval("openai", "repository-recover", '{"repositoryId":"first"}');
+    const second = buildToolApproval("openai", "repository-recover", '{"repositoryId":"second"}');
+    expect(first.mode).toBe("full-access");
+    expect(first.riskLevel).toBe("high");
+    expect(first.confirmationPhrase).toBe("approve repository-recover");
+    expect(first.dataUsed.find(item => item.startsWith("Arguments SHA-256:"))).not.toBe(second.dataUsed.find(item => item.startsWith("Arguments SHA-256:")));
+    expect(first.consequence).toContain("release retained staging/backup");
+    expect(first.decisions).toEqual(["once", "modify", "deny"]);
+  });
   it("binds complete repository commands and publication destinations", () => {
     const args = { repositoryId: "repo", command: `${"echo x; ".repeat(60)}true`, network: false, timeoutSeconds: 30 };
     const approval = buildToolApproval("codex", "repository-run", JSON.stringify(args));
@@ -10,7 +20,7 @@ describe("buildToolApproval", () => {
     expect(digest(approval)).toMatch(/[a-f0-9]{64}$/);
     expect(digest(changed)).not.toBe(digest(approval));
     expect(approval.consequence).toContain("Network: disabled");
-    expect(buildToolApproval("codex", "repository-run", JSON.stringify({ ...args, network: true })).consequence).toContain("LAN access");
+    expect(buildToolApproval("codex", "repository-run", JSON.stringify({ ...args, network: true })).consequence).toContain("internetClient capability; no private-network or loopback exemption");
     expect(buildToolApproval("codex", "repository-publish", JSON.stringify({ repositoryId: "repo", remote: "https://github.com/example/test.git", baseBranch: "main" })).dataUsed).toContain("remote: https://github.com/example/test.git");
   });
   it("matches native canonical JSON for nested input independent of provider key order", () => {
