@@ -269,7 +269,7 @@ pub(crate) fn start(
             }
         })
         .map_err(|_| "Cannot start native command owner.")?;
-    serde_json::to_string(&json!({"job": snapshot, "notice": "Selected copies only; all writes discarded. Use command-output and command-stop. Closure, Stop and timeout terminate all descendants; no automatic replay."})).map_err(|_| "Invalid job receipt.".into())
+    serde_json::to_string(&json!({"job": snapshot, "notice": "Selected copies only; all writes discarded. Use command-output and command-stop. Stop and timeout terminate all descendants; no automatic replay."})).map_err(|_| "Invalid job receipt.".into())
 }
 
 #[cfg(test)]

@@ -163,7 +163,7 @@ function CommandList({
           </p>
           {job.persistent && (
             <p>
-              Snapshot writes are discarded; app closure ends the job.
+              Snapshot writes are discarded; Stop ends the job.
               {job.repositoryId &&
                 " Stop before editing the repository."}
             </p>

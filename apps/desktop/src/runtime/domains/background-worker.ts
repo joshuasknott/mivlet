@@ -1,5 +1,4 @@
-import { getRuntimeAdapter } from "../adapters/select";
-import { toRuntimeError } from "../errors";
+import { invokeNative } from "../bridge";
 
 export interface BackgroundWorkerStatus {
   supported: boolean;
@@ -12,9 +11,10 @@ export interface BackgroundWorkerStatus {
 }
 
 export async function backgroundWorkerStatus(): Promise<BackgroundWorkerStatus> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind === "preview") {
-    return {
+  return (
+    (await invokeNative<BackgroundWorkerStatus>(
+      "background_worker_status",
+    )) ?? {
       supported: false,
       enabled: false,
       running: false,
@@ -22,29 +22,18 @@ export async function backgroundWorkerStatus(): Promise<BackgroundWorkerStatus> 
       version: "",
       processId: null,
       activeWork: 0,
-    };
-  }
-  try {
-    return await adapter.invoke<BackgroundWorkerStatus>(
-      "background_worker_status",
-    );
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+    }
+  );
 }
 
 export async function controlBackgroundWorker(
   action: "start" | "stop" | "restart",
 ): Promise<BackgroundWorkerStatus> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind === "preview")
+  const status = await invokeNative<BackgroundWorkerStatus>(
+    "background_worker_control",
+    { action },
+  );
+  if (!status)
     throw new Error("Background execution requires the installed Windows app.");
-  try {
-    return await adapter.invoke<BackgroundWorkerStatus>(
-      "background_worker_control",
-      { action },
-    );
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return status;
 }

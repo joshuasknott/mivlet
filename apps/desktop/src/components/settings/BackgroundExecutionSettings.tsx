@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   backgroundWorkerStatus,
   controlBackgroundWorker,
@@ -12,37 +12,32 @@ export function BackgroundExecutionSettings() {
   const canStop =
     status?.running || (error !== null && status?.supported !== false);
   const generation = useRef(0);
-  useEffect(() => {
-    const current = ++generation.current;
-    void backgroundWorkerStatus()
-      .then((value) => {
+  const act = useCallback(
+    async (action: "start" | "stop" | "restart" | "refresh") => {
+      const current = ++generation.current;
+      setPending(true);
+      setError(null);
+      try {
+        const value =
+          action === "refresh"
+            ? await backgroundWorkerStatus()
+            : await controlBackgroundWorker(action);
         if (current === generation.current) setStatus(value);
-      })
-      .catch((reason: unknown) => {
+      } catch (reason) {
         if (current === generation.current)
           setError(reason instanceof Error ? reason.message : String(reason));
-      });
+      } finally {
+        if (current === generation.current) setPending(false);
+      }
+    },
+    [],
+  );
+  useEffect(() => {
+    void act("refresh");
     return () => {
       generation.current++;
     };
-  }, []);
-  async function act(action: "start" | "stop" | "restart" | "refresh") {
-    const current = ++generation.current;
-    setPending(true);
-    setError(null);
-    try {
-      const value =
-        action === "refresh"
-          ? await backgroundWorkerStatus()
-          : await controlBackgroundWorker(action);
-      if (current === generation.current) setStatus(value);
-    } catch (reason) {
-      if (current === generation.current)
-        setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      if (current === generation.current) setPending(false);
-    }
-  }
+  }, [act]);
   return (
     <section
       className="settings-group"
@@ -52,21 +47,16 @@ export function BackgroundExecutionSettings() {
       <div className="settings-group__surface">
         <div className="settings-preference-row">
           <span>
-            <strong>
-              Keep supported work and approved commands running when you close
-              Mivlet
-            </strong>
+            <strong>Keep supported work running after closing Mivlet</strong>
             <small>
-              New requests and schedules for Read Only agents using Codex,
-              Claude or supported direct APIs can continue while Windows is
-              awake and your account session is valid. Results and Stop stay in
-              the conversation. Approved native commands remain in Library,
-              where you can inspect output and Stop them after reconnecting.
+              Read Only text work and schedules can continue with Codex, Claude
+              or supported APIs while Windows is awake and your session is
+              valid. Find results in conversations and approved commands in
+              Library.
             </small>
             <small>
-              New requests that need files, connected apps, projects, delegation
-              or computer actions still need the window open. New approvals wait
-              for you. Restart interrupts active background work for review.
+              Other requests and new approvals need the window open. Restart
+              interrupts work for review.
             </small>
           </span>
         </div>

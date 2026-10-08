@@ -32,7 +32,7 @@ const spec = (
 export const COMMAND_TOOLS: Record<string, BackendTool> = {
   "command-jobs": spec(
     "command-jobs",
-    "List this agent's native jobs and retained status. Closing the view keeps jobs running; app closure/Stop/timeout ends descendants. Restart never replays jobs; output is not persisted.",
+    "List this agent's native jobs and retained status. Closing the view keeps jobs running; Stop/timeout ends descendants. Restart never replays jobs; output is not persisted.",
     {},
     [],
   ),

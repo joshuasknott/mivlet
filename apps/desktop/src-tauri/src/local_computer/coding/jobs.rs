@@ -75,7 +75,7 @@ pub(super) fn start(
         })
         .map_err(|_| "Cannot start native command owner.")?;
     match receive.recv_timeout(std::time::Duration::from_secs(30)) {
-        Ok(result) => serde_json::to_string(&json!({"job": result?, "notice": "Native job owns a fixed isolated snapshot; all writes are discarded. Use command-output and command-stop. App closure, Stop or timeout terminates all descendants; restart never replays it."})).map_err(|_| "Invalid command start receipt.".into()),
+        Ok(result) => serde_json::to_string(&json!({"job": result?, "notice": "Native job owns a fixed isolated snapshot; all writes are discarded. Use command-output and command-stop. Stop or timeout terminates all descendants; restart never replays it."})).map_err(|_| "Invalid command start receipt.".into()),
         Err(_) => { cancel.store(true, Ordering::Release); Err("Command admission interrupted; inspect command-jobs before retrying.".into()) }
     }
 }
