@@ -1,4 +1,10 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { McpServerSettings } from "./McpServerSettings";
@@ -7,6 +13,7 @@ import {
   getMcpServerStatus,
   revokeMcpClient,
   startMcpServer,
+  stopMcpServer,
 } from "../../runtime/domains/mcp-server";
 vi.mock("../../runtime/domains/mcp-server", () => ({
   getMcpServerStatus: vi.fn(),
@@ -30,9 +37,10 @@ const base = {
   shareableWork: [],
 };
 beforeEach(() => {
+  vi.resetAllMocks();
   vi.mocked(getMcpServerStatus).mockResolvedValue(base);
 });
-afterEach(() => vi.clearAllMocks());
+afterEach(() => vi.useRealTimers());
 describe("external assistant consent", () => {
   it("requires explicit agents and keeps task access opt-in", async () => {
     render(
@@ -94,6 +102,80 @@ describe("external assistant consent", () => {
       "This port is unavailable.",
     );
   });
+  it("locks overlapping actions and consent while Stop is pending", async () => {
+    let finishStop!: () => void;
+    vi.mocked(stopMcpServer).mockReturnValue(
+      new Promise<void>((resolve) => {
+        finishStop = resolve;
+      }),
+    );
+    render(
+      <McpServerSettings
+        workspaceId="default"
+        agents={[{ id: "a", name: "Aster" }]}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Stop server" }));
+    expect(screen.getByRole("status")).toHaveTextContent("Processing request");
+    expect(screen.getByRole("button", { name: "Copy URL" })).toBeDisabled();
+    expect(screen.getByRole("checkbox", { name: "Aster" })).toBeDisabled();
+    expect(screen.getByLabelText("Access")).toBeDisabled();
+    fireEvent.submit(
+      screen.getByRole("button", { name: "Approve access" }).closest("form")!,
+    );
+    expect(decideMcpClient).not.toHaveBeenCalled();
+    vi.mocked(getMcpServerStatus).mockResolvedValue({
+      ...base,
+      endpoint: undefined,
+      pending: [],
+    });
+    await act(async () => finishStop());
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "Server stopped. Active tasks requested by clients were stopped.",
+    );
+    expect(
+      screen.queryByRole("button", { name: "Stop server" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Start MCP server" }),
+    ).toBeEnabled();
+  });
+  it("pauses stale consent and clears status errors after polling recovers", async () => {
+    vi.useFakeTimers();
+    vi.mocked(getMcpServerStatus)
+      .mockResolvedValueOnce(base)
+      .mockRejectedValueOnce(new Error("Status refresh failed."))
+      .mockResolvedValue(base);
+    render(
+      <McpServerSettings
+        workspaceId="default"
+        agents={[{ id: "a", name: "Aster" }]}
+      />,
+    );
+    await act(async () => {});
+    fireEvent.click(screen.getByRole("checkbox", { name: "Aster" }));
+    expect(
+      screen.getByRole("button", { name: "Approve access" }),
+    ).toBeEnabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Status refresh failed.",
+    );
+    expect(
+      screen.getByRole("button", { name: "Approve access" }),
+    ).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Stop server" })).toBeEnabled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("checkbox", { name: "Aster" })).toBeChecked();
+    expect(
+      screen.getByRole("button", { name: "Approve access" }),
+    ).toBeEnabled();
+  });
   it("revokes the exact grant and shows expiry and bounded audit history", async () => {
     vi.mocked(getMcpServerStatus).mockResolvedValue({
       ...base,
@@ -111,7 +193,7 @@ describe("external assistant consent", () => {
           access: "read-only",
           permissionMode: "trusted-scope",
           createdAt: 1,
-          expiresAt: 9999999999,
+          expiresAt: 1,
           revoked: false,
         },
       ],
@@ -130,6 +212,8 @@ describe("external assistant consent", () => {
         agents={[{ id: "a", name: "Aster" }]}
       />,
     );
+    expect(await screen.findByText(/^Expired /)).toBeInTheDocument();
+    expect(screen.getByText("https://example.com")).toBeInTheDocument();
     fireEvent.click(
       await screen.findByRole("button", { name: "Revoke Reader" }),
     );

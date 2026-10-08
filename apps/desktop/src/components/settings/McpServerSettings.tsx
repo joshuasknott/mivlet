@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   McpClientAccess,
   McpConsentRequest,
@@ -23,21 +23,36 @@ export function McpServerSettings({
 }) {
   const [status, setStatus] = useState<McpServerStatus | null>(null);
   const [message, setMessage] = useState("");
+  const [statusError, setStatusError] = useState("");
   const [busy, setBusy] = useState(false);
+  const actionPending = useRef(false);
   const [port, setPort] = useState("39440");
   const [origin, setOrigin] = useState("");
   const [browserOrigins, setBrowserOrigins] = useState("");
-  const refresh = async () => setStatus(await getMcpServerStatus());
+  const refresh = async () => {
+    try {
+      setStatus(await getMcpServerStatus());
+      setStatusError("");
+    } catch (error) {
+      setStatusError(
+        error instanceof Error ? error.message : "MCP status unavailable.",
+      );
+      throw error;
+    }
+  };
   useEffect(() => {
     let active = true;
     let timer: ReturnType<typeof setTimeout>;
     const load = async () => {
       try {
         const next = await getMcpServerStatus();
-        if (active) setStatus(next);
+        if (active) {
+          setStatus(next);
+          setStatusError("");
+        }
       } catch (error) {
         if (active)
-          setMessage(
+          setStatusError(
             error instanceof Error ? error.message : "MCP status unavailable.",
           );
       } finally {
@@ -51,6 +66,8 @@ export function McpServerSettings({
     };
   }, [workspaceId]);
   const act = async (action: () => Promise<void>, success: string) => {
+    if (actionPending.current) return;
+    actionPending.current = true;
     setBusy(true);
     setMessage("");
     try {
@@ -60,11 +77,12 @@ export function McpServerSettings({
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "MCP action failed.");
     } finally {
+      actionPending.current = false;
       setBusy(false);
     }
   };
   return (
-    <div className="mcp-settings">
+    <div className="mcp-settings" aria-busy={busy}>
       <p>
         Connect an external assistant to selected agents and Work. New clients
         start with read-only access. Keep Mivlet open and signed in for requests
@@ -84,6 +102,7 @@ export function McpServerSettings({
             <button
               className="button button--secondary"
               type="button"
+              disabled={busy}
               onClick={() =>
                 void act(
                   () => navigator.clipboard.writeText(status.endpoint!),
@@ -133,6 +152,7 @@ export function McpServerSettings({
               min="1024"
               max="65535"
               required
+              disabled={busy}
               value={port}
               onChange={(event) => setPort(event.target.value)}
             />
@@ -148,6 +168,7 @@ export function McpServerSettings({
               Public HTTPS origin
               <input
                 type="url"
+                disabled={busy}
                 placeholder="https://mivlet.example.com"
                 value={origin}
                 onChange={(event) => setOrigin(event.target.value)}
@@ -156,6 +177,7 @@ export function McpServerSettings({
             <label>
               Allowed browser origins, separated by commas
               <input
+                disabled={busy}
                 placeholder="https://assistant.example.com"
                 value={browserOrigins}
                 onChange={(event) => setBrowserOrigins(event.target.value)}
@@ -164,21 +186,29 @@ export function McpServerSettings({
           </details>
           <button
             className="button button--secondary"
-            disabled={busy || !status}
+            disabled={busy || !status || Boolean(statusError)}
             type="submit"
           >
             Start MCP server
           </button>
         </form>
       )}
-      {message && <p role="status">{message}</p>}
+      {!status && !statusError && <p role="status">Loading client access…</p>}
+      {statusError && (
+        <p role="alert">
+          {statusError} New access is paused until status refreshes.
+        </p>
+      )}
+      {(busy || message) && (
+        <p role="status">{busy ? "Processing request…" : message}</p>
+      )}
       {status?.pending.map((request) => (
         <Consent
           key={request.id}
           request={request}
           agents={agents}
           status={status}
-          busy={busy}
+          busy={busy || Boolean(statusError)}
           onDecide={(approve, agentIds, workIds, access, lifetimeHours) =>
             act(
               () =>
@@ -205,6 +235,9 @@ export function McpServerSettings({
               <li key={grant.id}>
                 <strong>{grant.clientName}</strong>
                 <span>
+                  Returns access to <code>{grant.redirectUri}</code>
+                </span>
+                <span>
                   {grant.access === "read-only"
                     ? "Read only"
                     : "Task requests · exact tool approvals"}
@@ -222,7 +255,7 @@ export function McpServerSettings({
                 <span>
                   {grant.revoked
                     ? "Revoked"
-                    : `Expires ${new Date(grant.expiresAt * 1000).toLocaleString()}`}
+                    : `${grant.expiresAt * 1000 <= Date.now() ? "Expired" : "Expires"} ${new Date(grant.expiresAt * 1000).toLocaleString()}`}
                 </span>
                 {!grant.revoked && (
                   <button
@@ -300,6 +333,7 @@ function Consent({
       className="mcp-consent"
       onSubmit={(event) => {
         event.preventDefault();
+        if (busy) return;
         void onDecide(true, agentIds, workIds, access, hours);
       }}
     >
@@ -311,7 +345,7 @@ function Consent({
       <p>
         Returns access to <code>{request.redirectUri}</code>
       </p>
-      <fieldset>
+      <fieldset disabled={busy}>
         <legend>Agents this client may see and request</legend>
         {agents.map((agent) => (
           <label className="mcp-choice" key={agent.id}>
@@ -334,6 +368,7 @@ function Consent({
       <label>
         Access
         <select
+          disabled={busy}
           value={access}
           onChange={(event) => setAccess(event.target.value as McpClientAccess)}
         >
@@ -360,6 +395,7 @@ function Consent({
             <label className="mcp-choice" key={work.id}>
               <input
                 type="checkbox"
+                disabled={busy}
                 checked={workIds.includes(work.id)}
                 onChange={(event) =>
                   setWork(
@@ -373,13 +409,14 @@ function Consent({
             </label>
           ))}
         <p>
-          Shares the request, status, and saved results. Other conversations,
-          attachments and private context are excluded.
+          Shares read-only access to the request, status, and saved results.
+          Other conversations, attachments and private context are excluded.
         </p>
       </details>
       <label>
         Access lifetime
         <select
+          disabled={busy}
           value={hours}
           onChange={(event) => setHours(Number(event.target.value))}
         >

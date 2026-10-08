@@ -2,6 +2,7 @@
   display: grid;
   gap: 14px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .mcp-settings form,
 .mcp-settings label,
@@ -61,4 +62,13 @@
 }
 .mcp-settings .button {
   min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 10px 12px;
+  line-height: 1.4;
+  white-space: normal;
+}
+.mcp-settings :is(input, select, button, summary):focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
 }
