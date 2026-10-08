@@ -51,10 +51,10 @@
   align-items: end;
 }
 .repository-checkpoints__create label {
-  flex: 1 1 240px;
+  flex: 4 1 240px;
 }
 .repository-checkpoints__create button {
-  flex: 1;
+  flex: 1 0 140px;
 }
 .checkpoint-panel input {
   width: 100%;
