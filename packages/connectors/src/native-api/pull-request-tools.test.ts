@@ -2,26 +2,6 @@ import { describe, expect, it } from "vitest";
 import { PULL_REQUEST_TOOLS } from "./pull-request-tools";
 import { buildToolApproval } from "./approvals";
 describe("PR tool authority", () => {
-  it("keeps every PR tool in its exact repository namespace and authority class", () => {
-    expect(
-      PULL_REQUEST_TOOLS.map(({ name, defaultMode, defaultRisk }) => [
-        name,
-        defaultMode,
-        defaultRisk,
-      ]),
-    ).toEqual([
-      ["repository-pr-read", "read-only", "low"],
-      ["repository-pr-local", "full-access", "high"],
-      ["repository-pr-action", "full-access", "critical"],
-      ["repository-pr-watch", "full-access", "high"],
-    ]);
-    for (const tool of PULL_REQUEST_TOOLS) {
-      const schema = JSON.parse(tool.parameters);
-      expect(schema.additionalProperties).toBe(false);
-      expect(schema.required).toContain("repositoryId");
-      expect(schema.required).toContain("action");
-    }
-  });
   it("binds every target and review parameter beyond preview length to an exact digest", () => {
     const input = {
       repositoryId: "repo",

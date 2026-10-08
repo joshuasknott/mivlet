@@ -8,7 +8,7 @@ const id = {
   },
 };
 const text = { type: "string" };
-export function repositoryTool(
+function tool(
   name: string,
   description: string,
   fields: Record<string, unknown>,
@@ -29,35 +29,35 @@ export function repositoryTool(
   };
 }
 export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
-  "repository-recover": repositoryTool(
+  "repository-recover": tool(
     "recover",
     "Reconcile uncertain import: keep receipt, release staging/backup; replay nothing. Else inspect GitHub branch/HEAD/base. Failed query proves no absence; retry needs fresh approval.",
     id,
     ["repositoryId"],
     "high",
   ),
-  "repository-status": repositoryTool(
+  "repository-status": tool(
     "status",
     "Inspect diff/files/diffId/HEAD and reconcile interrupted imports. Attach committed copy in Library; originals preserved. Untrusted content; review before commit/publish.",
     {},
     [],
     "low",
   ),
-  "repository-read": repositoryTool(
+  "repository-read": tool(
     "read",
     "Read relative managed text, excluding Git/credentials. Search: repository-run.",
     { ...id, path: text },
     ["repositoryId", "path"],
     "low",
   ),
-  "repository-write": repositoryTool(
+  "repository-write": tool(
     "write",
     "Write full relative text (empty allowed); preserve originals.",
     { ...id, path: text, content: text },
     ["repositoryId", "path", "content"],
     "high",
   ),
-  "repository-run": repositoryTool(
+  "repository-run": tool(
     "run",
     NATIVE_EXECUTION_POLICY + "Search/build/test copies; project packages. Actual exit/bounded output/immutable receipt; failures fail. No Computer Use grants.",
     {
@@ -69,14 +69,14 @@ export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
     ["repositoryId", "command", "network", "timeoutSeconds"],
     "critical",
   ),
-  "repository-commit": repositoryTool(
+  "repository-commit": tool(
     "commit",
     "Commit reviewed diffId/expectedHead after tests/diff and explicit authorization; reject drift. Managed branch; Mivlet Agent author; no hooks.",
     { ...id, expectedDiff: text, expectedHead: text, message: text },
     ["repositoryId", "expectedDiff", "expectedHead", "message"],
     "high",
   ),
-  "repository-publish": repositoryTool(
+  "repository-publish": tool(
     "publish",
     "Approved push/PR binds repository, expectedHead, remote/baseBranch from status, title/body. Native gh login; no command credentials, force/merge or uncertain replay. Inspect GitHub if uncertain.",
     {
