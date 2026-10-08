@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SettingsRuntime } from "./settings-runtime";
 import type { LocalSchedule } from "../../runtime/domains/local-schedules";
@@ -33,6 +33,21 @@ export function EventAutomations({
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
   const [port, setPort] = useState<string>();
+  const editorOpener = useRef<HTMLElement>(null);
+  const actionControl = useRef<HTMLElement>(null);
+  const summary = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const control =
+      !pending && actionControl.current
+        ? actionControl.current
+        : editing === undefined
+          ? editorOpener.current
+          : null;
+    if (control && document.activeElement === document.body)
+      (control.isConnected ? control : summary.current)?.focus();
+    if (!pending) actionControl.current = null;
+    if (editing === undefined) editorOpener.current = null;
+  }, [editing, pending]);
   const client = useQueryClient();
   const ingress = useQuery({
     queryKey: ["event-ingress", workspaceId],
@@ -49,6 +64,7 @@ export function EventAutomations({
       (!initialAgentId || schedule.agentId === initialAgentId),
   );
   const act = async (operation: () => Promise<unknown>, done: string) => {
+    actionControl.current = document.activeElement as HTMLElement;
     setPending(true);
     setStatus("");
     try {
@@ -68,10 +84,10 @@ export function EventAutomations({
   };
   return (
     <details
-      className="event-automations"
+      className="event-automations local-schedules__editor"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary>
+      <summary ref={summary}>
         Event triggers <span>{events.length || ""}</span>
       </summary>
       {open ? (
@@ -146,7 +162,10 @@ export function EventAutomations({
             type="button"
             className="button button--secondary"
             disabled={pending || editing !== undefined}
-            onClick={() => setEditing(null)}
+            onClick={(event) => {
+              editorOpener.current = event.currentTarget;
+              setEditing(null);
+            }}
           >
             New event trigger
           </button>
@@ -203,7 +222,10 @@ export function EventAutomations({
                     type="button"
                     className="button button--secondary"
                     disabled={pending || editing !== undefined}
-                    onClick={() => setEditing(schedule)}
+                    onClick={(event) => {
+                      editorOpener.current = event.currentTarget;
+                      setEditing(schedule);
+                    }}
                   >
                     Edit event trigger
                   </button>

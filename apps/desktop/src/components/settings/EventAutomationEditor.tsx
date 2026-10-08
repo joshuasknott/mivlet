@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AutomationEventDraft,
   AutomationEventSource,
@@ -67,6 +67,15 @@ export function EventAutomationEditor({
   const [error, setError] = useState("");
   const [pending, setPending] = useState(false);
   const previewGeneration = useRef(0);
+  const errorElement = useRef<HTMLParagraphElement>(null);
+  const actionControl = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!pending) {
+      if (document.activeElement === document.body)
+        (error ? errorElement.current : actionControl.current)?.focus();
+      actionControl.current = null;
+    }
+  }, [error, pending]);
   const agent = runtime.agents.find((candidate) => candidate.id === agentId);
   const route =
     schedule && agentId === schedule.agentId
@@ -103,6 +112,7 @@ export function EventAutomationEditor({
     setError("");
   };
   const act = async (operation: () => Promise<void>) => {
+    actionControl.current = document.activeElement as HTMLElement;
     setPending(true);
     setError("");
     try {
@@ -157,6 +167,7 @@ export function EventAutomationEditor({
         <select
           className="input"
           required
+          autoFocus
           value={agentId}
           onChange={(change) => {
             setAgentId(change.target.value);
@@ -387,7 +398,11 @@ export function EventAutomationEditor({
           </>
         ) : null}
       </details>
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? (
+        <p role="alert" tabIndex={-1} ref={errorElement}>
+          {error}
+        </p>
+      ) : null}
       <div className="profile-action-row">
         <button
           type="submit"

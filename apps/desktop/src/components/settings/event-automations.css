@@ -29,21 +29,8 @@
   padding-block: 16px;
 }
 .event-automations label {
-  display: grid;
-  gap: 6px;
   min-width: 0;
 }
-.event-automations .input {
-  width: 100%;
-  min-width: 0;
-  padding: 10px 12px;
-  border: 1px solid var(--line-strong);
-  border-radius: var(--radius-1);
-  background: var(--surface-raised);
-  color: var(--ink);
-  font: inherit;
-}
-.event-automations .input:focus-visible,
 .event-automations summary:focus-visible {
   outline: 2px solid var(--accent-line);
   outline-offset: 2px;

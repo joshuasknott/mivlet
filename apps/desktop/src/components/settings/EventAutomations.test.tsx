@@ -88,6 +88,13 @@ function openDisclosure(text: string) {
   details.open = true;
   fireEvent(details, new Event("toggle"));
 }
+function dropDisabledFocus() {
+  // jsdom retains disabled-button focus; model Chromium's focus loss.
+  document.body.tabIndex = -1;
+  document.body.focus();
+  document.body.removeAttribute("tabindex");
+  expect(document.body).toHaveFocus();
+}
 function mount(
   schedules: LocalSchedule[] = [],
   value = runtime(),
@@ -137,6 +144,63 @@ beforeEach(() => {
   vi.mocked(setLocalScheduleStatus).mockResolvedValue(trigger);
 });
 describe("Event automations", () => {
+  it("focuses the editor and returns to its opener when closed", async () => {
+    mount([trigger]);
+    const edit = screen.getByRole("button", { name: "Edit event trigger" });
+    edit.focus();
+    fireEvent.click(edit);
+    expect(screen.getByRole("combobox", { name: "Agent" })).toHaveFocus();
+    const close = screen.getByRole("button", { name: "Close event editor" });
+    close.focus();
+    fireEvent.click(close);
+    await waitFor(() => expect(edit).toHaveFocus());
+  });
+  it("restores a listener action after its pending control loses focus", async () => {
+    let resolve!: () => void;
+    vi.mocked(configureEventIngress).mockImplementationOnce(
+      () =>
+        new Promise((done) => {
+          resolve = () =>
+            done({
+              enabled: true,
+              port: 25139,
+              listening: true,
+              baseUrl: "http://127.0.0.1:25139",
+              availability: "app-open",
+              cloudHolding: false,
+            });
+        }),
+    );
+    mount();
+    const enable = screen.getByRole("button", { name: "Enable local ingress" });
+    await waitFor(() => expect(enable).toBeEnabled());
+    enable.focus();
+    fireEvent.click(enable);
+    dropDisabledFocus();
+    await act(async () => resolve());
+    await waitFor(() => expect(enable).toHaveFocus());
+  });
+  it("restores the preview action after pending keyboard focus is lost", async () => {
+    let resolve!: (
+      value: Awaited<ReturnType<typeof previewEventTemplate>>,
+    ) => void;
+    vi.mocked(previewEventTemplate).mockReturnValueOnce(
+      new Promise((done) => {
+        resolve = done;
+      }),
+    );
+    mount([trigger]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit event trigger" }));
+    openDisclosure("Preview the produced request");
+    const preview = screen.getByRole("button", { name: "Preview event task" });
+    preview.focus();
+    fireEvent.click(preview);
+    dropDisabledFocus();
+    await act(async () =>
+      resolve({ prompt: "Current preview", selectedFields: {}, missing: [] }),
+    );
+    await waitFor(() => expect(preview).toHaveFocus());
+  });
   it("requires a preview and protected reference, then sends only scoped configuration", async () => {
     mount();
     fireEvent.click(screen.getByRole("button", { name: "New event trigger" }));
@@ -190,13 +254,16 @@ describe("Event automations", () => {
     fireEvent.click(screen.getByRole("button", { name: "Edit event trigger" }));
     openDisclosure("Preview the produced request");
     fireEvent.click(screen.getByRole("button", { name: "Preview event task" }));
-    fireEvent.change(screen.getByLabelText("Task template"), {
+    const task = screen.getByLabelText("Task template");
+    task.focus();
+    fireEvent.change(task, {
       target: { value: "Changed task" },
     });
     await act(async () =>
       resolve({ prompt: "Old task", selectedFields: {}, missing: [] }),
     );
     expect(screen.queryByText("Old task")).toBeNull();
+    expect(task).toHaveFocus();
     expect(
       screen.getByRole("button", { name: "Save event trigger" }),
     ).toBeDisabled();
@@ -207,8 +274,12 @@ describe("Event automations", () => {
       selectedFields: {},
       missing: ["summary"],
     });
-    vi.mocked(saveEventTrigger).mockRejectedValueOnce(
-      new Error("Signing key was revoked."),
+    let rejectSave!: (error: Error) => void;
+    vi.mocked(saveEventTrigger).mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          rejectSave = reject;
+        }),
     );
     mount([trigger]);
     fireEvent.click(screen.getByRole("button", { name: "Edit event trigger" }));
@@ -226,8 +297,14 @@ describe("Event automations", () => {
         screen.getByRole("button", { name: "Save event trigger" }),
       ).toBeEnabled(),
     );
-    fireEvent.click(screen.getByRole("button", { name: "Save event trigger" }));
-    expect(await screen.findByText("Signing key was revoked.")).toBeVisible();
+    const save = screen.getByRole("button", { name: "Save event trigger" });
+    save.focus();
+    fireEvent.click(save);
+    dropDisabledFocus();
+    await act(async () => rejectSave(new Error("Signing key was revoked.")));
+    const failure = await screen.findByText("Signing key was revoked.");
+    expect(failure).toBeVisible();
+    await waitFor(() => expect(failure).toHaveFocus());
     expect(screen.getByLabelText("Task template")).toHaveValue(trigger.prompt);
   });
   it("preserves the saved route and refuses a disconnected provider", () => {
