@@ -1,4 +1,6 @@
 import { useState } from "react";
+import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
+import { CaretDown } from "@phosphor-icons/react/dist/csr/CaretDown";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type {
   LocalComputerEpochRequest,
@@ -45,9 +47,7 @@ export function RepositoryCheckpoints({
   const epoch = async () => {
     const computer = await loadRuntimeLocalComputer({ workspaceId, agentId });
     if (!computer?.plugins?.computer)
-      throw new Error(
-        "Open the desktop app and enable Computer Use.",
-      );
+      throw new Error("Open the desktop app and enable Computer Use.");
     const target = {
       workspaceId,
       agentId,
@@ -75,8 +75,7 @@ export function RepositoryCheckpoints({
         repositoryId,
         checkpoint.id,
       );
-      if (!value)
-        throw new Error("Open the desktop app to preview files.");
+      if (!value) throw new Error("Open the desktop app to preview files.");
       return { value, target };
     },
     onSuccess: setReview,
@@ -177,13 +176,20 @@ export function RepositoryCheckpoints({
       className="checkpoint-panel"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary>File checkpoints</summary>
+      <summary>
+        <FileText size={24} aria-hidden="true" />
+        <span>
+          <strong>File checkpoints</strong>
+          <small>
+            Ignored files, credentials and Git metadata are excluded.
+          </small>
+        </span>
+        <CaretDown size={16} aria-hidden="true" />
+      </summary>
       {open && (
         <div className="repository-checkpoints__body">
-          <p>
-            Ignored files, credentials and Git metadata are excluded.
-          </p>
           <form
+            className="repository-checkpoints__create"
             onSubmit={(event) => {
               event.preventDefault();
               resetFeedback();
@@ -208,6 +214,17 @@ export function RepositoryCheckpoints({
             </button>
           </form>
           <div className="repository-files__actions">
+            {list.data && (
+              <small>
+                {list.data.checkpoints.length} / {list.data.maxCheckpoints}{" "}
+                checkpoints ·{" "}
+                {Math.ceil(
+                  list.data.checkpoints.reduce((sum, c) => sum + c.bytes, 0) /
+                    1024,
+                )}{" "}
+                KiB stored
+              </small>
+            )}
             <button
               type="button"
               onClick={() => {
@@ -254,26 +271,20 @@ export function RepositoryCheckpoints({
           {message && <p role="status">{message}</p>}
           {list.data && (
             <>
-              <p>
-                {list.data.checkpoints.length} / {list.data.maxCheckpoints}{" "}
-                checkpoints ·{" "}
-                {Math.ceil(
-                  list.data.checkpoints.reduce((sum, c) => sum + c.bytes, 0) /
-                    1024,
-                )}{" "}
-                KiB stored
-              </p>
               {!list.data.checkpoints.length && (
                 <p>No saved file checkpoints yet.</p>
               )}
               <ul className="repository-checkpoints__list">
                 {list.data.checkpoints.map((checkpoint) => (
                   <li key={checkpoint.id}>
-                    <strong>{checkpoint.label}</strong>
-                    <span>
-                      {new Date(checkpoint.createdAt).toLocaleString()} ·{" "}
-                      {checkpoint.fileCount} files
-                    </span>
+                    <FileText size={24} aria-hidden="true" />
+                    <div>
+                      <strong>{checkpoint.label}</strong>
+                      <small>
+                        {new Date(checkpoint.createdAt).toLocaleString()} ·{" "}
+                        {checkpoint.fileCount} files
+                      </small>
+                    </div>
                     <div className="repository-files__actions">
                       <button
                         type="button"
@@ -310,14 +321,16 @@ export function RepositoryCheckpoints({
             >
               <h4>Restore “{review.value.checkpoint.label}”</h4>
               <p>
-                {review.value.files.length} file changes (added, modified or deleted).
-                Current code is saved first; test verification is cleared.
-                Git HEAD and chat stay unchanged.
+                {review.value.files.length} file changes (added, modified or
+                deleted). Current code is saved first; test verification is
+                cleared. Git HEAD and chat stay unchanged.
               </p>
               <ul>
                 {review.value.files.map((file) => (
                   <li key={file.path}>
-                    <code>{file.path}</code> · {file.status}
+                    <FileText size={18} aria-hidden="true" />
+                    <code>{file.path}</code>
+                    <span data-change={file.status}>{file.status}</span>
                   </li>
                 ))}
               </ul>
@@ -326,7 +339,8 @@ export function RepositoryCheckpoints({
               </pre>
               {review.value.truncated && (
                 <p role="status">
-                  Diff truncated. Review full files with the agent before restoring.
+                  Diff truncated. Review full files with the agent before
+                  restoring.
                 </p>
               )}
               <details>
@@ -343,6 +357,7 @@ export function RepositoryCheckpoints({
                 </dl>
               </details>
               <button
+                className="button button--primary"
                 type="button"
                 disabled={
                   busy ||
@@ -398,6 +413,7 @@ export function RepositoryCheckpoints({
               <div className="repository-files__actions">
                 <button
                   type="submit"
+                  className="button button--primary"
                   disabled={
                     disabled ||
                     busy ||

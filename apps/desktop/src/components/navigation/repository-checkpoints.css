@@ -1,7 +1,5 @@
 .checkpoint-panel {
   margin-top: 16px;
-  border-top: 1px solid var(--line, #dededc);
-  padding-top: 12px;
   min-width: 0;
 }
 .repository-files .checkpoint-panel summary {
@@ -9,17 +7,54 @@
   align-content: center;
   cursor: pointer;
 }
+.checkpoint-panel > summary {
+  display: grid;
+  grid-template-columns: 24px 1fr 16px;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  list-style: none;
+}
+.checkpoint-panel > summary::-webkit-details-marker {
+  display: none;
+}
+.checkpoint-panel:not([open]) > summary > svg:last-child {
+  transform: rotate(-90deg);
+}
+.checkpoint-panel > summary strong {
+  font-size: var(--text-20);
+}
+.checkpoint-panel small {
+  display: block;
+  color: var(--ink-muted);
+  font-size: var(--text-13);
+  font-weight: 400;
+  line-height: 1.5;
+}
 .repository-checkpoints__body {
   display: grid;
   gap: 12px;
-  padding-top: 10px;
+  padding-top: 16px;
   min-width: 0;
 }
 .checkpoint-panel form,
-.checkpoint-panel .repository-checkpoints__body label {
+.checkpoint-panel label {
   display: grid;
   gap: 8px;
   min-width: 0;
+}
+.checkpoint-panel .repository-checkpoints__create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+}
+.repository-checkpoints__create label {
+  flex: 1 1 240px;
+}
+.repository-checkpoints__create button {
+  flex: 1;
 }
 .checkpoint-panel input {
   width: 100%;
@@ -28,8 +63,8 @@
   box-sizing: border-box;
   padding: 10px;
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  background: var(--surface, transparent);
+  border-radius: var(--radius-2);
+  background: var(--surface-raised);
   color: inherit;
 }
 .checkpoint-panel .repository-checkpoints__body button {
@@ -37,38 +72,85 @@
   padding: 8px 12px;
   white-space: normal;
 }
-.repository-checkpoints__list {
+.checkpoint-panel .button--primary {
+  background: var(--accent);
+  color: var(--surface);
+  width: 100%;
+}
+.checkpoint-panel .button--primary:hover:not(:disabled) {
+  background: var(--accent-strong);
+}
+.checkpoint-panel .repository-files__actions {
+  align-items: center;
+}
+.checkpoint-panel .repository-files__actions > small {
+  margin-right: auto;
+}
+.repository-checkpoints__list,
+.repository-checkpoints__review ul {
   list-style: none;
   margin: 0;
   padding: 0;
+}
+.repository-checkpoints__list {
   display: grid;
-  gap: 12px;
+  gap: 8px;
 }
-.repository-checkpoints__list > li {
-  display: grid;
-  gap: 6px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--line);
-  overflow-wrap: anywhere;
-}
-.repository-checkpoints__list span {
-  font-size: 0.85em;
-  opacity: 0.75;
-}
+.repository-checkpoints__list > li,
 .repository-checkpoints__review,
 .repository-checkpoints__confirmation {
   border: 1px solid var(--line);
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: var(--radius-2);
+  background: var(--surface-raised);
+  padding: 16px;
   min-width: 0;
+  overflow-wrap: anywhere;
+}
+.repository-checkpoints__list > li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: center;
+}
+.repository-checkpoints__list .repository-files__actions {
+  grid-column: 1 / -1;
 }
 .repository-checkpoints__review h4 {
   margin: 0 0 8px;
 }
+.repository-checkpoints__review ul {
+  border-block: 1px solid var(--line);
+}
+.repository-checkpoints__review li {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 8px;
+  padding-block: 10px;
+}
+.repository-checkpoints__review li + li {
+  border-top: 1px solid var(--line);
+}
+.checkpoint-panel [data-change] {
+  font-size: var(--text-12);
+  padding: 3px 6px;
+  border-radius: var(--radius-1);
+  color: var(--caution);
+  background: var(--caution-subtle);
+}
+.checkpoint-panel [data-change="added"] {
+  color: var(--positive);
+  background: var(--positive-subtle);
+}
+.checkpoint-panel [data-change="deleted"] {
+  color: var(--destructive);
+  background: var(--destructive-subtle);
+}
 .checkpoint-panel pre {
   font-size: 12px;
-  padding: 8px;
+  padding: 10px;
   white-space: pre;
+  border-radius: var(--radius-1);
 }
 .checkpoint-panel dd {
   margin: 4px 0 10px;
