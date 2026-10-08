@@ -81,6 +81,7 @@
     "repository-publish": "connector-write",
     "repository-recover": "connector-write",
     "workspace-agents": "coordination",
+    "continuation-read": "coordination",
     "teammate-assign": "coordination",
     "teammate-message": "coordination",
     "project-record": "coordination",
