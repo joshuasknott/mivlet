@@ -268,6 +268,61 @@ describe("Event automations", () => {
       screen.getByRole("button", { name: "Save event trigger" }),
     ).toBeDisabled();
   });
+  it.each([
+    ["Source identity", "ci.changed"],
+    ["GitHub repository", "owner/changed"],
+    ["Selected JSON fields, one per line", "summary\nowner"],
+    ["Task template", "Inspect {{body.owner}}"],
+    ["Ignore events older than (minutes)", "6"],
+    ["Trigger expires (UTC)", "2030-10-10T12:00"],
+    ["Example JSON payload", '{"summary":"Changed synthetic event"}'],
+  ])("invalidates the preview when %s changes", async (label, value) => {
+    mount([trigger]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit event trigger" }));
+    if (label === "GitHub repository") {
+      fireEvent.change(screen.getByLabelText("Event source"), {
+        target: { value: "github-issues" },
+      });
+    }
+    openDisclosure("Preview the produced request");
+    fireEvent.click(screen.getByRole("button", { name: "Preview event task" }));
+    const save = await screen.findByRole("button", {
+      name: "Save event trigger",
+    });
+    await waitFor(() => expect(save).toBeEnabled());
+    const field = screen.getByLabelText(label);
+    field.focus();
+    fireEvent.change(field, { target: { value } });
+    expect(save).toBeDisabled();
+    expect(field).toHaveFocus();
+    expect(saveEventTrigger).not.toHaveBeenCalled();
+  });
+  it("keeps the template preview when only key custody or endpoint rotation changes", async () => {
+    mount([trigger]);
+    fireEvent.click(screen.getByRole("button", { name: "Edit event trigger" }));
+    openDisclosure("Preview the produced request");
+    fireEvent.click(screen.getByRole("button", { name: "Preview event task" }));
+    const save = await screen.findByRole("button", {
+      name: "Save event trigger",
+    });
+    await waitFor(() => expect(save).toBeEnabled());
+    fireEvent.change(screen.getByLabelText("Protected signing-key reference"), {
+      target: { value: "webhook-key:replacement" },
+    });
+    fireEvent.click(screen.getByLabelText("Rotate endpoint when saving"));
+    expect(save).toBeEnabled();
+    fireEvent.click(save);
+    await waitFor(() =>
+      expect(saveEventTrigger).toHaveBeenCalledWith(
+        expect.objectContaining({
+          signingKeyId: "webhook-key:replacement",
+          rotateEndpoint: true,
+          expectedRevision: 3,
+          prompt: trigger.prompt,
+        }),
+      ),
+    );
+  });
   it("keeps missing-field and native secret errors editable", async () => {
     vi.mocked(previewEventTemplate).mockResolvedValueOnce({
       prompt: "Inspect [missing]",
