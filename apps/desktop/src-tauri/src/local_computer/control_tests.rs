@@ -4,6 +4,60 @@ use super::super::desktop_tools;
 use super::*;
 
 struct BrowserStopFixture(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+#[test]
+fn protected_input_excludes_other_control_and_native_stop_revokes_its_ticket() {
+    let root = tempfile::tempdir().unwrap();
+    let authority = ComputerAuthority::load(root.path()).unwrap();
+    let ticket = authority.begin_viewer(1).unwrap();
+    let control = NativeControl::default();
+    let entry = control
+        .reserve_protected_input(
+            "workspace-one",
+            "agent-one",
+            1,
+            "secret-entry",
+            authority.clone(),
+        )
+        .unwrap();
+    assert_eq!(
+        control.activity_label(),
+        "Waiting for protected secret entry"
+    );
+    assert_eq!(
+        control
+            .snapshot("workspace-one", "agent-one")
+            .unwrap()
+            .application
+            .as_deref(),
+        Some("Protected secret entry")
+    );
+    assert!(control
+        .reserve_browser_launch(
+            "workspace-one",
+            "agent-two",
+            1,
+            "browser",
+            authority.clone()
+        )
+        .is_err());
+    assert!(control
+        .reserve_protected_input(
+            "workspace-one",
+            "agent-two",
+            1,
+            "second-secret",
+            authority.clone()
+        )
+        .is_err());
+    control.stop_scope("workspace-one", "agent-one", 2, "wrong generation");
+    assert!(ticket.check().is_ok());
+    control.stop("global Stop");
+    assert!(ticket.check().is_err());
+    assert!(!control.active());
+    drop(entry);
+}
+
 #[test]
 fn native_browser_read_never_runs_without_the_exact_selected_window_lease() {
     let root = tempfile::tempdir().unwrap();

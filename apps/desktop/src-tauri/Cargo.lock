@@ -2653,6 +2653,7 @@ dependencies = [
  "url",
  "windows",
  "windows-sys 0.61.2",
+ "zeroize",
  "zip",
 ]
 
