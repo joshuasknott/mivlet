@@ -29,14 +29,14 @@ fn random() -> Result<String> {
     Ok(URL_SAFE_NO_PAD.encode(bytes))
 }
 
-pub(super) struct Engine {
-    pub store: &'static Store,
-    pub origin: String,
-    pub config: Config,
-    pub oauth: Mutex<oauth::State>,
-    pub app: Option<tauri::AppHandle>,
-    pub inflight: Arc<tokio::sync::Semaphore>,
-    pub rate: Mutex<(std::time::Instant, u32)>,
+struct Engine {
+    store: &'static Store,
+    origin: String,
+    config: Config,
+    oauth: Mutex<oauth::State>,
+    app: Option<tauri::AppHandle>,
+    inflight: Arc<tokio::sync::Semaphore>,
+    rate: Mutex<(std::time::Instant, u32)>,
 }
 impl Engine {
     fn transaction<T>(
