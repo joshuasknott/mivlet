@@ -26,7 +26,9 @@ pub struct EventDraft {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+// Persisted configuration is flattened into LocalScheduleTrigger. Incoming
+// drafts remain strict; Serde does not support deny_unknown_fields with flatten.
+#[serde(rename_all = "camelCase")]
 pub struct EventConfig {
     pub source: EventSource,
     pub fields: Vec<String>,

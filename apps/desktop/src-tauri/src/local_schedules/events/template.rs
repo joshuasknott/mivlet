@@ -17,14 +17,17 @@ fn invalid(message: &str) -> StoreError {
 pub(super) fn validate(draft: &EventDraft, template: &str) -> Result<()> {
     match &draft.source {
         EventSource::SignedJson { source_id } => {
-            if !identifier(source_id, 96) {
+            if !identifier(source_id, 96) || crate::secret_redaction::looks_secret(source_id) {
                 return Err(invalid("Use a bounded source identity containing letters, numbers, dots, underscores or hyphens."));
             }
         }
         EventSource::GithubIssues { repository }
         | EventSource::GithubWorkflowRun { repository } => {
             let parts: Vec<_> = repository.split('/').collect();
-            if parts.len() != 2 || !parts.iter().all(|part| identifier(part, 100)) {
+            if parts.len() != 2
+                || !parts.iter().all(|part| identifier(part, 100))
+                || crate::secret_redaction::looks_secret(repository)
+            {
                 return Err(invalid("Choose one GitHub repository in owner/name form."));
             }
         }

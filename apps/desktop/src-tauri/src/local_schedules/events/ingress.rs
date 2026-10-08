@@ -201,7 +201,7 @@ async fn handle(
         };
         header_bytes += name.as_str().len() + value.len();
         if header_bytes > 16_384
-            || headers.len() > 64
+            || headers.len() >= 64
             || headers.insert(name.as_str().into(), value.into()).is_some()
         {
             return reply(400, "invalid_headers", None);

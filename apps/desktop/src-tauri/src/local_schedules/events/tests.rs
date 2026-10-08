@@ -110,6 +110,22 @@ fn receive(
 }
 
 #[test]
+fn persisted_event_trigger_round_trips_the_flattened_protocol_shape() {
+    let trigger = LocalScheduleTrigger::Event { config: config() };
+    let value = serde_json::to_value(&trigger).unwrap();
+    assert_eq!(value["kind"], "event");
+    assert_eq!(value["source"]["sourceId"], "ci.example");
+    assert_eq!(value["signingKeyId"], "webhook-key:test");
+    assert_eq!(
+        serde_json::from_value::<LocalScheduleTrigger>(value).unwrap(),
+        trigger
+    );
+    let mut draft = serde_json::to_value(config().draft()).unwrap();
+    draft["permissionMode"] = serde_json::json!("full-access");
+    assert!(serde_json::from_value::<EventDraft>(draft).is_err());
+}
+
+#[test]
 fn signatures_bind_exact_bytes_and_all_envelope_identity() {
     let raw = br#"{ "summary": "Build failed" }"#;
     let h = headers(raw, "build-1", at(NOW));
@@ -194,6 +210,16 @@ fn templates_only_expose_selected_bounded_scalars_and_redact_credentials() {
     assert!(template::validate(&draft, "{{body}}").is_err());
     assert!(template::validate(&draft, "{{headers.authorization}}").is_err());
     assert!(template::validate(&draft, "{{body.other}}").is_err());
+    assert!(template::validate(&draft, "Close }} before {{body.summary}}").is_err());
+    let mut source_canary = draft.clone();
+    source_canary.source = EventSource::SignedJson {
+        source_id: "ghp_abcdefghijklmnopqrstuvwx1234567890".into(),
+    };
+    assert!(template::validate(&source_canary, "Inspect").is_err());
+    source_canary.source = EventSource::GithubIssues {
+        repository: "acme/ghp_abcdefghijklmnopqrstuvwx1234567890".into(),
+    };
+    assert!(template::validate(&source_canary, "Inspect").is_err());
     assert!(template::render(
         &draft,
         "Inspect {{body.summary}}",
