@@ -10,6 +10,7 @@ import {
   loadRuntimeLocalComputer,
 } from "../../runtime/domains/local-computer";
 import "./repository-files.css";
+import { RepositoryCopies } from "./RepositoryCopies";
 
 export function RepositoryFiles({
   workspaceId,
@@ -150,6 +151,14 @@ function RepositoryDetails({
             : "Repository operation failed."}
         </p>
       )}
+      <RepositoryCopies
+        workspaceId={workspaceId}
+        agentId={agentId}
+        name={name}
+        onSelectionChange={() => {
+          void status.refetch();
+        }}
+      />
       {repo && (
         <>
           <p>

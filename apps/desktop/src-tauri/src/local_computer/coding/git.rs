@@ -12,6 +12,8 @@ fn git(cwd: &Path) -> Result<Command, String> {
         "-c",
         "core.autocrlf=false",
         "-c",
+        "core.longpaths=true",
+        "-c",
         "protocol.allow=never",
         "-c",
         "protocol.file.allow=never",
@@ -29,7 +31,7 @@ fn repo_git(directory: &Path, repo: &Repository) -> Result<Command, String> {
         .arg(checkout(directory, repo)?);
     Ok(cmd)
 }
-fn run(
+pub(super) fn run(
     directory: &Path,
     repo: &Repository,
     args: &[&str],

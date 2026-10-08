@@ -47,3 +47,35 @@ export interface CodingRepositoryStatus {
     truncated: boolean;
   } | null;
 }
+
+/** User-only inventory; managedPath is account-root-relative, never a host path. */
+export interface RepositoryCopy {
+  id: string;
+  name: string;
+  accountId: string;
+  ownershipVerified: boolean;
+  workspaceId: string;
+  agentId: string;
+  sourceRepository: string | null;
+  managedPath: string;
+  branch: string | null;
+  head: string | null;
+  selected: boolean;
+  dirty: boolean | null;
+  sizeBytes: number | null;
+  linkedWork: Array<{ id: string; status: string }>;
+  liveJobs: Array<{ id: string; status: string }>;
+  jobsStatus: string;
+  checkpointsStatus: string;
+  blockers: string[];
+  cleanupPending: boolean;
+}
+export interface RepositoryCopyInventory {
+  copies: RepositoryCopy[];
+  busy: boolean;
+}
+export interface RepositoryCopyCleanupPreview {
+  copy: RepositoryCopy;
+  previewToken: string | null;
+  expiresInSeconds: number;
+}
