@@ -45,29 +45,27 @@ impl<C: Custody> Service<'_, C> {
         let _custody = CUSTODY_LOCK.lock().map_err(|_| Failure::Custody)?;
         fence.check()?;
         let id = opaque("webhook-key:")?;
-        let record = fence.commit(|| {
-            repository::update(self.store, |records| {
-                if records.signing_keys.len() >= MAX_HISTORY {
-                    return Err(Failure::Limit);
-                }
-                let record = records
-                    .requests
-                    .iter_mut()
-                    .find(|r| r.id == input.request_id && r.reference == input.secret_ref)
-                    .ok_or(Failure::Unavailable)?;
-                self.require(record, scope, now, Status::Ready)?;
-                if input.consumer != record.input.consumer
-                    || input.purpose != record.input.purpose
-                    || input.target_id != record.input.target_id
-                {
-                    return Err(Failure::Unavailable);
-                }
-                // Durable tombstone precedes all OS I/O. A crash from this point is
-                // interrupted, never retried with the old reference.
-                record.status = Status::Consuming;
-                record.installing_key = Some(id.clone());
-                Ok(record.clone())
-            })
+        let record = repository::update_fenced(self.store, fence, |records| {
+            if records.signing_keys.len() >= MAX_HISTORY {
+                return Err(Failure::Limit);
+            }
+            let record = records
+                .requests
+                .iter_mut()
+                .find(|r| r.id == input.request_id && r.reference == input.secret_ref)
+                .ok_or(Failure::Unavailable)?;
+            self.require(record, scope, now, Status::Ready)?;
+            if input.consumer != record.input.consumer
+                || input.purpose != record.input.purpose
+                || input.target_id != record.input.target_id
+            {
+                return Err(Failure::Unavailable);
+            }
+            // Durable tombstone precedes all OS I/O. A crash from this point is
+            // interrupted, never retried with the old reference.
+            record.status = Status::Consuming;
+            record.installing_key = Some(id.clone());
+            Ok(record.clone())
         })?;
         let result = (|| {
             let value = self
@@ -77,34 +75,32 @@ impl<C: Custody> Service<'_, C> {
             self.custody.remove(&scope.account, &record.reference)?;
             fence.check()?;
             self.custody.put(&scope.account, &id, &value)?;
-            fence.commit(|| {
-                repository::update(self.store, |records| {
-                    let current = records
-                        .requests
-                        .iter_mut()
-                        .find(|r| r.id == record.id)
-                        .ok_or(Failure::Unavailable)?;
-                    self.require(
-                        current,
-                        scope,
-                        now + started.elapsed().as_millis() as i64,
-                        Status::Consuming,
-                    )?;
-                    current.status = Status::Consumed;
-                    current.cleanup_pending = false;
-                    let key = SigningKey {
-                        id: id.clone(),
-                        scope: scope.clone(),
-                        target_id: input.target_id,
-                        request_id: record.id.clone(),
-                        created_at: now,
-                        revoked: false,
-                        cleanup_pending: false,
-                    };
-                    let status = key.public();
-                    records.signing_keys.push(key);
-                    Ok(status)
-                })
+            repository::update_fenced(self.store, fence, |records| {
+                let current = records
+                    .requests
+                    .iter_mut()
+                    .find(|r| r.id == record.id)
+                    .ok_or(Failure::Unavailable)?;
+                self.require(
+                    current,
+                    scope,
+                    now + started.elapsed().as_millis() as i64,
+                    Status::Consuming,
+                )?;
+                current.status = Status::Consumed;
+                current.cleanup_pending = false;
+                let key = SigningKey {
+                    id: id.clone(),
+                    scope: scope.clone(),
+                    target_id: input.target_id,
+                    request_id: record.id.clone(),
+                    created_at: now,
+                    revoked: false,
+                    cleanup_pending: false,
+                };
+                let status = key.public();
+                records.signing_keys.push(key);
+                Ok(status)
             })
         })();
         if result.is_err() {
@@ -189,17 +185,15 @@ impl<C: Custody> Service<'_, C> {
     ) -> Result<KeyStatus, Failure> {
         let _custody = CUSTODY_LOCK.lock().map_err(|_| Failure::Custody)?;
         let key = self.key(scope, id, target)?;
-        let status = fence.commit(|| {
-            repository::update(self.store, |records| {
-                let key = records
-                    .signing_keys
-                    .iter_mut()
-                    .find(|k| k.id == key.id)
-                    .ok_or(Failure::Unavailable)?;
-                key.revoked = true;
-                key.cleanup_pending = true;
-                Ok(key.public())
-            })
+        let status = repository::update_fenced(self.store, fence, |records| {
+            let key = records
+                .signing_keys
+                .iter_mut()
+                .find(|k| k.id == key.id)
+                .ok_or(Failure::Unavailable)?;
+            key.revoked = true;
+            key.cleanup_pending = true;
+            Ok(key.public())
         })?;
         self.cleanup_keys()?;
         Ok(status)

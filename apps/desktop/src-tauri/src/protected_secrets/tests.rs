@@ -1,4 +1,5 @@
 use super::*;
+mod fencing;
 use crate::store::vault::{MasterKey, Vault};
 use std::collections::HashMap;
 use std::sync::{
@@ -92,7 +93,13 @@ fn service<'a>(store: &'a Store, custody: &'a MemoryCustody) -> Service<'a, Memo
 }
 fn save(s: &Service<'_, MemoryCustody>) -> Record {
     let r = s
-        .begin(&scope(), "approved-call-one", input(), 1000)
+        .begin(
+            &scope(),
+            "approved-call-one",
+            input(),
+            1000,
+            &TestFence(&s.custody.stopped),
+        )
         .unwrap();
     let public = s
         .answer(
@@ -265,7 +272,15 @@ fn protected_request_decline_duplicate_answer_expiry_and_stop_are_terminal() {
     let store = store();
     let custody = MemoryCustody::default();
     let s = service(&store, &custody);
-    let r = s.begin(&scope(), "decline", input(), 1000).unwrap();
+    let r = s
+        .begin(
+            &scope(),
+            "decline",
+            input(),
+            1000,
+            &TestFence(&custody.stopped),
+        )
+        .unwrap();
     assert_eq!(
         s.answer(&r, None, 1001, &TestFence(&custody.stopped))
             .unwrap()
@@ -309,7 +324,13 @@ fn protected_request_decline_duplicate_answer_expiry_and_stop_are_terminal() {
     s.sweep(r.expires_at, |_| true).unwrap();
     assert!(custody.values.lock().unwrap().is_empty());
     let r = s
-        .begin(&scope(), "stop-before-answer", input(), 1000)
+        .begin(
+            &scope(),
+            "stop-before-answer",
+            input(),
+            1000,
+            &TestFence(&custody.stopped),
+        )
         .unwrap();
     custody.stopped.store(true, Ordering::SeqCst);
     assert_eq!(
@@ -330,7 +351,15 @@ fn protected_request_stop_during_save_cleans_late_value() {
     let store = store();
     let custody = MemoryCustody::default();
     let s = service(&store, &custody);
-    let r = s.begin(&scope(), "stop-save", input(), 1000).unwrap();
+    let r = s
+        .begin(
+            &scope(),
+            "stop-save",
+            input(),
+            1000,
+            &TestFence(&custody.stopped),
+        )
+        .unwrap();
     custody.stop_after_put.store(true, Ordering::SeqCst);
     assert_eq!(
         s.answer(
@@ -461,7 +490,15 @@ fn protected_request_invalid_inputs_and_custody_failures_are_nonsecret() {
     let store = store();
     let custody = MemoryCustody::default();
     let s = service(&store, &custody);
-    let r = s.begin(&scope(), "storage-failed", input(), 1000).unwrap();
+    let r = s
+        .begin(
+            &scope(),
+            "storage-failed",
+            input(),
+            1000,
+            &TestFence(&custody.stopped),
+        )
+        .unwrap();
     custody.fail_put.store(true, Ordering::SeqCst);
     let error = s
         .answer(
@@ -498,7 +535,9 @@ fn protected_request_real_native_generation_revokes_ready_reference() {
     let store = store();
     let custody = MemoryCustody::default();
     let s = service(&store, &custody);
-    let request = s.begin(&scope, "native-stop", input(), 1000).unwrap();
+    let request = s
+        .begin(&scope, "native-stop", input(), 1000, &fence)
+        .unwrap();
     s.answer(&request, Some(Secret::new(CANARY.into())), 1001, &fence)
         .unwrap();
     authority.revoke(scope.generation).unwrap();

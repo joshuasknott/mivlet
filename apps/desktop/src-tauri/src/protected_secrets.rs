@@ -47,6 +47,11 @@ impl std::fmt::Display for Failure {
         })
     }
 }
+impl From<crate::store::StoreError> for Failure {
+    fn from(_: crate::store::StoreError) -> Self {
+        Self::History
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -57,8 +62,8 @@ struct Scope {
     generation: u64,
 }
 
-/// Both the account dispatch fence and native generation ticket linearize the
-/// small durable commit against Stop. OS custody I/O never holds these locks.
+/// Preflight may read the Store. Commit must use only cached account/generation
+/// checks around SQL COMMIT; never acquire the Store or perform custody I/O.
 trait Fence {
     fn check(&self) -> Result<(), Failure>;
     fn commit<T>(&self, operation: impl FnOnce() -> Result<T, Failure>) -> Result<T, Failure>;
@@ -205,6 +210,7 @@ impl<C: Custody> Service<'_, C> {
         approved_request: &str,
         input: RequestInput,
         now: i64,
+        fence: &impl Fence,
     ) -> Result<Record, Failure> {
         input.validate()?;
         let record = Record {
@@ -220,7 +226,7 @@ impl<C: Custody> Service<'_, C> {
             cleanup_pending: true,
             installing_key: None,
         };
-        repository::update(self.store, |records| {
+        repository::update_fenced(self.store, fence, |records| {
             if records
                 .requests
                 .iter()
@@ -263,7 +269,7 @@ impl<C: Custody> Service<'_, C> {
         }
         // Claim the pending record before touching custody; duplicate answers
         // never replace a ready value. Only this native caller holds the value.
-        repository::update(self.store, |records| {
+        repository::update_fenced(self.store, fence, |records| {
             let current = records
                 .requests
                 .iter_mut()
@@ -291,23 +297,21 @@ impl<C: Custody> Service<'_, C> {
                 return Err(error);
             }
         };
-        let result = fence.commit(|| {
-            repository::update(self.store, |records| {
-                let current = records
-                    .requests
-                    .iter_mut()
-                    .find(|r| r.id == record.id)
-                    .ok_or(Failure::Unavailable)?;
-                self.require(
-                    current,
-                    &record.scope,
-                    now + started.elapsed().as_millis() as i64,
-                    Status::Consuming,
-                )?;
-                current.status = status;
-                current.cleanup_pending = status == Status::Ready;
-                Ok(current.public(true))
-            })
+        let result = repository::update_fenced(self.store, fence, |records| {
+            let current = records
+                .requests
+                .iter_mut()
+                .find(|r| r.id == record.id)
+                .ok_or(Failure::Unavailable)?;
+            self.require(
+                current,
+                &record.scope,
+                now + started.elapsed().as_millis() as i64,
+                Status::Consuming,
+            )?;
+            current.status = status;
+            current.cleanup_pending = status == Status::Ready;
+            Ok(current.public(true))
         });
         if result.is_err() {
             self.close(&record.id, Status::Stopped)?;
@@ -370,8 +374,8 @@ impl<C: Custody> Service<'_, C> {
 
     fn sweep(&self, now: i64, current: impl Fn(&Scope) -> bool) -> Result<(), Failure> {
         let _custody = CUSTODY_LOCK.lock().map_err(|_| Failure::Custody)?;
-        // Never acquire a native generation/account lock under the SQL lock:
-        // foreground commits acquire those locks in the opposite order.
+        // Resolve generations outside the SQL transaction. Only cached final
+        // commit checks belong under its lock; maintenance can do broader I/O.
         let snapshot = repository::update(self.store, |records| Ok(records.requests.clone()))?;
         let stale = snapshot
             .iter()
