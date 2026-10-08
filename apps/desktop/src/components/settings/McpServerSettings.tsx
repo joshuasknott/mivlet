@@ -1,4 +1,9 @@
 import { useEffect, useRef, useState } from "react";
+import { LinkSimple } from "@phosphor-icons/react/dist/csr/LinkSimple";
+import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
+import { Copy } from "@phosphor-icons/react/dist/csr/Copy";
+import { StopCircle } from "@phosphor-icons/react/dist/csr/StopCircle";
+import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import type {
   McpClientAccess,
   McpConsentRequest,
@@ -83,124 +88,152 @@ export function McpServerSettings({
   };
   return (
     <div className="mcp-settings" aria-busy={busy}>
-      <p>
-        Connect an external assistant to selected agents and Work. New clients
-        start with read-only access. Keep Mivlet open and signed in for requests
-        to run.
-      </p>
-      {status?.endpoint ? (
-        <>
-          <label>
-            MCP URL
-            <input
-              readOnly
-              value={status.endpoint}
-              onFocus={(event) => event.target.select()}
-            />
-          </label>
-          <div className="profile-action-row">
-            <button
-              className="button button--secondary"
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void act(
-                  () => navigator.clipboard.writeText(status.endpoint!),
-                  "MCP URL copied.",
-                )
-              }
-            >
-              Copy URL
-            </button>
-            <button
-              className="button button--secondary"
-              type="button"
-              disabled={busy}
-              onClick={() =>
-                void act(
-                  stopMcpServer,
-                  "Server stopped. Active tasks requested by clients were stopped.",
-                )
-              }
-            >
-              Stop server
-            </button>
-          </div>
-        </>
-      ) : (
-        <form
-          onSubmit={(event) => {
-            event.preventDefault();
-            void act(
-              () =>
-                startMcpServer({
-                  port: Number(port),
-                  publicOrigin: origin.trim() || undefined,
-                  browserOrigins: browserOrigins
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean),
-                }),
-              "MCP server started. Add its URL to your assistant and sign in.",
-            );
-          }}
-        >
-          <label>
-            Local port
-            <input
-              type="number"
-              min="1024"
-              max="65535"
-              required
-              disabled={busy}
-              value={port}
-              onChange={(event) => setPort(event.target.value)}
-            />
-          </label>
-          <details>
-            <summary>Remote and browser access</summary>
-            <p>
-              Remote clients require your own HTTPS reverse proxy forwarding to
-              this loopback port, preserving Host, and disabling access-log
-              query strings. Starting this server does not publish an endpoint.
+      <section className="mcp-server-panel" aria-label="MCP server">
+        <header className="mcp-panel-heading">
+          <span className="mcp-panel-icon">
+            <LinkSimple size={24} aria-hidden="true" />
+          </span>
+          <div>
+            <div className="mcp-title-row">
+              <h3>MCP server</h3>
+              <span
+                className={`mcp-state${status?.endpoint && !statusError ? " mcp-state--running" : ""}`}
+              >
+                {statusError
+                  ? "Unavailable"
+                  : !status
+                    ? "Loading"
+                    : status.endpoint
+                      ? "Running"
+                      : "Stopped"}
+              </span>
+            </div>
+            <p className="mcp-description">
+              Connect an external assistant to selected agents and Work. New
+              clients start with read-only access. Keep Mivlet open and signed
+              in for requests to run.
             </p>
+          </div>
+        </header>
+        {status?.endpoint ? (
+          <>
             <label>
-              Public HTTPS origin
+              MCP URL
               <input
-                type="url"
-                disabled={busy}
-                placeholder="https://mivlet.example.com"
-                value={origin}
-                onChange={(event) => setOrigin(event.target.value)}
+                readOnly
+                value={status.endpoint}
+                onFocus={(event) => event.target.select()}
               />
             </label>
-            <label>
-              Allowed browser origins, separated by commas
-              <input
+            <div className="profile-action-row">
+              <button
+                className="button button--secondary"
+                type="button"
                 disabled={busy}
-                placeholder="https://assistant.example.com"
-                value={browserOrigins}
-                onChange={(event) => setBrowserOrigins(event.target.value)}
-              />
-            </label>
-          </details>
-          <button
-            className="button button--secondary"
-            disabled={busy || !status || Boolean(statusError)}
-            type="submit"
+                onClick={() =>
+                  void act(
+                    () => navigator.clipboard.writeText(status.endpoint!),
+                    "MCP URL copied.",
+                  )
+                }
+              >
+                <Copy size={18} aria-hidden="true" />
+                Copy URL
+              </button>
+              <button
+                className="button button--secondary"
+                type="button"
+                disabled={busy}
+                onClick={() =>
+                  void act(
+                    stopMcpServer,
+                    "Server stopped. Active tasks requested by clients were stopped.",
+                  )
+                }
+              >
+                <StopCircle size={18} aria-hidden="true" />
+                Stop server
+              </button>
+            </div>
+          </>
+        ) : (
+          <form
+            onSubmit={(event) => {
+              event.preventDefault();
+              void act(
+                () =>
+                  startMcpServer({
+                    port: Number(port),
+                    publicOrigin: origin.trim() || undefined,
+                    browserOrigins: browserOrigins
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean),
+                  }),
+                "MCP server started. Add its URL to your assistant and sign in.",
+              );
+            }}
           >
-            Start MCP server
-          </button>
-        </form>
-      )}
+            <label>
+              Local port
+              <input
+                type="number"
+                min="1024"
+                max="65535"
+                required
+                disabled={busy}
+                value={port}
+                onChange={(event) => setPort(event.target.value)}
+              />
+            </label>
+            <details>
+              <summary>Remote and browser access</summary>
+              <p>
+                Remote clients require your own HTTPS reverse proxy forwarding
+                to this loopback port, preserving Host, and disabling access-log
+                query strings. Starting this server does not publish an
+                endpoint.
+              </p>
+              <label>
+                Public HTTPS origin
+                <input
+                  type="url"
+                  disabled={busy}
+                  placeholder="https://mivlet.example.com"
+                  value={origin}
+                  onChange={(event) => setOrigin(event.target.value)}
+                />
+              </label>
+              <label>
+                Allowed browser origins, separated by commas
+                <input
+                  disabled={busy}
+                  placeholder="https://assistant.example.com"
+                  value={browserOrigins}
+                  onChange={(event) => setBrowserOrigins(event.target.value)}
+                />
+              </label>
+            </details>
+            <button
+              className="button button--secondary"
+              disabled={busy || !status || Boolean(statusError)}
+              type="submit"
+            >
+              Start MCP server
+            </button>
+          </form>
+        )}
+      </section>
       {!status && !statusError && <p role="status">Loading client access…</p>}
       {statusError && (
-        <p role="alert">
+        <p className="mcp-notice mcp-notice--error" role="alert">
           {statusError} New access is paused until status refreshes.
         </p>
       )}
       {(busy || message) && (
-        <p role="status">{busy ? "Processing request…" : message}</p>
+        <p className="mcp-notice" role="status">
+          {busy ? "Processing request…" : message}
+        </p>
       )}
       {status?.pending.map((request) => (
         <Consent
@@ -227,56 +260,66 @@ export function McpServerSettings({
         />
       ))}
       {status && (
-        <>
-          <h3>Client access</h3>
-          {!status.grants.length && <p>No clients have access.</p>}
-          <ul>
-            {status.grants.map((grant) => (
-              <li key={grant.id}>
-                <strong>{grant.clientName}</strong>
-                <span>
-                  Returns access to <code>{grant.redirectUri}</code>
-                </span>
-                <span>
-                  {grant.access === "read-only"
-                    ? "Read only"
-                    : "Task requests · exact tool approvals"}
-                </span>
-                <span>
-                  {grant.agentIds
-                    .map(
-                      (id) =>
-                        agents.find((agent) => agent.id === id)?.name ??
-                        "Removed agent",
-                    )
-                    .join(", ")}{" "}
-                  · {grant.workIds.length} shared Work
-                </span>
-                <span>
-                  {grant.revoked
-                    ? "Revoked"
-                    : `${grant.expiresAt * 1000 <= Date.now() ? "Expired" : "Expires"} ${new Date(grant.expiresAt * 1000).toLocaleString()}`}
-                </span>
-                {!grant.revoked && (
-                  <button
-                    className="button button--secondary"
-                    type="button"
-                    disabled={busy}
-                    onClick={() =>
-                      void act(
-                        () => revokeMcpClient(grant.id),
-                        "Client access revoked. Its active Work was stopped.",
+        <section className="mcp-access-panel" aria-label="Client access">
+          <h3 className="mcp-title-row">
+            Client access{" "}
+            <span className="mcp-count">{status.grants.length}</span>
+          </h3>
+          {!status.grants.length && (
+            <p className="mcp-empty">No clients have access.</p>
+          )}
+          {!!status.grants.length && (
+            <ul className="mcp-grants">
+              {status.grants.map((grant) => (
+                <li key={grant.id}>
+                  <strong>{grant.clientName}</strong>
+                  <span>
+                    Returns access to <code>{grant.redirectUri}</code>
+                  </span>
+                  <span>
+                    {grant.access === "read-only"
+                      ? "Read only"
+                      : "Task requests · exact tool approvals"}
+                  </span>
+                  <span>
+                    {grant.agentIds
+                      .map(
+                        (id) =>
+                          agents.find((agent) => agent.id === id)?.name ??
+                          "Removed agent",
                       )
-                    }
-                  >
-                    Revoke {grant.clientName}
-                  </button>
-                )}
-              </li>
-            ))}
-          </ul>
-          <details>
-            <summary>Access history ({status.history.length})</summary>
+                      .join(", ")}{" "}
+                    · {grant.workIds.length} shared Work
+                  </span>
+                  <span>
+                    {grant.revoked
+                      ? "Revoked"
+                      : `${grant.expiresAt * 1000 <= Date.now() ? "Expired" : "Expires"} ${new Date(grant.expiresAt * 1000).toLocaleString()}`}
+                  </span>
+                  {!grant.revoked && (
+                    <button
+                      className="button button--secondary"
+                      type="button"
+                      disabled={busy}
+                      onClick={() =>
+                        void act(
+                          () => revokeMcpClient(grant.id),
+                          "Client access revoked. Its active Work was stopped.",
+                        )
+                      }
+                    >
+                      Revoke {grant.clientName}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <details className="mcp-history">
+            <summary>
+              <Clock size={18} aria-hidden="true" /> Access history (
+              {status.history.length})
+            </summary>
             <p>
               The most recent 256 decisions and requests. Prompts and
               credentials are excluded.
@@ -299,7 +342,7 @@ export function McpServerSettings({
               ))}
             </ol>
           </details>
-        </>
+        </section>
       )}
     </div>
   );
@@ -337,12 +380,20 @@ function Consent({
         void onDecide(true, agentIds, workIds, access, hours);
       }}
     >
-      <h3>{request.clientName} wants to connect</h3>
-      <p>
-        Match this code to the sign-in you started:{" "}
+      <header className="mcp-panel-heading">
+        <span className="mcp-panel-icon">
+          <ShieldCheck size={24} aria-hidden="true" />
+        </span>
+        <div>
+          <p className="mcp-eyebrow">Connection request</p>
+          <h3>{request.clientName} wants to connect</h3>
+        </div>
+      </header>
+      <p className="mcp-request-code">
+        <span>Match this code to the sign-in you started:</span>
         <strong>{request.id}</strong>
       </p>
-      <p>
+      <p className="mcp-return-address">
         Returns access to <code>{request.redirectUri}</code>
       </p>
       <fieldset disabled={busy}>
@@ -365,21 +416,38 @@ function Consent({
           </label>
         ))}
       </fieldset>
-      <label>
-        Access
-        <select
-          disabled={busy}
-          value={access}
-          onChange={(event) => setAccess(event.target.value as McpClientAccess)}
-        >
-          <option value="read-only">Read only</option>
-          {request.requestedAccess === "request-tasks" && (
-            <option value="request-tasks">
-              Request tasks, message and stop own Work
-            </option>
-          )}
-        </select>
-      </label>
+      <div className="mcp-consent-options">
+        <label>
+          Access
+          <select
+            disabled={busy}
+            value={access}
+            onChange={(event) =>
+              setAccess(event.target.value as McpClientAccess)
+            }
+          >
+            <option value="read-only">Read only</option>
+            {request.requestedAccess === "request-tasks" && (
+              <option value="request-tasks">
+                Request tasks, message and stop own Work
+              </option>
+            )}
+          </select>
+        </label>
+        <label>
+          Access lifetime
+          <select
+            disabled={busy}
+            value={hours}
+            onChange={(event) => setHours(Number(event.target.value))}
+          >
+            <option value="1">1 hour</option>
+            <option value="8">8 hours</option>
+            <option value="24">1 day</option>
+            <option value="168">7 days</option>
+          </select>
+        </label>
+      </div>
       {access === "request-tasks" && (
         <p>
           Agents use their configured instructions and memory, and share task
@@ -413,20 +481,7 @@ function Consent({
           Other conversations, attachments and private context are excluded.
         </p>
       </details>
-      <label>
-        Access lifetime
-        <select
-          disabled={busy}
-          value={hours}
-          onChange={(event) => setHours(Number(event.target.value))}
-        >
-          <option value="1">1 hour</option>
-          <option value="8">8 hours</option>
-          <option value="24">1 day</option>
-          <option value="168">7 days</option>
-        </select>
-      </label>
-      <div className="profile-action-row">
+      <div className="profile-action-row mcp-consent-actions">
         <button
           className="button button--primary"
           type="submit"

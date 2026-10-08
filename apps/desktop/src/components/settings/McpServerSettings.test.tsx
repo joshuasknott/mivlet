@@ -153,6 +153,7 @@ describe("external assistant consent", () => {
       />,
     );
     await act(async () => {});
+    expect(screen.getByText("Running", { exact: true })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Aster" }));
     expect(
       screen.getByRole("button", { name: "Approve access" }),
@@ -164,6 +165,9 @@ describe("external assistant consent", () => {
       "Status refresh failed.",
     );
     expect(
+      screen.getByText("Unavailable", { exact: true }),
+    ).toBeInTheDocument();
+    expect(
       screen.getByRole("button", { name: "Approve access" }),
     ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Stop server" })).toBeEnabled();
@@ -171,6 +175,7 @@ describe("external assistant consent", () => {
       await vi.advanceTimersByTimeAsync(3000);
     });
     expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByText("Running", { exact: true })).toBeInTheDocument();
     expect(screen.getByRole("checkbox", { name: "Aster" })).toBeChecked();
     expect(
       screen.getByRole("button", { name: "Approve access" }),
