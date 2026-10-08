@@ -35,9 +35,11 @@ impl Fence for NativeFence {
     fn commit<T>(&self, operation: impl FnOnce() -> Result<T, Failure>) -> Result<T, Failure> {
         // Store preparation and execution-pause checks already completed.
         // Do not call check(): its preflight reads the same Store connection.
-        self.account
+        // Match native input dispatch order: generation first, then the
+        // nonblocking identity fence. Never wait for Stop while holding identity.
+        self.ticket
             .with_current(|| {
-                self.ticket.with_current(|| {
+                self.account.with_current(|| {
                     Ok(if now() >= self.expires {
                         Err(Failure::Expired)
                     } else {
