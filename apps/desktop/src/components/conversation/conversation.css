@@ -82,8 +82,6 @@
 .message-code { min-width: 0; margin-block: 12px; }
 .message-code > header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 12px; border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; font-size: 11px; color: var(--ink-muted); }
 .message-code > pre { margin-top: 0; border-radius: 0 0 8px 8px; }
-.conversation-recovery { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
-.conversation-recovery > p, .conversation-recovery > details { flex: 1 1 100%; }
 .conversation-context-event { margin: 16px 0; padding: 10px 12px; border-left: 2px solid var(--line); color: var(--ink-muted); font-size: var(--text-12); }
 .conversation-context-event summary { cursor: pointer; }
 .conversation-context-event time { margin-left: 8px; }
