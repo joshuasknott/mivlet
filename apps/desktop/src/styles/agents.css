@@ -142,24 +142,8 @@
 .agent-avatar svg { display: block; }
 .agent-avatar img { width: 100%; height: 100%; object-fit: cover; border-radius: 10px; }
 
-.agent-row__copy,
-.agent-row__line {
+.agent-row__copy {
   min-width: 0;
-}
-
-.agent-row__line {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.agent-row__line strong {
-  overflow: hidden;
-  font-size: 14px;
-  font-weight: 500;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 
@@ -315,21 +299,6 @@
 .agent-editor__skills { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 42px; margin-top: 10px; padding: 0 12px; color: var(--ink); background: var(--surface-hover); border: 0; border-radius: 11px; }
 .agent-editor__skills span { color: var(--ink-muted); }
 
-.live-screen {
-  width: 100%;
-  margin: 4px 0 12px;
-  padding: 0;
-  overflow: hidden;
-  color: #fff;
-  background: #191919;
-  border: 1px solid #303030;
-  border-radius: 11px;
-  text-align: left;
-  opacity: 1;
-}
-
-.live-screen img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
-
 .live-screen-modal,
 .agent-editor-backdrop,
 .agent-learning-backdrop {
@@ -354,7 +323,6 @@
 .hosted-computer-card > button:disabled { opacity: .5; }
 .hosted-computer-card__state { color: var(--positive); font-size: 10px; font-weight: 650; }
 .local-computer-card { background: color-mix(in srgb, var(--surface-raised) 88%, var(--positive-subtle)); }
-.local-computer-card__boundary { grid-column: 1 / -1; color: var(--ink-soft); font-size: 9px; line-height: 1.45; }
 .local-computer-files { display: grid; grid-column: 1 / -1; gap: 6px; }
 .local-computer-files__toolbar { display: flex; align-items: center; gap: 5px; }
 .local-computer-files__toolbar button { display: inline-flex; min-height: 28px; align-items: center; gap: 6px; padding: 0 8px; color: var(--ink-soft); background: var(--surface-overlay); border: 1px solid var(--line); border-radius: 8px; font-size: 10px; }
@@ -484,7 +452,6 @@ button.local-computer-files__entry:disabled { opacity: .55; }
   .agent-list { margin-top: 12px; }
   .agent-row__select { grid-template-columns: 44px minmax(0, 1fr) 8px; min-height: 76px; gap: 12px; padding: 12px 10px; }
   .agent-row__select .agent-avatar { width: 44px !important; height: 44px !important; }
-  .agent-row__line strong { font-size: 16px; }
   .agent-row__preview { font-size: 13px; margin-top: 5px; }
   .agent-learning-backdrop { align-items: end; padding: 0; }
   .agent-learning-dialog { width: 100%; max-height: min(86dvh, 760px); border-radius: 18px 18px 0 0; }
@@ -556,11 +523,6 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 .agent-editor__model .model-picker { bottom: calc(100% + 6px); left: 0; }
 @media (max-width: 650px) { .composer-menu.model-picker { width: min(320px, calc(100vw - 80px)); } .composer-menu.model-picker--effort { width: min(224px, calc(100vw - 80px)); } }
 
-.agent-row__line strong { min-width: 0; line-height: 1.35; }
-.agent-row__meta { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
-.agent-row__meta .agent-row__preview { flex: 1; min-width: 0; }
-.agent-row__meta time { flex: none; font-size: 10px; color: var(--ink-soft); }
-
 
 
 /* Agent identity and colour editing. */
@@ -606,7 +568,6 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 .agent-search { margin-bottom: 10px; border-color: transparent; background: var(--surface-hover); transition: border-color var(--motion-fast) ease; }
 .agent-search:focus-within { border-color: var(--ink-soft); }
 .agent-search input { width: 100%; min-width: 0; padding: 8px 0; color: var(--ink); border: 0; outline: 0; background: transparent; box-shadow: none; }
-.agent-row__line time { flex-shrink: 0; color: var(--ink-muted); font-size: 10px; font-variant-numeric: tabular-nums; }
 .agent-row__select, .agent-sidebar__new { transition: background var(--motion-fast) ease, color var(--motion-fast) ease; }
 .agent-row__select:active, .agent-sidebar__new:active { background: var(--accent-subtle); }
 .live-rail { animation: work-panel-in var(--motion-panel) var(--ease-out); }
