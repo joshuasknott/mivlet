@@ -39,7 +39,7 @@ pub(crate) fn apply(conn: &Connection) -> Result<()> {
             .ok_or_else(|| StoreError::Invalid("The schedule schema is invalid.".into()))?;
         let ddl = format!(
             "CREATE TABLE local_schedule_event_v1 {}",
-            &schema[open..].replace(
+            schema[open..].replace(
                 constraint,
                 "CHECK(trigger_kind IN ('once','daily','weekly','event'))"
             )

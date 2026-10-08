@@ -46,7 +46,7 @@ pub fn event_trigger_save(
         .map_err(|e| e.to_string())?;
     let prior_config = prior
         .as_ref()
-        .map(|row| decode_schedule_payload(row))
+        .map(decode_schedule_payload)
         .transpose()
         .map_err(|e| e.to_string())?
         .and_then(|p| match p.trigger {
@@ -65,10 +65,9 @@ pub fn event_trigger_save(
         fields: request.event.fields,
         max_age_seconds: request.event.max_age_seconds,
         valid_until: request.event.valid_until,
-        route_id: if rotate || prior_config.is_none() {
-            new_route()?
-        } else {
-            prior_config.as_ref().unwrap().route_id.clone()
+        route_id: match prior_config.as_ref() {
+            Some(old) if !rotate => old.route_id.clone(),
+            _ => new_route()?,
         },
         key_version: if rotate {
             prior_config.as_ref().map_or(Ok(1), |old| {
