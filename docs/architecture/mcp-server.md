@@ -18,6 +18,10 @@ codex mcp add mivlet --url http://127.0.0.1:39440/mcp
 codex mcp login mivlet
 ```
 
+For task requests, use `codex mcp login mivlet --scopes mivlet:read,mivlet:tasks`
+and explicitly select task access when approving in Mivlet. Asking for a scope
+does not approve it.
+
 Clients discover RFC 9728 protected-resource metadata and RFC 8414 authorization
 metadata. Public-client registration, authorization-code exchange, S256 PKCE,
 resource binding, state round-trip and issuer identification are supported. Callback
