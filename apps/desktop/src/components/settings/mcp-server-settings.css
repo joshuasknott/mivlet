@@ -131,11 +131,6 @@
   border: 1px solid var(--line-strong);
   border-radius: 6px;
 }
-.mcp-settings code,
-.mcp-settings p,
-.mcp-settings span {
-  overflow-wrap: anywhere;
-}
 .mcp-settings ul,
 .mcp-settings ol {
   display: grid;
@@ -153,7 +148,6 @@
   border-radius: 8px;
 }
 .mcp-grants > li > strong {
-  font-size: 14px;
   font-weight: 600;
 }
 .mcp-settings fieldset {
