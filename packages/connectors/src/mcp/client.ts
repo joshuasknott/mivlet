@@ -33,6 +33,8 @@ export interface McpUntrustedContent {
   uri?: string;
   name?: string;
   mimeType?: string;
+  /** Bounded, untrusted resource metadata. Never grants host capability. */
+  metadata?: Record<string, unknown>;
   truncated: boolean;
 }
 
@@ -49,6 +51,7 @@ const MAX_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
 const MAX_TOOL_CONTENT_ITEMS = 64;
 const MAX_TOOL_TEXT_CHARACTERS = 64 * 1024;
 const MAX_STRUCTURED_CHARACTERS = 256 * 1024;
+const MAX_RESOURCE_METADATA_CHARACTERS = 16 * 1024;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -69,6 +72,13 @@ function safeOptionalString(value: unknown, max: number): string | undefined {
   if (typeof value !== "string" || value.length === 0 || value.length > max || /[\u0000-\u001f\u007f]/u.test(value)) {
     return undefined;
   }
+  return value;
+}
+
+function boundedMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!isObject(value)) return undefined;
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined || encoded.length > MAX_RESOURCE_METADATA_CHARACTERS) return undefined;
   return value;
 }
 
@@ -122,6 +132,7 @@ export function normalizeMcpToolResult(value: unknown): McpUntrustedToolResult {
         uri,
         text: bounded,
         mimeType: safeOptionalString(item.resource.mimeType, 200),
+        metadata: boundedMetadata(item.resource._meta),
         truncated
       };
     }

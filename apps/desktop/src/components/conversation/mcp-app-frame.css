@@ -1,0 +1,40 @@
+.mcp-app-frame {
+  width: 100%;
+  min-height: 112px;
+  overflow: hidden;
+  border: 1px solid var(--line, #d8d4cc);
+  border-radius: 14px;
+  background: var(--surface-raised, #fbfaf7);
+}
+.mcp-app-frame__iframe {
+  display: block;
+  width: 100%;
+  min-height: 112px;
+  border: 0;
+  background: transparent;
+}
+
+.mcp-app-frame__status {
+  display: grid;
+  gap: 4px;
+  min-height: 112px;
+  margin: 0;
+  padding: 20px;
+  align-content: center;
+  color: var(--ink-muted, #6f6a61);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.mcp-app-frame__status--error {
+  color: var(--danger, #a54b3c);
+}
+
+.mcp-app-frame__status--error span {
+  color: var(--ink-muted, #6f6a61);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mcp-app-frame,
+  .mcp-app-frame__iframe { scroll-behavior: auto; }
+}
