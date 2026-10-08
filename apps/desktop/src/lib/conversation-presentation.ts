@@ -20,6 +20,12 @@ export interface ConversationTurn {
 
 /** Presentation only. Tool labels never confer execution authority. */
 const toolLabels: Record<string, [string, string]> = {
+  "request-secret": ["Waiting for protected secret entry", "Protected secret request finished"],
+  "secret-request-status": ["Checking protected request status", "Checked protected request status"],
+  "webhook-signing-install": ["Installing a webhook verification key", "Installed a webhook verification key"],
+  "webhook-signing-status": ["Checking webhook key status", "Checked webhook key status"],
+  "webhook-signing-verify": ["Checking a webhook signature", "Checked a webhook signature"],
+  "webhook-signing-remove": ["Removing a webhook verification key", "Removed a webhook verification key"],
   "teammate-assign": ["Handing work to a teammate", "Assigned to a teammate"],
   "project-record": ["Recording project context", "Recorded project context"],
   "team-await-user": ["Pausing for your input", "Waiting for your input"],
