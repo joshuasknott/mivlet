@@ -3,7 +3,8 @@ import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderAllowance, ProviderUsageReport } from "@mivlet/protocol";
-import { ProviderUsageDetails } from "./ProviderUsageDetails";
+// Use the shipping deferred export for the direct detail renders below.
+import { ProviderUsageDetails } from "../pages/SettingsPage";
 import { ProviderAllowanceIndicator } from "./ProviderUsage";
 import {
   currentAllowance,

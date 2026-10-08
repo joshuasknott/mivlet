@@ -9,7 +9,7 @@ import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import "./provider-usage.css";
 
 const Details = lazy(() =>
-  import("./ProviderUsageDetails").then((module) => ({
+  import("../pages/SettingsPage").then((module) => ({
     default: module.ProviderUsageDetails,
   })),
 );
