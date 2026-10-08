@@ -54,7 +54,7 @@ export function BackgroundExecutionSettings() {
               Keep supported text work running when you close Mivlet
             </strong>
             <small>
-              New text requests and Read Only agent schedules using Codex,
+              New requests and schedules for Read Only agents using Codex,
               Claude or supported direct APIs can continue while Windows is
               awake and your account session is valid. Results and Stop stay in
               the conversation.
@@ -80,9 +80,10 @@ export function BackgroundExecutionSettings() {
                       ? "Background connection unavailable"
                       : "Checking background execution…"}
           </span>
-          <div>
+          <div className="profile-action-row">
             <button
               type="button"
+              className="button button--secondary"
               disabled={pending || !status?.supported}
               onClick={() => void act(status?.running ? "stop" : "start")}
             >
@@ -93,6 +94,7 @@ export function BackgroundExecutionSettings() {
             {status?.running && (
               <button
                 type="button"
+                className="button button--secondary"
                 disabled={pending}
                 onClick={() => void act("restart")}
               >
@@ -101,6 +103,7 @@ export function BackgroundExecutionSettings() {
             )}
             <button
               type="button"
+              className="button button--secondary"
               disabled={pending}
               onClick={() => void act("refresh")}
             >

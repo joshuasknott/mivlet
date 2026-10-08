@@ -9,6 +9,7 @@ mod windows;
 pub(crate) use control::revoke;
 pub use control::{background_worker_control, background_worker_status};
 pub(crate) use persistence::enabled_at;
+pub(crate) use persistence::revoke_at;
 pub(crate) use persistence::{enabled, owns_attempt, owns_work};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};

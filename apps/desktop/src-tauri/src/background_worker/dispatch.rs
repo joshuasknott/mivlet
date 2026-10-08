@@ -272,7 +272,7 @@ async fn execute(
     };
     attempt.updated_at = chrono::Utc::now().to_rfc3339();
     let attempt = crate::execution_attempts::normalize_execution_attempt(attempt)?;
-    background::finish(app, item, &attempt, status.clone())?;
+    let status = background::finish(app, item, &attempt, status)?;
     if let Some(claim) = scheduled {
         claim.finish(if status == WorkStatus::Completed {
             "completed"

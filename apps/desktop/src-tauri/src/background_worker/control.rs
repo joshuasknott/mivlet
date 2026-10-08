@@ -77,7 +77,11 @@ pub async fn background_worker_control(
                 )
                 .spawn()
                 .map_err(|_| "Windows could not start Mivlet's background worker.")?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
             for _ in 0..100 {
+                if std::time::Instant::now() >= deadline {
+                    break;
+                }
                 if let Ok(status) = super::windows::request(super::windows::Action::Status).await {
                     return Ok(status);
                 }

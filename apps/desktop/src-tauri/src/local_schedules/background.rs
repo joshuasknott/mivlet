@@ -187,6 +187,42 @@ impl Claim {
     }
 }
 
+impl Drop for Claim {
+    fn drop(&mut self) {
+        if self.settled {
+            return;
+        }
+        let Ok(store) = global_store() else {
+            return;
+        };
+        if let Some(attempt) = &self.attempt {
+            let _ = finish_bound_occurrence(
+                store,
+                &self.scope,
+                &self.claim.occurrence_id,
+                &self.claim.claim_token,
+                attempt,
+                "interrupted",
+                Some("The native owner stopped. No automatic replay."),
+                Utc::now(),
+            );
+        } else {
+            let _ = store.transaction(|conn| {
+                repo::interrupt_claimed(
+                    conn,
+                    store,
+                    &self.scope,
+                    &self.claim.occurrence_id,
+                    &fingerprint(&self.claim.claim_token),
+                    "Background dispatch stopped before binding.",
+                    &timestamp(Utc::now()),
+                )
+                .map(|_| ())
+            });
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::super::tests::{at, daily_request, store_and_scope};
@@ -288,41 +324,5 @@ mod tests {
                 now + Duration::minutes(10)
             ))
             .is_err());
-    }
-}
-
-impl Drop for Claim {
-    fn drop(&mut self) {
-        if self.settled {
-            return;
-        }
-        let Ok(store) = global_store() else {
-            return;
-        };
-        if let Some(attempt) = &self.attempt {
-            let _ = finish_bound_occurrence(
-                store,
-                &self.scope,
-                &self.claim.occurrence_id,
-                &self.claim.claim_token,
-                attempt,
-                "interrupted",
-                Some("The native owner stopped. No automatic replay."),
-                Utc::now(),
-            );
-        } else {
-            let _ = store.transaction(|conn| {
-                repo::interrupt_claimed(
-                    conn,
-                    store,
-                    &self.scope,
-                    &self.claim.occurrence_id,
-                    &fingerprint(&self.claim.claim_token),
-                    "Background dispatch stopped before binding.",
-                    &timestamp(Utc::now()),
-                )
-                .map(|_| ())
-            });
-        }
     }
 }

@@ -67,30 +67,38 @@ pub(crate) fn enabled_at(conn: &Connection, store: &Store) -> crate::store::Resu
 
 pub(crate) fn set_enabled(store: &Store, enabled: bool) -> Result<(), String> {
     store
-        .transaction(|conn| {
-            let current = settings_at(conn, store)?;
-            if current.enabled == enabled {
-                return Ok(());
-            }
-            let next = Settings {
-                version: 1,
-                enabled,
-                generation: current.generation.checked_add(1).ok_or_else(|| {
-                    StoreError::Invalid("Background generation exhausted.".into())
-                })?,
-            };
-            preferences::upsert_scoped(
-                conn,
-                store,
-                &DataScope::legacy_default(),
-                KEY,
-                &serde_json::to_value(next).map_err(|_| {
-                    StoreError::Invalid("Background settings could not be encoded.".into())
-                })?,
-                &chrono::Utc::now().to_rfc3339(),
-            )
-        })
+        .transaction(|conn| set_enabled_at(conn, store, enabled))
         .map_err(|e| e.to_string())
+}
+
+fn set_enabled_at(conn: &Connection, store: &Store, enabled: bool) -> crate::store::Result<()> {
+    let current = settings_at(conn, store)?;
+    if current.enabled == enabled {
+        return Ok(());
+    }
+    let next = Settings {
+        version: 1,
+        enabled,
+        generation: current
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| StoreError::Invalid("Background generation exhausted.".into()))?,
+    };
+    preferences::upsert_scoped(
+        conn,
+        store,
+        &DataScope::legacy_default(),
+        KEY,
+        &serde_json::to_value(next)
+            .map_err(|_| StoreError::Invalid("Background settings could not be encoded.".into()))?,
+        &chrono::Utc::now().to_rfc3339(),
+    )
+}
+
+/// Outgoing-account suspension uses its already bound store even after the
+/// credential expired. IPC availability cannot keep the worker authorized.
+pub(crate) fn revoke_at(conn: &Connection, store: &Store) -> crate::store::Result<()> {
+    set_enabled_at(conn, store, false)
 }
 
 pub(crate) fn owns_work(work: &Work) -> bool {

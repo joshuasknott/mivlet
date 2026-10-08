@@ -33,6 +33,9 @@ pub(crate) fn eligible(item: &Work, agent: &MivletAgentProfile) -> bool {
         && item.project_id.is_none()
         && item.recipient_ids.len() <= 1
         && item.dependencies.is_empty()
+        && item.run_ids.is_empty()
+        && item.steering.is_empty()
+        && item.messages.is_empty()
         && agent.connector_ids.is_empty()
         && agent.knowledge_source_ids.is_empty()
         && route.is_some_and(crate::background_worker::dispatch::supports_provider)
@@ -149,7 +152,7 @@ pub(crate) fn claim(
             || execution_attempt::get_scoped(ctx.conn, ctx.store, &ctx.scope.data, &attempt.id)?
                 .is_some()
         {
-            return Err(invalid("This background assignment cannot be claimed."));
+            return Err(invalid("This request now needs foreground context or tools. Open Mivlet and Continue after reviewing its saved state."));
         }
         write_attempt(ctx, attempt)?;
         if item.schedule.is_some() {
@@ -188,32 +191,52 @@ pub(crate) fn finish(
     item: &Work,
     attempt: &ExecutionAttempt,
     status: WorkStatus,
-) -> std::result::Result<(), String> {
-    with_context(app, |ctx| {
-        work::current(ctx, &item.id, item.generation, Some(&attempt.id))?;
-        // Terminal rows are immutable even if a delayed terminal event arrives.
-        let existing =
-            execution_attempt::get_scoped(ctx.conn, ctx.store, &ctx.scope.data, &attempt.id)?
-                .ok_or_else(|| invalid("The background attempt is unavailable."))?;
-        if !matches!(
-            existing.status.as_str(),
-            "queued" | "streaming" | "awaiting-approval"
-        ) {
-            return Err(invalid("The background attempt is already terminal."));
-        }
-        write_attempt(ctx, attempt)?;
-        if status == WorkStatus::Completed {
-            append(ctx, item, attempt, "assistant", &attempt.transcript)?;
-        }
-        work::finish(
-            ctx,
-            &item.id,
-            item.generation,
-            &attempt.id,
-            status,
-            attempt.error.clone(),
-        )
-    })
+) -> std::result::Result<WorkStatus, String> {
+    with_context(app, |ctx| finish_at(ctx, item, attempt, status))
+}
+
+fn finish_at(
+    ctx: &Context<'_>,
+    item: &Work,
+    attempt: &ExecutionAttempt,
+    status: WorkStatus,
+) -> Result<WorkStatus> {
+    work::current(ctx, &item.id, item.generation, Some(&attempt.id))?;
+    // Terminal rows are immutable even if a delayed terminal event arrives.
+    let existing =
+        execution_attempt::get_scoped(ctx.conn, ctx.store, &ctx.scope.data, &attempt.id)?
+            .ok_or_else(|| invalid("The background attempt is unavailable."))?;
+    if !matches!(
+        existing.status.as_str(),
+        "queued" | "streaming" | "awaiting-approval"
+    ) {
+        return Err(invalid("The background attempt is already terminal."));
+    }
+    write_attempt(ctx, attempt)?;
+    if status == WorkStatus::Completed {
+        append(ctx, item, attempt, "assistant", &attempt.transcript)?;
+    }
+    work::finish(
+        ctx,
+        &item.id,
+        item.generation,
+        &attempt.id,
+        status,
+        attempt.error.clone(),
+    )?;
+    let mut finished = ctx.item(&item.id)?;
+    if finished.status == WorkStatus::Queued {
+        // The renderer normally supplies task-scoped follow-up context.
+        // Until that native path exists, preserve the completed result and
+        // new steering instead of silently repeating the original prompt.
+        finished.status = WorkStatus::AwaitingUser;
+        finished.awaiting_user = true;
+        finished.generation += 1;
+        finished.current_run_id = None;
+        finished.reason = Some("The result is saved. Open Mivlet and Continue to apply the new follow-up with its current context.".into());
+        ctx.work(&finished)?;
+    }
+    Ok(finished.status)
 }
 
 pub(crate) fn checkpoint(
@@ -222,11 +245,13 @@ pub(crate) fn checkpoint(
     attempt: &ExecutionAttempt,
 ) -> std::result::Result<(), String> {
     with_context(app, |ctx| {
-        work::current(ctx, &item.id, item.generation, Some(&attempt.id))?;
+        let mut current = work::current(ctx, &item.id, item.generation, Some(&attempt.id))?;
         if !crate::background_worker::enabled_at(ctx.conn, ctx.store)? {
             return Err(invalid("Background execution was stopped."));
         }
-        write_attempt(ctx, attempt)
+        write_attempt(ctx, attempt)?;
+        current.updated_at = ctx.time.into();
+        ctx.work(&current)
     })
 }
 
@@ -409,6 +434,41 @@ mod tests {
         }
     }
     #[test]
+    fn follow_up_preserves_completed_evidence_without_replaying_the_original_prompt() {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        fixture(&store, |ctx| {
+            let mut item = seed(ctx, true)?;
+            let mut attempt: ExecutionAttempt = serde_json::from_value(json!({"id":"native-attempt","providerId":"codex","model":"fixture",
+                "threadId":item.conversation_id,"status":"streaming","transcript":"Completed first response", "turn":1,
+                "pendingApprovalIds":[],"recoverable":false,"retryCount":0,"createdAt":ctx.time,"updatedAt":ctx.time})).unwrap();
+            write_attempt(ctx, &attempt)?;
+            item.status = WorkStatus::Running;
+            item.current_run_id = Some(attempt.id.clone());
+            item.run_ids.push(attempt.id.clone());
+            item.steering.push(WorkSteering {
+                id: "follow-up".into(),
+                text: "Now explain the alternative".into(),
+                created_at: ctx.time.into(),
+            });
+            ctx.work(&item)?;
+            attempt.status = "completed".into();
+            assert_eq!(
+                finish_at(ctx, &item, &attempt, WorkStatus::Completed)?,
+                WorkStatus::AwaitingUser
+            );
+            let saved = ctx.item(&item.id)?;
+            assert_eq!(saved.outputs[0].text, "Completed first response");
+            assert_eq!(saved.steering.len(), 1);
+            assert_eq!(saved.delivered_steering_count, 0);
+            assert_eq!(saved.generation, item.generation + 1);
+            assert!(saved.current_run_id.is_none());
+            assert!(finish_at(ctx, &item, &attempt, WorkStatus::Completed).is_err());
+            Ok(())
+        });
+    }
+
+    #[test]
     fn unsupported_tools_inputs_and_renderer_takeover_are_refused() {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
@@ -425,6 +485,16 @@ mod tests {
             unsupported = work.clone();
             unsupported.model_option_id = "gemini::fixture".into();
             assert!(!eligible(&unsupported, &profile));
+            let mut continued = work.clone();
+            continued.run_ids.push("finished-attempt".into());
+            assert!(!eligible(&continued, &profile));
+            let mut steered = work.clone();
+            steered.steering.push(WorkSteering {
+                id: "steer".into(),
+                text: "New instruction".into(),
+                created_at: ctx.time.into(),
+            });
+            assert!(!eligible(&steered, &profile));
             assert!(work::bind(ctx, &work.id, work.generation, "renderer-attempt", None).is_err());
             Ok(())
         });

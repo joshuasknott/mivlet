@@ -87,6 +87,8 @@ their existing runner. Requests with unsupported capabilities stay with the
 desktop executor. The worker exposes no command, file, computer or connector
 tools, and it never approves an action. A provider tool or approval request
 interrupts the attempt for explicit review and Continue in the app.
+Follow-ups and steering also require the foreground Continue path; a native
+turn never marks a new instruction delivered without actually supplying it.
 
 `Work.executionOwner = "native-background"` selects this owner. Claiming,
 checkpoints and completion check canonical Work identity and generation in the
@@ -95,6 +97,10 @@ terminal Work together. The renderer does not dispatch these records and its
 disposal does not stop them. Reopening the app reads the same records. Stop
 still changes the canonical generation, and the native loop observes that fence
 at its next 250 ms check. It never publishes a result from a superseded attempt.
+Views also discover new native schedules while idle, retry failed transcript
+reads, and can refresh durable results if the control pipe disconnects. Account
+suspension revokes background admission in its existing storage transaction;
+an expired credential or failed Stop IPC cannot retain that authority.
 
 An exclusive Windows file handle prevents duplicate account owners; a second
 handle marks readiness only after startup recovery. An account-derived local

@@ -358,12 +358,13 @@ impl Store {
             .conn
             .lock()
             .map_err(|_| StoreError::Invalid("Account store unavailable.".into()))?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
             "UPDATE local_schedule SET status='paused',revision=revision+1 WHERE status='enabled'",
             [],
         )?;
         crate::collaboration::suspend_account(&tx, self, user, member)?;
+        crate::background_worker::revoke_at(&tx, self)?;
         let data = repos::scope::DataScope::legacy_default();
         let path = Path::new("execution-approvals.json");
         let (_, key) = scoped_document_location(path, &data).map_err(StoreError::Invalid)?;
@@ -1295,6 +1296,7 @@ mod tests {
                 id:"schedule".into(), agent_id:"agent".into(), status:"enabled".into(), trigger_kind:"once".into(), revision:1, prompt_revision:1,
                 next_run_at:Some("2026-09-14T00:00:00Z".into()), created_at:"now".into(), updated_at:"now".into(), payload:serde_json::json!({"prompt":"RETAIN_REQUEST"})
             })?;
+            repos::preferences::upsert(conn, &store, "nativeBackgroundExecution", &serde_json::json!({"version":1,"enabled":true,"generation":9}), "now")?;
             repos::preferences::upsert(conn, &store, "document:execution-approvals.json", &serde_json::json!([{"requestId":"permit","decision":"allow","consumedAt":null}]), "now")
         }).unwrap();
         store
@@ -1313,6 +1315,10 @@ mod tests {
                         .unwrap();
                 assert_eq!(permits[0]["requestId"], "permit");
                 assert!(permits[0]["invalidatedAt"].as_str().is_some());
+                let background =
+                    repos::preferences::get(conn, &store, "nativeBackgroundExecution")?.unwrap();
+                assert_eq!(background["enabled"], false);
+                assert_eq!(background["generation"], 10);
                 Ok(())
             })
             .unwrap();
