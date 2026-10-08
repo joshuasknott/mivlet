@@ -40,9 +40,9 @@ export function RepositoryCopies({
   } | null>(null);
   const [confirmed, setConfirmed] = useState(false);
   const previewRef = useRef<HTMLElement>(null);
-  useEffect(() => {
-    if (preview) previewRef.current?.focus();
-  }, [preview]);
+  const previewTriggerRef = useRef<HTMLButtonElement>(null);
+  const refreshRef = useRef<HTMLButtonElement>(null);
+  const hadPreview = useRef(false);
   const epoch = async () => {
     const target = { workspaceId, agentId };
     const computer = await loadRuntimeLocalComputer(target);
@@ -125,6 +125,19 @@ export function RepositoryCopies({
   const error =
     cleanup.error ?? select.error ?? inspect.error ?? inventory.error;
   const pending = cleanup.isPending || select.isPending || inspect.isPending;
+  useEffect(() => {
+    if (preview) {
+      previewRef.current?.focus();
+      hadPreview.current = true;
+    } else if (hadPreview.current && !pending && !inventory.isFetching) {
+      const trigger = previewTriggerRef.current;
+      (trigger?.isConnected && !trigger.disabled
+        ? trigger
+        : refreshRef.current
+      )?.focus();
+      hadPreview.current = false;
+    }
+  }, [preview, pending, inventory.isFetching]);
   const clearErrors = () => {
     cleanup.reset();
     select.reset();
@@ -150,6 +163,7 @@ export function RepositoryCopies({
             or clean up its copies. Cleanup protects unfinished work.
           </p>
           <button
+            ref={refreshRef}
             type="button"
             disabled={inventory.isFetching || pending}
             onClick={() => {
@@ -300,7 +314,8 @@ export function RepositoryCopies({
                       pending ||
                       inventory.data?.busy
                     }
-                    onClick={() => {
+                    onClick={(event) => {
+                      previewTriggerRef.current = event.currentTarget;
                       clearErrors();
                       setPreview(null);
                       inspect.mutate(copy.id);

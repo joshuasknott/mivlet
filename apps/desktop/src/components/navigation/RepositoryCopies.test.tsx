@@ -140,6 +140,53 @@ describe("retained repository copies", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(native.remove).not.toHaveBeenCalled();
   });
+  it("returns focus after closing a preview without deleting the copy", async () => {
+    setup();
+    const review = await screen.findByRole("button", {
+      name: "Review cleanup",
+    });
+    fireEvent.click(review);
+    const preview = await screen.findByRole("region", {
+      name: "Exact repository cleanup preview",
+    });
+    await waitFor(() => expect(preview).toHaveFocus());
+    const close = screen.getByRole("button", { name: "Close cleanup preview" });
+    close.focus();
+    fireEvent.click(close);
+    await waitFor(() => expect(review).toHaveFocus());
+    expect(native.remove).not.toHaveBeenCalled();
+    fireEvent.click(review);
+    expect(await screen.findByRole("checkbox")).not.toBeChecked();
+  });
+  it("focuses refresh after cleanup removes the preview's originating copy", async () => {
+    setup();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Review cleanup" }),
+    );
+    fireEvent.click(await screen.findByRole("checkbox"));
+    let finishRefresh!: (value: {
+      copies: RepositoryCopy[];
+      busy: boolean;
+    }) => void;
+    native.inventory.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishRefresh = resolve;
+        }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "Permanently remove this copy" }),
+    );
+    await waitFor(() => expect(native.remove).toHaveBeenCalled());
+    await waitFor(() => expect(native.inventory).toHaveBeenCalledTimes(2));
+    finishRefresh({ copies: [], busy: false });
+    await screen.findByText("No retained repository copies in this account.");
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Refresh copies" }),
+      ).toHaveFocus(),
+    );
+  });
   it("reopens a retained copy and refreshes the canonical selected repository", async () => {
     const changed = setup();
     await screen.findByText("Sample", { selector: "strong" });
