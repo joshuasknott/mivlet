@@ -11,7 +11,6 @@
 .pr-review section,
 .pr-review section > details:not(.pr-review__file) {
   border-top: 1px solid var(--line);
-  padding-block: 8px;
 }
 .pr-review section,
 .pr-review article {
@@ -64,7 +63,7 @@
 .pr-review__file {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-2);
-  padding: 10px;
+  padding-inline: 10px;
   margin-block: 8px;
 }
 .pr-review__file summary {
