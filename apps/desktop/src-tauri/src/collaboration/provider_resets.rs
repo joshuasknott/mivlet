@@ -1,7 +1,7 @@
 //! One user-authorized reset continuation through canonical Work admission.
 use super::*;
 use crate::provider_usage;
-use crate::store::repos::execution_attempt;
+use crate::store::repos::{backend_connection, execution_attempt};
 
 fn unchanged(ctx: &Context<'_>, item: &Work) -> Result<()> {
     let room = commands::continuation_context(ctx, item)?;
@@ -79,6 +79,13 @@ pub(super) fn arm(
         return Err(invalid("Fresh provider measurements are required."));
     }
     item.reset_continuation = Some(ResetContinuation {
+        connection_revision: backend_connection::list_records(
+            ctx.conn,
+            &ctx.scope.internal_user_id,
+        )?
+        .into_iter()
+        .find(|c| c.provider_id == provider)
+        .map(|c| c.updated_at),
         opportunity_id: reset.id.clone(),
         resets_at: reset.resets_at.clone(),
         provider_id: provider.into(),
@@ -118,6 +125,12 @@ pub(super) fn dispatch(ctx: &Context<'_>) -> Result<()> {
         let report =
             provider_usage::cached(ctx.conn, ctx.store, ctx.scope, &reset.provider_id, ctx.time)?;
         let valid = item.generation == reset.generation
+            && backend_connection::list_records(ctx.conn, &ctx.scope.internal_user_id)?
+                .iter()
+                .any(|c| {
+                    c.provider_id == reset.provider_id
+                        && reset.connection_revision.as_ref() == Some(&c.updated_at)
+                })
             && item.run_ids.last() == Some(&reset.run_id)
             && matches!(item.status, WorkStatus::Failed | WorkStatus::AwaitingUser)
             && unchanged(ctx, &item).is_ok()

@@ -233,6 +233,8 @@ pub struct WorkSteering {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResetContinuation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_revision: Option<String>,
     pub opportunity_id: String,
     pub resets_at: String,
     pub provider_id: String,

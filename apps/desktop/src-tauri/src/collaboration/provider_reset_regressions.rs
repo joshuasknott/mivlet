@@ -151,7 +151,14 @@ fn verified_reset_admits_one_fresh_attempt_through_work_and_keeps_prior_receipts
 }
 #[test]
 fn unavailable_reset_changed_identity_and_stop_all_require_new_review() {
-    for scenario in ["unavailable", "identity", "stop", "model", "restart"] {
+    for scenario in [
+        "unavailable",
+        "identity",
+        "stop",
+        "model",
+        "restart",
+        "reconnect",
+    ] {
         fixture_with_profiles(&store(), reset_profiles(), |ctx| {
             let (generation, opportunity) = failed(ctx, true)?;
             provider_resets::arm(ctx, "reset-work", generation, &opportunity, true)?;
@@ -172,6 +179,14 @@ fn unavailable_reset_changed_identity_and_stop_all_require_new_review() {
                 profiles: &changed_profiles,
                 ..*ctx
             };
+            if scenario == "reconnect" {
+                backend_connection::upsert(
+                    ctx.conn,
+                    &ctx.scope.internal_user_id,
+                    "chatgpt",
+                    RESET,
+                )?;
+            }
             if scenario != "unavailable" {
                 measurement(
                     &after,

@@ -218,7 +218,7 @@ that only the managed connection is identified.
 After a native typed provider limit failure, the user can request one continuation
 for an exact exhausted allowance/reset opportunity and reconcile prior effects.
 This choice is saved on existing Work. At the reset, fresh post-reset allowance,
-provider identity, latest failed run, Work/conversation generations, model,
+provider identity and connection revision, latest failed run, Work/conversation generations, model,
 project revision, participant and parent validity are checked. Admission consumes
 the choice in the same transaction and calls ordinary `ContinueWork`, retaining
 permission lowering, frozen context, fresh attempts and normal approvals. Stop,

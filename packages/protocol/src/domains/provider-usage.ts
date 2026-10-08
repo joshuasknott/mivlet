@@ -64,6 +64,8 @@ export interface ProviderUsagePrice {
 }
 
 export interface ProviderResetContinuation {
+  /** Native connection revision fence; legacy choices without it require review. */
+  connectionRevision?: string;
   opportunityId: string;
   resetsAt: string;
   providerId: string;
