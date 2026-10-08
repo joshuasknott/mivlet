@@ -42,8 +42,10 @@ a deployed or production-validated service.
 - Bounded live command logs and native persistent jobs for repository snapshots
   or selected workspace files. Library's Commands section shows status and Stop.
   Persistent jobs require an explicit lifetime, retain isolation and repository
-  locks, and discard every file change. App closure ends jobs; restart never
-  replays them. See the [native lifecycle](docs/architecture/native-execution.md#live-output-and-controlled-jobs).
+  locks, and discard every file change. Desktop-owned jobs end with the app;
+  the opt-in [background owner](docs/architecture/work-execution.md#opt-in-native-background-text-execution-on-windows)
+  retains approved commands after the window closes. Restart never replays jobs.
+  See the [native lifecycle](docs/architecture/native-execution.md#live-output-and-controlled-jobs).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens

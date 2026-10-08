@@ -202,6 +202,7 @@ function CommandOutput({
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
   const [redacted, setRedacted] = useState(false);
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
     let disposed = false;
     let cursor = 0;
@@ -251,12 +252,25 @@ function CommandOutput({
       disposed = true;
       clearTimeout(timer);
     };
-  }, [workspaceId, agentId, job.id, job.generation]);
+  }, [workspaceId, agentId, job.id, job.generation, retry]);
   return (
     <div>
       {notice && <p>{notice}</p>}
       {redacted && <p>Some output was redacted or omitted.</p>}
-      {error && <p role="alert">{error}</p>}
+      {error && (
+        <>
+          <p role="alert">{error}</p>
+          <button
+            type="button"
+            onClick={() => {
+              setError("");
+              setRetry((value) => value + 1);
+            }}
+          >
+            Retry output
+          </button>
+        </>
+      )}
       <pre tabIndex={0} aria-label="Command output">
         {frames.length
           ? frames.map((frame) => frame.text).join("")

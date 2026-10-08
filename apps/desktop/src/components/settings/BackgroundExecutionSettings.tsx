@@ -4,34 +4,36 @@ import {
   controlBackgroundWorker,
   type BackgroundWorkerStatus,
 } from "../../runtime/domains/background-worker";
+import "./background-execution-settings.css";
+
+type Action = "start" | "stop" | "restart" | "refresh";
 
 export function BackgroundExecutionSettings() {
   const [status, setStatus] = useState<BackgroundWorkerStatus | null>(null);
-  const [pending, setPending] = useState(false);
+  const [pending, setPending] = useState<Action | null>(null);
   const [error, setError] = useState<string | null>(null);
   const canStop =
     status?.running || (error !== null && status?.supported !== false);
   const generation = useRef(0);
-  const act = useCallback(
-    async (action: "start" | "stop" | "restart" | "refresh") => {
-      const current = ++generation.current;
-      setPending(true);
-      setError(null);
-      try {
-        const value =
-          action === "refresh"
-            ? await backgroundWorkerStatus()
-            : await controlBackgroundWorker(action);
-        if (current === generation.current) setStatus(value);
-      } catch (reason) {
-        if (current === generation.current)
-          setError(reason instanceof Error ? reason.message : String(reason));
-      } finally {
-        if (current === generation.current) setPending(false);
+  const act = useCallback(async (action: Action) => {
+    const current = ++generation.current;
+    setPending(action);
+    try {
+      const value =
+        action === "refresh"
+          ? await backgroundWorkerStatus()
+          : await controlBackgroundWorker(action);
+      if (current === generation.current) {
+        setStatus(value);
+        setError(null);
       }
-    },
-    [],
-  );
+    } catch (reason) {
+      if (current === generation.current)
+        setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      if (current === generation.current) setPending(null);
+    }
+  }, []);
   useEffect(() => {
     void act("refresh");
     return () => {
@@ -40,7 +42,7 @@ export function BackgroundExecutionSettings() {
   }, [act]);
   return (
     <section
-      className="settings-group"
+      className="settings-group background-execution-settings"
       aria-labelledby="background-execution-heading"
     >
       <h2 id="background-execution-heading">Background execution</h2>
@@ -49,9 +51,9 @@ export function BackgroundExecutionSettings() {
           <span>
             <strong>Keep supported work running after closing Mivlet</strong>
             <small>
-              Read Only text work and schedules can continue with Codex, Claude
-              or supported APIs while Windows is awake and your session is
-              valid. Find results in conversations and approved commands in
+              New Read Only text work and schedules can continue with Codex,
+              Claude or supported APIs while Windows is awake and your session
+              is valid. Find results in conversations and approved commands in
               Library.
             </small>
             <small>
@@ -64,30 +66,33 @@ export function BackgroundExecutionSettings() {
           <span role="status" aria-label="Background execution">
             {pending
               ? "Updating background execution…"
-              : status?.running
-                ? `Running · ${status.activeWork} active`
-                : status?.supported === false
-                  ? "Requires the installed Windows app"
-                  : status
-                    ? "Stopped"
-                    : error
-                      ? "Background connection unavailable"
+              : error
+                ? "Background connection unavailable"
+                : status?.running
+                  ? `Running · ${status.activeWork} active`
+                  : status?.supported === false
+                    ? "Requires the installed Windows app"
+                    : status
+                      ? "Stopped"
                       : "Checking background execution…"}
           </span>
           <div className="profile-action-row">
             <button
               type="button"
               className="button button--secondary"
-              disabled={pending || (!canStop && !status?.supported)}
+              disabled={
+                Boolean(pending && !(pending === "refresh" && canStop)) ||
+                (!canStop && !status?.supported)
+              }
               onClick={() => void act(canStop ? "stop" : "start")}
             >
               {canStop ? "Stop background work" : "Start background worker"}
             </button>
-            {status?.running && (
+            {status?.running && !error && (
               <button
                 type="button"
                 className="button button--secondary"
-                disabled={pending}
+                disabled={Boolean(pending)}
                 onClick={() => void act("restart")}
               >
                 Restart worker
@@ -96,7 +101,7 @@ export function BackgroundExecutionSettings() {
             <button
               type="button"
               className="button button--secondary"
-              disabled={pending}
+              disabled={Boolean(pending)}
               onClick={() => void act("refresh")}
             >
               Refresh status
