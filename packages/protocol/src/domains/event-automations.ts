@@ -1,4 +1,4 @@
-import type { PermissionMode } from "../index.js";
+import type { PermissionMode } from "./approvals.js";
 
 /** Events are untrusted context. This contract carries no credentials or permits. */
 export type AutomationEventSource =

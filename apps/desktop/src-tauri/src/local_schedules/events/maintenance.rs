@@ -14,11 +14,11 @@ pub(super) fn start() {
                 (|| {
                     let store = global_store()?;
                     let scope = authorized_scope::active_command_scope(ScopeAccess::Write)?;
-                    fence.with_current(|| {
-                        store
-                            .transaction(|conn| sweep(conn, store, &scope.private, Utc::now()))
-                            .map_err(|_| "Event retention could not be updated.".to_string())
-                    })
+                    store
+                        .transaction_with_account_fence(&fence, |conn| {
+                            sweep(conn, store, &scope.private, Utc::now())
+                        })
+                        .map_err(|_| "Event retention could not be updated.".to_string())
                 })()
             })
             .await;

@@ -109,15 +109,16 @@ pub(super) fn verify(
     {
         return Err("event_expired");
     }
+    let id_fingerprint = super::super::fingerprint(&format!(
+        "{}:{id}",
+        serde_json::to_string(&config.source).map_err(|_| "source_mismatch")?
+    ));
     Ok(VerifiedEvent {
-        id_fingerprint: super::super::fingerprint(&format!(
-            "{}:{id}",
-            serde_json::to_string(&config.source).map_err(|_| "source_mismatch")?
-        )),
         body_fingerprint: super::super::fingerprint(&format!(
-            "{id}:{}",
+            "{id_fingerprint}:{}",
             hex::encode(ring::digest::digest(&ring::digest::SHA256, raw).as_ref())
         )),
+        id_fingerprint,
         event_time,
         body,
     })

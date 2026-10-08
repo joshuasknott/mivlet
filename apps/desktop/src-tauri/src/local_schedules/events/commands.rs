@@ -87,61 +87,59 @@ pub fn event_trigger_save(
         &request.id,
         &config,
     )?;
-    fence.with_current(|| {
-        store
-            .transaction(|conn| {
-                scope.private.ensure_exists(conn)?;
-                let trigger = LocalScheduleTrigger::Event { config };
-                let result = if let Some(expected_revision) = request.expected_revision {
-                    update_at(
-                        conn,
-                        store,
-                        &scope,
-                        UpdateLocalScheduleRequest {
-                            workspace_id: request.workspace_id,
-                            id: request.id.clone(),
-                            project_id: None,
-                            agent_id: request.agent_id,
-                            provider_id: request.provider_id,
-                            model: request.model,
-                            reasoning_effort: request.reasoning_effort,
-                            prompt: request.prompt,
-                            timezone: "UTC".into(),
-                            execution_kind: "agent".into(),
-                            permission_mode: request.permission_mode,
-                            trigger,
-                            expected_revision,
-                        },
-                        Utc::now(),
-                    )?
-                } else {
-                    create_at(
-                        conn,
-                        store,
-                        &scope,
-                        CreateLocalScheduleRequest {
-                            workspace_id: request.workspace_id,
-                            id: request.id.clone(),
-                            project_id: None,
-                            agent_id: request.agent_id,
-                            provider_id: request.provider_id,
-                            model: request.model,
-                            reasoning_effort: request.reasoning_effort,
-                            prompt: request.prompt,
-                            timezone: "UTC".into(),
-                            execution_kind: "agent".into(),
-                            permission_mode: request.permission_mode,
-                            trigger,
-                            status: LocalScheduleStatus::Paused,
-                        },
-                        Utc::now(),
-                    )?
-                };
-                local_event::retire_pending(conn, &scope.private, &request.id, "paused")?;
-                Ok(result)
-            })
-            .map_err(|error| error.to_string())
-    })
+    store
+        .transaction_with_account_fence(&fence, |conn| {
+            scope.private.ensure_exists(conn)?;
+            let trigger = LocalScheduleTrigger::Event { config };
+            let result = if let Some(expected_revision) = request.expected_revision {
+                update_at(
+                    conn,
+                    store,
+                    &scope,
+                    UpdateLocalScheduleRequest {
+                        workspace_id: request.workspace_id,
+                        id: request.id.clone(),
+                        project_id: None,
+                        agent_id: request.agent_id,
+                        provider_id: request.provider_id,
+                        model: request.model,
+                        reasoning_effort: request.reasoning_effort,
+                        prompt: request.prompt,
+                        timezone: "UTC".into(),
+                        execution_kind: "agent".into(),
+                        permission_mode: request.permission_mode,
+                        trigger,
+                        expected_revision,
+                    },
+                    Utc::now(),
+                )?
+            } else {
+                create_at(
+                    conn,
+                    store,
+                    &scope,
+                    CreateLocalScheduleRequest {
+                        workspace_id: request.workspace_id,
+                        id: request.id.clone(),
+                        project_id: None,
+                        agent_id: request.agent_id,
+                        provider_id: request.provider_id,
+                        model: request.model,
+                        reasoning_effort: request.reasoning_effort,
+                        prompt: request.prompt,
+                        timezone: "UTC".into(),
+                        execution_kind: "agent".into(),
+                        permission_mode: request.permission_mode,
+                        trigger,
+                        status: LocalScheduleStatus::Paused,
+                    },
+                    Utc::now(),
+                )?
+            };
+            local_event::retire_pending(conn, &scope.private, &request.id, "paused")?;
+            Ok(result)
+        })
+        .map_err(|error| error.to_string())
 }
 
 fn new_route() -> Result<String, String> {

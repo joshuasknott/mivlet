@@ -100,6 +100,24 @@ mod tests {
     use super::*;
 
     #[test]
+    fn real_store_startup_applies_events_and_restores_foreign_keys() {
+        use crate::store::{
+            vault::{MasterKey, Vault},
+            Store,
+        };
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        store.with_conn(|conn| {
+            assert_eq!(conn.pragma_query_value(None, "foreign_keys", |row| row.get::<_, i64>(0))?, 1);
+            assert_eq!(conn.query_row("SELECT value FROM schema_meta WHERE key='feature:event-automations'", [], |row| row.get::<_, String>(0))?, "1");
+            let schema: String = conn.query_row("SELECT sql FROM sqlite_master WHERE name='local_schedule'", [], |row| row.get(0))?;
+            assert!(schema.contains("CHECK(trigger_kind IN ('once','daily','weekly','event'))"));
+            assert!(conn.query_row("PRAGMA foreign_key_check", [], |row| row.get::<_, String>(0)).optional()?.is_none());
+            Ok(())
+        }).unwrap();
+    }
+
+    #[test]
     fn preserves_existing_clock_rows_children_indexes_and_additional_columns() {
         let conn = Connection::open_in_memory().unwrap();
         conn.execute_batch("CREATE TABLE schema_meta(key TEXT PRIMARY KEY,value TEXT NOT NULL); INSERT INTO schema_meta VALUES('version','42');

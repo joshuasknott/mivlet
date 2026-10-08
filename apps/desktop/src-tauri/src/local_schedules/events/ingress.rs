@@ -339,20 +339,18 @@ pub async fn event_ingress_configure(
         state.stop()?;
     }
     let store = global_store()?;
-    let persisted = fence.with_current(|| {
-        store
-            .transaction(|conn| {
-                crate::store::repos::preferences::upsert_scoped(
-                    conn,
-                    store,
-                    &scope.data,
-                    "event-ingress",
-                    &encode(&config)?,
-                    &timestamp(Utc::now()),
-                )
-            })
-            .map_err(|e| e.to_string())
-    });
+    let persisted = store
+        .transaction_with_account_fence(&fence, |conn| {
+            crate::store::repos::preferences::upsert_scoped(
+                conn,
+                store,
+                &scope.data,
+                "event-ingress",
+                &encode(&config)?,
+                &timestamp(Utc::now()),
+            )
+        })
+        .map_err(|e| e.to_string());
     if let Err(error) = persisted {
         state.stop()?;
         return Err(error);

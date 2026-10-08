@@ -134,34 +134,32 @@ pub(crate) fn pause_revoked_key(
     let store = global_store()?;
     let scope = authorized_scope::command_scope(Some(workspace.into()), None, ScopeAccess::Write)?;
     let fence = crate::account_session::AccountDispatchFence::capture()?;
-    fence.with_current(|| {
-        store
-            .transaction(|conn| {
-                let Some(row) = repo::get_schedule(conn, store, &scope.private, target)? else {
-                    return Ok(());
-                };
-                let schedule = schedule_from_row(row)?;
-                if let LocalScheduleTrigger::Event { config } = &schedule.trigger {
-                    if schedule.agent_id == agent
-                        && config.signing_key_id == key_id
-                        && schedule.status == LocalScheduleStatus::Enabled
-                    {
-                        set_status_at(
-                            conn,
-                            store,
-                            &scope,
-                            SetLocalScheduleStatusRequest {
-                                workspace_id: workspace.into(),
-                                id: target.into(),
-                                expected_revision: schedule.revision,
-                                status: LocalScheduleStatus::Paused,
-                            },
-                            Utc::now(),
-                        )?;
-                    }
+    store
+        .transaction_with_account_fence(&fence, |conn| {
+            let Some(row) = repo::get_schedule(conn, store, &scope.private, target)? else {
+                return Ok(());
+            };
+            let schedule = schedule_from_row(row)?;
+            if let LocalScheduleTrigger::Event { config } = &schedule.trigger {
+                if schedule.agent_id == agent
+                    && config.signing_key_id == key_id
+                    && schedule.status == LocalScheduleStatus::Enabled
+                {
+                    set_status_at(
+                        conn,
+                        store,
+                        &scope,
+                        SetLocalScheduleStatusRequest {
+                            workspace_id: workspace.into(),
+                            id: target.into(),
+                            expected_revision: schedule.revision,
+                            status: LocalScheduleStatus::Paused,
+                        },
+                        Utc::now(),
+                    )?;
                 }
-                Ok(())
-            })
-            .map_err(|error| error.to_string())
-    })
+            }
+            Ok(())
+        })
+        .map_err(|error| error.to_string())
 }

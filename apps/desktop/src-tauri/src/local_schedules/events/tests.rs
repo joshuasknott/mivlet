@@ -161,6 +161,37 @@ fn signatures_bind_exact_bytes_and_all_envelope_identity() {
 }
 
 #[test]
+fn separate_signed_sources_do_not_share_replay_receipts() {
+    let raw = br#"{"summary":"Build failed"}"#;
+    let original_headers = headers(raw, "build-1", at(NOW));
+    let first = signature::verify(&config(), &original_headers, raw, at(NOW), verify).unwrap();
+    let mut other = config();
+    other.source = EventSource::SignedJson {
+        source_id: "another.source".into(),
+    };
+    let mut other_headers = original_headers;
+    other_headers.insert("x-mivlet-event-source".into(), "another.source".into());
+    let mut signed = format!("v1\nanother.source\nbuild-1\n{}\n", at(NOW).timestamp()).into_bytes();
+    signed.extend_from_slice(raw);
+    other_headers.insert(
+        "x-mivlet-signature".into(),
+        format!(
+            "v1={}",
+            hex::encode(
+                ring::hmac::sign(
+                    &ring::hmac::Key::new(ring::hmac::HMAC_SHA256, SECRET.as_bytes()),
+                    &signed
+                )
+                .as_ref()
+            )
+        ),
+    );
+    let second = signature::verify(&other, &other_headers, raw, at(NOW), verify).unwrap();
+    assert_ne!(first.id_fingerprint, second.id_fingerprint);
+    assert_ne!(first.body_fingerprint, second.body_fingerprint);
+}
+
+#[test]
 fn github_uses_signed_body_identity_and_freshness_not_unsigned_delivery_headers() {
     let mut config = config();
     config.source = EventSource::GithubIssues {
@@ -315,9 +346,10 @@ fn failed_authentication_never_stages_work_or_persists_payload() {
 fn account_stop_between_verification_and_commit_persists_no_delivery() {
     struct StoppedFence;
     impl delivery::ReceiptFence for StoppedFence {
-        fn commit<T>(
+        fn transact<T>(
             &self,
-            _: impl FnOnce() -> crate::store::Result<T>,
+            _: &Store,
+            _: impl FnOnce(&rusqlite::Transaction<'_>) -> crate::store::Result<T>,
         ) -> crate::store::Result<T> {
             Err(StoreError::Invalid(
                 "Account stopped after verification".into(),
@@ -354,16 +386,66 @@ fn account_stop_between_verification_and_commit_persists_no_delivery() {
 }
 
 #[test]
+fn account_stop_after_receipt_sql_rolls_back_the_entire_admission() {
+    struct StoppedAtCommit;
+    impl delivery::ReceiptFence for StoppedAtCommit {
+        fn transact<T>(
+            &self,
+            store: &Store,
+            operation: impl FnOnce(&rusqlite::Transaction<'_>) -> crate::store::Result<T>,
+        ) -> crate::store::Result<T> {
+            store.transaction(|tx| {
+                operation(tx)?;
+                Err(StoreError::Invalid("Account stopped before commit".into()))
+            })
+        }
+    }
+    let (store, scope) = fixture();
+    let raw = br#"{"summary":"Commit rollback canary"}"#;
+    assert!(delivery::receive(
+        &store,
+        &scope,
+        delivery::IncomingEvent {
+            schedule_id: "event-test",
+            route: &config().route_id,
+            headers: &headers(raw, "one", at(NOW)),
+            raw,
+            now: at(NOW),
+        },
+        |_, _, body, signature| verify(body, signature),
+        |_, _, preview| Ok(preview),
+        &StoppedAtCommit,
+    )
+    .is_err());
+    store
+        .with_conn(|conn| {
+            assert_eq!(
+                crate::store::repos::local_event::count(conn, &scope.private, "event-test")?,
+                0
+            );
+            assert!(
+                repo::get_schedule(conn, &store, &scope.private, "event-test")?
+                    .unwrap()
+                    .next_run_at
+                    .is_none()
+            );
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
 fn native_verification_runs_outside_the_account_commit_fence() {
     use std::cell::Cell;
     struct Fence(Cell<bool>);
     impl delivery::ReceiptFence for Fence {
-        fn commit<T>(
+        fn transact<T>(
             &self,
-            operation: impl FnOnce() -> crate::store::Result<T>,
+            store: &Store,
+            operation: impl FnOnce(&rusqlite::Transaction<'_>) -> crate::store::Result<T>,
         ) -> crate::store::Result<T> {
             self.0.set(true);
-            let result = operation();
+            let result = store.transaction(operation);
             self.0.set(false);
             result
         }
