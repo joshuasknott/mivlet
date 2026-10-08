@@ -189,7 +189,7 @@ export function RepositoryCheckpoints({
       {open && (
         <div className="repository-checkpoints__body">
           <form
-            className="repository-checkpoints__create"
+            className="repository-checkpoints__create repository-files__actions"
             onSubmit={(event) => {
               event.preventDefault();
               resetFeedback();
