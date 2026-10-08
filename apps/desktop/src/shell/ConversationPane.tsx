@@ -35,7 +35,12 @@ import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
 import type { ConversationTurn } from "../lib/conversation-presentation";
 import { SideChatContextNotice } from "../components/conversation/SideChats";
-import { ProviderContinuationControl } from "../components/conversation/ProviderContinuationControl";
+
+const ProviderContinuationControl = lazy(() =>
+  import("../components/conversation/ProviderContinuationControl").then((module) => ({
+    default: module.ProviderContinuationControl,
+  })),
+);
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -552,7 +557,7 @@ export function ConversationPane({
         </div>
       </div>
       <div className="conversation-pane-composer">
-        {history?.messages.length && profile ? <ProviderContinuationControl
+        {history?.messages.length && profile ? <Suspense fallback={null}><ProviderContinuationControl
           workspaceId={service.workspaceId} conversationId={room.id} agentId={profile.id}
           ownerKey={`${owner?.internalUserId}:${owner?.memberId ?? ""}`}
           model={model} provider={runtime.backendProviders.find(p => p.id === model?.providerId)}
@@ -568,7 +573,7 @@ export function ConversationPane({
               scroll.toLatest();
             } finally { composer.endSubmission(); }
           }}
-        /> : null}
+        /></Suspense> : null}
         {composer.replyWorkId ? <p className="conversation-attention" role="status">Following up with {replyTarget?.agentName ?? "an unavailable agent"} in this effort. <button type="button" onClick={() => composer.setReplyWork(undefined)}>New request</button></p> : null}
         {empty ? <div className="team-conversation-welcome"><h1>What would you like to work on?</h1></div> : null}
         {scroll.showLatest ? (
