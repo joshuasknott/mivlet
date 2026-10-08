@@ -1004,10 +1004,7 @@ fn read_codex_stdout(
             continue;
         };
         if crate::provider_usage::codex_event_is_limit(&value) {
-            crate::provider_usage::record_limit_failure(
-                "chatgpt",
-                request.options.run_id.as_deref(),
-            );
+            crate::provider_usage::record_limit_failure("codex", request.options.run_id.as_deref());
         }
         if is_rpc_response(&value, 2) {
             if value.get("error").is_some() {

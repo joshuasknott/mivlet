@@ -40,7 +40,7 @@ const report: ProviderUsageReport = {
   since: at,
   coverage: "saved-mivlet-attempts",
   prices: [],
-  allowances: [allowance("chatgpt"), allowance("claude")],
+  allowances: [allowance("codex"), allowance("claude")],
   models: [
     {
       providerId: "openai",
@@ -78,7 +78,7 @@ beforeEach(() => {
 describe("provider usage", () => {
   it("opens details from the additive control, traps focus and restores the trigger", async () => {
     const user = userEvent.setup();
-    render(<ProviderAllowanceIndicator providerId="chatgpt" />);
+    render(<ProviderAllowanceIndicator providerId="codex" />);
     const trigger = screen.getByRole("button", { name: /Provider usage/ });
     await user.click(trigger);
     await screen.findByRole("combobox");
@@ -116,7 +116,7 @@ describe("provider usage", () => {
   it("renders warm saved data while one provider refresh is pending or fails", async () => {
     let complete!: (value: ProviderAllowance) => void;
     vi.mocked(refreshProviderAllowance).mockImplementation((id) =>
-      id === "chatgpt"
+      id === "codex"
         ? new Promise((resolve) => {
             complete = resolve;
           })
@@ -138,7 +138,7 @@ describe("provider usage", () => {
     );
     await act(async () =>
       complete({
-        ...allowance("chatgpt"),
+        ...allowance("codex"),
         windows: [{ id: "new", label: "Five hour", usedPercent: 95 }],
       }),
     );
@@ -156,7 +156,7 @@ describe("provider usage", () => {
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });
   it("expires measurements and never guesses a reset", () => {
-    const measurement = allowance("chatgpt");
+    const measurement = allowance("codex");
     const observed = Date.parse(at);
     expect(allowanceLabel(currentAllowance(measurement, observed))).toBe(
       "20% remaining",

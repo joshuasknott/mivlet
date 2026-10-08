@@ -139,12 +139,12 @@ pub(crate) fn codex(owner: &str, account: &Value, response: &Value, at: &str) ->
         .filter(|id| !id.is_empty() && id.len() <= 256);
     let mut report = unavailable(
         owner,
-        "chatgpt",
+        "codex",
         at,
         "The provider returned no allowance windows.",
     );
     if let Some(id) = account_id {
-        report.identity = hash(&format!("{owner}:chatgpt:{id}"));
+        report.identity = hash(&format!("{owner}:codex:{id}"));
         report.identity_kind = "reported-account".into();
     }
     let buckets = response
@@ -429,7 +429,7 @@ pub(crate) async fn refresh_provider_allowance(
     let report = tauri::async_runtime::spawn_blocking(move || {
         let at = time();
         let result = match requested.as_str() {
-            "chatgpt" => crate::codex_app_server::usage_probe().map(|(a,r)| codex(&principal,&a,&r,&at)),
+            "codex" => crate::codex_app_server::usage_probe().map(|(a,r)| codex(&principal,&a,&r,&at)),
             "claude" => crate::managed_runtime::claude_usage(&app,&principal).map(|r| claude(&principal,&r,&at)),
             _ => Ok(unavailable(&principal,&requested,&at,"This route exposes no supported subscription allowance endpoint. Saved Mivlet token receipts remain available.")),
         };

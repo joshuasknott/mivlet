@@ -14,7 +14,7 @@ const Details = lazy(() =>
   })),
 );
 
-export function ProviderUsageDialog({
+function ProviderUsageDialog({
   providerId,
   onClose,
 }: {

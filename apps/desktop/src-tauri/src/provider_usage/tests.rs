@@ -11,6 +11,8 @@ fn limits() -> Value {
 #[test]
 fn codex_multi_bucket_preserves_duration_unknown_reset_and_identity_isolation() {
     let report = codex("owner-a", &json!({"id":"provider-account"}), &limits(), AT);
+    assert_eq!(report.provider_id, "codex");
+    assert!(crate::models::SUPPORTED_BACKEND_PROVIDER_IDS.contains(&report.provider_id.as_str()));
     assert_eq!(report.windows.len(), 3);
     assert_eq!(report.windows[0].used_percent, 100.0);
     assert_eq!(report.identity_kind, "reported-account");
@@ -72,15 +74,15 @@ fn measurements_are_encrypted_scope_bound_and_invalidated_by_reconnect() {
     store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
-            backend_connection::upsert(conn, &scope.internal_user_id, "chatgpt", AT)?;
+            backend_connection::upsert(conn, &scope.internal_user_id, "codex", AT)?;
             let report = codex(&scope.internal_user_id, &json!({}), &limits(), AT);
             store_allowance(conn, &store, &scope, &report)?;
             assert_eq!(
-                cached(conn, &store, &scope, "chatgpt", AT)?.status,
+                cached(conn, &store, &scope, "codex", AT)?.status,
                 "available"
             );
             assert_eq!(
-                cached(conn, &store, &scope, "chatgpt", "2026-10-08T12:06:00.000Z")?.status,
+                cached(conn, &store, &scope, "codex", "2026-10-08T12:06:00.000Z")?.status,
                 "stale"
             );
             let other = AuthorizedCommandScope {
@@ -88,17 +90,17 @@ fn measurements_are_encrypted_scope_bound_and_invalidated_by_reconnect() {
                 ..scope.clone()
             };
             assert_eq!(
-                cached(conn, &store, &other, "chatgpt", AT)?.status,
+                cached(conn, &store, &other, "codex", AT)?.status,
                 "unavailable"
             );
             backend_connection::upsert(
                 conn,
                 &scope.internal_user_id,
-                "chatgpt",
+                "codex",
                 "2026-10-08T12:01:00.000Z",
             )?;
             assert_eq!(
-                cached(conn, &store, &scope, "chatgpt", "2026-10-08T12:01:00.000Z")?.status,
+                cached(conn, &store, &scope, "codex", "2026-10-08T12:01:00.000Z")?.status,
                 "unavailable"
             );
             let bytes: Vec<u8> = conn.query_row(

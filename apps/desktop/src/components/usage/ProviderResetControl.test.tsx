@@ -17,7 +17,7 @@ vi.mock("../../runtime/domains/provider-usage", async (original) => ({
 const at = new Date().toISOString();
 const reset = new Date(Date.now() + 60_000).toISOString();
 const measured: ProviderAllowance = {
-  providerId: "chatgpt",
+  providerId: "codex",
   identity: "opaque",
   identityKind: "managed-connection",
   status: "available",
@@ -52,7 +52,7 @@ const item: CollaborationWorkItem = {
   maxTurns: 6,
   maxTokens: 1000,
   runIds: ["failed-run"],
-  modelOptionId: "chatgpt::fixture",
+  modelOptionId: "codex::fixture",
   outputs: [],
   createdAt: at,
   updatedAt: at,
@@ -66,7 +66,7 @@ it("requires reconciliation and sends the exact Work generation and reset opport
   const choice = {
     opportunityId: "opportunity",
     resetsAt: reset,
-    providerId: "chatgpt",
+    providerId: "codex",
     identity: "opaque",
     generation: 2,
     runId: "failed-run",
@@ -125,7 +125,7 @@ it("does not reuse reconciliation after generation changes or offer a consumed o
           resetContinuation: {
             opportunityId: "opportunity",
             resetsAt: reset,
-            providerId: "chatgpt",
+            providerId: "codex",
             identity: "opaque",
             generation: 2,
             runId: "failed-run",
