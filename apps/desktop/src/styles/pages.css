@@ -736,7 +736,6 @@
 .approval-card__context { margin: 4px 0 8px; color: var(--ink-muted); font-size: var(--text-13); overflow-wrap: anywhere; }
 .approval-card__payload { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; font: inherit; font-size: var(--text-13); }
 
-.provider-model-settings { margin-top: 24px; }
 .provider-model-settings .settings-disclosure summary { display: flex; justify-content: space-between; gap: 12px; }
 .provider-model-settings summary span { font-size: 12px; font-weight: 400; opacity: .65; }
 .provider-model-settings__actions { display: flex; gap: 16px; padding: 8px 16px; }
@@ -815,7 +814,6 @@
   margin-left: 8px;
   padding: 4px 8px;
   border-radius: 999px;
-  background: var(--surface-hover);
   font-size: var(--text-12);
   font-weight: 500;
 }
