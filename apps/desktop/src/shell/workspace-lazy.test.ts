@@ -14,7 +14,6 @@ const islands = [
   "../components/pages/SettingsPage",
   "../components/pages/MarketplacePage",
   "../components/settings/LocalSchedules",
-  "../components/navigation/WorkspaceLibrary",
   "../components/agents/AccountDialog",
   "./ComputerInspector",
 ];

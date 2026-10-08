@@ -1,10 +1,8 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { Suspense } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import { WorkspaceLibrary } from "./WorkspaceLibrary";
-import { WorkspaceLibrary as LazyWorkspaceLibrary } from "../../shell/workspace-lazy";
 import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-computer";
 
 vi.mock("../../runtime/domains/local-computer", () => ({
@@ -27,13 +25,11 @@ function setup(workspaceId = "workspace") {
   });
   const view = render(
     <QueryClientProvider client={client}>
-      <Suspense fallback={<p role="status">Loading Library…</p>}>
-        <LazyWorkspaceLibrary
-          workspaceId={workspaceId}
-          agents={agents}
-          onOpen={onOpen}
-        />
-      </Suspense>
+      <WorkspaceLibrary
+        workspaceId={workspaceId}
+        agents={agents}
+        onOpen={onOpen}
+      />
     </QueryClientProvider>,
   );
   return { onOpen, ...view };

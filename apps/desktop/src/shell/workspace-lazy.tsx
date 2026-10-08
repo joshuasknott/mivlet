@@ -46,11 +46,6 @@ export const AccountDialog = lazy(() =>
     default: module.AccountDialog,
   })),
 );
-export const WorkspaceLibrary = lazy(() =>
-  import("../components/navigation/WorkspaceLibrary").then((module) => ({
-    default: module.WorkspaceLibrary,
-  })),
-);
 export const ComputerInspector = lazy(() =>
   import("./ComputerInspector").then((module) => ({
     default: module.ComputerInspector,
