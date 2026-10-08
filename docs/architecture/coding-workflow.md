@@ -31,6 +31,9 @@ operations, active or recoverable provider attempts without exact copy attributi
 unknown ownership/metadata, interrupted command imports, publication
 recovery, published copies and commits beyond the imported HEAD also protect it.
 Git calls use process-local `core.longpaths=true`; no global Git settings change.
+The Git adapter converts canonical Windows verbatim paths to Git-compatible
+drive/UNC arguments without losing UTF-16 identity; native path validation
+continues to use canonical paths.
 Links, Windows reparse points and paths outside the managed scope fail closed.
 
 Per-copy `repository.json` and `ownership.json` records retain the native state;
