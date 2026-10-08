@@ -47,23 +47,22 @@ export function BackgroundExecutionSettings() {
     >
       <h2 id="background-execution-heading">Background execution</h2>
       <div className="settings-group__surface">
-        <div className="settings-preference-row">
-          <span>
-            <strong>Keep supported work running after closing Mivlet</strong>
-            <small>
-              New Read Only text work and schedules can continue with Codex,
-              Claude or supported APIs while Windows is awake and your session
-              is valid. Find results in conversations and approved commands in
-              Library.
-            </small>
-            <small>
-              Other requests and new approvals need the window open. Restart
-              interrupts work for review.
-            </small>
-          </span>
-        </div>
-        <div className="settings-preference-row">
-          <span role="status" aria-label="Background execution">
+        <div className="background-execution__intro">
+          <h3>Keep work running after closing Mivlet</h3>
+          <span
+            className="background-execution__status"
+            data-state={
+              pending
+                ? "pending"
+                : error
+                  ? "error"
+                  : status?.running
+                    ? "running"
+                    : "stopped"
+            }
+            role="status"
+            aria-label="Background execution"
+          >
             {pending
               ? "Updating background execution…"
               : error
@@ -76,37 +75,59 @@ export function BackgroundExecutionSettings() {
                       ? "Stopped"
                       : "Checking background execution…"}
           </span>
-          <div className="profile-action-row">
-            <button
-              type="button"
-              className="button button--secondary"
-              disabled={
-                Boolean(pending && !(pending === "refresh" && canStop)) ||
-                (!canStop && !status?.supported)
-              }
-              onClick={() => void act(canStop ? "stop" : "start")}
-            >
-              {canStop ? "Stop background work" : "Start background worker"}
-            </button>
-            {status?.running && !error && (
-              <button
-                type="button"
-                className="button button--secondary"
-                disabled={Boolean(pending)}
-                onClick={() => void act("restart")}
-              >
-                Restart worker
-              </button>
-            )}
+          <p>
+            New Read Only text work and schedules can continue with Codex,
+            Claude or supported APIs.
+          </p>
+        </div>
+        <dl className="background-execution__details">
+          <div>
+            <dt>While the window is closed</dt>
+            <dd>
+              Windows must stay awake and your session must stay valid.
+              <br />
+              Find results in conversations and approved commands in Library.
+            </dd>
+          </div>
+          <div>
+            <dt>When to return</dt>
+            <dd>
+              Other requests and new approvals need the window open.
+              <br />
+              Restart interrupts work for review.
+            </dd>
+          </div>
+        </dl>
+        <div className="profile-action-row background-execution__actions">
+          <button
+            type="button"
+            className={`button button--secondary${canStop ? " background-execution__stop" : ""}`}
+            disabled={
+              Boolean(pending && !(pending === "refresh" && canStop)) ||
+              (!canStop && !status?.supported)
+            }
+            onClick={() => void act(canStop ? "stop" : "start")}
+          >
+            {canStop ? "Stop background work" : "Start background worker"}
+          </button>
+          {status?.running && !error && (
             <button
               type="button"
               className="button button--secondary"
               disabled={Boolean(pending)}
-              onClick={() => void act("refresh")}
+              onClick={() => void act("restart")}
             >
-              Refresh status
+              Restart worker
             </button>
-          </div>
+          )}
+          <button
+            type="button"
+            className="button button--secondary background-execution__refresh"
+            disabled={Boolean(pending)}
+            onClick={() => void act("refresh")}
+          >
+            Refresh status
+          </button>
         </div>
         {error && (
           <p className="settings-status" role="alert">
