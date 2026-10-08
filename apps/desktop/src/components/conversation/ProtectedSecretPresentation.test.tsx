@@ -48,7 +48,9 @@ describe("protected request presentation", () => {
     const decide = vi.fn();
     const noop = () => {};
     const view = render(<ApprovalPanel compact approvals={[approval]} audit={[]} sessionGrants={[]} approvalRules={[]} editingApprovalId={null} modificationDraft={{ mode: "read-only", dataUsed: "", consequence: "" }} pendingConfirmation={null} confirmationText="" onDecision={decide} onStartModify={noop} onUpdateModification={noop} onSaveModify={noop} onCancelModify={noop} onUpdateConfirmation={noop} onConfirmDecision={noop} onCancelConfirmation={noop} />);
-    expect(screen.getByText("Codex · Request a webhook signing secret")).toBeVisible();
+    expect(screen.getByText("Request a webhook signing secret")).toBeVisible();
+    expect(screen.getByText("Protected secret")).toBeVisible();
+    expect(screen.getByText("One request only")).toBeVisible();
     expect(view.container.querySelector("input,textarea")).toBeNull();
     const user = userEvent.setup();
     await user.click(screen.getByText("View action details"));
