@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ComponentProps } from "react";
+import { useEffect, useRef, useState } from "react";
 import type {
   AutomationEventDraft,
   AutomationEventSource,
@@ -13,51 +13,6 @@ import {
 import { resolveProviderModelOption } from "../../lib/provider-models";
 import { permissionModeFor } from "../../lib/agent-run";
 import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
-
-function EventField({
-  label,
-  multiline,
-  value,
-  onChange,
-  ...attributes
-}: {
-  label: string;
-  multiline?: boolean;
-  value: string;
-  onChange?: (value: string) => void;
-} & Pick<
-  ComponentProps<"input">,
-  | "type"
-  | "required"
-  | "readOnly"
-  | "min"
-  | "max"
-  | "step"
-  | "maxLength"
-  | "placeholder"
->) {
-  const Control = multiline ? "textarea" : "input";
-  return (
-    <label>
-      {label}
-      <Control
-        {...attributes}
-        className="input"
-        value={value}
-        onChange={
-          onChange
-            ? (change) => onChange(change.currentTarget.value)
-            : undefined
-        }
-        onFocus={
-          attributes.readOnly
-            ? (focus) => focus.currentTarget.select()
-            : undefined
-        }
-      />
-    </label>
-  );
-}
 
 export function EventAutomationEditor({
   runtime,
@@ -156,10 +111,6 @@ export function EventAutomationEditor({
     setPreview(undefined);
     setError("");
   };
-  const change = (setter: (value: string) => void) => (value: string) => {
-    setter(value);
-    invalidate();
-  };
   const act = async (operation: () => Promise<void>) => {
     actionControl.current = document.activeElement as HTMLElement;
     setPending(true);
@@ -256,65 +207,99 @@ export function EventAutomationEditor({
         </select>
       </label>
       {kind === "signed-json" ? (
-        <EventField
-          label="Source identity"
-          required
-          maxLength={96}
-          value={sourceId}
-          placeholder="ci.example"
-          onChange={change(setSourceId)}
-        />
+        <label>
+          Source identity
+          <input
+            className="input"
+            required
+            maxLength={96}
+            value={sourceId}
+            placeholder="ci.example"
+            onChange={(change) => {
+              setSourceId(change.target.value);
+              invalidate();
+            }}
+          />
+        </label>
       ) : (
-        <EventField
-          label="GitHub repository"
-          required
-          maxLength={201}
-          value={repository}
-          placeholder="owner/repository"
-          onChange={change(setRepository)}
-        />
+        <label>
+          GitHub repository
+          <input
+            className="input"
+            required
+            maxLength={201}
+            value={repository}
+            placeholder="owner/repository"
+            onChange={(change) => {
+              setRepository(change.target.value);
+              invalidate();
+            }}
+          />
+        </label>
       )}
-      <EventField
-        label="Selected JSON fields, one per line"
-        multiline
-        maxLength={2000}
-        value={fields}
-        onChange={change(setFields)}
-      />
+      <label>
+        Selected JSON fields, one per line
+        <textarea
+          className="input"
+          maxLength={2000}
+          value={fields}
+          onChange={(change) => {
+            setFields(change.target.value);
+            invalidate();
+          }}
+        />
+      </label>
       <small>
         Select up to 12 scalar fields. Each field is limited to 2,048 bytes.
         Credentials and whole request bodies are excluded.
       </small>
-      <EventField
-        label="Task template"
-        multiline
-        required
-        maxLength={16000}
-        value={prompt}
-        onChange={change(setPrompt)}
-      />
+      <label>
+        Task template
+        <textarea
+          className="input"
+          required
+          maxLength={16000}
+          value={prompt}
+          onChange={(change) => {
+            setPrompt(change.target.value);
+            invalidate();
+          }}
+        />
+      </label>
       <small>
         Use selected fields as {"{{body.summary}}"}. Substitutions are quoted,
         untrusted evidence. They never grant permission.
       </small>
       <div className="event-automations__pair">
-        <EventField
-          label="Ignore events older than (minutes)"
-          type="number"
-          required
-          min={1}
-          max={1440}
-          step={1}
-          value={minutes}
-          onChange={change(setMinutes)}
-        />
-        <EventField
-          label="Trigger expires (UTC)"
-          type="datetime-local"
-          required
-          value={expiry}
-          onChange={change(setExpiry)}
-        />
+        <label>
+          Ignore events older than (minutes)
+          <input
+            className="input"
+            type="number"
+            required
+            min={1}
+            max={1440}
+            step={1}
+            value={minutes}
+            onChange={(change) => {
+              setMinutes(change.target.value);
+              invalidate();
+            }}
+          />
+        </label>
+        <label>
+          Trigger expires (UTC)
+          <input
+            className="input"
+            type="datetime-local"
+            required
+            value={expiry}
+            onChange={(change) => {
+              setExpiry(change.target.value);
+              invalidate();
+            }}
+          />
+        </label>
       </div>
       <details>
         <summary>Protected signing-key setup</summary>
@@ -323,19 +308,30 @@ export function EventAutomationEditor({
           install it for the trigger target below. Native protected entry keeps
           the value out of chat. Use the returned key reference here.
         </p>
-        <EventField label="Exact trigger target" readOnly value={id} />
+        <label>
+          Exact trigger target
+          <input
+            className="input"
+            readOnly
+            value={id}
+            onFocus={(focus) => focus.currentTarget.select()}
+          />
+        </label>
         <small>
           Consumer: webhook-signing-key · Purpose: verify-webhook-signature
         </small>
       </details>
-      <EventField
-        label="Protected signing-key reference"
-        required
-        value={keyId}
-        placeholder="webhook-key:…"
-        maxLength={160}
-        onChange={setKeyId}
-      />
+      <label>
+        Protected signing-key reference
+        <input
+          className="input"
+          required
+          value={keyId}
+          placeholder="webhook-key:…"
+          maxLength={160}
+          onChange={(change) => setKeyId(change.target.value)}
+        />
+      </label>
       {schedule ? (
         <label className="event-automations__check">
           <input
@@ -353,13 +349,18 @@ export function EventAutomationEditor({
       )}
       <details>
         <summary>Preview the produced request</summary>
-        <EventField
-          label="Example JSON payload"
-          multiline
-          maxLength={256 * 1024}
-          value={sample}
-          onChange={change(setSample)}
-        />
+        <label>
+          Example JSON payload
+          <textarea
+            className="input"
+            maxLength={256 * 1024}
+            value={sample}
+            onChange={(change) => {
+              setSample(change.target.value);
+              invalidate();
+            }}
+          />
+        </label>
         <small>
           Use synthetic data without credentials. Preview does not receive an
           event or start Work.
