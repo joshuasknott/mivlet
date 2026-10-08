@@ -97,6 +97,8 @@ terminal Work together. The renderer does not dispatch these records and its
 disposal does not stop them. Reopening the app reads the same records. Stop
 still changes the canonical generation, and the native loop observes that fence
 at its next 250 ms check. It never publishes a result from a superseded attempt.
+Completion checks durable background revocation in its storage transaction too,
+so a terminal provider event cannot bypass Stop between polling ticks.
 Views also discover new native schedules while idle, retry failed transcript
 reads, and can refresh durable results if the control pipe disconnects. Account
 suspension revokes background admission in its existing storage transaction;

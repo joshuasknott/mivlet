@@ -201,7 +201,14 @@ fn finish_at(
     attempt: &ExecutionAttempt,
     status: WorkStatus,
 ) -> Result<WorkStatus> {
-    work::current(ctx, &item.id, item.generation, Some(&attempt.id))?;
+    let current = work::current(ctx, &item.id, item.generation, Some(&attempt.id))?;
+    // A terminal provider event can race the worker's next polling tick. Check
+    // durable revocation in the same transaction before publishing any result.
+    if !crate::background_worker::owns_work(&current)
+        || !crate::background_worker::enabled_at(ctx.conn, ctx.store)?
+    {
+        return Err(invalid("Background execution was stopped."));
+    }
     // Terminal rows are immutable even if a delayed terminal event arrives.
     let existing =
         execution_attempt::get_scoped(ctx.conn, ctx.store, &ctx.scope.data, &attempt.id)?
@@ -380,6 +387,15 @@ mod tests {
         ctx.work(&work)?;
         Ok(work)
     }
+    fn enable(ctx: &Context<'_>) -> Result<()> {
+        crate::store::repos::preferences::upsert(
+            ctx.conn,
+            ctx.store,
+            "nativeBackgroundExecution",
+            &json!({"version":1,"enabled":true,"generation":1}),
+            ctx.time,
+        )
+    }
     #[test]
     fn recovery_survives_reopen_preserves_output_and_never_requeues() {
         let temp = tempfile::tempdir().unwrap();
@@ -438,6 +454,7 @@ mod tests {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         fixture(&store, |ctx| {
+            enable(ctx)?;
             let mut item = seed(ctx, true)?;
             let mut attempt: ExecutionAttempt = serde_json::from_value(json!({"id":"native-attempt","providerId":"codex","model":"fixture",
                 "threadId":item.conversation_id,"status":"streaming","transcript":"Completed first response", "turn":1,
@@ -464,6 +481,43 @@ mod tests {
             assert_eq!(saved.generation, item.generation + 1);
             assert!(saved.current_run_id.is_none());
             assert!(finish_at(ctx, &item, &attempt, WorkStatus::Completed).is_err());
+            Ok(())
+        });
+    }
+
+    #[test]
+    fn durable_revocation_rejects_a_racing_completion_without_publishing() {
+        let store =
+            Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
+        fixture(&store, |ctx| {
+            enable(ctx)?;
+            let mut item = seed(ctx, true)?;
+            let mut attempt: ExecutionAttempt = serde_json::from_value(json!({"id":"native-attempt","providerId":"codex","model":"fixture",
+                "threadId":item.conversation_id,"status":"streaming","transcript":"Saved partial output", "turn":1,
+                "pendingApprovalIds":[],"recoverable":false,"retryCount":0,"createdAt":ctx.time,"updatedAt":ctx.time})).unwrap();
+            write_attempt(ctx, &attempt)?;
+            item.status = WorkStatus::Running;
+            item.current_run_id = Some(attempt.id.clone());
+            item.run_ids.push(attempt.id.clone());
+            ctx.work(&item)?;
+            crate::background_worker::revoke_at(ctx.conn, ctx.store)?;
+            attempt.status = "completed".into();
+            attempt.transcript = "Late output after Stop".into();
+            let error = finish_at(ctx, &item, &attempt, WorkStatus::Completed).unwrap_err();
+            assert!(error
+                .to_string()
+                .contains("Background execution was stopped."));
+            assert!(ctx.item(&item.id)?.outputs.is_empty());
+            let saved =
+                execution_attempt::get_scoped(ctx.conn, ctx.store, &ctx.scope.data, &attempt.id)?
+                    .unwrap();
+            assert_eq!(saved.status, "streaming");
+            assert_eq!(saved.payload["transcript"], "Saved partial output");
+            assert!(
+                !message::list(ctx.conn, ctx.store, &ctx.scope.data, &item.conversation_id)?
+                    .iter()
+                    .any(|message| message.kind == "assistant")
+            );
             Ok(())
         });
     }
