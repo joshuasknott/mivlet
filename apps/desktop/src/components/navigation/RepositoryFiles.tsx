@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import {
@@ -10,7 +10,13 @@ import {
   loadRuntimeLocalComputer,
 } from "../../runtime/domains/local-computer";
 import "./repository-files.css";
-import { RepositoryCopies } from "./RepositoryCopies";
+
+// RepositoryDetails mounts only after the user opens Repository.
+const RepositoryCopies = lazy(() =>
+  import("./RepositoryCopies").then((module) => ({
+    default: module.RepositoryCopies,
+  })),
+);
 
 export function RepositoryFiles({
   workspaceId,
@@ -151,14 +157,16 @@ function RepositoryDetails({
             : "Repository operation failed."}
         </p>
       )}
-      <RepositoryCopies
-        workspaceId={workspaceId}
-        agentId={agentId}
-        name={name}
-        onSelectionChange={() => {
-          void status.refetch();
-        }}
-      />
+      <Suspense fallback={<p role="status">Loading retained copies…</p>}>
+        <RepositoryCopies
+          workspaceId={workspaceId}
+          agentId={agentId}
+          name={name}
+          onSelectionChange={() => {
+            void status.refetch();
+          }}
+        />
+      </Suspense>
       {repo && (
         <>
           <p>
