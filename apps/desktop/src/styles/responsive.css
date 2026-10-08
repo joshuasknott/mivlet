@@ -220,10 +220,6 @@
     gap: 10px 12px;
   }
 
-  .settings-local-storage {
-    padding-top: 28px;
-  }
-
   .toggle-row {
     grid-template-columns: minmax(0, 1fr) 42px;
   }
