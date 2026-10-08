@@ -94,12 +94,10 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
-.og-provider__key-panel input,
 .settings-field input {
   border-color: transparent;
 }
 
-.og-provider__key-panel input:focus,
 .settings-field input:focus {
   border-color: transparent;
   box-shadow: none;
