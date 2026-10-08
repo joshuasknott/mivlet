@@ -4,9 +4,10 @@ import type {
   PullRequestRequest,
 } from "@mivlet/protocol";
 import { hasTauriRuntime, invokeNative, listen } from "../bridge";
+import type { RuntimeUnlisten } from "../ports";
 export const listenPullRequestWorkUpdates = (
   onUpdate: (workspaceId: string) => void,
-) =>
+): Promise<RuntimeUnlisten | null> =>
   hasTauriRuntime()
     ? listen<{ workspaceId: string }>("mivlet:pr-work-updated", (event) => {
         if (typeof event.payload?.workspaceId === "string")

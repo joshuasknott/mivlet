@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import {
@@ -10,7 +10,12 @@ import {
   loadRuntimeLocalComputer,
 } from "../../runtime/domains/local-computer";
 import "./repository-files.css";
-import { PullRequestReview } from "./PullRequestReview";
+
+const PullRequestReview = lazy(() =>
+  import("./PullRequestReview").then((module) => ({
+    default: module.PullRequestReview,
+  })),
+);
 
 export function RepositoryFiles({
   workspaceId,
@@ -236,7 +241,17 @@ function RepositoryDetails({
               </a>
             </p>
           )}
-          {repo.remote && <PullRequestReview key={repo.id} repository={repo} epoch={epoch} workspaceId={workspaceId} agentId={agentId} />}
+          {repo.remote && (
+            <Suspense fallback={<p role="status">Loading pull request review…</p>}>
+              <PullRequestReview
+                key={repo.id}
+                repository={repo}
+                epoch={epoch}
+                workspaceId={workspaceId}
+                agentId={agentId}
+              />
+            </Suspense>
+          )}
         </>
       )}
     </div>
