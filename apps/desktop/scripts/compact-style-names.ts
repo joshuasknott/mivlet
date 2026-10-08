@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import type { Plugin } from "vite";
@@ -7,6 +7,8 @@ interface Source {
   fileName: string;
   code: string;
 }
+const styleToken =
+  /(?<![a-zA-Z0-9_-])(?:--[a-z][a-z0-9-]*|[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*)/g;
 function safeModifier(node: ts.Expression | undefined): boolean {
   if (!node) return false;
   if (ts.isStringLiteralLike(node))
@@ -68,13 +70,16 @@ export function styleNameMap(
           parent = parent.parent;
         }
         const text = node.text;
+        // Use the same token boundaries as replacement. A longer opaque ID
+        // such as dialog-panel-title does not use (or rewrite) dialog-panel.
+        const tokens = new Set(text.match(styleToken) ?? []);
         if (classAttribute && /^--[a-z][a-z0-9-]*$/.test(text)) modifierVariables.add(text);
         if (ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === ts.SyntaxKind.PlusToken) {
           const suffix = /[a-z][a-z0-9_-]*$/.exec(text)?.[0];
           if (suffix) dynamic.push(suffix);
         }
         for (const name of candidates) {
-          if (text.includes(name)) (classAttribute ? seen : opaque).add(name);
+          if (tokens.has(name)) (classAttribute ? seen : opaque).add(name);
         }
         if (ts.isTemplateHead(node) || ts.isTemplateMiddle(node)) {
           const suffix = /[a-z][a-z0-9_-]*$/.exec(text)?.[0];
@@ -125,17 +130,25 @@ export function compactStyleText(
   names: ReadonlyMap<string, string>,
 ): string {
   return text.replace(
-    /(?<![a-zA-Z0-9_-])(?:--[a-z][a-z0-9-]*|[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*)/g,
+    styleToken,
     (token) => names.get(token) ?? token,
   );
 }
 
 export function compactStyleNames(sourceRoot: string): Plugin {
   let names: Map<string, string>;
-  const root = sourceRoot.replaceAll("\\", "/");
+  // Vite resolves imported files through real paths, including Windows short
+  // paths and junctions. Accept both spellings of this same source directory.
+  const roots = [sourceRoot, realpathSync.native(sourceRoot)].map((path) =>
+    path.replaceAll("\\", "/"),
+  );
+  const inSource = (path: string) =>
+    roots.some((root) => path.replaceAll("\\", "/").startsWith(`${root}/`));
   return {
     name: "mivlet-compact-style-names",
-    enforce: "pre",
+    // Vite expands CSS @imports before normal transforms. Running as a pre
+    // transform misses those selectors while still renaming their JSX uses.
+    // Keep this before Vite's CSS emission so all imported layers share the map.
     apply: "build",
     buildStart() {
       const paths = files(sourceRoot);
@@ -158,11 +171,16 @@ export function compactStyleNames(sourceRoot: string): Plugin {
       );
     },
     transform(code, id) {
-      if (
-        !id.replaceAll("\\", "/").startsWith(`${root}/`) ||
-        !/\.(?:css|[jt]sx?)(?:\?|$)/.test(id)
-      )
-        return null;
+      if (!/\.(?:css|[jt]sx?)(?:\?|$)/.test(id)) return null;
+      if (!inSource(id)) {
+        // A resolved junction can retain a short spelling of an ancestor.
+        // Canonicalize unmatched files before deciding they are outside src.
+        try {
+          if (!inSource(realpathSync.native(id.split("?")[0]))) return null;
+        } catch {
+          return null;
+        }
+      }
       const transformed = compactStyleText(code, names);
       return transformed === code ? null : { code: transformed, map: null };
     },
