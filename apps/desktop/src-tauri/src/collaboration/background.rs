@@ -7,6 +7,7 @@ use serde_json::json;
 
 pub(super) fn admit(ctx: &Context<'_>, id: &str) -> Result<()> {
     if !crate::background_worker::enabled_at(ctx.conn, ctx.store)?
+        || !crate::execution_control::allowed_at(ctx.conn, ctx.store)?
         || !crate::background_worker::ready()
     {
         return Ok(());
@@ -147,6 +148,7 @@ pub(crate) fn claim(
         if !crate::background_worker::is_worker()
             || !crate::background_worker::owns_work(&current)
             || !crate::background_worker::enabled_at(ctx.conn, ctx.store)?
+            || !crate::execution_control::allowed_at(ctx.conn, ctx.store)?
             || !eligible(&current, profile(ctx.profiles, &current.agent_id)?)
             || current.status != WorkStatus::Queued
             || execution_attempt::get_scoped(ctx.conn, ctx.store, &ctx.scope.data, &attempt.id)?
@@ -179,6 +181,7 @@ pub(crate) fn check(
         let current = work::current(ctx, &item.id, item.generation, Some(run))?;
         if !crate::background_worker::owns_work(&current)
             || !crate::background_worker::enabled_at(ctx.conn, ctx.store)?
+            || !crate::execution_control::allowed_at(ctx.conn, ctx.store)?
         {
             return Err(invalid("Background execution was stopped."));
         }
@@ -206,6 +209,7 @@ fn finish_at(
     // durable revocation in the same transaction before publishing any result.
     if !crate::background_worker::owns_work(&current)
         || !crate::background_worker::enabled_at(ctx.conn, ctx.store)?
+        || !crate::execution_control::allowed_at(ctx.conn, ctx.store)?
     {
         return Err(invalid("Background execution was stopped."));
     }
@@ -253,7 +257,9 @@ pub(crate) fn checkpoint(
 ) -> std::result::Result<(), String> {
     with_context(app, |ctx| {
         let mut current = work::current(ctx, &item.id, item.generation, Some(&attempt.id))?;
-        if !crate::background_worker::enabled_at(ctx.conn, ctx.store)? {
+        if !crate::background_worker::enabled_at(ctx.conn, ctx.store)?
+            || !crate::execution_control::allowed_at(ctx.conn, ctx.store)?
+        {
             return Err(invalid("Background execution was stopped."));
         }
         write_attempt(ctx, attempt)?;
@@ -487,6 +493,15 @@ mod tests {
 
     #[test]
     fn durable_revocation_rejects_a_racing_completion_without_publishing() {
+        racing_completion_after_revocation(false);
+    }
+
+    #[test]
+    fn durable_workspace_pause_rejects_a_racing_completion_without_publishing() {
+        racing_completion_after_revocation(true);
+    }
+
+    fn racing_completion_after_revocation(pause: bool) {
         let store =
             Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap();
         fixture(&store, |ctx| {
@@ -500,7 +515,19 @@ mod tests {
             item.current_run_id = Some(attempt.id.clone());
             item.run_ids.push(attempt.id.clone());
             ctx.work(&item)?;
-            crate::background_worker::revoke_at(ctx.conn, ctx.store)?;
+            if pause {
+                crate::store::repos::preferences::upsert_scoped(
+                    ctx.conn,
+                    ctx.store,
+                    &ctx.scope.data,
+                    "executionControl",
+                    &json!({"paused":true,"revision":1,"changedAt":ctx.time}),
+                    ctx.time,
+                )?;
+                assert!(crate::background_worker::enabled_at(ctx.conn, ctx.store)?);
+            } else {
+                crate::background_worker::revoke_at(ctx.conn, ctx.store)?;
+            }
             attempt.status = "completed".into();
             attempt.transcript = "Late output after Stop".into();
             let error = finish_at(ctx, &item, &attempt, WorkStatus::Completed).unwrap_err();
