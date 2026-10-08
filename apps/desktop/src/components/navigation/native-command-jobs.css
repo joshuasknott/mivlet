@@ -7,10 +7,13 @@
   cursor: pointer;
   min-height: 44px;
   font-weight: 600;
+  align-content: center;
 }
 .native-command-jobs p {
+  margin: 8px 0;
   font-size: 13px;
   line-height: 1.5;
+  color: var(--ink-muted);
   overflow-wrap: anywhere;
 }
 .native-command-jobs label {
@@ -23,26 +26,98 @@
   min-width: 0;
   width: 100%;
   min-height: 44px;
-  background: var(--surface-raised, transparent);
+  background: var(--surface-raised);
   color: inherit;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
   padding: 6px;
 }
+.native-command-jobs select,
+.native-command-jobs button {
+  font: inherit;
+}
 .native-command-jobs button {
   min-height: 44px;
   padding: 6px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: inherit;
+  cursor: pointer;
+}
+.native-command-jobs button:hover:enabled {
+  background: var(--surface-hover);
+}
+.native-command-jobs button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.native-command-jobs header {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 18px;
+}
+.native-command-jobs header p {
+  margin: 0;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-pill);
+  color: var(--ink);
+  background: var(--accent-subtle);
+  text-transform: capitalize;
+}
+.native-command-jobs header span {
+  flex: 1;
+  color: var(--ink-muted);
+}
+.native-command-jobs dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 16px;
+  margin: 12px 0;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.native-command-jobs dl > div:first-child {
+  grid-column: 1 / -1;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 8px;
+}
+.native-command-jobs dl > div:last-child {
+  border-left: 1px solid var(--line);
+  padding-left: 16px;
+}
+.native-command-jobs dt {
+  color: var(--ink-muted);
+}
+.native-command-jobs dd {
+  margin: 3px 0 0;
+  overflow-wrap: anywhere;
+}
+.native-command-jobs h3 {
+  margin: 18px 0 8px;
+  font-size: 16px;
+  font-weight: 500;
+}
+.native-command-jobs [role="alert"] {
+  color: var(--destructive);
 }
 .native-command-jobs pre {
-  max-height: 320px;
+  max-height: 240px;
   overflow: auto;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  font-size: 12px;
+  font-size: 13px;
   line-height: 1.5;
-  padding: 10px;
+  padding: 12px;
+  margin: 0;
   border: 1px solid var(--line-strong);
   border-radius: 6px;
+  background: var(--sidebar-surface);
 }
 .native-command-jobs :focus-visible {
   outline: 2px solid var(--accent);
