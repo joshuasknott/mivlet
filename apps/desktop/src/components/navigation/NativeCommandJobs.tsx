@@ -17,6 +17,8 @@ const active = (job: NativeCommandJob) =>
   ["preparing", "running", "stopping"].includes(job.status);
 const errorText = (error: unknown) =>
   error instanceof Error ? error.message : "Commands are unavailable.";
+const desktopRequired = () =>
+  new Error("Open Mivlet desktop to view commands.");
 
 export function retainCommandFrames(
   previous: NativeCommandFrame[],
@@ -94,8 +96,7 @@ function CommandList({
   const [selected, setSelected] = useState("");
   const epoch = async () => {
     const computer = await loadRuntimeLocalComputer({ workspaceId, agentId });
-    if (!computer)
-      throw new Error("Open the desktop app to inspect native commands.");
+    if (!computer) throw desktopRequired();
     return { workspaceId, agentId, expectedGeneration: computer.generation };
   };
   const query = useQuery({
@@ -105,8 +106,7 @@ function CommandList({
     queryFn: async () => {
       const target = await epoch();
       const result = await listNativeCommandJobs(target);
-      if (!result)
-        throw new Error("Open the desktop app to inspect native commands.");
+      if (!result) throw desktopRequired();
       return { ...result, generation: target.expectedGeneration };
     },
     refetchInterval: 1000,
@@ -213,8 +213,7 @@ function CommandOutput({
           agentId,
         });
         if (disposed) return;
-        if (!computer)
-          throw new Error("Open the desktop app to read native output.");
+        if (!computer) throw desktopRequired();
         if (computer.generation !== job.generation) {
           setNotice("This generation has ended. Output is closed.");
           return;
@@ -230,8 +229,7 @@ function CommandOutput({
           cursor,
         );
         if (disposed) return;
-        if (!result)
-          throw new Error("Open the desktop app to read native output.");
+        if (!result) throw desktopRequired();
         if (result.outputUnavailable || !result.output) {
           setNotice("Output expired; the job was not replayed.");
           return;

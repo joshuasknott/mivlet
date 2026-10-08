@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
@@ -6,12 +6,9 @@ import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-computer";
 import type { RightPanelTab } from "./right-panel-state";
-
-const LibraryNativeTools = lazy(() =>
-  import("./LibraryNativeTools").then((module) => ({
-    default: module.LibraryNativeTools,
-  })),
-);
+import { RepositoryFiles } from "./RepositoryFiles";
+import { NativeExecutionSetup } from "./NativeExecutionSetup";
+import { NativeCommandJobs } from "./NativeCommandJobs";
 
 export function WorkspaceLibrary({
   workspaceId,
@@ -87,9 +84,9 @@ export function WorkspaceLibrary({
           Refresh
         </button>
       </header>
-      <Suspense fallback={<p role="status">Loading agent tools…</p>}>
-        <LibraryNativeTools workspaceId={workspaceId} agents={agents} />
-      </Suspense>
+      <NativeExecutionSetup />
+      <NativeCommandJobs workspaceId={workspaceId} agents={agents} />
+      <RepositoryFiles workspaceId={workspaceId} agents={agents} />
       <label className="workspace-library__search">
         <MagnifyingGlass size={17} aria-hidden="true" />
         <input

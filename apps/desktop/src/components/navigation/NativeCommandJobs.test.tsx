@@ -91,7 +91,7 @@ describe("NativeCommandJobs", () => {
     vi.mocked(readNativeCommandOutput).mockResolvedValue(null);
     mount();
     expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Open the desktop app to read native output.",
+      "Open Mivlet desktop to view commands.",
     );
     expect(stopNativeCommandJob).not.toHaveBeenCalled();
   });
