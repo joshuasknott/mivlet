@@ -354,14 +354,108 @@ fn work_is_private_to_the_grant_messages_are_untrusted_and_stop_is_idempotent() 
     let stop = json!({"workspaceId":"default","agentId":"agent-one","workId":item["id"],"requestId":"stop-req-1","expectedGeneration":1});
     let stopped = tools::invoke(&e, &token, "mivlet_stop_work", stop.clone()).unwrap();
     assert_eq!(stopped["status"], "cancelled");
+    assert_eq!(stopped["generation"], 2);
     assert_eq!(
         tools::invoke(&e, &token, "mivlet_stop_work", stop).unwrap(),
         stopped
     );
-    assert_eq!(
-        tools::invoke(&e, &token, "mivlet_read_work", read).unwrap()["status"],
-        "cancelled"
-    );
+    let current = tools::invoke(&e, &token, "mivlet_read_work", read).unwrap();
+    assert_eq!(current["status"], "cancelled");
+    assert_eq!(current["generation"], 2);
+}
+
+#[test]
+fn stop_checks_current_generation_and_cancels_only_unfinished_descendants() {
+    use crate::collaboration::models::WorkStatus;
+    use crate::store::repos::collaboration::{put, Kind};
+
+    for status in [
+        WorkStatus::Queued,
+        WorkStatus::Running,
+        WorkStatus::Waiting,
+        WorkStatus::AwaitingApproval,
+        WorkStatus::AwaitingUser,
+        WorkStatus::Blocked,
+        WorkStatus::Failed,
+    ] {
+        let e = engine("http://127.0.0.1:39440");
+        let token = login(&e, Access::RequestTasks);
+        let item = task(&e, &token, "stop-root-task");
+        let unrelated = task(&e, &token, "stop-unrelated-task");
+        let id = item["id"].as_str().unwrap();
+        e.transaction(|conn, scope, _| {
+            let root = tools::work(conn, e.store, scope, id)?;
+            for (key, parent, state) in [
+                (id, None, status.clone()),
+                ("stop-child", Some(id), WorkStatus::Running),
+                ("stop-grandchild", Some("stop-child"), WorkStatus::Queued),
+                ("stop-completed", Some(id), WorkStatus::Completed),
+            ] {
+                let mut work = root.clone();
+                work.id = key.into();
+                work.parent_id = parent.map(str::to_owned);
+                work.generation = 2;
+                work.status = state;
+                if parent.is_some() {
+                    work.external_client = None;
+                }
+                put(
+                    conn,
+                    e.store,
+                    &scope.private,
+                    Kind::Work,
+                    &work.id,
+                    Some(&work.conversation_id),
+                    None,
+                    &work,
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+        let mut stop = json!({"workspaceId":"default","agentId":"agent-one","workId":id,"requestId":"stop-root-req","expectedGeneration":1});
+        assert!(tools::invoke(&e, &token, "mivlet_stop_work", stop.clone()).is_err());
+        e.transaction(|conn, scope, saved| {
+            let root = tools::work(conn, e.store, scope, id)?;
+            assert_eq!(root.status, status);
+            assert_eq!(root.generation, 2);
+            let child = tools::work(conn, e.store, scope, "stop-child")?;
+            assert_eq!(child.status, WorkStatus::Running);
+            assert_eq!(child.generation, 2);
+            assert_eq!(
+                saved.receipts.len(),
+                2,
+                "denied Stop must not save a receipt"
+            );
+            Ok(())
+        })
+        .unwrap();
+        // The rejected stale request did not consume its ID. A fresh generation
+        // cancels the subtree; replaying that accepted request cannot cancel twice.
+        stop["expectedGeneration"] = json!(2);
+        let stopped = tools::invoke(&e, &token, "mivlet_stop_work", stop.clone()).unwrap();
+        assert_eq!(stopped["status"], "cancelled");
+        assert_eq!(stopped["generation"], 3);
+        assert_eq!(
+            tools::invoke(&e, &token, "mivlet_stop_work", stop).unwrap(),
+            stopped
+        );
+        e.transaction(|conn, scope, _| {
+            for (key, state, generation) in [
+                (id, WorkStatus::Cancelled, 3),
+                ("stop-child", WorkStatus::Cancelled, 3),
+                ("stop-grandchild", WorkStatus::Cancelled, 3),
+                ("stop-completed", WorkStatus::Completed, 2),
+                (unrelated["id"].as_str().unwrap(), WorkStatus::Queued, 1),
+            ] {
+                let work = tools::work(conn, e.store, scope, key)?;
+                assert_eq!(work.status, state, "{key}, root was {status:?}");
+                assert_eq!(work.generation, generation, "{key}");
+            }
+            Ok(())
+        })
+        .unwrap();
+    }
 }
 
 #[test]

@@ -103,24 +103,24 @@ try {
     requestId: "sdk-message-1",
     text: "Untrusted follow-up",
   });
-  const stopped = await call("mivlet_stop_work", {
+  const stop = {
     workspaceId: "default",
     agentId: "agent-one",
     workId: task.id,
     expectedGeneration: task.generation,
     requestId: "sdk-stop-1",
-  });
+  };
+  const stopped = await call("mivlet_stop_work", stop);
   assert.equal(stopped.status, "cancelled");
-  assert.equal(
-    (
-      await call("mivlet_read_work", {
-        workspaceId: "default",
-        agentId: "agent-one",
-        workId: task.id,
-      })
-    ).status,
-    "cancelled",
-  );
+  assert.equal(stopped.generation, task.generation + 1);
+  assert.deepEqual(await call("mivlet_stop_work", stop), stopped);
+  const current = await call("mivlet_read_work", {
+    workspaceId: "default",
+    agentId: "agent-one",
+    workId: task.id,
+  });
+  assert.equal(current.status, "cancelled");
+  assert.equal(current.generation, stopped.generation);
   console.log("official MCP client passed");
 } finally {
   await client.close();

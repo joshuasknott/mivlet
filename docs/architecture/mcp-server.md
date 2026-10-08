@@ -41,8 +41,9 @@ credentials. Grant selection uses native account-scoped repositories.
 
 `mivlet_request_task` creates an ordinary private conversation and Work record.
 `mivlet_message_work` adds untrusted task data, separately from user steering.
-`mivlet_stop_work` uses canonical Work cancellation and generation fences. Writes
-require stable `requestId` values; identical retries return their saved receipt,
+`mivlet_stop_work` checks the current generation in the same native transaction as
+canonical cancellation, including queued or waiting Work and unfinished descendants.
+Writes require stable `requestId` values; identical retries return their saved receipt,
 and changed payloads are rejected. Receipts remain after conversation deletion
 until their grant expires or is revoked, so deletion cannot authorize replay.
 The native access log retains the latest 256 decisions and calls without prompt

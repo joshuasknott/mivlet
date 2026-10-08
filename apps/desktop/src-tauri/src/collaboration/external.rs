@@ -132,7 +132,10 @@ pub(crate) fn stop(
         &ctx,
         Command::StopWork {
             id: item.id.clone(),
-            expected_generation: Some(expected),
+            // MCP checked the canonical generation in this same transaction.
+            // Some(expected) is reserved for executing-owner cleanup and would
+            // silently leave queued or waiting Work uncancelled.
+            expected_generation: None,
         },
     )?;
     ctx.item(&item.id)
