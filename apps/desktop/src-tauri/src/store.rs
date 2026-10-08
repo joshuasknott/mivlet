@@ -89,6 +89,8 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 /// The durable encrypted store. Cheap to share behind an `Arc`.
 pub struct Store {
     account_owned: bool,
+    #[cfg(test)]
+    account_check: Option<Box<dyn Fn() -> Result<()> + Send + Sync>>,
     conn: Mutex<Connection>,
     vault: Vault,
 }
@@ -108,6 +110,8 @@ impl Store {
         Self::initialize_schema(&conn)?;
         let store = Self {
             account_owned: false,
+            #[cfg(test)]
+            account_check: None,
             conn: Mutex::new(conn),
             vault,
         };
@@ -125,6 +129,7 @@ impl Store {
         Self::initialize_schema(&conn)?;
         let store = Self {
             account_owned: false,
+            account_check: None,
             conn: Mutex::new(conn),
             vault,
         };
@@ -318,6 +323,10 @@ impl Store {
     /// pragmas, and ad-hoc reads).
     fn check_account(&self) -> Result<()> {
         if self.account_owned {
+            #[cfg(test)]
+            if let Some(check) = &self.account_check {
+                return check();
+            }
             crate::account_session::ensure_current().map_err(StoreError::Invalid)?;
         }
         Ok(())
@@ -363,6 +372,38 @@ impl Store {
             .with_current(|| Ok(tx.commit().map_err(StoreError::from)))
             .map_err(StoreError::Invalid)??;
         Ok(out)
+    }
+
+    /// Prepare SQL under the account-owned Store lock, then fence only COMMIT.
+    /// The final callback must use cached authority checks and the supplied
+    /// transaction only: Store access or credential I/O would re-enter locks.
+    /// Any preparation, account-check or commit-fence error rolls back.
+    pub(crate) fn transaction_with_commit_fence<R, E>(
+        &self,
+        f: impl FnOnce(&rusqlite::Transaction<'_>) -> std::result::Result<R, E>,
+        commit: impl FnOnce(rusqlite::Transaction<'_>) -> std::result::Result<(), E>,
+    ) -> std::result::Result<R, E>
+    where
+        E: From<StoreError>,
+    {
+        let mut conn = self.conn.lock().expect("store connection mutex poisoned");
+        self.check_account()?;
+        let tx = conn.transaction().map_err(StoreError::from)?;
+        let out = f(&tx)?;
+        self.check_account()?;
+        commit(tx)?;
+        Ok(out)
+    }
+
+    /// Exercise account-owned storage with isolated, synthetic identity state.
+    #[cfg(test)]
+    pub(crate) fn with_test_account_check(
+        mut self,
+        check: impl Fn() -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.account_owned = true;
+        self.account_check = Some(Box::new(check));
+        self
     }
 
     /// Privileged outgoing-account cleanup; never accepts a caller-selected owner.

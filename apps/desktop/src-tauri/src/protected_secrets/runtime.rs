@@ -33,9 +33,20 @@ impl Fence for NativeFence {
         self.ticket.check().map_err(|_| Failure::Stopped)
     }
     fn commit<T>(&self, operation: impl FnOnce() -> Result<T, Failure>) -> Result<T, Failure> {
-        self.check()?;
-        self.account
-            .with_current(|| self.ticket.with_current(|| Ok(operation())))
+        // Store preparation and execution-pause checks already completed.
+        // Do not call check(): its preflight reads the same Store connection.
+        // Match native input dispatch order: generation first, then the
+        // nonblocking identity fence. Never wait for Stop while holding identity.
+        self.ticket
+            .with_current(|| {
+                self.account.with_current(|| {
+                    Ok(if now() >= self.expires {
+                        Err(Failure::Expired)
+                    } else {
+                        operation()
+                    })
+                })
+            })
             .map_err(|_| Failure::Stopped)?
     }
 }
@@ -109,8 +120,8 @@ pub(crate) fn execute(
             let input: RequestInput = decode(arguments)?;
             input.validate().map_err(|e| e.to_string())?;
             computers.with_protected_input(workspace, agent, generation, request, || {
-                let record = fence
-                    .commit(|| service.begin(&scope, request, input.clone(), now()))
+                let record = service
+                    .begin(&scope, request, input.clone(), now(), &fence)
                     .map_err(|e| e.to_string())?;
                 let answer = capture::prompt(&input, &|| {
                     fence.check().is_ok() && now() < record.expires_at

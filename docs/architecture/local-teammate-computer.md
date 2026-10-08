@@ -133,6 +133,13 @@ server credential store are not used. Native API references:
 [zeroizing native values](https://docs.rs/zeroize/latest/zeroize/struct.Zeroizing.html),
 and [ring HMAC verification](https://docs.rs/ring/latest/ring/hmac/index.html).
 
+Protected writes prepare metadata under the account-owned Store connection and
+check execution pause through that transaction. Cached identity, expiry and
+agent-generation fences guard only SQL commit. Account checks never run inside
+the identity fence, and custody I/O stays outside authority locks. Regression
+tests exercise account-owned storage with synthetic identity checks, rejected
+commits after generation/sign-out changes, rollback and pause after preflight.
+
 Focused verification: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 protected_request`. The opt-in `protected_secret_native_vault_acceptance` writes,
 reads and removes a random synthetic Windows vault entry. The opt-in
