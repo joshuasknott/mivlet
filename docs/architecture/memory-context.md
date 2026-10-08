@@ -210,6 +210,15 @@ overflow or browser errors were observed; action targets remain 44px high.
 Transport and provider were explicitly simulated. Selected-branch integration,
 installed-app behavior and live-provider acceptance remain separate requirements.
 
+The continuation review now groups session identity, transfer counts, attachment
+notices and public source cards using shared tokens, controls and Phosphor icons.
+A built-in imagegen reference preceded implementation. The isolated fixture's
+`output/continuation-acceptance/design-qa.md` records reference comparison and
+desktop/narrow light/dark checks. The five component tests and the production
+style-transformed fixture pass; review acknowledgement, stale-response handling,
+Stop gating and error/cancel focus return remain intact. Generated references and
+screenshots are local evidence, not shipped assets or live-provider evidence.
+
 Summarisation is deterministic and local. No provider is called by the
 compaction pipeline, so a conversation can never be summarised by a different
 provider than the one that owns the turn. Provider credentials remain in native
