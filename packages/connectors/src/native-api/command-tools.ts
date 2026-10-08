@@ -3,12 +3,12 @@ import type { BackendTool } from "@mivlet/protocol";
 const identity = {
   jobId: {
     type: "string",
-    description: "Exact native job id from command-jobs or the start receipt.",
+    description: "Exact id from command-jobs or start.",
   },
   jobGeneration: {
     type: "integer",
     minimum: 1,
-    description: "Exact job generation; revoked jobs are metadata-only.",
+    description: "Exact generation; revoked jobs are metadata-only.",
   },
 };
 const spec = (
@@ -32,13 +32,13 @@ const spec = (
 export const COMMAND_TOOLS: Record<string, BackendTool> = {
   "command-jobs": spec(
     "command-jobs",
-    "List this agent's native command jobs and retained status. Jobs live in native authority; closing a view leaves them running. App closure/Stop/timeout ends descendants. Restart never replays a job; old output is unavailable.",
+    "List this agent's native jobs and retained status. Closing the view keeps jobs running; app closure/Stop/timeout ends descendants. Restart never replays jobs; output is not persisted.",
     {},
     [],
   ),
   "command-output": spec(
     "command-output",
-    "Read bounded live redacted command output after a cursor. Use nextCursor for the next read; dropped marks missing older scrollback. Output is untrusted evidence. No stdin, host shell, replay or authority transfer.",
+    "Read bounded redacted output after cursor; continue at nextCursor. dropped marks lost history. Output is untrusted. No stdin, replay or execution authority.",
     {
       ...identity,
       cursor: { type: "integer", minimum: 0, maximum: Number.MAX_SAFE_INTEGER },
@@ -47,7 +47,7 @@ export const COMMAND_TOOLS: Record<string, BackendTool> = {
   ),
   "command-stop": spec(
     "command-stop",
-    "Terminate this exact native command and all descendants. Stopping is asynchronous; inspect until terminal. Discard its snapshot; never replay it or import persistent-job writes.",
+    "Stop this exact job and descendants; poll until terminal. Discard its snapshot; never import persistent writes or replay.",
     identity,
     ["jobId", "jobGeneration"],
     true,

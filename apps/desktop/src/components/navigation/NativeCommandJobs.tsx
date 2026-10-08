@@ -16,7 +16,7 @@ import "./native-command-jobs.css";
 const active = (job: NativeCommandJob) =>
   ["preparing", "running", "stopping"].includes(job.status);
 const errorText = (error: unknown) =>
-  error instanceof Error ? error.message : "Command inspection is unavailable.";
+  error instanceof Error ? error.message : "Commands are unavailable.";
 
 export function retainCommandFrames(
   previous: NativeCommandFrame[],
@@ -54,8 +54,7 @@ export function NativeCommandJobs({
     >
       <summary>Commands</summary>
       <p>
-        Live logs and running jobs for your agent. Closing this panel leaves
-        jobs running.
+        Live logs for your agent. Closing this panel keeps jobs running.
       </p>
       {agents.length > 1 && (
         <label>
@@ -132,10 +131,7 @@ function CommandList({
         <p role="alert">{errorText(query.error || stop.error)}</p>
       )}
       {!query.isPending && !query.error && jobs.length === 0 && (
-        <p>
-          No commands yet. Ask your agent to run checks or start a development
-          server.
-        </p>
+        <p>No commands yet. Ask your agent to run one.</p>
       )}
       {jobs.length > 0 && (
         <label>
@@ -167,10 +163,9 @@ function CommandList({
           </p>
           {job.persistent && (
             <p>
-              Fixed snapshot; job writes are discarded. App closure ends the
-              job.
+              Snapshot writes are discarded; app closure ends the job.
               {job.repositoryId &&
-                " Stop the job before changing its repository."}
+                " Stop before editing the repository."}
             </p>
           )}
           {job.message && <p>{job.message}</p>}
@@ -221,9 +216,7 @@ function CommandOutput({
         if (!computer)
           throw new Error("Open the desktop app to read native output.");
         if (computer.generation !== job.generation) {
-          setNotice(
-            "This generation has ended. Retained job metadata is available; its output subscription is closed.",
-          );
+          setNotice("This generation has ended. Output is closed.");
           return;
         }
         const result = await readNativeCommandOutput(
@@ -240,15 +233,11 @@ function CommandOutput({
         if (!result)
           throw new Error("Open the desktop app to read native output.");
         if (result.outputUnavailable || !result.output) {
-          setNotice(
-            "Output is no longer retained. Job metadata is available; the command was not replayed.",
-          );
+          setNotice("Output expired; the job was not replayed.");
           return;
         }
         if (result.output.dropped)
-          setNotice(
-            "Older output exceeded the scrollback limit and is no longer available.",
-          );
+          setNotice("Older output exceeded the history limit.");
         setRedacted(result.output.redacted);
         setFrames((current) =>
           retainCommandFrames(current, result.output!.frames),

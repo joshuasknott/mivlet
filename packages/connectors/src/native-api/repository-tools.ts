@@ -1,5 +1,5 @@
 import type { BackendTool } from "@mivlet/protocol";
-import { NATIVE_EXECUTION_POLICY } from "./workspace-tools";
+import { NATIVE_EXECUTION_POLICY, PERSISTENT_EXECUTION_POLICY } from "./workspace-tools";
 
 const id = {
   repositoryId: {
@@ -31,7 +31,7 @@ function tool(
 export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
   "repository-start": tool(
     "start",
-    "Start a native persistent Windows command (for example a dev server) in a fixed isolated repository snapshot. Bundled Node/npm/Python/pip only; no host PATH/files/credentials or provider shell. Network defaults off; true adds internetClient without private-network or loopback exemptions. Explicit 1–86400 second lifetime. All writes discarded, even success. Repository stays locked until all descendants end. Use command-output/command-stop; never automatically restart. No interactive stdin or host-browser access grant.",
+    PERSISTENT_EXECUTION_POLICY + "Use a fixed isolated repository snapshot; hold its lock until all descendants end.",
     { ...id, command: text, network: { type: "boolean" }, timeoutSeconds: { type: "integer", minimum: 1, maximum: 86400 } },
     ["repositoryId", "command", "network", "timeoutSeconds"],
     "critical",

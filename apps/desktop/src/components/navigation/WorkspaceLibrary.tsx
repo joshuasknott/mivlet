@@ -6,12 +6,10 @@ import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-computer";
 import type { RightPanelTab } from "./right-panel-state";
-import { RepositoryFiles } from "./RepositoryFiles";
-import { NativeExecutionSetup } from "./NativeExecutionSetup";
 
-const NativeCommandJobs = lazy(() =>
-  import("./NativeCommandJobs").then((module) => ({
-    default: module.NativeCommandJobs,
+const LibraryNativeTools = lazy(() =>
+  import("./LibraryNativeTools").then((module) => ({
+    default: module.LibraryNativeTools,
   })),
 );
 
@@ -89,11 +87,9 @@ export function WorkspaceLibrary({
           Refresh
         </button>
       </header>
-      <NativeExecutionSetup />
-      <Suspense fallback={<p role="status">Loading commands…</p>}>
-        <NativeCommandJobs workspaceId={workspaceId} agents={agents} />
+      <Suspense fallback={<p role="status">Loading agent tools…</p>}>
+        <LibraryNativeTools workspaceId={workspaceId} agents={agents} />
       </Suspense>
-      <RepositoryFiles workspaceId={workspaceId} agents={agents} />
       <label className="workspace-library__search">
         <MagnifyingGlass size={17} aria-hidden="true" />
         <input
