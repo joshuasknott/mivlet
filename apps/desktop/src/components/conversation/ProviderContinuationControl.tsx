@@ -19,6 +19,12 @@ export function ProviderContinuationControl({ workspaceId, ownerKey, conversatio
   const [reviewed, setReviewed] = useState(false);
   const generation = useRef(0);
   const trigger = useRef<HTMLButtonElement>(null);
+  const previewRegion = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (pending) return;
+    if (preview) previewRegion.current?.focus();
+    else if (error) trigger.current?.focus();
+  }, [preview, error, pending]);
   const closePreview = () => {
     setPreview(undefined);
     requestAnimationFrame(() => trigger.current?.focus());
@@ -74,7 +80,7 @@ export function ProviderContinuationControl({ workspaceId, ownerKey, conversatio
         "Uses the selected model in a fresh provider session."}
       onClick={() => void review()}>{pending ? "Preparing continuation…" : "Continue with selected model…"}</button>
     {error && <p role="alert">{error}</p>}
-    {preview && <section aria-label="Provider continuation preview" className="provider-continuation-preview">
+    {preview && <section ref={previewRegion} tabIndex={-1} aria-label="Provider continuation preview" className="provider-continuation-preview">
       <h3>Continue with {model?.label}</h3>
       <p>A fresh {model?.providerLabel} session receives {preview.messages.length} saved messages.
         {" "}{preview.omittedCount} remain in saved history. Your new request stays unchanged.</p>

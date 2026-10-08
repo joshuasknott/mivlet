@@ -191,12 +191,24 @@ and provider runs. Desktop and
 390px review controls were inspected with synthetic native responses; no live
 provider was called. Security lint, explicit-any, formatting, dead-code and
 dependency-cycle checks passed.
-Native compilation was interrupted without a test result; the encrypted-store
-close/reopen/recovery regression still requires execution. The built ordinary
-JS/CSS bundle exceeds its existing ceiling by 7.9 KiB raw and 1.1 KiB gzip.
-Baseline comparison, performance resolution and final native tests/Clippy
-remain required; no ceiling was increased. These are local implementation
-results, not provider, packaged-app or release acceptance.
+The initial native compilation was interrupted and the pre-stack bundle
+exceeded its ceiling. After inheriting the separate dependency-audit and style
+compaction fixes, exact revision `93fb8ab7` passed
+[full validation](https://github.com/joshuasknott/mivlet/actions/runs/37837485639),
+including native tests/Clippy, encrypted-store close/reopen/recovery and unchanged
+performance budgets. Those earlier gates are resolved.
+
+Subsequent focused acceptance compiled the real control and application CSS
+through the production style transform in an isolated 42-module fixture.
+Desktop (1280px) and narrow (390px), light/dark, long provenance, empty history,
+empty draft, delayed stale preview, preview failure, admission denial, review
+gating, Cancel, simulated Stop and successful simulated admission were inspected.
+A keyboard focus loss after denial was reproduced and fixed: review completion
+focuses the preview region, while preview/admission failure returns focus to the
+trigger. Five focused component tests pass after that correction. No horizontal
+overflow or browser errors were observed; action targets remain 44px high.
+Transport and provider were explicitly simulated. Selected-branch integration,
+installed-app behavior and live-provider acceptance remain separate requirements.
 
 Summarisation is deterministic and local. No provider is called by the
 compaction pipeline, so a conversation can never be summarised by a different

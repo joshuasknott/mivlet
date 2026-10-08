@@ -17,6 +17,7 @@ describe("provider continuation review", () => {
     const p = props(); render(<ProviderContinuationControl {...p} />);
     fireEvent.click(screen.getByRole("button", { name: "Continue with selected model…" }));
     await screen.findByRole("region", { name: "Provider continuation preview" });
+    expect(screen.getByRole("region")).toHaveFocus();
     expect(p.onContinue).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /^Continue$/ })).toBeDisabled();
     fireEvent.click(screen.getByRole("checkbox"));
@@ -32,6 +33,16 @@ describe("provider continuation review", () => {
     view.rerender(<ProviderContinuationControl {...p} conversationId="other" />);
     await act(async () => resolve(continuation));
     expect(screen.queryByRole("region")).toBeNull();
+  });
+  it("restores focus after a preview failure so keyboard users can retry", async () => {
+    preview.mockRejectedValue(new Error("History unavailable"));
+    render(<ProviderContinuationControl {...props()} />);
+    const trigger = screen.getByRole("button", { name: "Continue with selected model…" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(await screen.findByRole("alert")).toHaveTextContent("History unavailable");
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toBeEnabled();
   });
   it("blocks active work and missing draft attachment availability", () => {
     const p = props(); const view = render(<ProviderContinuationControl {...p} disabled />);
@@ -49,5 +60,6 @@ describe("provider continuation review", () => {
     fireEvent.click(screen.getByRole("button", { name: /^Continue$/ }));
     expect(await screen.findByRole("alert")).toHaveTextContent("Saved context changed");
     expect(screen.queryByRole("region")).toBeNull();
+    await waitFor(() => expect(screen.getByRole("button", { name: "Continue with selected model…" })).toHaveFocus());
   });
 });
