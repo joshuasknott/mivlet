@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import type { Plugin } from "vite";
@@ -137,7 +137,13 @@ export function compactStyleText(
 
 export function compactStyleNames(sourceRoot: string): Plugin {
   let names: Map<string, string>;
-  const root = sourceRoot.replaceAll("\\", "/");
+  // Vite resolves imported files through real paths, including Windows short
+  // paths and junctions. Accept both spellings of this same source directory.
+  const roots = [sourceRoot, realpathSync.native(sourceRoot)].map((path) =>
+    path.replaceAll("\\", "/"),
+  );
+  const inSource = (path: string) =>
+    roots.some((root) => path.replaceAll("\\", "/").startsWith(`${root}/`));
   return {
     name: "mivlet-compact-style-names",
     // Vite expands CSS @imports before normal transforms. Running as a pre
@@ -165,11 +171,16 @@ export function compactStyleNames(sourceRoot: string): Plugin {
       );
     },
     transform(code, id) {
-      if (
-        !id.replaceAll("\\", "/").startsWith(`${root}/`) ||
-        !/\.(?:css|[jt]sx?)(?:\?|$)/.test(id)
-      )
-        return null;
+      if (!/\.(?:css|[jt]sx?)(?:\?|$)/.test(id)) return null;
+      if (!inSource(id)) {
+        // A resolved junction can retain a short spelling of an ancestor.
+        // Canonicalize unmatched files before deciding they are outside src.
+        try {
+          if (!inSource(realpathSync.native(id.split("?")[0]))) return null;
+        } catch {
+          return null;
+        }
+      }
       const transformed = compactStyleText(code, names);
       return transformed === code ? null : { code: transformed, map: null };
     },
