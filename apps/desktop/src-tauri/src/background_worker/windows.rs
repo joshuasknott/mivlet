@@ -17,7 +17,7 @@ use tokio::{
 use windows_sys::Win32::{
     Foundation::*,
     Security::{Authorization::*, *},
-    System::{JobObjects::*, Pipes::*, Threading::*},
+    System::{JobObjects::*, Pipes::*, RemoteDesktop::ProcessIdToSessionId, Threading::*},
 };
 
 const LIMIT: usize = 4096;

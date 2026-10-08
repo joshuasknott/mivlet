@@ -28,6 +28,19 @@ beforeEach(() => {
 });
 
 describe("background execution controls", () => {
+  it("can request Stop when the owner cannot answer the initial status read", async () => {
+    native.status.mockRejectedValueOnce(new Error("Worker disconnected."));
+    native.control.mockResolvedValueOnce(stopped);
+    render(<BackgroundExecutionSettings />);
+    const stop = await screen.findByRole("button", {
+      name: "Stop background work",
+    });
+    expect(stop).toBeEnabled();
+    fireEvent.click(stop);
+    await screen.findByText("Stopped");
+    expect(native.control).toHaveBeenCalledExactlyOnceWith("stop");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
   it("can reconnect after the first status read fails", async () => {
     native.status.mockRejectedValueOnce(new Error("Worker disconnected."));
     render(<BackgroundExecutionSettings />);

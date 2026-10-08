@@ -3,14 +3,13 @@
 #[cfg(windows)]
 mod command_ipc;
 pub(crate) mod commands;
-mod control;
+pub(crate) mod control;
 pub(crate) mod dispatch;
 mod persistence;
 #[cfg(windows)]
 mod windows;
 
 pub(crate) use control::revoke;
-pub use control::{background_worker_control, background_worker_status};
 pub(crate) use persistence::enabled_at;
 pub(crate) use persistence::revoke_at;
 pub(crate) use persistence::{enabled, owns_attempt, owns_work};
@@ -122,7 +121,8 @@ pub fn run(account: String) {
                 persistence::capture_generation(store)?;
                 // Every process incarnation fences its predecessor before any
                 // provider starts. Even an abrupt kill never replays an attempt.
-                crate::collaboration::background::recover(store)?;
+                crate::collaboration::background::recover(store)
+                    .map_err(|error| error.to_string())?;
                 let computers = std::sync::Arc::new(
                     crate::local_computer::LocalComputerState::initialize(&handle)?,
                 );

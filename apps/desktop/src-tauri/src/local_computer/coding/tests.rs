@@ -286,7 +286,7 @@ fn recovery_and_repository_lock_are_visible() {
         .operation
         .starts_with("publication"));
     let mutex = lock(&directory).unwrap();
-    let _guard = mutex.lock().unwrap();
+    let _guard = mutex.try_lock().unwrap();
     assert_eq!(status(&directory, &ticket).unwrap()["busy"], true);
     assert!(execute_in(
         &directory,

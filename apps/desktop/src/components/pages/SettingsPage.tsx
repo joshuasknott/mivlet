@@ -81,7 +81,7 @@ export function SettingsPage({
         )}
 
         {status?.tab === activeTab && status.message ? (
-          <p className="settings-status" role="status">
+          <p className="settings-status" role="status" aria-label="Settings update">
             {status.message}
           </p>
         ) : null}

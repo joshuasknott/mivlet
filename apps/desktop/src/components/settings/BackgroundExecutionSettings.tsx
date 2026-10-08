@@ -9,6 +9,8 @@ export function BackgroundExecutionSettings() {
   const [status, setStatus] = useState<BackgroundWorkerStatus | null>(null);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const canStop =
+    status?.running || (error !== null && status?.supported !== false);
   const generation = useRef(0);
   useEffect(() => {
     const current = ++generation.current;
@@ -69,7 +71,7 @@ export function BackgroundExecutionSettings() {
           </span>
         </div>
         <div className="settings-preference-row">
-          <span role="status">
+          <span role="status" aria-label="Background execution">
             {pending
               ? "Updating background execution…"
               : status?.running
@@ -86,12 +88,10 @@ export function BackgroundExecutionSettings() {
             <button
               type="button"
               className="button button--secondary"
-              disabled={pending || !status?.supported}
-              onClick={() => void act(status?.running ? "stop" : "start")}
+              disabled={pending || (!canStop && !status?.supported)}
+              onClick={() => void act(canStop ? "stop" : "start")}
             >
-              {status?.running
-                ? "Stop background work"
-                : "Start background worker"}
+              {canStop ? "Stop background work" : "Start background worker"}
             </button>
             {status?.running && (
               <button
