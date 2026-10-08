@@ -22,7 +22,7 @@ pub(crate) fn apply(conn: &Connection) -> Result<()> {
         [],
         |row| row.get(0),
     )?;
-    if !schema.contains("'event'") {
+    if !schema.contains("CHECK(trigger_kind IN ('once','daily','weekly','event'))") {
         if tx.pragma_query_value(None, "foreign_keys", |row| row.get::<_, i64>(0))? != 0 {
             return Err(StoreError::Invalid(
                 "The event migration requires the store's foreign-key maintenance fence.".into(),

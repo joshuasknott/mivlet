@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { clearRuntimeAdapterForTest, selectRuntimeAdapterForTest } from "../adapters/select";
+import {
+  clearRuntimeAdapterForTest,
+  selectRuntimeAdapterForTest,
+} from "../adapters/select";
 import {
   configureEventIngress,
   getEventIngress,

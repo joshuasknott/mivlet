@@ -17,6 +17,34 @@ pub(super) struct IncomingEvent<'a> {
     pub now: DateTime<Utc>,
 }
 
+/// The production account guard owns the final SQL commit, after native custody
+/// verification has released its own identity lock. A fixture guard exists only
+/// in tests; no renderer or event selects a fence.
+pub(super) trait ReceiptFence {
+    fn commit<T>(
+        &self,
+        operation: impl FnOnce() -> crate::store::Result<T>,
+    ) -> crate::store::Result<T>;
+}
+impl ReceiptFence for crate::account_session::AccountDispatchFence {
+    fn commit<T>(
+        &self,
+        operation: impl FnOnce() -> crate::store::Result<T>,
+    ) -> crate::store::Result<T> {
+        self.with_current(|| Ok(operation()))
+            .map_err(StoreError::Invalid)?
+    }
+}
+#[cfg(test)]
+impl ReceiptFence for () {
+    fn commit<T>(
+        &self,
+        operation: impl FnOnce() -> crate::store::Result<T>,
+    ) -> crate::store::Result<T> {
+        operation()
+    }
+}
+
 pub(super) fn receive(
     store: &Store,
     scope: &AuthorizedCommandScope,
@@ -27,6 +55,8 @@ pub(super) fn receive(
         &[u8],
         &str,
     ) -> Result<bool, String>,
+    sanitize: impl FnOnce(&LocalSchedule, &EventConfig, EventPreview) -> Result<EventPreview, String>,
+    fence: &impl ReceiptFence,
 ) -> crate::store::Result<Receipt> {
     let IncomingEvent {
         schedule_id,
@@ -64,168 +94,184 @@ pub(super) fn receive(
     let authentication = signature::verify(config, headers, raw, now, |body, signature| {
         verify(&schedule, config, body, signature)
     });
-    store.transaction(|conn| {
-        let current = repo::get_schedule(conn, store, &scope.private, schedule_id)?
-            .ok_or_else(|| StoreError::Invalid("The event trigger is unavailable.".into()))?;
-        if current.revision != schedule.revision || current.status == "cancelled" {
-            return Ok(Receipt {
-                status: 409,
-                id: None,
-                reason: "trigger_changed",
-            });
-        }
-        let time = timestamp(now);
-        local_event::prune(
-            conn,
-            store,
-            &scope.private,
-            schedule_id,
-            &time,
-            &timestamp(now - Duration::hours(24)),
-        )?;
-        let (status, reason, verified) = match authentication {
-            Ok(verified) => (202, "accepted", Some(verified)),
-            Err(reason) => (
-                match reason {
-                    "invalid_signature" => 401,
-                    "signing_key_unavailable" => 503,
-                    "event_expired" | "trigger_expired" => 410,
-                    _ => 422,
-                },
-                reason,
-                None,
-            ),
-        };
-        if let Some(verified) = &verified {
-            if let Some(id) = local_event::duplicate(
-                conn,
-                &scope.private,
-                schedule_id,
-                &verified.id_fingerprint,
-                &verified.body_fingerprint,
-            )? {
-                let original =
-                    local_event::get(conn, store, &scope.private, &id)?.ok_or_else(|| {
-                        StoreError::Invalid("The prior delivery is unavailable.".into())
-                    })?;
+    let preview = match authentication.as_ref() {
+        Ok(event) => template::render(&config.draft(), &schedule.prompt, &event.body)
+            .map_err(|_| "invalid_selected_fields")
+            .and_then(|preview| {
+                sanitize(&schedule, config, preview).map_err(|_| "signing_key_unavailable")
+            })
+            .map(Some),
+        Err(_) => Ok(None),
+    };
+    fence.commit(|| {
+        store.transaction(|conn| {
+            let current = repo::get_schedule(conn, store, &scope.private, schedule_id)?
+                .ok_or_else(|| StoreError::Invalid("The event trigger is unavailable.".into()))?;
+            if current.revision != schedule.revision || current.status == "cancelled" {
                 return Ok(Receipt {
-                    status: if original.body_fingerprint.as_deref()
-                        == Some(verified.body_fingerprint.as_str())
-                    {
-                        200
-                    } else {
-                        409
-                    },
-                    id: Some(id),
-                    reason: if original.body_fingerprint.as_deref()
-                        == Some(verified.body_fingerprint.as_str())
-                    {
-                        "duplicate"
-                    } else {
-                        "idempotency_conflict"
-                    },
+                    status: 409,
+                    id: None,
+                    reason: "trigger_changed",
                 });
             }
-        }
-        if local_event::count(conn, &scope.private, schedule_id)? >= 10_000 {
-            return Ok(Receipt {
-                status: 429,
-                id: None,
-                reason: "delivery_capacity",
-            });
-        }
-        let preview = verified
-            .as_ref()
-            .map(|event| template::render(&config.draft(), &schedule.prompt, &event.body, None))
-            .transpose();
-        let (status, reason, preview) = match preview {
-            Ok(Some(preview)) if !preview.missing.is_empty() => {
-                (422, "missing_selected_fields", None)
+            let time = timestamp(now);
+            local_event::prune(
+                conn,
+                store,
+                &scope.private,
+                schedule_id,
+                &time,
+                &timestamp(now - Duration::hours(24)),
+            )?;
+            let (status, reason, verified) = match authentication {
+                Ok(verified) => (202, "accepted", Some(verified)),
+                Err(reason) => (
+                    match reason {
+                        "invalid_signature" => 401,
+                        "signing_key_unavailable" => 503,
+                        "event_expired" | "trigger_expired" => 410,
+                        _ => 422,
+                    },
+                    reason,
+                    None,
+                ),
+            };
+            if let Some(verified) = &verified {
+                if let Some(id) = local_event::duplicate(
+                    conn,
+                    &scope.private,
+                    schedule_id,
+                    &verified.id_fingerprint,
+                    &verified.body_fingerprint,
+                )? {
+                    let original =
+                        local_event::get(conn, store, &scope.private, &id)?.ok_or_else(|| {
+                            StoreError::Invalid("The prior delivery is unavailable.".into())
+                        })?;
+                    return Ok(Receipt {
+                        status: if original.body_fingerprint.as_deref()
+                            == Some(verified.body_fingerprint.as_str())
+                        {
+                            200
+                        } else {
+                            409
+                        },
+                        id: Some(id),
+                        reason: if original.body_fingerprint.as_deref()
+                            == Some(verified.body_fingerprint.as_str())
+                        {
+                            "duplicate"
+                        } else {
+                            "idempotency_conflict"
+                        },
+                    });
+                }
             }
-            Ok(preview) => (status, reason, preview),
-            Err(_) => (422, "invalid_selected_fields", None),
-        };
-        let paused = current.status != "enabled";
-        if status == 202
-            && !paused
-            && local_event::pending_count(conn, &scope.private, schedule_id)? >= 128
-        {
-            return Ok(Receipt {
-                status: 429,
-                id: None,
-                reason: "pending_capacity",
-            });
-        }
-        let state = if status != 202 {
-            "rejected"
-        } else if paused {
-            "paused"
-        } else {
-            "pending"
-        };
-        let id = random_token("delivery")?;
-        let expires_at = verified
-            .as_ref()
-            .map(|event| {
-                timestamp(event.event_time + Duration::seconds(config.max_age_seconds.into()))
-            })
-            .unwrap_or_else(|| time.clone());
-        let payload = DeliveryPayload {
-            source: config.source.clone(),
-            reason: if paused && status == 202 {
-                "This trigger is paused. The event will not run or replay on resume.".into()
+            if local_event::count(conn, &scope.private, schedule_id)? >= 10_000 {
+                return Ok(Receipt {
+                    status: 429,
+                    id: None,
+                    reason: "delivery_capacity",
+                });
+            }
+            let (status, reason, preview) = match preview {
+                Ok(Some(preview)) if !preview.missing.is_empty() => {
+                    (422, "missing_selected_fields", None)
+                }
+                Ok(preview) => (status, reason, preview),
+                Err(reason) => (
+                    if reason == "signing_key_unavailable" {
+                        503
+                    } else {
+                        422
+                    },
+                    reason,
+                    None,
+                ),
+            };
+            let paused = current.status != "enabled";
+            if status == 202
+                && !paused
+                && local_event::pending_count(conn, &scope.private, schedule_id)? >= 128
+            {
+                return Ok(Receipt {
+                    status: 429,
+                    id: None,
+                    reason: "pending_capacity",
+                });
+            }
+            let state = if status != 202 {
+                "rejected"
+            } else if paused {
+                "paused"
             } else {
-                reason.into()
-            },
-            selected_fields: preview
+                "pending"
+            };
+            let id = random_token("delivery")?;
+            let expires_at = verified
                 .as_ref()
-                .map(|p| p.selected_fields.clone())
-                .unwrap_or_default(),
-            prompt: preview.map(|p| p.prompt),
-            event_time: verified.as_ref().map(|event| timestamp(event.event_time)),
-        };
-        local_event::insert(
-            conn,
-            store,
-            &scope.private,
-            &DeliveryRow {
-                id: id.clone(),
-                schedule_id: schedule_id.into(),
-                schedule_revision: current.revision,
-                fingerprint: verified.as_ref().map(|event| event.id_fingerprint.clone()),
-                body_fingerprint: verified
+                .map(|event| {
+                    timestamp(event.event_time + Duration::seconds(config.max_age_seconds.into()))
+                })
+                .unwrap_or_else(|| time.clone());
+            let payload = DeliveryPayload {
+                source: config.source.clone(),
+                reason: if paused && status == 202 {
+                    "This trigger is paused. The event will not run or replay on resume.".into()
+                } else {
+                    reason.into()
+                },
+                selected_fields: preview
                     .as_ref()
-                    .map(|event| event.body_fingerprint.clone()),
-                state: state.into(),
-                received_at: time.clone(),
-                expires_at,
-                dedup_until: timestamp(now + Duration::days(7)),
-                occurrence_id: None,
-                payload: encode(&payload)?,
-            },
-        )?;
-        local_event::prune(
-            conn,
-            store,
-            &scope.private,
-            schedule_id,
-            &time,
-            &timestamp(now - Duration::hours(24)),
-        )?;
-        if state == "pending" {
-            let mut row = current;
-            row.next_run_at = local_event::first_pending(conn, store, &scope.private, schedule_id)?
-                .map(|event| event.received_at);
-            repo::replace_schedule(conn, store, &scope.private, row.revision, &row)?;
-        }
-        Ok(Receipt {
-            status: if paused && status == 202 { 409 } else { status },
-            id: Some(id),
-            reason: if paused && status == 202 {
-                "trigger_paused"
-            } else {
-                reason
-            },
+                    .map(|p| p.selected_fields.clone())
+                    .unwrap_or_default(),
+                prompt: preview.map(|p| p.prompt),
+                event_time: verified.as_ref().map(|event| timestamp(event.event_time)),
+            };
+            local_event::insert(
+                conn,
+                store,
+                &scope.private,
+                &DeliveryRow {
+                    id: id.clone(),
+                    schedule_id: schedule_id.into(),
+                    schedule_revision: current.revision,
+                    fingerprint: verified.as_ref().map(|event| event.id_fingerprint.clone()),
+                    body_fingerprint: verified
+                        .as_ref()
+                        .map(|event| event.body_fingerprint.clone()),
+                    state: state.into(),
+                    received_at: time.clone(),
+                    expires_at,
+                    dedup_until: timestamp(now + Duration::days(7)),
+                    occurrence_id: None,
+                    payload: encode(&payload)?,
+                },
+            )?;
+            local_event::prune(
+                conn,
+                store,
+                &scope.private,
+                schedule_id,
+                &time,
+                &timestamp(now - Duration::hours(24)),
+            )?;
+            if state == "pending" {
+                let mut row = current;
+                row.next_run_at =
+                    local_event::first_pending(conn, store, &scope.private, schedule_id)?
+                        .map(|event| event.received_at);
+                repo::replace_schedule(conn, store, &scope.private, row.revision, &row)?;
+            }
+            Ok(Receipt {
+                status: if paused && status == 202 { 409 } else { status },
+                id: Some(id),
+                reason: if paused && status == 202 {
+                    "trigger_paused"
+                } else {
+                    reason
+                },
+            })
         })
     })
 }
@@ -250,6 +296,7 @@ pub(super) fn public(
         thread_id: None,
     };
     match event.state.as_str() {
+        "pending" => event.payload.reason = "Waiting for an available agent/provider and ordinary Work capacity. The event must still be fresh when admitted.".into(),
         "expired" => {
             event.payload.reason = "The event or trigger expired before Work admission.".into()
         }

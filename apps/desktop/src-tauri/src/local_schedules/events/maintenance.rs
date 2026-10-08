@@ -11,14 +11,15 @@ pub(super) fn start() {
         loop {
             let fence = fence.clone();
             let active = tauri::async_runtime::spawn_blocking(move || {
-                fence.with_current(|| {
-                    crate::account_session::ensure_current()?;
+                (|| {
                     let store = global_store()?;
                     let scope = authorized_scope::active_command_scope(ScopeAccess::Write)?;
-                    store
-                        .transaction(|conn| sweep(conn, store, &scope.private, Utc::now()))
-                        .map_err(|_| "Event retention could not be updated.".to_string())
-                })
+                    fence.with_current(|| {
+                        store
+                            .transaction(|conn| sweep(conn, store, &scope.private, Utc::now()))
+                            .map_err(|_| "Event retention could not be updated.".to_string())
+                    })
+                })()
             })
             .await;
             if crate::account_session::ensure_current().is_err() {

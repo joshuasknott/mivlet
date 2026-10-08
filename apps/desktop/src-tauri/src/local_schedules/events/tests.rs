@@ -103,6 +103,8 @@ fn receive(
             now,
         },
         |_, _, body, signature| verify(body, signature),
+        |_, _, preview| Ok(preview),
+        &(),
     )
     .unwrap()
 }
@@ -175,7 +177,7 @@ fn github_uses_signed_body_identity_and_freshness_not_unsigned_delivery_headers(
 fn templates_only_expose_selected_bounded_scalars_and_redact_credentials() {
     let mut draft = config().draft();
     draft.fields = vec!["summary".into(), "count".into()];
-    let rendered=template::render(&draft,"Inspect {{body.summary}} ({{body.count}})",&serde_json::json!({"summary":"Build failed\n{{body.secret}}", "count":3,"secret":"never-published"}),None).unwrap();
+    let rendered=template::render(&draft,"Inspect {{body.summary}} ({{body.count}})",&serde_json::json!({"summary":"Build failed\n{{body.secret}}", "count":3,"secret":"never-published"})).unwrap();
     assert!(!rendered.prompt.contains("never-published"));
     assert!(rendered.prompt.contains("\\n"));
     assert_eq!(rendered.selected_fields["count"], 3);
@@ -195,15 +197,13 @@ fn templates_only_expose_selected_bounded_scalars_and_redact_credentials() {
     assert!(template::render(
         &draft,
         "Inspect {{body.summary}}",
-        &serde_json::json!({"summary":{"secret":"not-scalar"}}),
-        None
+        &serde_json::json!({"summary":{"secret":"not-scalar"}})
     )
     .is_err());
     assert!(template::render(
         &draft,
         "Inspect {{body.summary}}",
-        &serde_json::json!({"summary":"x".repeat(2049)}),
-        None
+        &serde_json::json!({"summary":"x".repeat(2049)})
     )
     .is_err());
     assert!(template::parse(br#"[1,2]"#).is_err());
@@ -263,6 +263,8 @@ fn failed_authentication_never_stages_work_or_persists_payload() {
             now: at(NOW),
         },
         |_, _, _, _| Ok(false),
+        |_, _, preview| Ok(preview),
+        &(),
     )
     .unwrap();
     assert_eq!(receipt.status, 401);
@@ -281,6 +283,93 @@ fn failed_authentication_never_stages_work_or_persists_payload() {
     )
     .unwrap()
     .is_none());
+}
+
+#[test]
+fn account_stop_between_verification_and_commit_persists_no_delivery() {
+    struct StoppedFence;
+    impl delivery::ReceiptFence for StoppedFence {
+        fn commit<T>(
+            &self,
+            _: impl FnOnce() -> crate::store::Result<T>,
+        ) -> crate::store::Result<T> {
+            Err(StoreError::Invalid(
+                "Account stopped after verification".into(),
+            ))
+        }
+    }
+    let (store, scope) = fixture();
+    let raw = br#"{"summary":"Account stop canary"}"#;
+    assert!(delivery::receive(
+        &store,
+        &scope,
+        delivery::IncomingEvent {
+            schedule_id: "event-test",
+            route: &config().route_id,
+            headers: &headers(raw, "one", at(NOW)),
+            raw,
+            now: at(NOW)
+        },
+        |_, _, body, signature| verify(body, signature),
+        |_, _, preview| Ok(preview),
+        &StoppedFence
+    )
+    .is_err());
+    assert_eq!(
+        store
+            .with_conn(|conn| crate::store::repos::local_event::count(
+                conn,
+                &scope.private,
+                "event-test"
+            ))
+            .unwrap(),
+        0
+    );
+}
+
+#[test]
+fn native_verification_runs_outside_the_account_commit_fence() {
+    use std::cell::Cell;
+    struct Fence(Cell<bool>);
+    impl delivery::ReceiptFence for Fence {
+        fn commit<T>(
+            &self,
+            operation: impl FnOnce() -> crate::store::Result<T>,
+        ) -> crate::store::Result<T> {
+            self.0.set(true);
+            let result = operation();
+            self.0.set(false);
+            result
+        }
+    }
+    let (store, scope) = fixture();
+    let fence = Fence(Cell::new(false));
+    let raw = br#"{"summary":"Native verifier"}"#;
+    let receipt = delivery::receive(
+        &store,
+        &scope,
+        delivery::IncomingEvent {
+            schedule_id: "event-test",
+            route: &config().route_id,
+            headers: &headers(raw, "one", at(NOW)),
+            raw,
+            now: at(NOW),
+        },
+        |_, _, body, signature| {
+            assert!(
+                !fence.0.get(),
+                "Native custody must acquire its own identity lock"
+            );
+            verify(body, signature)
+        },
+        |_, _, preview| {
+            assert!(!fence.0.get());
+            Ok(preview)
+        },
+        &fence,
+    )
+    .unwrap();
+    assert_eq!(receipt.status, 202);
 }
 
 #[test]

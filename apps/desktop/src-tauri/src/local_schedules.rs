@@ -540,6 +540,7 @@ pub fn local_schedule_dispatch_claim(
     *active = None;
     let store = global_store()?;
     let scope = resolve_private_scope(store, &request.workspace_id, ScopeAccess::Write)?;
+    events::require_schedule_key(store, &scope, &request.expected_schedule_id)?;
     let reservation = LocalScheduleCapacityReservation::new(
         random_token("capacity").map_err(|error| error.to_string())?,
     )?;

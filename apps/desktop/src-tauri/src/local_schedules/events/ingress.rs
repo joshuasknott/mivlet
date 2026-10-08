@@ -184,11 +184,7 @@ async fn handle(
     {
         return reply(404, "unknown_endpoint", None);
     }
-    if state
-        .fence
-        .with_current(|| crate::account_session::ensure_current())
-        .is_err()
-    {
+    if state.fence.with_current(|| Ok(())).is_err() {
         return reply(503, "account_unavailable", None);
     }
     // Browser requests never constitute a supported event source. No CORS or
@@ -250,7 +246,7 @@ async fn handle(
     };
     let fence = state.fence.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
-        fence.with_current(|| {
+        (|| {
             let store = global_store()?;
             let scope = authorized_scope::active_command_scope(ScopeAccess::Write)?;
             delivery::receive(
@@ -273,9 +269,19 @@ async fn handle(
                         signature,
                     )
                 },
+                |schedule, config, preview| {
+                    secrets::redact(
+                        scope.data.workspace_id(),
+                        &schedule.agent_id,
+                        &schedule.id,
+                        config,
+                        preview,
+                    )
+                },
+                fence.as_ref(),
             )
             .map_err(|_| "Event delivery could not be persisted.".to_string())
-        })
+        })()
     })
     .await;
     match result {

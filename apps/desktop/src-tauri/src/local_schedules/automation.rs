@@ -40,6 +40,8 @@ pub fn local_schedule_dispatch_stage(
     )?;
     let profiles = crate::collaboration::native_profiles(app, &request.workspace_id)?;
     let store = global_store()?;
+    let private_scope = resolve_private_scope(store, &request.workspace_id, ScopeAccess::Write)?;
+    events::require_occurrence_key(store, &private_scope, &request.occurrence_id)?;
     store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(

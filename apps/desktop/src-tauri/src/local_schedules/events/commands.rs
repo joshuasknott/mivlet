@@ -29,6 +29,9 @@ pub fn event_trigger_save(
     template::validate(&request.event, &request.prompt).map_err(|error| error.to_string())?;
     template::validate_new_expiry(&request.event, Utc::now()).map_err(|error| error.to_string())?;
     validate_bounded_id(&request.id, "Event trigger", MAX_ID_CHARACTERS)?;
+    if !template::identifier(&request.id, 96) {
+        return Err("Event trigger IDs use at most 96 ASCII letters, numbers, dots, underscores or hyphens.".into());
+    }
     if !request.signing_key_id.starts_with("webhook-key:") || request.signing_key_id.len() > 160 {
         return Err("Choose the key reference returned by protected webhook signing setup.".into());
     }
@@ -87,12 +90,7 @@ pub fn event_trigger_save(
     fence.with_current(|| {
         store
             .transaction(|conn| {
-                let scope = authorized_scope::resolve(
-                    conn,
-                    Some(&request.workspace_id),
-                    None,
-                    ScopeAccess::Write,
-                )?;
+                scope.private.ensure_exists(conn)?;
                 let trigger = LocalScheduleTrigger::Event { config };
                 let result = if let Some(expected_revision) = request.expected_revision {
                     update_at(
@@ -167,7 +165,7 @@ pub fn event_template_preview(
 ) -> Result<EventPreview, String> {
     require_main_window(&window)?;
     template::parse(request.sample_json.as_bytes())
-        .and_then(|body| template::render(&request.event, &request.prompt, &body, None))
+        .and_then(|body| template::render(&request.event, &request.prompt, &body))
         .map_err(|error| error.to_string())
 }
 

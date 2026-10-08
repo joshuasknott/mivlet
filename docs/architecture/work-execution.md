@@ -172,6 +172,12 @@ pause/remove controls. New triggers are paused. The main native window owns
 configuration; a browser preview cannot receive events or save triggers.
 Signing keys belong to the native protected-secret consumer for the exact
 account/workspace/agent/trigger target. No plaintext key crosses the renderer.
+This workstream builds on protected-secret checkpoint
+`d95f0e4ced3ed9da0306c126c9eba0d5e8927f78`. Its narrow native consumer also
+scrubs arbitrary signing values and their JSON spelling from selected event
+text before the receipt is committed. Removing a bound key pauses the trigger;
+key availability is checked again before claim and Work staging. The event
+workstream adds no key getter or signer.
 
 The opt-in listener binds `127.0.0.1` on the account's configured port. It
 accepts only bounded JSON POSTs at `/events/<trigger-id>/<route-id>`, rejects

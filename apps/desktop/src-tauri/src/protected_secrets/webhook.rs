@@ -180,6 +180,48 @@ impl<C: Custody> Service<'_, C> {
         .is_ok())
     }
 
+    /// Event history may retain selected text only after the same scoped native
+    /// consumer removes its signing material. This returns sanitized input,
+    /// never a key, signer or export; missing/revoked custody fails closed.
+    pub(super) fn redact_event_texts(
+        &self,
+        scope: &Scope,
+        id: &str,
+        target: &str,
+        texts: &[String],
+    ) -> Result<Vec<String>, Failure> {
+        if texts.len() > 13
+            || texts.iter().any(|text| text.len() > 32_000)
+            || texts.iter().map(String::len).sum::<usize>() > 64_000
+        {
+            return Err(Failure::Invalid);
+        }
+        let _custody = CUSTODY_LOCK.lock().map_err(|_| Failure::Custody)?;
+        let key = self.key(scope, id, target)?;
+        if key.revoked {
+            return Err(Failure::Unavailable);
+        }
+        let value = self
+            .custody
+            .get(&scope.account, &key.id)?
+            .ok_or(Failure::Custody)?;
+        if value.is_empty() {
+            return Err(Failure::Custody);
+        }
+        let quoted = serde_json::to_string(value.as_str()).map_err(|_| Failure::Invalid)?;
+        let escaped = &quoted[1..quoted.len() - 1];
+        Ok(texts
+            .iter()
+            .map(|text| {
+                crate::secret_redaction::redact_secret_text_or_omit(
+                    &text
+                        .replace(value.as_str(), "[REDACTED]")
+                        .replace(escaped, "[REDACTED]"),
+                )
+            })
+            .collect())
+    }
+
     pub(super) fn revoke_key(
         &self,
         scope: &Scope,

@@ -146,29 +146,16 @@ pub(super) fn lookup<'a>(body: &'a Value, path: &str) -> Option<&'a Value> {
     Some(value)
 }
 
-pub(super) fn render(
-    draft: &EventDraft,
-    template: &str,
-    body: &Value,
-    signing_secret: Option<&str>,
-) -> Result<EventPreview> {
+pub(super) fn render(draft: &EventDraft, template: &str, body: &Value) -> Result<EventPreview> {
     validate(draft, template)?;
     let mut selected_fields = BTreeMap::new();
     let mut missing = Vec::new();
     for path in &draft.fields {
         match lookup(body, path) {
             Some(Value::String(value)) if value.len() <= MAX_FIELD_BYTES => {
-                let scrubbed = signing_secret
-                    .filter(|secret| !secret.is_empty())
-                    .map_or_else(
-                        || value.clone(),
-                        |secret| value.replace(secret, "[REDACTED]"),
-                    );
                 selected_fields.insert(
                     path.clone(),
-                    Value::String(crate::secret_redaction::redact_secret_text_or_omit(
-                        &scrubbed,
-                    )),
+                    Value::String(crate::secret_redaction::redact_secret_text_or_omit(value)),
                 );
             }
             Some(value @ (Value::Number(_) | Value::Bool(_))) => {
