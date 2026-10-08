@@ -28,6 +28,7 @@ pub mod connector_cache_settings;
 pub mod draft;
 pub mod execution_attempt;
 pub mod knowledge_source;
+pub mod local_event;
 pub mod local_project;
 pub mod local_schedule;
 pub mod mcp_local_server;

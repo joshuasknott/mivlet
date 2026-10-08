@@ -122,6 +122,8 @@ pub fn run() {
                 protected_secrets::start_maintenance(computers.clone());
                 app.manage(computers);
                 app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
+                app.manage(local_schedules::events::EventIngress::new());
+                local_schedules::events::start_maintenance();
             }
             account_session::start_watchdog(handle);
             Ok(())
@@ -142,6 +144,9 @@ pub fn run() {
                     .try_state::<std::sync::Arc<local_computer::LocalComputerState>>()
                     .map(|state| state.inner().clone());
                 let _ = window.hide();
+                if let Some(ingress) = app.try_state::<local_schedules::events::EventIngress>() {
+                    let _ = ingress.stop();
+                }
                 tauri::async_runtime::spawn(async move {
                     codex_app_server::shutdown_all_runs();
                     embedded_agent::shutdown_all();
@@ -178,6 +183,12 @@ pub fn run() {
             local_schedules::local_schedule_dispatch_renew,
             local_schedules::local_schedule_dispatch_finish,
             local_schedules::local_schedule_dispatch_abandon,
+            local_schedules::events::commands::event_trigger_save,
+            local_schedules::events::commands::event_template_preview,
+            local_schedules::events::commands::event_delivery_list,
+            local_schedules::events::ingress::event_ingress_status,
+            local_schedules::events::ingress::event_ingress_configure,
+            local_schedules::events::ingress::event_ingress_restore,
             local_projects::local_project_create,
             collaboration::collaboration_load,
             collaboration::collaboration_command,

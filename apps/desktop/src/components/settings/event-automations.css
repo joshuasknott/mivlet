@@ -1,0 +1,83 @@
+.event-automations {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  min-width: 0;
+}
+.event-automations > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.event-automations__body,
+.event-automations__editor,
+.event-automations__trigger,
+.event-automations__ingress,
+.event-automations__delivery {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.event-automations__body {
+  padding-top: 12px;
+}
+.event-automations__trigger,
+.event-automations__editor,
+.event-automations__delivery {
+  border-top: 1px solid var(--line);
+  padding-block: 16px;
+}
+.event-automations label {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.event-automations .input {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-1);
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+}
+.event-automations .input:focus-visible,
+.event-automations summary:focus-visible {
+  outline: 2px solid var(--accent-line);
+  outline-offset: 2px;
+}
+.event-automations pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 12px;
+  background: var(--surface-raised);
+  font-size: 12px;
+}
+.event-automations p,
+.event-automations code,
+.event-automations small {
+  overflow-wrap: anywhere;
+}
+.event-automations__pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.event-automations .event-automations__check {
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+}
+.event-automations__check input {
+  width: 18px;
+  height: 18px;
+}
+@media (max-width: 580px) {
+  .event-automations__pair {
+    grid-template-columns: 1fr;
+  }
+}

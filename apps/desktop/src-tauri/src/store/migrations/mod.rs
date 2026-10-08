@@ -12,6 +12,8 @@
 
 use rusqlite::{Connection, OptionalExtension};
 
+pub(crate) mod local_events;
+
 /// Apply forward schema migrations from `from` → `to` (inclusive of `to`).
 ///
 /// v1 DDL is created by [`crate::store::schema::SCHEMA_V1`] before this runs,

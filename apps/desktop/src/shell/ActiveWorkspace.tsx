@@ -20,6 +20,7 @@ import {
   useLocalScheduleDispatcher,
   useLocalScheduleDispatchStatus,
 } from "../hooks/useLocalScheduleDispatcher";
+import { useEventIngress } from "../hooks/useEventIngress";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import { ExecutionApprovalRouter } from "../lib/execution-approvals";
 import {
@@ -201,6 +202,7 @@ export function ActiveWorkspace({
         .catch((error) => service.report(error));
   }, [accountDialog]);
 
+  useEventIngress(workspaceId, runtime.runtimeSnapshotReady && !runtime.runtimeSnapshotError);
   useLocalScheduleDispatcher({
     workspaceId,
     agents: runtime.agents,

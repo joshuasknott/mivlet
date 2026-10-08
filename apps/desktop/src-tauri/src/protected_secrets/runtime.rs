@@ -166,8 +166,16 @@ pub(crate) fn execute(
             } else {
                 service.key_status(&scope, &input.key_id, &input.target_id)
             };
-            serde_json::to_value(status.map_err(|e| e.to_string())?)
-                .map_err(|_| Failure::History.to_string())?
+            let status = status.map_err(|e| e.to_string())?;
+            if tool == "webhook-signing-remove" {
+                crate::local_schedules::events::pause_revoked_key(
+                    workspace,
+                    agent,
+                    &input.key_id,
+                    &input.target_id,
+                )?;
+            }
+            serde_json::to_value(status).map_err(|_| Failure::History.to_string())?
         }
         "webhook-signing-verify" => {
             let input: VerifyInput = decode(arguments)?;
@@ -203,6 +211,23 @@ pub(crate) fn verify_webhook_signature(
     let result = service(store)
         .and_then(|s| s.verify(&scope, key_id, target_id, body, signature))
         .map_err(|e| e.to_string())?;
+    fence.with_current(|| Ok(result))
+}
+
+/// Native-only event text scrubber; the renderer cannot call it or obtain a key.
+pub(crate) fn redact_event_texts(
+    workspace: &str,
+    agent: &str,
+    key_id: &str,
+    target_id: &str,
+    texts: &[String],
+) -> Result<Vec<String>, String> {
+    let scope = scope(workspace, agent, 0)?;
+    let store = crate::store::try_global().ok_or("Protected request storage is unavailable.")?;
+    let fence = AccountDispatchFence::capture()?;
+    let result = service(store)
+        .and_then(|service| service.redact_event_texts(&scope, key_id, target_id, texts))
+        .map_err(|error| error.to_string())?;
     fence.with_current(|| Ok(result))
 }
 

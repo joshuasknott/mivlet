@@ -164,6 +164,99 @@ this does not provide an offline or hosted worker. Existing schedules without an
 execution kind default to read-only research and retain their restricted Codex
 runner. Their project occurrences continue using `bind_schedule`/`finish_schedule`.
 
+### Authenticated event triggers
+
+Agent schedule settings include event source, selected payload fields, task
+preview, protected signing-key reference, expiry, delivery history and
+pause/remove controls. New triggers are paused. The main native window owns
+configuration; a browser preview cannot receive events or save triggers.
+Signing keys belong to the native protected-secret consumer for the exact
+account/workspace/agent/trigger target. No plaintext key crosses the renderer.
+This workstream builds on protected-secret checkpoint
+`d95f0e4ced3ed9da0306c126c9eba0d5e8927f78`. Its narrow native consumer also
+scrubs arbitrary signing values and their JSON spelling from selected event
+text before the receipt is committed. Removing a bound key pauses the trigger;
+key availability is checked again before claim and Work staging. The event
+workstream adds no key getter or signer.
+
+The opt-in listener binds `127.0.0.1` on the account's configured port. It
+accepts only bounded JSON POSTs at `/events/<trigger-id>/<route-id>`, rejects
+browser origins and query strings, and requires a signature even when a route
+is known. Configuration changes serialize, and account teardown closes the
+listener. Mivlet must be open, signed in, awake, and have the target workspace
+active. Public sources require an independently configured HTTPS forwarder to
+this loopback endpoint; Mivlet provisions no tunnel, cloud holding or remote
+worker. Closed/sleeping/disconnected computers miss deliveries. Sources must
+retry while their signed event is still fresh; no retrospective replay is
+performed.
+
+| Source | Authenticated identity and freshness |
+| --- | --- |
+| Signed JSON | `x-mivlet-event-source` equals the configured source ID; ID and Unix-seconds event time are covered with the raw body by HMAC-SHA256. |
+| GitHub issues | GitHub raw-body HMAC; exact signed `repository.full_name` and `issue.updated_at`; issue payloads containing `pull_request` are excluded. |
+| GitHub workflow runs | GitHub raw-body HMAC; exact signed repository and `workflow_run.updated_at`. |
+
+For signed JSON, sign these UTF-8 bytes followed immediately by the exact raw
+request bytes: `v1\n<source-id>\n<event-id>\n<unix-seconds>\n`. Set
+`x-mivlet-signature: v1=<64-hex-HMAC>`, the three corresponding
+`x-mivlet-event-*` headers, and `Content-Type: application/json`. Reuse the same
+ID and body on redelivery. IDs accept ASCII letters/numbers/dots/underscores/
+hyphens (128 bytes maximum). GitHub uses `x-hub-signature-256: sha256=<hex>`;
+its delivery/event headers are not cryptographic proof, so replay identity
+comes from the authenticated body. This follows
+[GitHub's raw-body validation contract](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries).
+
+Templates expose at most 12 unique dotted scalar paths (160 bytes, eight
+segments maximum), using `{{body.issue.title}}` syntax. Arrays allow explicit
+numeric indices. Whole objects, raw bodies, headers, query strings, scripts,
+credential paths and unknown placeholders are excluded. Bodies are limited to
+256 KiB, each selected string to 2,048 bytes, templates to 16,000 bytes and
+produced requests to 32,000 bytes. Values are redacted and JSON quoted as
+untrusted evidence; they grant no permission. A preview starts no Work. Events
+older than the configured 1 minute–24 hour window or more than 30 seconds in
+the future fail closed. Trigger expiry is absolute and must be configured
+within 90 days.
+
+Authenticated delivery inserts an encrypted, scoped pending receipt. A native
+transaction claims it once through the existing occurrence lease and serial
+capacity reservation. Ordinary Work then freezes the produced request,
+provider/model/effort, event origin and minimum permission ceiling. Stop,
+approvals, tool authority and recovery remain with the existing executor.
+Changing a trigger invalidates old revisions; key/source changes or explicit
+rotation replace the route. Paused/removed/expired deliveries do not replay on
+resume. An expired claimed occurrence becomes interrupted, with no automatic
+retry. Event receipt and trigger expiry are rechecked at admission and by the
+root Work fence before effects. Unavailable providers leave pending receipts
+until their freshness deadline.
+
+History shows the latest 50 redacted deliveries, produced request, rejection
+reason and canonical Work outcome/conversation link. No raw request, headers,
+signature or signing key is persisted. Preview content expires after 24 hours
+or displacement from the newest 50 entries; minimal replay digests remain for
+seven days. Each trigger caps pending receipts at 128 and replay records at
+10,000, refusing new delivery when full rather than evicting fresh replay
+protection. Ingress additionally caps concurrent requests at eight, rate at
+60 per trigger per minute, headers at 16 KiB/64 entries, and body reads at five
+seconds. Retention sweeps run in the authenticated app for the active workspace
+and at history/delivery access. The feature migration uses
+`schema_meta['feature:event-automations']='1'`, preserving core schema v42 and
+existing clock rows, relationships and indexes.
+
+Behavioral references were reviewed in MIT-licensed T3 Code at snapshot
+`a4c9494b0e3606775cc5fc929fc138399288bd43`; no T3 implementation was copied.
+The server/relay/mobile/web chain is
+[#15085](https://github.com/pingdotgg/t3code/pull/15085)
+(`7dfb86a32be6ec064dd8988e1a3b44cc046ff958`),
+[#15086](https://github.com/pingdotgg/t3code/pull/15086)
+(`b070e52d3e6b49c98117249e5b3f0d46edce173a`),
+[#15087](https://github.com/pingdotgg/t3code/pull/15087)
+(`aee889b0e043fdc652e48850698d08ebc563d5bc`) and
+[#15088](https://github.com/pingdotgg/t3code/pull/15088)
+(`ea4b44343d3c8f71cf49a72a266d00eac7389435`). The offline-holding follow-up
+[#15487](https://github.com/pingdotgg/t3code/pull/15487)
+(`f33b060cafc96d7c3229744315c230a3b8d1f631`) was considered; this local-first
+implementation has no corresponding relay or holding capability.
+
 Saved results can be promoted into Memory through the baseline Memory
 interface (`save_memory_state`) with explicit user-confirmed conclusion text,
 an owning Agent or Project scope and run provenance. Only the new record is
