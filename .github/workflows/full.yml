@@ -1,19 +1,28 @@
 name: Full validation
+run-name: ${{ inputs.bundle_profile && 'Production bundle profile' || 'Full validation' }}
 
 on:
   workflow_dispatch:
+    inputs:
+      bundle_profile:
+        description: Profile the production renderer only (not full validation)
+        type: boolean
+        default: false
   schedule:
-    - cron: '17 3 * * *'
+    - cron: "17 3 * * *"
 
 permissions:
   contents: read
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}-${{ inputs.bundle_profile && 'profile' || 'full' }}
   cancel-in-progress: true
 
 jobs:
   check:
+    # A profile dispatch must not emit a skipped/successful required `check`.
+    name: ${{ inputs.bundle_profile && 'full-validation-not-requested' || 'check' }}
+    if: ${{ !inputs.bundle_profile }}
     runs-on: windows-latest
     timeout-minutes: 60
     steps:
@@ -48,3 +57,30 @@ jobs:
       - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
       - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+  bundle-profile:
+    if: ${{ inputs.bundle_profile }}
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.15.0
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: node --test scripts/perf/profile.test.mjs scripts/perf/budget.test.mjs
+      - run: pnpm --filter @mivlet/desktop exec vite build --config ../../scripts/perf/profile.vite.config.mjs --configLoader runner
+      - run: pnpm perf:check
+      - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
+        with:
+          name: bundle-profile-${{ github.sha }}
+          path: output/bundle-profile/report.json
+          if-no-files-found: error
+          retention-days: 14
