@@ -72,8 +72,11 @@ export function SubscriptionUsage({
   const [reports, setReports] = useState<
     Record<string, ProviderAllowance | null>
   >({});
-  const [loading, setLoading] = useState(true);
-  const [pending, setPending] = useState(false);
+  const [phase, setPhase] = useState<"loading" | "ready" | "refreshing">(
+    "loading",
+  );
+  const loading = phase === "loading";
+  const pending = phase === "refreshing";
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now);
   const generation = useRef(0);
@@ -81,99 +84,70 @@ export function SubscriptionUsage({
     providers ?? inventory,
     connectedProviderIds,
   );
-  useEffect(() => {
+  const load = async (refresh = false) => {
+    if (refresh && phase !== "ready") return;
     const request = ++generation.current;
-    setReports({});
-    setLoading(true);
-    setPending(false);
+    if (!refresh) setReports({});
+    setPhase(refresh ? "refreshing" : "loading");
     setError("");
-    void (async () => {
-      try {
-        const available = providers ?? (await listRuntimeBackends());
-        if (request !== generation.current) return;
-        if (!available) {
-          setInventory([]);
-          throw new Error("Provider metadata unavailable");
-        }
-        setInventory(available);
-        await Promise.all(
-          connectedSubscriptions(available, connectedProviderIds).map(
-            async (provider) => {
-              const report = await readProviderAllowance(provider.id).catch(
-                () => null,
+    try {
+      const available = providers ?? (await listRuntimeBackends());
+      if (request !== generation.current) return;
+      if (!available) throw new Error("Provider metadata unavailable");
+      setInventory(available);
+      await Promise.all(
+        connectedSubscriptions(available, connectedProviderIds).map(
+          async (provider) => {
+            let report: ProviderAllowance | null = null;
+            let failed = false;
+            try {
+              report = await (
+                refresh ? refreshProviderAllowance : readProviderAllowance
+              )(provider.id);
+            } catch {
+              failed = refresh;
+            }
+            if (request !== generation.current) return;
+            setNow(Date.now());
+            if (failed)
+              setError(
+                "Some allowances could not be refreshed. Last measurements remain visible.",
               );
-              if (request === generation.current) {
-                setNow(Date.now());
-                setReports((current) => ({
-                  ...current,
-                  [provider.id]: report,
-                }));
-              }
-            },
-          ),
-        );
-      } catch {
-        if (request === generation.current)
-          setError("Connected subscriptions could not be loaded.");
-      } finally {
-        if (request === generation.current) setLoading(false);
+            setReports((current) => ({
+              ...current,
+              [provider.id]:
+                failed && current[provider.id]
+                  ? {
+                      ...current[provider.id]!,
+                      status: "stale",
+                      resetOpportunity: undefined,
+                    }
+                  : report,
+            }));
+          },
+        ),
+      );
+    } catch {
+      if (request === generation.current) {
+        setInventory([]);
+        setReports({});
+        setError("Connected subscriptions could not be loaded.");
       }
-    })();
+    } finally {
+      if (request === generation.current) {
+        setNow(Date.now());
+        setPhase("ready");
+      }
+    }
+  };
+  useEffect(() => {
+    void load();
     const timer = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => {
       generation.current++;
       window.clearInterval(timer);
     };
   }, [providers, connectedProviderIds]);
-  const refresh = async () => {
-    if (pending || loading) return;
-    const request = ++generation.current;
-    setPending(true);
-    setError("");
-    let targets = subscriptions;
-    if (!providers) {
-      const available = await listRuntimeBackends().catch(() => null);
-      if (request !== generation.current) return;
-      setInventory(available ?? []);
-      if (!available) {
-        setReports({});
-        setError("Connected subscriptions could not be loaded.");
-        setPending(false);
-        return;
-      }
-      targets = connectedSubscriptions(available, connectedProviderIds);
-    }
-    await Promise.all(
-      targets.map(async (provider) => {
-        try {
-          const report = await refreshProviderAllowance(provider.id);
-          if (request === generation.current) {
-            setNow(Date.now());
-            setReports((current) => ({ ...current, [provider.id]: report }));
-          }
-        } catch {
-          if (request !== generation.current) return;
-          setError(
-            "Some allowances could not be refreshed. Last measurements remain visible.",
-          );
-          setReports((current) => ({
-            ...current,
-            [provider.id]: current[provider.id]
-              ? {
-                  ...current[provider.id]!,
-                  status: "stale",
-                  resetOpportunity: undefined,
-                }
-              : null,
-          }));
-        }
-      }),
-    );
-    if (request === generation.current) {
-      setNow(Date.now());
-      setPending(false);
-    }
-  };
   return (
     <div className="subscription-usage">
       <header>
@@ -182,7 +156,7 @@ export function SubscriptionUsage({
           className="subscription-usage__refresh"
           type="button"
           disabled={loading || pending || (!subscriptions.length && !error)}
-          onClick={() => void refresh()}
+          onClick={() => void load(true)}
         >
           <ArrowClockwise size={21} aria-hidden="true" />
           {pending ? "Checking…" : "Refresh"}

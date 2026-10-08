@@ -154,6 +154,34 @@ describe("connected subscription usage", () => {
     expect(screen.queryByText("0% used")).not.toBeInTheDocument();
   });
 
+  it("recovers a failed cache read through refresh and retries unavailable metadata", async () => {
+    vi.mocked(listRuntimeBackends).mockResolvedValue([codex]);
+    vi.mocked(readProviderAllowance).mockRejectedValue(
+      new Error("Cache unavailable"),
+    );
+    vi.mocked(refreshProviderAllowance).mockResolvedValue(
+      allowance("codex", 62),
+    );
+    const user = userEvent.setup();
+    render(<SubscriptionUsage />);
+    expect(await screen.findByText("Usage unavailable")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.queryByText("0% used")).not.toBeInTheDocument();
+    vi.mocked(listRuntimeBackends).mockResolvedValueOnce(null);
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Connected subscriptions could not be loaded.",
+    );
+    expect(screen.queryByRole("region")).not.toBeInTheDocument();
+    expect(refreshProviderAllowance).not.toHaveBeenCalled();
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    expect(await screen.findByText("62% used")).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(readProviderAllowance).toHaveBeenCalledOnce();
+    expect(refreshProviderAllowance).toHaveBeenCalledExactlyOnceWith("codex");
+    expect(listRuntimeBackends).toHaveBeenCalledTimes(3);
+  });
+
   it("marks expired data stale, retains distinct provider windows and never invents reset times", async () => {
     vi.mocked(readProviderAllowance).mockResolvedValue({
       ...allowance("codex"),
