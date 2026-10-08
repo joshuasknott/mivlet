@@ -83,7 +83,11 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 40] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 44] = [
+    "repository-pr-read",
+    "repository-pr-local",
+    "repository-pr-action",
+    "repository-pr-watch",
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -289,6 +293,9 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
 
 pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
+        "repository-pr-read" => Some(("read-only", "low")),
+        "repository-pr-local" | "repository-pr-watch" => Some(("full-access", "high")),
+        "repository-pr-action" => Some(("full-access", "critical")),
         "repository-status" | "repository-read" => Some(("read-only", "low")),
         "repository-write" | "repository-commit" => Some(("full-access", "high")),
         "repository-run" | "repository-publish" | "workspace-run" => {

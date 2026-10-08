@@ -10,6 +10,7 @@ import {
   loadRuntimeLocalComputer,
 } from "../../runtime/domains/local-computer";
 import "./repository-files.css";
+import { PullRequestReview } from "./PullRequestReview";
 
 export function RepositoryFiles({
   workspaceId,
@@ -235,6 +236,7 @@ function RepositoryDetails({
               </a>
             </p>
           )}
+          {repo.remote && <PullRequestReview key={repo.id} repository={repo} epoch={epoch} workspaceId={workspaceId} agentId={agentId} />}
         </>
       )}
     </div>

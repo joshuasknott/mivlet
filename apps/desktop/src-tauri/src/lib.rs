@@ -118,6 +118,10 @@ pub fn run() {
                 let computers =
                     std::sync::Arc::new(local_computer::LocalComputerState::initialize(&handle)?);
                 computers.start_activity();
+                local_computer::coding::pull_requests::watch::start(
+                    handle.clone(),
+                    computers.clone(),
+                );
                 app.manage(computers);
                 app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
             }
@@ -152,6 +156,9 @@ pub fn run() {
             }
         })
         .invoke_handler(account_session::guard(tauri::generate_handler![
+            local_computer::coding::pull_requests::coding_pr_read,
+            local_computer::coding::pull_requests::coding_pr_local,
+            local_computer::coding::pull_requests::watch::coding_pr_watch,
             account_session::account_theme,
             local_computer::control::local_app_stop,
             local_computer::artifacts::local_computer_open_artifact,

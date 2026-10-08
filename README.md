@@ -39,6 +39,12 @@ a deployed or production-validated service.
   Node/npm and isolated Python/pip are bundled; publication additionally requires GitHub CLI login. Available through
   Codex, Claude SDK and direct API routes that bridge Mivlet tools. See the
   [coding workflow and its limits](docs/architecture/coding-workflow.md).
+- GitHub PR review for attached repositories: paginated changes, checks and
+  comments, revision-aware viewed files, local review drafts, explicitly approved
+  managed-branch updates and review actions, and bounded optional PR watches
+  that wake existing Work while the desktop is open. Uncertain writes require
+  read-only reconciliation; credentials stay native. See the
+  [PR workflow](docs/architecture/coding-workflow.md#pull-request-review-and-updates).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens
