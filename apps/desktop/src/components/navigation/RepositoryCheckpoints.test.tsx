@@ -163,6 +163,32 @@ describe("repository file checkpoints", () => {
     ).toBeDisabled();
     expect(listRepositoryCheckpoints).not.toHaveBeenCalled();
   });
+  it("identifies the exact checkpoint in a delete approval and cancels without mutation", async () => {
+    setup();
+    fireEvent.click(
+      await screen.findByRole("button", { name: "Delete Tests passing" }),
+    );
+    const confirmation = await screen.findByRole("form", {
+      name: "Confirm checkpoint action",
+    });
+    expect(confirmation).toHaveTextContent("Tests passing");
+    expect(confirmation.querySelector("code")).toHaveTextContent("saved");
+    expect(prepareCheckpointAction).toHaveBeenCalledWith(
+      { workspaceId: "workspace", agentId: "agent", expectedGeneration: 7 },
+      "delete",
+      {
+        repositoryId: "repo",
+        checkpointId: "saved",
+        expectedCheckpointTree: "saved-tree",
+      },
+    );
+    expect(screen.getByRole("button", { name: "Approve once" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(executeCheckpointAction).not.toHaveBeenCalled();
+    expect(
+      screen.queryByRole("form", { name: "Confirm checkpoint action" }),
+    ).not.toBeInTheDocument();
+  });
   it("shows native prerequisites and failed previews without presenting restore", async () => {
     vi.mocked(previewRepositoryCheckpoint).mockRejectedValue(
       new Error("Checkpoint files changed"),

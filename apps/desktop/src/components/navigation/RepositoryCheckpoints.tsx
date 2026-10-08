@@ -377,6 +377,19 @@ export function RepositoryCheckpoints({
                     ? "Delete saved checkpoint"
                     : "Save file checkpoint"}
               </strong>
+              {typeof action.arguments.checkpointId === "string" && (
+                <p>
+                  Checkpoint:{" "}
+                  {
+                    list.data?.checkpoints.find(
+                      (checkpoint) =>
+                        checkpoint.id === action.arguments.checkpointId,
+                    )?.label
+                  }
+                  <br />
+                  <code>{action.arguments.checkpointId}</code>
+                </p>
+              )}
               <p>{action.approval.consequence}</p>
               <label>
                 Type <code>{action.approval.confirmationPhrase}</code>
