@@ -1,13 +1,95 @@
 .repository-copies {
   margin-block: 1rem;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-3);
+  min-width: 0;
+  container-type: inline-size;
+}
+.repository-copies > summary {
+  font-size: var(--text-15);
+  font-weight: 600;
+}
+.repository-copies > summary svg {
+  vertical-align: middle;
+  margin-right: 8px;
 }
 .repository-copies__list {
   padding: 0;
   list-style: none;
+  display: grid;
+  gap: 10px;
 }
 .repository-copies__list > li {
-  padding-block: 1rem;
-  border-bottom: 1px solid var(--border, #8885);
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-2);
+  background: var(--surface-raised);
+  min-width: 0;
+}
+.repository-copies__list > .repository-copies__selected {
+  background: var(--surface-hover);
+  border-color: var(--line-strong);
+}
+.repository-copies__heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+.repository-copies__heading > strong {
+  flex: 1 1 130px;
+  overflow-wrap: anywhere;
+  font-weight: 600;
+}
+.repository-copies svg {
+  flex-shrink: 0;
+}
+.repository-copies__state,
+.repository-copies__tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border-radius: var(--radius-pill);
+  font-size: var(--text-12);
+  line-height: 1.5;
+  max-width: 100%;
+}
+.repository-copies__state--clean {
+  color: var(--positive);
+  background: var(--positive-subtle);
+}
+.repository-copies__state--protected {
+  color: var(--caution);
+  background: var(--caution-subtle);
+}
+.repository-copies__tag {
+  color: var(--ink);
+  background: var(--accent-subtle);
+}
+.repository-copies__size {
+  color: var(--ink-muted);
+  font-size: var(--text-12);
+}
+.repository-copies .repository-copies__storage {
+  display: flex;
+  align-items: start;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-1);
+  background: var(--surface);
+  font-size: var(--text-12);
+}
+.repository-copies__storage svg {
+  margin-top: 2px;
+}
+.repository-copies__details > summary {
+  min-height: 44px;
+  color: var(--ink-muted);
+  font-size: var(--text-12);
 }
 .repository-copies__list p {
   margin-block: 0.5rem;
@@ -31,22 +113,45 @@
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
-  margin-top: 0.75rem;
+  justify-content: end;
+  margin-top: 4px;
 }
 .repository-copies button {
   min-height: 44px;
   max-width: 100%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 .repository-copies__preview {
-  border: 1px solid var(--border, #8885);
-  border-radius: 10px;
-  padding: 1rem;
-  margin-top: 1rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+  background: var(--surface);
+  padding: 12px;
+  margin-top: 12px;
+}
+.repository-copies__preview h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  font-size: var(--text-14);
+  line-height: 1.5;
+  font-weight: 600;
+}
+.repository-copies__preview h4 svg {
+  color: var(--caution);
+}
+.repository-copies .repository-copies__remove {
+  color: var(--destructive);
+  border-color: var(--destructive);
+  background: var(--destructive-subtle);
 }
 .repository-copies__preview button {
   margin: 0.5rem 0.5rem 0 0;
 }
-.repository-copies__confirm {
+.repository-copies .repository-copies__confirm {
   display: flex;
   gap: 0.6rem;
   align-items: start;
@@ -56,4 +161,41 @@
   flex-shrink: 0;
   width: 18px;
   height: 18px;
+}
+@media (max-width: 480px) {
+  .repository-copies {
+    padding: 12px;
+  }
+  .repository-copies__list > li {
+    padding: 10px;
+  }
+  .repository-copies__actions {
+    justify-content: start;
+  }
+  .repository-copies__actions button {
+    flex: 1 1 auto;
+  }
+}
+@container (min-width: 480px) {
+  .repository-copies__list > li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    column-gap: 10px;
+  }
+  .repository-copies__heading {
+    grid-column: 1;
+    min-height: 44px;
+  }
+  .repository-copies__details {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .repository-copies__details[open] {
+    grid-column: 1 / -1;
+    grid-row: auto;
+  }
+  .repository-copies__actions,
+  .repository-copies__preview {
+    grid-column: 1 / -1;
+  }
 }

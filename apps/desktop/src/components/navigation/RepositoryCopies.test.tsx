@@ -140,6 +140,34 @@ describe("retained repository copies", () => {
     expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
     expect(native.remove).not.toHaveBeenCalled();
   });
+  it("keeps cleanup review on the exact owner when retained copy IDs coincide", async () => {
+    native.inventory.mockResolvedValue({
+      copies: [
+        copy,
+        { ...copy, agentId: "other-agent", name: "Other agent copy" },
+      ],
+      busy: false,
+    });
+    setup();
+    const reviews = await screen.findAllByRole("button", {
+      name: "Review cleanup",
+    });
+    expect(reviews[1]).toBeDisabled();
+    fireEvent.click(reviews[0]);
+    await screen.findByRole("region", {
+      name: "Exact repository cleanup preview",
+    });
+    expect(
+      screen.getAllByRole("region", {
+        name: "Exact repository cleanup preview",
+      }),
+    ).toHaveLength(1);
+    const otherOwner = screen
+      .getByText("Other agent copy", { selector: "strong" })
+      .closest("li");
+    expect(otherOwner?.querySelector("section")).toBeNull();
+    expect(native.remove).not.toHaveBeenCalled();
+  });
   it("returns focus after closing a preview without deleting the copy", async () => {
     setup();
     const review = await screen.findByRole("button", {

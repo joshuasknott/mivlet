@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
+import { FolderSimple } from "@phosphor-icons/react/dist/csr/FolderSimple";
+import { CheckCircle } from "@phosphor-icons/react/dist/csr/CheckCircle";
+import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
+import { HardDrives } from "@phosphor-icons/react/dist/csr/HardDrives";
+import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
+import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import type {
   LocalComputerEpochRequest,
+  RepositoryCopy,
   RepositoryCopyCleanupPreview,
 } from "@mivlet/protocol";
 import { loadRuntimeLocalComputer } from "../../runtime/domains/local-computer";
@@ -144,6 +152,83 @@ export function RepositoryCopies({
     inspect.reset();
   };
   const copies = inventory.data?.copies ?? [];
+  const isPreviewCopy = (copy: RepositoryCopy) =>
+    preview !== null &&
+    copy.id === preview.result.copy.id &&
+    copy.accountId === preview.result.copy.accountId &&
+    copy.workspaceId === preview.result.copy.workspaceId &&
+    copy.agentId === preview.result.copy.agentId;
+  const cleanupPreview = preview && (
+    <section
+      ref={previewRef}
+      tabIndex={-1}
+      className="repository-copies__preview"
+      aria-label="Exact repository cleanup preview"
+    >
+      <h4>
+        <ShieldWarning size={22} aria-hidden="true" />
+        {preview.result.previewToken
+          ? "Confirm copy cleanup"
+          : "This copy is protected"}
+      </h4>
+      <p>
+        <strong>{preview.result.copy.name}</strong> ·{" "}
+        <code>{preview.result.copy.id}</code>
+      </p>
+      <p>
+        <code>{preview.result.copy.managedPath}</code>
+        <br />
+        {formatCopyBytes(preview.result.copy.sizeBytes)} · HEAD{" "}
+        <code>{preview.result.copy.head ?? "cleanup recovery"}</code>
+      </p>
+      {preview.result.copy.blockers.length > 0 ? (
+        <ul>
+          {preview.result.copy.blockers.map((reason) => (
+            <li key={reason}>{reason}</li>
+          ))}
+        </ul>
+      ) : (
+        <>
+          <p>
+            Remove this managed copy permanently.{" "}
+            {preview.result.copy.selected && "It will also be deselected. "}
+            The source repository remains intact. This preview expires in{" "}
+            {preview.result.expiresInSeconds} seconds; any change requires
+            another review.
+          </p>
+          <label className="repository-copies__confirm">
+            <input
+              type="checkbox"
+              checked={confirmed}
+              onChange={(event) => setConfirmed(event.target.checked)}
+            />
+            I reviewed this copy and want to remove it.
+          </label>
+          <button
+            className="repository-copies__remove"
+            type="button"
+            disabled={!confirmed || pending}
+            onClick={() => cleanup.mutate()}
+          >
+            <Trash size={16} aria-hidden="true" />{" "}
+            {cleanup.isPending
+              ? "Removing copy…"
+              : "Permanently remove this copy"}
+          </button>
+        </>
+      )}
+      <button
+        type="button"
+        disabled={pending}
+        onClick={() => {
+          setPreview(null);
+          setConfirmed(false);
+        }}
+      >
+        <X size={16} aria-hidden="true" /> Close cleanup preview
+      </button>
+    </section>
+  );
   return (
     <details
       className="repository-copies"
@@ -155,7 +240,10 @@ export function RepositoryCopies({
         }
       }}
     >
-      <summary>Retained copies</summary>
+      <summary>
+        <FolderSimple size={20} aria-hidden="true" />
+        Retained copies
+      </summary>
       {open && (
         <>
           <p>
@@ -172,7 +260,7 @@ export function RepositoryCopies({
               void inventory.refetch();
             }}
           >
-            Refresh copies
+            <ArrowClockwise size={16} aria-hidden="true" /> Refresh copies
           </button>
           {inventory.isPending && (
             <p role="status">Inspecting repository copies…</p>
@@ -193,36 +281,58 @@ export function RepositoryCopies({
             <p>No retained repository copies in this account.</p>
           )}
           {copies.length > 0 && (
-            <p>
-              {formatCopyBytes(
-                copies.reduce(
-                  (total, copy) => total + (copy.sizeBytes ?? 0),
-                  0,
-                ),
-              )}{" "}
-              measured file bytes
-              {copies.some((copy) => copy.sizeBytes === null)
-                ? "; some sizes unavailable"
-                : ""}
-              . Disk allocation may differ.
+            <p className="repository-copies__storage">
+              <HardDrives size={18} aria-hidden="true" />
+              <span>
+                {formatCopyBytes(
+                  copies.reduce(
+                    (total, copy) => total + (copy.sizeBytes ?? 0),
+                    0,
+                  ),
+                )}{" "}
+                measured file bytes
+                {copies.some((copy) => copy.sizeBytes === null)
+                  ? "; some sizes unavailable"
+                  : ""}
+                . Disk allocation may differ.
+              </span>
             </p>
           )}
           <ul className="repository-copies__list">
             {copies.map((copy) => (
-              <li key={`${copy.agentId}:${copy.id}`}>
-                <strong>{copy.name}</strong>{" "}
-                {copy.selected && <span>· Selected</span>}
-                <p>
-                  {copy.cleanupPending
-                    ? "Cleanup interrupted"
-                    : copy.dirty === null
-                      ? "Changes unavailable"
-                      : copy.dirty
-                        ? "Uncommitted or ignored files"
-                        : "Clean"}{" "}
-                  · {formatCopyBytes(copy.sizeBytes)}
-                </p>
-                <details>
+              <li
+                key={`${copy.agentId}:${copy.id}`}
+                className={
+                  copy.selected ? "repository-copies__selected" : undefined
+                }
+              >
+                <div className="repository-copies__heading">
+                  <FolderSimple size={20} aria-hidden="true" />
+                  <strong>{copy.name}</strong>
+                  {copy.selected && (
+                    <span className="repository-copies__tag">Selected</span>
+                  )}
+                  <span
+                    className={`repository-copies__state ${copy.dirty === false && !copy.cleanupPending ? "repository-copies__state--clean" : "repository-copies__state--protected"}`}
+                  >
+                    {copy.dirty === false && !copy.cleanupPending ? (
+                      <CheckCircle size={15} aria-hidden="true" />
+                    ) : (
+                      <ShieldWarning size={15} aria-hidden="true" />
+                    )}
+                    {copy.cleanupPending
+                      ? "Cleanup interrupted"
+                      : copy.dirty === null
+                        ? "Changes unavailable"
+                        : copy.dirty
+                          ? "Uncommitted or ignored files"
+                          : "Clean"}
+                  </span>
+                  <span className="repository-copies__size">
+                    {formatCopyBytes(copy.sizeBytes)}
+                  </span>
+                </div>
+                <details className="repository-copies__details">
                   <summary>Copy details</summary>
                   <dl>
                     <dt>Owner</dt>
@@ -326,78 +436,11 @@ export function RepositoryCopies({
                       : "Review cleanup"}
                   </button>
                 </div>
+                {isPreviewCopy(copy) && cleanupPreview}
               </li>
             ))}
           </ul>
-          {preview && (
-            <section
-              ref={previewRef}
-              tabIndex={-1}
-              className="repository-copies__preview"
-              aria-label="Exact repository cleanup preview"
-            >
-              <h4>
-                {preview.result.previewToken
-                  ? "Confirm copy cleanup"
-                  : "This copy is protected"}
-              </h4>
-              <p>
-                <strong>{preview.result.copy.name}</strong> ·{" "}
-                <code>{preview.result.copy.id}</code>
-              </p>
-              <p>
-                <code>{preview.result.copy.managedPath}</code>
-                <br />
-                {formatCopyBytes(preview.result.copy.sizeBytes)} · HEAD{" "}
-                <code>{preview.result.copy.head ?? "cleanup recovery"}</code>
-              </p>
-              {preview.result.copy.blockers.length > 0 ? (
-                <ul>
-                  {preview.result.copy.blockers.map((reason) => (
-                    <li key={reason}>{reason}</li>
-                  ))}
-                </ul>
-              ) : (
-                <>
-                  <p>
-                    Remove this managed copy permanently.{" "}
-                    {preview.result.copy.selected &&
-                      "It will also be deselected. "}
-                    The source repository remains intact. This preview expires
-                    in {preview.result.expiresInSeconds} seconds; any change
-                    requires another review.
-                  </p>
-                  <label className="repository-copies__confirm">
-                    <input
-                      type="checkbox"
-                      checked={confirmed}
-                      onChange={(event) => setConfirmed(event.target.checked)}
-                    />
-                    I reviewed this copy and want to remove it.
-                  </label>
-                  <button
-                    type="button"
-                    disabled={!confirmed || pending}
-                    onClick={() => cleanup.mutate()}
-                  >
-                    {cleanup.isPending
-                      ? "Removing copy…"
-                      : "Permanently remove this copy"}
-                  </button>
-                </>
-              )}
-              <button
-                type="button"
-                disabled={pending}
-                onClick={() => {
-                  setPreview(null);
-                  setConfirmed(false);
-                }}
-              >
-                Close cleanup preview
-              </button>
-            </section>
-          )}
+          {preview && !copies.some(isPreviewCopy) && cleanupPreview}
         </>
       )}
     </details>
