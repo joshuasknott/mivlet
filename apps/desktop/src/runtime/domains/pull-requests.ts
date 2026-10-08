@@ -3,7 +3,16 @@ import type {
   PullRequestLocalState,
   PullRequestRequest,
 } from "@mivlet/protocol";
-import { invokeNative } from "../bridge";
+import { hasTauriRuntime, invokeNative, listen } from "../bridge";
+export const listenPullRequestWorkUpdates = (
+  onUpdate: (workspaceId: string) => void,
+) =>
+  hasTauriRuntime()
+    ? listen<{ workspaceId: string }>("mivlet:pr-work-updated", (event) => {
+        if (typeof event.payload?.workspaceId === "string")
+          onUpdate(event.payload.workspaceId);
+      })
+    : Promise.resolve(null);
 export const readPullRequest = <T>(
   target: LocalComputerEpochRequest,
   request: PullRequestRequest,

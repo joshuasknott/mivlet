@@ -3,16 +3,21 @@ use std::{cell::RefCell, collections::VecDeque};
 pub(super) struct Fake {
     replies: RefCell<VecDeque<Result<Value, String>>>,
     calls: RefCell<Vec<(String, String, Option<Value>)>>,
+    rejected: bool,
 }
 impl Fake {
     pub(super) fn new(replies: Vec<Result<Value, String>>) -> Self {
         Self {
             replies: RefCell::new(replies.into()),
             calls: RefCell::new(Vec::new()),
+            rejected: false,
         }
     }
 }
 impl Api for Fake {
+    fn rejected_write(&self) -> bool {
+        self.rejected
+    }
     fn request(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
         self.calls
             .borrow_mut()
@@ -135,6 +140,7 @@ fn uncertain_review_survives_reload_blocks_edits_and_recovery_never_replays() {
         Ok(pr(&input)),
         Ok(json!({"login":"viewer"})),
         Ok(json!([])),
+        Ok(pr(&input)),
         Err("connection lost".into()),
     ]);
     let mut saved = Saved::default();
@@ -315,6 +321,7 @@ fn fast_forward_update_pushes_only_reviewed_commit_and_never_replays_after_resta
     let fake = Fake::new(vec![
         Ok(pr(&input)),
         Ok(json!({"login":"viewer"})),
+        Ok(pr(&input)),
         Err("connection lost after push".into()),
     ]);
     assert!(mutations::execute(
@@ -391,4 +398,105 @@ fn native_github_pr_read_acceptance() {
         assert!(detail["head"].as_str().is_some_and(api::sha));
         println!("Live native GitHub list/detail passed; no remote mutation attempted.");
     }
+}
+
+#[test]
+fn concurrent_review_reads_wait_for_the_lock_and_stop_cancels_the_wait() {
+    let (_temp, directory, authority, _repo) = super::super::tests::fixture();
+    let lock = super::super::lock(&directory).unwrap();
+    let guard = lock.lock().unwrap();
+    let ready = std::sync::mpsc::channel();
+    let queued_lock = lock.clone();
+    let ticket = authority.begin_agent(1).unwrap();
+    let worker = std::thread::spawn(move || {
+        ready.0.send(()).unwrap();
+        review_lock(&queued_lock, &ticket).map(|_| ())
+    });
+    ready.1.recv().unwrap();
+    drop(guard);
+    worker.join().unwrap().unwrap();
+    let _guard = lock.lock().unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    authority.revoke(1).unwrap();
+    assert!(review_lock(&lock, &ticket).is_err());
+}
+
+#[test]
+fn confirmed_rejection_releases_the_journal_without_replaying_the_write() {
+    let (_temp, directory, authority, mut repo) = super::super::tests::fixture();
+    repo.remote = Some("https://github.com/example/repository.git".into());
+    let ticket = authority.begin_agent(1).unwrap();
+    let input = request(&repo);
+    let mut fake = Fake::new(vec![
+        Ok(pr(&input)),
+        Ok(json!({"login":"viewer"})),
+        Ok(json!([])),
+        Ok(pr(&input)),
+        Err("GitHub rejected HTTP 422".into()),
+    ]);
+    fake.rejected = true;
+    assert!(mutations::execute(
+        &directory,
+        &mut repo,
+        &mut Saved::default(),
+        &input,
+        &ticket,
+        &fake
+    )
+    .is_err());
+    assert!(!has_pending(&directory, &repo).unwrap());
+    assert_eq!(repo.operation, "idle");
+    assert_eq!(
+        fake.calls
+            .borrow()
+            .iter()
+            .filter(|(method, _, _)| method != "GET")
+            .count(),
+        1
+    );
+}
+
+#[test]
+fn own_approval_and_a_head_that_moves_during_preparation_never_write() {
+    let (_temp, directory, authority, mut repo) = super::super::tests::fixture();
+    repo.remote = Some("https://github.com/example/repository.git".into());
+    let ticket = authority.begin_agent(1).unwrap();
+    let input = request(&repo);
+    let mut own = pr(&input);
+    own["user"] = json!({"login":"VIEWER"});
+    let fake = Fake::new(vec![Ok(own), Ok(json!({"login":"viewer"}))]);
+    assert!(mutations::execute(
+        &directory,
+        &mut repo,
+        &mut Saved::default(),
+        &input,
+        &ticket,
+        &fake
+    )
+    .unwrap_err()
+    .contains("own PR"));
+    let mut moved = pr(&input);
+    moved["head"]["sha"] = "c".repeat(40).into();
+    let fake = Fake::new(vec![
+        Ok(pr(&input)),
+        Ok(json!({"login":"viewer"})),
+        Ok(json!([])),
+        Ok(moved),
+    ]);
+    assert!(mutations::execute(
+        &directory,
+        &mut repo,
+        &mut Saved::default(),
+        &input,
+        &ticket,
+        &fake
+    )
+    .unwrap_err()
+    .contains("changed"));
+    assert!(fake
+        .calls
+        .borrow()
+        .iter()
+        .all(|(method, _, _)| method == "GET"));
+    assert!(!has_pending(&directory, &repo).unwrap());
 }

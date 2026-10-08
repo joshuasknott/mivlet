@@ -106,7 +106,7 @@ Select the linked PR or another PR in the attached origin to inspect its current
 head/base, changed files and text patches, checks, commit statuses, reviews,
 inline comments and discussion. File/review pages are bound to the inspected
 head and base; refresh after either changes. Search filters the current page.
-Missing text patches are labelled and cannot be marked viewed. Viewed marks
+Missing or truncated text patches are labelled and cannot be marked viewed. Viewed marks
 belong to exact file revisions, so a later change becomes unread. Draft summaries
 and inline comments remain local until an agent submits an approved action.
 
@@ -138,6 +138,9 @@ restart retains uncertainty and blocks subsequent repository writes and
 replacement attachment. Recovery requires exact positive evidence for edits,
 pushes and reviews; it never resubmits, and excludes reviews that predated the
 intent. Ambiguous/absent evidence leaves the operation locked for inspection.
+An explicit HTTP validation, permission or rate-limit rejection releases the
+intent without retrying; fixing it requires a fresh approved request. Transport
+failures, timeouts and server errors retain uncertainty.
 GitHub does not offer an atomic expected-head condition for PR metadata edits;
 their head/base validation is a preflight check, whereas pushes use an exact
 server-side reference lease and reviews explicitly name their commit.
@@ -164,6 +167,9 @@ queued turn. Approval, blockage, user decisions, existing turn/usage limits,
 account ownership and conversation generations remain enforced. The monitor
 does not invoke a provider or own execution. A persisted pending event and native
 message ID bridge the crash gap without duplicating a wake.
+Native admission emits a scoped update to the main renderer; its small bridge
+refreshes the existing workspace executor, which admits the queued turn under
+the same provider availability, permissions and capacity checks as other Work.
 
 Monitoring requires the open, authenticated desktop. It polls no faster than
 every two minutes, rotates at most two profiles per 30-second sweep, backs off

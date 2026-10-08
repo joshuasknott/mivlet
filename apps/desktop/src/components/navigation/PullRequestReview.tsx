@@ -207,6 +207,14 @@ function Detail({
         <br />
         Reviewed commit <code>{pr.head.slice(0, 12)}</code>
       </p>
+      {pr.body && (
+        <details>
+          <summary>Description</summary>
+          <article>
+            <pre>{pr.body}</pre>
+          </article>
+        </details>
+      )}
       <button
         type="button"
         onClick={() => void detail.refetch()}
@@ -230,7 +238,7 @@ function Detail({
       />
       {local.data && (
         <DraftReview
-          key={"draft:" + pr.head + ":" + pr.base}
+          key="draft"
           epoch={epoch}
           identity={identity}
           state={local.data}
@@ -419,6 +427,9 @@ function DraftReview({
   refreshed: () => void;
 }) {
   const [body, setBody] = useState(state.review?.body ?? "");
+  const [draftHead, setDraftHead] = useState(
+    state.review?.head ?? identity.expectedHead,
+  );
   const [comments, setComments] = useState<PullRequestCommentDraft[]>(
     state.review?.comments ?? [],
   );
@@ -430,12 +441,18 @@ function DraftReview({
         body,
         comments,
       }),
-    onSuccess: refreshed,
+    onSuccess: (result) => {
+      if (result?.review) setDraftHead(result.review.head);
+      refreshed();
+    },
   });
+  const dirty =
+    body !== (state.review?.body ?? "") ||
+    JSON.stringify(comments) !== JSON.stringify(state.review?.comments ?? []);
   return (
     <details>
       <summary>Draft review · local</summary>
-      {state.review?.head && state.review.head !== identity.expectedHead && (
+      {draftHead && draftHead !== identity.expectedHead && (
         <p role="alert">
           The PR has new commits. Recheck draft comments against the current
           diff before saving or submitting.
@@ -547,7 +564,8 @@ function DraftReview({
           Save local draft
         </button>
       </div>
-      {save.isSuccess && <p role="status">Draft saved locally.</p>}
+      {dirty && <p role="status">Unsaved local draft.</p>}
+      {save.isSuccess && !dirty && <p role="status">Draft saved locally.</p>}
       {save.error && <p role="alert">{message(save.error)}</p>}
       <p>
         Ask your agent to load this draft and submit a comment, approval or
@@ -587,6 +605,7 @@ function WatchControl({
     (item) =>
       item.agentId === agentId &&
       !item.parentId &&
+      !item.schedule &&
       !["cancelled", "failed", "awaiting-user", "blocked"].includes(
         item.status,
       ),
@@ -607,6 +626,7 @@ function WatchControl({
   return (
     <details onToggle={(event) => setOpen(event.currentTarget.open)}>
       <summary>PR watch{state?.watch?.active ? " · Active" : ""}</summary>
+      {state?.watch?.active && <p>Watching PR #{state.watch.number}.</p>}
       <p>
         While Mivlet is open, relevant checks, reviews or conflicts can wake
         selected Work. Your own comments and duplicate updates stay quiet. Stops

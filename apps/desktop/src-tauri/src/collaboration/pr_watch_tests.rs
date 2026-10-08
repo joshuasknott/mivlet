@@ -112,3 +112,34 @@ fn pr_watch_does_not_bypass_approval_or_recovery_decisions() {
         Ok(())
     });
 }
+
+#[test]
+fn pr_watch_stops_when_project_context_changes() {
+    fixture(&store(), |ctx| {
+        let room = project(ctx, "project", "project-chat")?;
+        work::start(
+            ctx,
+            "pr-work".into(),
+            room.id,
+            "lead".into(),
+            "Review PR".into(),
+            false,
+            None,
+            None,
+        )?;
+        let item = ctx.item("pr-work")?;
+        let mut team = ctx.project_team("project")?;
+        team.revision += 1;
+        ctx.team(&team)?;
+        assert!(deliver(
+            ctx,
+            "lead",
+            &item.id,
+            item.generation,
+            Some(("pr-event-1", "A reviewer commented."))
+        )
+        .is_err());
+        assert!(ctx.item(&item.id)?.messages.is_empty());
+        Ok(())
+    });
+}

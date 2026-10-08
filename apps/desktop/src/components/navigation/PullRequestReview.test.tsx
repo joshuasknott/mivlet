@@ -232,3 +232,25 @@ it("stops the repository watch without selecting new Work", async () => {
     ),
   );
 });
+it("preserves unsaved review text when the PR moves to a new head", async () => {
+  setup();
+  fireEvent.click(await screen.findByText("Draft review · local"));
+  fireEvent.change(screen.getByLabelText("Review summary"), {
+    target: { value: "Unfinished review of this change" },
+  });
+  const moved = { ...pr, head: "c".repeat(40) };
+  vi.mocked(readPullRequest).mockImplementation(
+    async <T,>(_target: unknown, request: PullRequestRequest): Promise<T> =>
+      (request.action === "detail"
+        ? moved
+        : { items: [], nextPage: null }) as T,
+  );
+  fireEvent.click(
+    screen.getByRole("button", { name: "Refresh PR and commit" }),
+  );
+  await screen.findByText(/PR has new commits/);
+  expect(screen.getByLabelText("Review summary")).toHaveValue(
+    "Unfinished review of this change",
+  );
+  expect(screen.getByText("Unsaved local draft.")).toBeVisible();
+});

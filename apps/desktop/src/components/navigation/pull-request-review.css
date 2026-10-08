@@ -74,3 +74,11 @@
   outline: 2px solid currentColor;
   outline-offset: 3px;
 }
+@media (max-width: 600px) {
+  .pull-request-review button,
+  .pull-request-review summary,
+  .pull-request-review input:not([type="checkbox"]),
+  .pull-request-review select {
+    min-height: 44px;
+  }
+}

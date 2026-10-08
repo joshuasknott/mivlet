@@ -101,6 +101,14 @@ pub(super) fn execute(
         .ok_or("GitHub account unavailable.")?
         .to_owned();
     let prefix = api::endpoint(repo, input.number)?;
+    if matches!(input.action.as_str(), "review" | "submit")
+        && matches!(input.event.as_str(), "APPROVE" | "REQUEST_CHANGES")
+        && pr["user"]["login"]
+            .as_str()
+            .is_some_and(|author| author.eq_ignore_ascii_case(&actor))
+    {
+        return Err("GitHub does not allow approving or requesting changes on your own PR. Submit a comment instead.".into());
+    }
     review_owned(api, &prefix, input, &actor)?;
     if input.action == "review" {
         review_state::validate_positions(api, repo, input)?;
@@ -116,6 +124,11 @@ pub(super) fn execute(
     if input.action == "push" {
         validate_push(directory, repo, input, &pr, ticket)?;
     }
+    let latest = api::detail(api, repo, input.number)?;
+    api::verify(&latest, input)?;
+    if latest["state"] != "open" {
+        return Err("The PR closed during preparation. Refresh before acting.".into());
+    }
     // Persist intent before *any* remote write. A transport failure, Stop or crash
     // never proves that GitHub did not apply it.
     saved.pending = Some(Pending {
@@ -127,9 +140,9 @@ pub(super) fn execute(
     ticket.with_current(|| save(directory, repo, saved))?;
     repo.operation = "publication PR outcome unknown; reconcile before retrying".into();
     ticket.with_current(|| super::super::save(directory, repo))?;
-    let result = if input.action == "push" {
-        api.push(directory, repo, &input.next_head, &input.expected_head)?;
-        json!({"head": input.next_head})
+    let outcome = if input.action == "push" {
+        api.push(directory, repo, &input.next_head, &input.expected_head)
+            .map(|()| json!({"head": input.next_head}))
     } else {
         let path = match input.action.as_str() {
             "review" => format!("{prefix}/reviews"),
@@ -137,7 +150,18 @@ pub(super) fn execute(
             "delete-draft" => format!("{prefix}/reviews/{}", input.review_id),
             _ => prefix,
         };
-        api.request(&method, &path, (method != "DELETE").then_some(body))?
+        api.request(&method, &path, (method != "DELETE").then_some(body))
+    };
+    let result = match outcome {
+        Ok(value) => value,
+        Err(error) => {
+            // A received validation/auth/rate-limit rejection is different from
+            // an interrupted request or 5xx response. No write is replayed.
+            if api.rejected_write() {
+                complete(directory, repo, saved, ticket)?;
+            }
+            return Err(error);
+        }
     };
     ticket.check()?;
     complete(directory, repo, saved, ticket)?;
@@ -224,7 +248,7 @@ pub(super) fn recover(
         }
         "edit" => {
             api::verify(&pr, input)?;
-            pr["title"] == input.title && pr["body"] == input.body
+            pr["title"] == input.title && pr["body"].as_str().unwrap_or("") == input.body
         }
         "review" | "submit" => {
             let reviews = api::all(
@@ -248,7 +272,7 @@ pub(super) fn recover(
                                 .as_u64()
                                 .is_some_and(|id| !pending.previous_reviews.contains(&id)))
                         && r["state"] == expected
-                        && r["body"] == input.body
+                        && r["body"].as_str().unwrap_or("") == input.body
                         && (input.action != "submit" || r["id"] == input.review_id)
                         && (r["submitted_at"].as_str().is_some_and(|at| {
                             at >= pending.started_at.as_str().get(..19).unwrap_or("")
@@ -265,14 +289,7 @@ pub(super) fn recover(
                     ),
                     None,
                 )?;
-                input.comments.iter().all(|expected| {
-                    comments.iter().any(|actual| {
-                        actual["path"] == expected.path
-                            && actual["body"] == expected.body
-                            && actual["line"] == expected.line
-                            && actual["side"] == expected.side
-                    })
-                })
+                comments_confirmed(&input.comments, comments)
             } else {
                 matches.len() == 1
             }
@@ -297,4 +314,47 @@ pub(super) fn recover(
     Ok(
         json!({"reconciled": true, "message": "Confirmed the saved action from GitHub; no mutation was replayed."}),
     )
+}
+
+fn comments_confirmed(expected: &[ReviewComment], mut actual: Vec<Value>) -> bool {
+    expected.iter().all(|expected| {
+        let index = actual.iter().position(|row| {
+            row["path"] == expected.path
+                && row["body"] == expected.body
+                && row["original_line"]
+                    .as_u64()
+                    .or_else(|| row["line"].as_u64())
+                    == Some(u64::from(expected.line))
+                && row["side"] == expected.side
+        });
+        if let Some(index) = index {
+            actual.swap_remove(index);
+            true
+        } else {
+            false
+        }
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn review_recovery_uses_original_positions_and_requires_each_comment() {
+        let expected = ReviewComment {
+            path: "sum.js".into(),
+            line: 2,
+            side: "RIGHT".into(),
+            body: "Check overflow".into(),
+        };
+        let observed = json!({"path":"sum.js", "line":null, "original_line":2, "side":"RIGHT", "body":"Check overflow"});
+        assert!(comments_confirmed(
+            std::slice::from_ref(&expected),
+            vec![observed.clone()]
+        ));
+        assert!(!comments_confirmed(
+            &[expected.clone(), expected],
+            vec![observed]
+        ));
+    }
 }

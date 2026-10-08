@@ -2,6 +2,7 @@
 use super::*;
 use sha2::{Digest, Sha256};
 use std::time::Duration;
+use tauri::Emitter;
 
 #[derive(Clone, Default, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -302,6 +303,7 @@ fn sweep_one(
     state: &super::super::LocalComputerState,
     workspace: &str,
     agent: &str,
+    updated: impl Fn(),
 ) -> Result<(), String> {
     let directory = super::super::directory(state, workspace, agent)?;
     let lock = super::super::lock(&directory)?;
@@ -343,7 +345,10 @@ fn sweep_one(
     // Retry only the native idempotent Work admission, never any remote mutation.
     if let Some(wake) = &watch.pending {
         match admit(&directory, &repo, &watch, workspace, agent, &ticket, wake) {
-            Ok(generation) => watch.work_generation = generation,
+            Ok(generation) => {
+                watch.work_generation = generation;
+                updated();
+            }
             Err(_) => {
                 watch.active = false;
                 watch.reason = Some("Stopped: Work no longer accepts PR updates.".into());
@@ -408,7 +413,10 @@ fn sweep_one(
     ticket.with_current(|| save(&directory, &repo, &saved))?;
     if let Some(wake) = &watch.pending {
         match admit(&directory, &repo, &watch, workspace, agent, &ticket, wake) {
-            Ok(generation) => watch.work_generation = generation,
+            Ok(generation) => {
+                watch.work_generation = generation;
+                updated();
+            }
             Err(_) => {
                 watch.active = false;
                 watch.reason = Some("Stopped: Work no longer accepts PR updates.".into());
@@ -437,7 +445,7 @@ pub(crate) fn start(app: tauri::AppHandle, computers: Arc<super::super::LocalCom
                     crate::authorized_scope::ScopeAccess::Read,
                 )?;
                 let workspace = scope.data.workspace_id();
-                let profiles = crate::collaboration::native_profiles(app, workspace)?;
+                let profiles = crate::collaboration::native_profiles(app.clone(), workspace)?;
                 // Rotate across profiles; admit at most two monitors per sweep.
                 // Large workspaces poll less frequently instead of bursting.
                 for profile in profiles
@@ -449,7 +457,13 @@ pub(crate) fn start(app: tauri::AppHandle, computers: Arc<super::super::LocalCom
                     if computers.closing.load(std::sync::atomic::Ordering::Acquire) {
                         break;
                     }
-                    let _ = sweep_one(&computers, workspace, &profile.id);
+                    let _ = sweep_one(&computers, workspace, &profile.id, || {
+                        let _ = app.emit_to(
+                            "main",
+                            "mivlet:pr-work-updated",
+                            json!({"workspaceId":workspace}),
+                        );
+                    });
                 }
                 Ok::<(), String>(())
             })

@@ -5,6 +5,9 @@ use std::time::Duration;
 
 pub(super) trait Api {
     fn request(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String>;
+    fn rejected_write(&self) -> bool {
+        false
+    }
     fn push(
         &self,
         directory: &Path,
@@ -17,6 +20,7 @@ pub(super) struct GitHub<'a> {
     ticket: &'a OperationTicket,
     token: String,
     watch_stop: Option<(std::path::PathBuf, String)>,
+    rejected: std::sync::atomic::AtomicBool,
 }
 impl<'a> GitHub<'a> {
     pub fn connect(directory: &Path, ticket: &'a OperationTicket) -> Result<Self, String> {
@@ -26,6 +30,7 @@ impl<'a> GitHub<'a> {
             ticket,
             token: process::credential(auth, ticket)?,
             watch_stop: None,
+            rejected: std::sync::atomic::AtomicBool::new(false),
         })
     }
     pub fn watching(mut self, directory: &Path, repo: &Repository, id: &str) -> Self {
@@ -79,6 +84,9 @@ impl<'a> GitHub<'a> {
     }
 }
 impl Api for GitHub<'_> {
+    fn rejected_write(&self) -> bool {
+        self.rejected.load(std::sync::atomic::Ordering::Acquire)
+    }
     fn push(
         &self,
         directory: &Path,
@@ -89,6 +97,8 @@ impl Api for GitHub<'_> {
         GitHub::push(self, directory, repo, head, expected)
     }
     fn request(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+        self.rejected
+            .store(false, std::sync::atomic::Ordering::Release);
         if !path.starts_with('/') || path.contains("..") || path.contains(['#', '\\', '\r', '\n']) {
             return Err("Invalid GitHub endpoint.".into());
         }
@@ -116,6 +126,10 @@ impl Api for GitHub<'_> {
                 }
                 let response = request.send().await.map_err(|_| "GitHub request failed; a mutation may have completed. Reconcile before retrying.")?;
                 let status = response.status().as_u16();
+                self.rejected.store(
+                    definite_rejection(method, status),
+                    std::sync::atomic::Ordering::Release,
+                );
                 if status == 429
                     || status == 403
                         && (response.headers().contains_key("retry-after")
@@ -130,6 +144,9 @@ impl Api for GitHub<'_> {
                     return Err("GitHub access is unavailable. Check the signed-in account and repository permissions.".into());
                 }
                 if !(200..300).contains(&status) {
+                    if self.rejected_write() {
+                        return Err(format!("GitHub rejected the action (HTTP {status}). Correct the request and obtain a new approval."));
+                    }
                     return Err(format!(
                         "GitHub returned HTTP {status}; reconcile any mutation before retrying."
                     ));
@@ -157,6 +174,14 @@ impl Api for GitHub<'_> {
             }
         })
     }
+}
+
+fn definite_rejection(method: &str, status: u16) -> bool {
+    matches!(method, "POST" | "PATCH" | "DELETE")
+        && matches!(
+            status,
+            400 | 401 | 403 | 404 | 405 | 409 | 410 | 415 | 422 | 429
+        )
 }
 
 pub(super) fn remote(repo: &Repository) -> Result<String, String> {
@@ -353,4 +378,21 @@ pub(super) fn revision(file: &Value) -> String {
             .unwrap_or_default()
         )
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::definite_rejection;
+    #[test]
+    fn validation_denials_are_distinct_from_timeouts_and_server_uncertainty() {
+        for method in ["POST", "PATCH", "DELETE"] {
+            for status in [400, 401, 403, 404, 409, 422, 429] {
+                assert!(definite_rejection(method, status));
+            }
+            for status in [200, 408, 500, 502, 504] {
+                assert!(!definite_rejection(method, status));
+            }
+        }
+        assert!(!definite_rejection("GET", 404));
+    }
 }

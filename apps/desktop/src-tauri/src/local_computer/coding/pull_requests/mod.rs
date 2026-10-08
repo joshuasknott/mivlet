@@ -157,9 +157,12 @@ pub(super) fn execute(
 ) -> Result<String, String> {
     let input: Request = serde_json::from_value(arguments).map_err(|_| "Invalid PR arguments.")?;
     let lock = super::lock(directory)?;
-    let _guard = lock
-        .try_lock()
-        .map_err(|_| "Repository operation in progress. Wait or Stop it.")?;
+    let _guard = if tool == "repository-pr-action" {
+        lock.try_lock()
+            .map_err(|_| "Repository operation in progress. Wait or Stop it.")?
+    } else {
+        review_lock(&lock, ticket)?
+    };
     let mut repo = super::load(directory)?.ok_or("Attach a repository first.")?;
     if repo.id != input.repository_id {
         return Err("Repository selection changed. Refresh first.".into());
@@ -193,6 +196,29 @@ pub(super) fn execute(
     Ok(crate::secret_redaction::redact_secret_text_or_omit(
         &result.to_string(),
     ))
+}
+
+fn review_lock<'a>(
+    lock: &'a std::sync::Mutex<()>,
+    ticket: &OperationTicket,
+) -> Result<std::sync::MutexGuard<'a, ()>, String> {
+    // The review screen requests independent projections concurrently. Serialize
+    // their native reads instead of reporting a false failure on first open.
+    let start = std::time::Instant::now();
+    loop {
+        ticket.check()?;
+        match lock.try_lock() {
+            Ok(guard) => return Ok(guard),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err("Repository lock is unavailable.".into())
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        if start.elapsed() >= std::time::Duration::from_secs(60) {
+            return Err("Repository remained busy. Refresh the review after the current operation finishes.".into());
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
 }
 
 /// Read-only UI transport. Remote mutations have no direct renderer command.

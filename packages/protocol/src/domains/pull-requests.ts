@@ -29,6 +29,10 @@ export interface PullRequestRequest {
   headBranch?: string;
   baseSha?: string;
   baseBranch?: string;
+  nextHead?: string;
+  title?: string;
+  event?: "APPROVE" | "REQUEST_CHANGES" | "COMMENT" | "PENDING";
+  reviewId?: number;
   body?: string;
   comments?: PullRequestCommentDraft[];
   path?: string;
