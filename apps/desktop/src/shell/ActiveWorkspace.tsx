@@ -1,4 +1,5 @@
 import "../styles/agent-settings.css";
+import { useMcpWorkEvents } from "../hooks/useMcpWorkEvents";
 import { AgentNotifications } from "../components/agents/AgentNotifications";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import {
@@ -77,6 +78,7 @@ export function ActiveWorkspace({
     () => new WorkspaceExecution(workspaceId, undefined, approvals),
   );
   onService(service);
+  useMcpWorkEvents(service);
   const state = useSyncExternalStore(
     service.subscribe,
     service.getSnapshot,

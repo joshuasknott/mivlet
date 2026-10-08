@@ -89,6 +89,11 @@ a deployed or production-validated service.
   The official MCP SDK owns negotiation and discovery in the bundled
   native host over the existing transport. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
+- An authenticated local MCP server lets external assistants inspect explicitly
+  shared Work and request tasks from selected agents. Native desktop consent,
+  read-only defaults, expiry, revocation and scoped access history preserve
+  Mivlet authority. Remote access requires an operator-provided HTTPS proxy;
+  the app does not publish an endpoint. See [external assistants](docs/architecture/mcp-server.md).
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.

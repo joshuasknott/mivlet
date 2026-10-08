@@ -1,7 +1,7 @@
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { VoiceCapability } from "@mivlet/protocol";
 import type { SettingsRuntime } from "../settings/settings-runtime";
 import { MemoryRecords } from "../settings/MemoryRecords";
@@ -17,6 +17,8 @@ import type { SettingsTab } from "./settings-tabs";
 
 export type { SettingsTab } from "./settings-tabs";
 export { tabs } from "./settings-tabs";
+
+const McpServerSettings = lazy(() => import("../settings/McpServerSettings").then((module) => ({ default: module.McpServerSettings })));
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
   status: "unavailable",
@@ -104,6 +106,7 @@ function GeneralSettings({
   onThemeChange: (theme: "light" | "dark") => void;
   onStatus: (message: string) => void;
 }) {
+  const [externalOpen, setExternalOpen] = useState(false);
   const accountConfigured =
     runtime.identityStatus.enabled && runtime.accountWorkspaceStatus.configured;
 
@@ -124,6 +127,7 @@ function GeneralSettings({
           <ApprovalsSettingsView runtime={runtime} onStatus={onStatus} />
         </div>
       </section>
+      <section className="settings-group" aria-labelledby="external-assistants-heading"><h2 id="external-assistants-heading">External assistants</h2><details className="settings-disclosure" onToggle={(event) => setExternalOpen(event.currentTarget.open)}><summary>Manage MCP server and client access</summary>{externalOpen && <Suspense fallback={<p>Loading client access…</p>}><McpServerSettings workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId} agents={runtime.agents} /></Suspense>}</details></section>
       <section className="settings-group" aria-labelledby="general-voice-heading"><h2 id="general-voice-heading">Voice input</h2><div className="settings-group__surface"><DictationPrivacySettings runtime={runtime} capability={dictationCapability} onStatus={onStatus} /></div></section>
     </div>
   );

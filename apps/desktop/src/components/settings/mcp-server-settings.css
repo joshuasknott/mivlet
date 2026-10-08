@@ -1,0 +1,64 @@
+.mcp-settings {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+.mcp-settings form,
+.mcp-settings label,
+.mcp-settings li {
+  display: grid;
+  gap: 8px;
+}
+.mcp-settings input:not([type="checkbox"]),
+.mcp-settings select {
+  width: 100%;
+  min-width: 0;
+  min-height: 40px;
+  padding: 8px;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--border, #888);
+  border-radius: 6px;
+}
+.mcp-settings code,
+.mcp-settings p,
+.mcp-settings span {
+  overflow-wrap: anywhere;
+}
+.mcp-settings ul,
+.mcp-settings ol {
+  display: grid;
+  gap: 16px;
+  padding-left: 20px;
+}
+.mcp-settings fieldset {
+  min-width: 0;
+  border: 1px solid var(--border, #888);
+  border-radius: 6px;
+}
+.mcp-settings .mcp-choice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+}
+.mcp-choice input {
+  flex: 0 0 auto;
+}
+.mcp-consent {
+  padding: 16px;
+  border: 1px solid var(--border, #888);
+  border-radius: 8px;
+}
+.mcp-settings summary {
+  cursor: pointer;
+  min-height: 40px;
+  padding-block: 8px;
+}
+.mcp-settings .profile-action-row {
+  flex-wrap: wrap;
+}
+.mcp-settings .button {
+  min-height: 44px;
+}

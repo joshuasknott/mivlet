@@ -50,6 +50,7 @@ mod local_projects;
 mod local_schedules;
 mod managed_runtime;
 mod mcp_process;
+mod mcp_server;
 mod media_images;
 mod memory;
 mod models;
@@ -103,12 +104,15 @@ use tauri::Manager;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
+        .manage(mcp_server::Server::default())
         .setup(|app| {
             let handle = app.handle().clone();
             if account_session::initialize(&handle)? {
                 let app_data = paths::app_data_dir(&handle)?;
                 store::initialize(&app_data)?;
                 if let Some(store) = store::try_global() {
+                    mcp_server::initialize(store)
+                        .map_err(|error| std::io::Error::other(error.to_string()))?;
                     collaboration::recover(store).map_err(|error| {
                         std::io::Error::other(format!("Coordination recovery failed: {error:?}"))
                     })?;
@@ -177,6 +181,11 @@ pub fn run() {
             local_schedules::local_schedule_dispatch_finish,
             local_schedules::local_schedule_dispatch_abandon,
             local_projects::local_project_create,
+            mcp_server::mcp_server_start,
+            mcp_server::mcp_server_stop,
+            mcp_server::mcp_server_status,
+            mcp_server::mcp_server_decide,
+            mcp_server::mcp_server_revoke,
             collaboration::collaboration_load,
             collaboration::collaboration_command,
             local_projects::local_project_list,

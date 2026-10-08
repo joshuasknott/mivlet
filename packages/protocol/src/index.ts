@@ -1046,3 +1046,5 @@ export interface MivletAgentProfile {
   /** Local conversation references for this teammate, including earlier chats. */
   threadIds?: string[];
 }
+
+export type { McpClientAccess, McpServerConfig, McpConsentRequest, McpClientGrant, McpConsentDecision, McpServerStatus } from "./domains/mcp-server";

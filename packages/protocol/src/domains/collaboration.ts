@@ -103,7 +103,9 @@ export interface CollaborationWorkItem {
   /** Durable attachment references recorded at submission and refreshed at dispatch. */
   attachments?: WorkAttachment[];
   /** Where the request came from. Absent legacy Work predates origins (chat). */
-  origin?: "chat" | "schedule";
+  origin?: "chat" | "schedule" | "external-client";
+  /** Native client grant identity; never an OAuth credential or approval. */
+  externalClient?: { grantId: string; clientName: string };
   permissionMode: import("./approvals").PermissionMode;
   id: string;
   workspaceId: string;

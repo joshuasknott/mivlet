@@ -5,6 +5,7 @@ mod chats;
 mod commands;
 mod context;
 mod exchanges;
+pub(crate) mod external;
 pub(crate) mod models;
 mod schedules;
 mod work;
@@ -719,6 +720,14 @@ pub(crate) fn ensure_run_current(
     }
     let root = repo::get::<Work>(conn, store, &scope.private, Kind::Work, &item.root_id)?
         .ok_or_else(|| invalid("The parent request is unavailable."))?;
+    crate::mcp_server::repository::check_work(
+        conn,
+        store,
+        &scope,
+        &root,
+        &item.agent_id,
+        &item.permission_mode,
+    )?;
     check_schedule(conn, store, &scope.private, &root, &now(), true)?;
     Ok(())
 }
