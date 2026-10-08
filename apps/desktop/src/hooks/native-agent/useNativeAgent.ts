@@ -14,6 +14,7 @@ import {
   CONVERSATION_STYLE_INSTRUCTIONS,
   toolActivity,
 } from "../../lib/conversation-presentation";
+import { GENERATED_UI_INSTRUCTIONS } from "../../lib/generated-interface";
 import type { AgentBackend } from "@mivlet/connectors";
 import { cancelNativeAgentRun } from "./cancellation";
 import { nativeAgentContextScope } from "./context";
@@ -151,7 +152,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       attemptToRetry: ExecutionAttempt,
       tools: AgentTurnRequest["tools"] = [],
       permissionMode: PermissionMode = "read-only",
-      instructions: string = CONVERSATION_STYLE_INSTRUCTIONS,
+      instructions: string = `${CONVERSATION_STYLE_INSTRUCTIONS}\n\n${GENERATED_UI_INSTRUCTIONS}`,
       control?: NativeAgentRunControl,
     ) => {
       const blocked = describeRetryBlock(attemptToRetry, {

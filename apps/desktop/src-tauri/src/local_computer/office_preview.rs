@@ -40,6 +40,8 @@ impl OfficePreview {
 #[derive(Debug, Serialize)]
 pub(super) struct Section {
     name: String,
+    #[serde(rename = "sourceEntry")]
+    source_entry: String,
     blocks: Vec<Block>,
 }
 
@@ -289,6 +291,7 @@ fn document(root: &Node, budget: &mut Budget) -> Option<Vec<Section>> {
     budget.truncated |= body.children.len() > 500;
     Some(vec![Section {
         name: "Document".into(),
+        source_entry: "word/document.xml".into(),
         blocks,
     }])
 }
@@ -410,6 +413,7 @@ fn workbook(
         ));
         sections.push(Section {
             name: budget.text(sheet.attribute("name")),
+            source_entry: sheet_path.to_string(),
             blocks,
         });
     }
@@ -461,6 +465,7 @@ fn presentation(
         }
         sections.push(Section {
             name: format!("Slide {}", index + 1),
+            source_entry: slide_path.to_string(),
             blocks,
         });
     }

@@ -15,6 +15,9 @@ struct Fold {
 
 fn fingerprint(rows: &[&MessageRow]) -> String {
     let mut hash = Sha256::new();
+    // v2 reads canonical string revisions as well as legacy object text.
+    // Recompute caches created by the old object-only reader.
+    hash.update(b"mivlet-transcript-fold-v2\0");
     for row in rows {
         hash.update(row.id.as_bytes());
         hash.update([0]);
@@ -67,8 +70,10 @@ pub(super) fn capture(
         .copied()
         .collect::<Vec<_>>()
     {
-        let text: String = row.content["text"]
+        let text: String = row
+            .content
             .as_str()
+            .or_else(|| row.content.get("text").and_then(serde_json::Value::as_str))
             .unwrap_or("")
             .chars()
             .take(500)

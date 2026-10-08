@@ -972,3 +972,49 @@
 }
 
 .provider-method-form__actions { display: flex; gap: 12px; }
+
+/* MCP server cards keep the name/status column flexible while action controls retain their touch target. */
+.mcp-settings__server-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.mcp-settings__server-header > span:first-child {
+  display: grid;
+  flex: 1 1 240px;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mcp-settings__server-header > span:first-child strong,
+.mcp-settings__server-header > span:first-child small {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mcp-settings__server-header > .button,
+.mcp-settings__server-header > .profile-action-row {
+  flex: 0 0 auto;
+}
+
+.mcp-settings__server-header .profile-action-row {
+  margin-top: 0;
+}
+
+@media (max-width: 700px) {
+  .mcp-settings__server-header {
+    align-items: stretch;
+  }
+
+  .mcp-settings__server-header > span:first-child {
+    flex-basis: 100%;
+  }
+
+  .mcp-settings__server-header > .button,
+  .mcp-settings__server-header > .profile-action-row {
+    flex: 1 1 auto;
+  }
+}

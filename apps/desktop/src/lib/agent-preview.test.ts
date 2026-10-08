@@ -3,6 +3,10 @@ import type { CollaborationWorkItem } from "@mivlet/protocol";
 import { latestAgentReply } from "./agent-preview";
 const work = (text: string, createdAt: string) => ({ outputs: [{ text, createdAt }] }) as CollaborationWorkItem;
 describe("agent sidebar reply", () => {
+  it("keeps generated source out of the bounded sidebar preview", () => {
+    expect(latestAgentReply([work('Here is the comparison.\n```openui\nroot = Table("Data", [], [])\n```', "2026-10-08")])).toBe("Here is the comparison. Interactive response");
+    expect(latestAgentReply([work("x".repeat(1_000), "2026-10-08")])).toHaveLength(240);
+  });
   it("leaves agents without replies blank", () => {
     expect(latestAgentReply([])).toBe("");
     expect(latestAgentReply([work("  ", "2026-09-16")])).toBe("");

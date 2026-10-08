@@ -138,6 +138,22 @@ and dynamic icon imports disable pruning. Package-format changes keep the origin
 definitions; the bundle gate still checks the resulting size. The desktop suite
 tests the analysis and retained artwork against the installed icon package.
 
+The conversation upgrade is a separately measured deferred graph. `vite.config.ts`
+keeps assistant-ui, OpenUI, MCP Apps, conversation rendering, output preview and
+history chunks behind the lazy conversation boundary, and `cssCodeSplit` keeps its
+ConversationPane and WorkspaceHistory styles out of the base stylesheet. The perf
+summary reports that graph under `conversationUpgrade` and subtracts it from
+`commonJsCss`; the existing common and initial-entry ceilings therefore remain
+unchanged. The initial 2026-10-08 feature measurement was 672,598 raw / 202,723
+gzip, with caps of 688,982 raw / 210,915 gzip. Final integration measured 688,948
+raw / 207,943 gzip after deferring the CSV parser, grid and styles until a CSV
+output opens, and loading browser branch helpers only when history is requested.
+Base CSS measured 175,919 raw, common JS/CSS 1,200,828 raw /
+342,940 gzip, and the startup entry 435,405 raw. The original common and feature
+ceilings were retained; common raw size has little remaining headroom. The manifest check rejects any
+feature chunk that becomes reachable through the entry's static imports. PDF assets
+remain independently classified and capped.
+
 Inspect the actual application entry point when verifying UI. Use the native app
 for account-owned storage, conversation navigation, provider setup, approvals and
 computer control; the browser entry is a runtime-limited rendering of that same
@@ -149,3 +165,97 @@ tests; speaking must come from confirmed audio playback, and reduced motion must
 retain static expressions. Conversation tests cover ordered durable segments,
 call/result pairing, redaction, scrolling and safe Markdown. Native tests cover
 bounded previews, public-summary persistence and external link schemes.
+
+## Conversational UI acceptance
+
+Use a separate harmless test conversation with an existing connected provider.
+Do not bypass onboarding or insert synthetic successful provider results into
+the native store. Browser/component fixtures and SDK protocol examples are
+separate evidence from a signed-in native/provider run.
+
+| Journey | Acceptance evidence |
+| --- | --- |
+| Generated response | Ask the provider for an OpenUI comparison, clarification form, table and plan. Change an answer, review it in the composer, restart, and verify the saved answer/source without another model call. Exercise incomplete/invalid output and Stop. |
+| Branches | Edit an earlier user turn, regenerate an alternative, switch back, then restart. Original IDs/attribution and completed external-effect records must remain; switching must not invoke a provider or replay tools. |
+| Outputs | Open beside chat, save a direct edit, request a targeted agent revision, compare/restore, reopen, and export. A stale revision response must conflict rather than overwrite a newer edit. |
+| Context | Inspect the draft retrieval, exclude a source/memory/history, then compare the admitted native capture and actual request receipt. A sibling private conversation must never appear. |
+| MCP Apps | The SDK 1.7.5 lifecycle peer test covers initialize, host messages, approval-gated tool calls and teardown; the official quickstart has also been discovered through Mivlet's production connector path. The desktop MCP host/typecheck and right-panel docking tests cover generation-fenced panel tabs and explicit renegotiation after portal moves. Native WebView2 resource rendering, IPC containment, origin/navigation fencing, approval interaction and teardown require the signed-in acceptance run; protocol/example evidence must not be presented as native acceptance. |
+| Coordination | Follow owner and handoff context through approval, Stop and restart. Recovery must describe uncertain effects and require explicit continuation. |
+
+Inspect wide and narrow native windows, a large table, open output, long response
+and pending approval. Check keyboard actions, labels, focus, scrolling and reduced
+motion. Save screenshots under `output/`; record any unavailable provider/app or
+authentication prerequisite without presenting fixture evidence as live success.
+
+The October 8 local acceptance run used the ordinary signed-in Windows app,
+its encrypted account store, and an existing GPT-6-Luna provider connection in
+a separate harmless Side Chat. It did not bypass onboarding or seed successful
+responses. The provider generated the OpenUI comparison, required clarification,
+table, chart, checklist and draft. Selecting Tea and entering “Afternoon reading”
+staged a reviewable reply; restarting restored both values without a model call.
+Editing and regenerating the original prompt preserved three alternatives, which
+remained switchable after restart. A pinned Markdown output was edited directly,
+revised by that provider, compared and restored as a new fourth revision. Native
+Save As exported the fourth revision with matching file contents; Files reopened
+that revision after restart with the immutable earlier revisions intact.
+
+The same run inspected native context snapshots: excluding history produced zero
+messages and a provider answer saying the earlier discussion was unavailable;
+including history produced four canonical message texts and the provider correctly
+recovered the earlier drinks and recommendation. The native context reader and
+summary-cache regression tests also cover the production string-shaped message
+envelope, legacy object envelopes, and selected-branch isolation. Screenshots and
+the harmless export are under the ignored `output/conversation-upgrade/` directory.
+These are native development/provider observations, not installer or hosted
+deployment evidence. MCP sandbox acceptance and final gates must be recorded
+separately rather than inferred from these results.
+
+The same native run exercised interruption recovery for the harmless official
+`get-time` example. Restart retained the interrupted attempt; continuation stayed
+disabled until its effects were explicitly reviewed, and then created a fresh
+attempt. No previous tool action was replayed. The narrow 753-pixel window kept
+the approval details readable and Stop accessible. A notification positioning
+defect that covered Stop in that layout was corrected and inspected again.
+
+A further live run delegated one harmless sentence from Chief of Staff to
+Acceptance Reviewer. The reviewer completed its own assignment and the parent
+resumed; Activity grouped both owners and retained the exact shared assignment.
+Stop at the parent's pending `get-time` approval removed that proposal and
+cancelled the effort. Restart retained the reviewer result and cancelled effort
+without a provider call or tool replay. This run caught two production issues:
+children previously received the root prompt instead of their scoped assignment,
+and stale branch-head snapshots accumulated false alternatives. Both fixes have
+focused regressions. A deliberate `user-stop` notice now renders as Cancelled;
+missing terminal results and unexpected restart notices remain Interrupted.
+
+The provider also generated a 30-row, six-column OpenUI table. Its multiline
+literal arrays exposed a validator defect; the bounded parser now accepts those
+arrays and canonicalizes a sole unambiguous display component to `root`. Invalid
+or incomplete interfaces retain readable source and actionable recovery text.
+The saved response rendered after the fix without another provider call. Native
+filtering found three Herbal tea rows and numeric Minutes sorting ordered them
+19, 23, 25. Large tables use a bounded keyboard-focusable scrolling region and
+sticky headers; they do not widen the conversation or hide the composer.
+
+Office package regressions cover plain paragraph/cell edits, immutable revisions,
+formula and unrelated-entry preservation, stale edits, owner/agent assignment and
+selection references. These native tests do not establish a live provider-created
+Office document journey. Keep that evidence distinct from the Markdown output
+journey above.
+
+The final October 8 automated integration run (`final-full-check-v26.log` under
+the ignored evidence directory) passed `pnpm check`: quality/dead-code/cycle
+checks, production builds, 1,410 desktop tests, 496 connector tests, 342 knowledge
+tests, 135 broker tests, 83 hosted-runner tests, 21 account tests, the Windows
+embedded-host fixtures (56 passed, 3 platform/capability skips), CI/release tests,
+bundle/runtime budgets, native checking and dependency audits. The separate
+native pass recorded 904 passed and 16 explicitly ignored opt-in tests, plus
+`cargo fmt --check` and all-target/all-feature Clippy with warnings denied.
+Two pnpm advisories are source-verified local patches; Cargo reports two reviewed
+notification-only quick-xml findings expiring October 31 and nine informational
+maintenance/unsoundness warnings. These accepted findings remain visible.
+
+The image-led refinement retains the catalogue's real data and established app
+assets. Its final native visual comparison is tracked in `design-qa.md`. Neither
+that comparison nor native MCP iframe acceptance is inferred from the automated
+gate; the remaining native observations must be recorded explicitly.

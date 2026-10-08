@@ -45,6 +45,12 @@ export interface McpUntrustedToolResult {
   content: readonly McpUntrustedContent[];
   structuredJson?: string;
   structuredTruncated?: boolean;
+  /** Safe discovery metadata for reopening a UI resource after persistence. */
+  mcpApp?: {
+    connectorId: string;
+    toolName: string;
+    resourceUri: string;
+  };
 }
 
 const MAX_TOOL_RESULT_BYTES = 2 * 1024 * 1024;

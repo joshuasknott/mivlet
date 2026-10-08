@@ -80,9 +80,11 @@ interface BrowserRecognition {
 
 type BrowserRecognitionConstructor = new () => BrowserRecognition;
 
-type BrowserSpeechEnvironment = Window & {
+/** Narrow seam kept independent of lib.dom's evolving SpeechRecognition types. */
+type BrowserSpeechEnvironment = {
   SpeechRecognition?: BrowserRecognitionConstructor;
   webkitSpeechRecognition?: BrowserRecognitionConstructor;
+  navigator: { language?: string };
 };
 
 const BROWSER_SPEECH_DESCRIPTOR: VoiceProviderDescriptor = {
@@ -101,7 +103,7 @@ function constructorFor(environment: BrowserSpeechEnvironment) {
 }
 
 export function detectBrowserSpeechCapability(
-  environment: BrowserSpeechEnvironment = window
+  environment: BrowserSpeechEnvironment = window as unknown as BrowserSpeechEnvironment
 ): VoiceCapability {
   return constructorFor(environment)
     ? { status: "supported", provider: BROWSER_SPEECH_DESCRIPTOR }
@@ -149,7 +151,7 @@ function platformError(error: string, started: boolean): SpeechToTextError {
 }
 
 export function createBrowserSpeechProvider(
-  environment: BrowserSpeechEnvironment = window
+  environment: BrowserSpeechEnvironment = window as unknown as BrowserSpeechEnvironment
 ): SpeechToTextProvider {
   const capability = detectBrowserSpeechCapability(environment);
   const unavailableMessage = capability.status === "unavailable"
