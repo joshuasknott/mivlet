@@ -156,6 +156,10 @@ fn remove(path: &Path, ticket: &OperationTicket, depth: usize) -> Result<(), Str
             .map_err(|_| "Cleanup interrupted; inspect and retry retained cleanup.".into())
     } else {
         #[cfg(windows)]
+        #[allow(
+            clippy::permissions_set_readonly_false,
+            reason = "Windows-only: clears the readonly file attribute through the pinned handle; never changes Unix mode bits."
+        )]
         if metadata.permissions().readonly() {
             let mut permissions = metadata.permissions();
             permissions.set_readonly(false);
