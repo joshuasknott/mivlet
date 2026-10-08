@@ -197,6 +197,8 @@ pub struct Work {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScheduledWorkContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<crate::local_schedules::events::models::EventWorkOrigin>,
     pub occurrence_id: String,
     pub reasoning_effort: Option<String>,
 }

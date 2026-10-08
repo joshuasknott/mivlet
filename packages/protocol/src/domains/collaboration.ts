@@ -93,7 +93,17 @@ export interface WorkAttachment {
 }
 export interface CollaborationWorkItem {
   /** Frozen occurrence metadata; carries no claim token or execution authority. */
-  schedule?: { occurrenceId: string; reasoningEffort?: string };
+  schedule?: {
+    occurrenceId: string;
+    reasoningEffort?: string;
+    event?: {
+      deliveryId: string;
+      source: import("./event-automations.js").AutomationEventSource;
+      receivedAt: string;
+      expiresAt: string;
+      selectedFields: Record<string, string | number | boolean>;
+    };
+  };
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
   capturedContext?: CapturedWorkContext;
   steering?: WorkSteering[];

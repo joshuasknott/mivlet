@@ -61,7 +61,7 @@ pub fn local_schedule_dispatch_stage(
         .map_err(|error| error.to_string())
 }
 
-fn stage_at(
+pub(super) fn stage_at(
     conn: &rusqlite::Connection,
     store: &Store,
     scope: &AuthorizedCommandScope,
@@ -83,6 +83,26 @@ fn stage_at(
         return Err(StoreError::Invalid(
             "The schedule occurrence was paused, cancelled or expired.".into(),
         ));
+    }
+    if schedule.trigger_kind == "event" {
+        let expiry = schedule.payload["trigger"]["validUntil"]
+            .as_str()
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .ok_or_else(|| StoreError::Invalid("The event trigger expiry is invalid.".into()))?;
+        if schedule.revision != row.schedule_revision || expiry <= now {
+            return Err(StoreError::Invalid(
+                "The event trigger changed or expired before Work admission.".into(),
+            ));
+        }
+        let event_expiry = row.payload["event"]["expiresAt"]
+            .as_str()
+            .and_then(|value| DateTime::parse_from_rfc3339(value).ok())
+            .ok_or_else(|| StoreError::Invalid("The event receipt expiry is invalid.".into()))?;
+        if event_expiry <= now {
+            return Err(StoreError::Invalid(
+                "The event expired before Work admission.".into(),
+            ));
+        }
     }
     let mut payload: OccurrencePayload = serde_json::from_value(row.payload.clone())
         .map_err(|_| StoreError::Invalid("The frozen schedule context is invalid.".into()))?;
