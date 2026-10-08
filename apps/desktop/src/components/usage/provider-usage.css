@@ -172,6 +172,10 @@
   margin: 0;
 }
 @media (max-width: 520px) {
+  .account-dialog .settings-modal__close {
+    width: 44px;
+    height: 44px;
+  }
   .provider-allowance-indicator,
   .provider-usage-details button,
   .provider-usage-details input,
