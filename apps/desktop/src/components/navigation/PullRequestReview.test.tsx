@@ -300,3 +300,75 @@ it("keeps inline edits on their own comment after another comment is removed", a
     }),
   );
 });
+
+it("retries a failed PR detail read without reselecting the pull request", async () => {
+  const read = vi.mocked(readPullRequest).getMockImplementation()!;
+  let failed = true;
+  vi.mocked(readPullRequest).mockImplementation(
+    async <T,>(
+      target: Parameters<typeof readPullRequest>[0],
+      request: PullRequestRequest,
+    ) => {
+      if (request.action === "detail" && failed)
+        throw new Error("PR unavailable");
+      return (await read(target, request)) as T;
+    },
+  );
+  setup();
+  expect(await screen.findByRole("alert")).toHaveTextContent("PR unavailable");
+  failed = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry pull request" }));
+  expect(
+    await screen.findByRole("link", { name: "#7 Fix calculation" }),
+  ).toBeVisible();
+  expect(screen.queryByText("PR unavailable")).toBeNull();
+  expect(
+    vi
+      .mocked(readPullRequest)
+      .mock.calls.filter(([, request]) => request.action === "detail"),
+  ).toHaveLength(2);
+  expect(setPullRequestWatch).not.toHaveBeenCalled();
+});
+
+it("retries the failed review section against the same exact PR revision", async () => {
+  const read = vi.mocked(readPullRequest).getMockImplementation()!;
+  let failed = true;
+  vi.mocked(readPullRequest).mockImplementation(
+    async <T,>(
+      target: Parameters<typeof readPullRequest>[0],
+      request: PullRequestRequest,
+    ) => {
+      if (request.action === "checks" && failed)
+        throw new Error("Checks unavailable");
+      return (await read(target, request)) as T;
+    },
+  );
+  setup();
+  fireEvent.click(
+    await screen.findByRole("button", { name: "checks" }),
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(
+    "Checks unavailable",
+  );
+  failed = false;
+  fireEvent.click(screen.getByRole("button", { name: "Retry checks" }));
+  await waitFor(() =>
+    expect(screen.queryByText("Checks unavailable")).toBeNull(),
+  );
+  const calls = vi
+    .mocked(readPullRequest)
+    .mock.calls.filter(([, request]) => request.action === "checks");
+  expect(calls).toHaveLength(2);
+  expect(calls[1]).toEqual([
+    { workspaceId: "local", agentId: "agent", expectedGeneration: 7 },
+    expect.objectContaining({
+      repositoryId: "repo",
+      number: 7,
+      expectedHead: pr.head,
+      baseSha: pr.base,
+      action: "checks",
+      page: 1,
+    }),
+  ]);
+  expect(setPullRequestWatch).not.toHaveBeenCalled();
+});

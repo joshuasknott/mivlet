@@ -182,7 +182,19 @@ function Detail({
     refetchInterval: 30_000,
   });
   const pr = detail.data;
-  if (detail.error) return <p role="alert">{message(detail.error)}</p>;
+  if (detail.error)
+    return (
+      <>
+        <p role="alert">{message(detail.error)}</p>
+        <button
+          type="button"
+          disabled={detail.isFetching}
+          onClick={() => void detail.refetch()}
+        >
+          Retry pull request
+        </button>
+      </>
+    );
   if (!pr) return <p role="status">Loading review…</p>;
   const identity = {
     repositoryId: repository.id,
@@ -343,6 +355,15 @@ function ReviewPages({
       {rows.isPending && <p role="status">Loading {tab}…</p>}
       {(rows.error || viewed.error) && (
         <p role="alert">{message(rows.error ?? viewed.error)}</p>
+      )}
+      {rows.error && (
+        <button
+          type="button"
+          disabled={rows.isFetching}
+          onClick={() => void rows.refetch()}
+        >
+          Retry {tab}
+        </button>
       )}
       {filtered?.map((row, index) =>
         tab === "files" ? (

@@ -77,6 +77,7 @@
 @media (max-width: 600px) {
   .pr-review button,
   .pr-review summary,
+  .pr-review label:has(input[type="checkbox"]),
   .pr-review input:not([type="checkbox"]),
   .pr-review select {
     min-height: 44px;
