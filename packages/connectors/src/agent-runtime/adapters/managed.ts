@@ -70,6 +70,9 @@ export function createManagedRuntimeBackend(
             const measuredCost = typeof event.costUsd === "number" && Number.isFinite(event.costUsd) && event.costUsd >= 0;
             yield {
               ...event,
+              cachedInputTokens: event.cachedInputTokens ?? undefined,
+              cacheWriteTokens: event.cacheWriteTokens ?? undefined,
+              reasoningTokens: event.reasoningTokens ?? undefined,
               costUsd: measuredCost ? event.costUsd! : 0,
               ...(!measuredCost ? { costUnknown: true } : {}),
             };
