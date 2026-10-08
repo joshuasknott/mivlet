@@ -54,6 +54,17 @@ nightly at 03:17 UTC. Installer generation remains manual in the Windows
 preview artifact workflow. Its artifacts are accessible to repository readers;
 the channel label does not make an artifact private. Cargo and cargo-audit are cached.
 
+For a bundle-only investigation, dispatch Full validation with `bundle_profile`
+set to true. Its separately named `bundle-profile` job installs frozen dependencies
+and observes the production Vite build without changing its graph, minifier, or
+budget accounting. It uploads `output/bundle-profile/report.json` even when the
+unchanged budget gate fails. The report records the checkout, lockfile hash,
+Node/zlib versions, final asset sizes, imports, and module contributions before
+minification. Module lengths are diagnostic, not additive gzip estimates. This
+mode does not produce the required `check` result or replace full validation.
+Locally, the matching command is `pnpm --filter @mivlet/desktop exec vite build
+--config ../../scripts/perf/profile.vite.config.mjs --configLoader runner`.
+
 While editing a renderer, run desktop typecheck and focused tests; for a package,
 run its build and tests. Run native checks for native changes. Use `pnpm check`
 for release candidates and broad integration work, not every intermediate edit.
