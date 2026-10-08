@@ -211,6 +211,20 @@ describe("ApprovalPanel — deny accessibility", () => {
 });
 
 describe("ApprovalPanel — high-risk confirmation", () => {
+  it.each(["", "wrong phrase", "approve delete file launch-plan.md"])("keeps the confirmation guard for %j", async (confirmationText) => {
+    const { handlers } = renderPanel({
+      compact: true,
+      pendingConfirmation: { request: baseApproval, decision: "once" },
+      confirmationText
+    });
+    const confirm = screen.getByRole("button", { name: "Confirm" });
+    const matches = confirmationText === baseApproval.confirmationPhrase;
+    expect(confirm).toHaveProperty("disabled", !matches);
+    await userEvent.setup().click(confirm);
+    expect(handlers.onConfirmDecision).toHaveBeenCalledTimes(matches ? 1 : 0);
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeEnabled();
+  });
+
   it("explains the required phrase and what confirming unlocks", () => {
     renderPanel({
       pendingConfirmation: { request: baseApproval, decision: "session" },

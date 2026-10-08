@@ -107,8 +107,8 @@ export function isHighRisk(
   return mode === "full-access" || riskLevel === "high" || riskLevel === "critical";
 }
 
-/** Short action summary: "Service · Action". */
-export function actionSummary(approval: ApprovalRequest): string {
+/** Readable action label; never changes the canonical approval payload. */
+export function actionLabel(approval: ApprovalRequest): string {
   // Presentation only: retain the exact action and argument digest for native
   // approval validation. Raw tool syntax remains available in action details.
   const protectedActions: Record<string, string> = {
@@ -120,8 +120,12 @@ export function actionSummary(approval: ApprovalRequest): string {
     "webhook-signing-remove": "Remove a webhook verification key"
   };
   const tool = approval.action.split(" ", 1)[0];
-  const action = Object.hasOwn(protectedActions, tool) ? protectedActions[tool] : approval.action;
-  return `${serviceLabel(approval.service)} · ${action}`;
+  return Object.hasOwn(protectedActions, tool) ? protectedActions[tool] : approval.action;
+}
+
+/** Short action summary: "Service · Action". */
+export function actionSummary(approval: ApprovalRequest): string {
+  return `${serviceLabel(approval.service)} · ${actionLabel(approval)}`;
 }
 
 /**
