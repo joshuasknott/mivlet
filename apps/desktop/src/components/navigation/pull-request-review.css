@@ -1,26 +1,26 @@
-.pull-request-review {
+.pr-review {
   min-width: 0;
   margin-block: 12px;
 }
-.pull-request-review section,
-.pull-request-review article {
+.pr-review section,
+.pr-review article {
   min-width: 0;
   padding-block: 8px;
 }
-.pull-request-review label {
+.pr-review label {
   display: flex;
   flex-direction: column;
   align-items: stretch;
   gap: 5px;
   margin-block: 10px;
 }
-.pull-request-review label:has(input[type="checkbox"]) {
+.pr-review label:has(input[type="checkbox"]) {
   flex-direction: row;
   align-items: center;
 }
-.pull-request-review select,
-.pull-request-review input,
-.pull-request-review textarea {
+.pr-review select,
+.pr-review input,
+.pr-review textarea {
   max-width: 100%;
   min-width: 0;
   font: inherit;
@@ -30,29 +30,29 @@
   border-radius: 6px;
   padding: 8px;
 }
-.pull-request-review textarea {
+.pr-review textarea {
   min-height: 100px;
   resize: vertical;
 }
-.pull-request-review__actions {
+.pr-review__actions {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   margin-block: 10px;
 }
-.pull-request-review button {
+.pr-review button {
   min-height: 36px;
 }
-.pull-request-review button[aria-pressed="true"] {
+.pr-review button[aria-pressed="true"] {
   text-decoration: underline;
   text-underline-offset: 4px;
   font-weight: 600;
 }
-.pull-request-review__file summary {
+.pr-review__file summary {
   overflow-wrap: anywhere;
 }
-.pull-request-review pre {
+.pr-review pre {
   max-height: 400px;
   max-width: 100%;
   overflow: auto;
@@ -60,25 +60,25 @@
   line-height: 1.6;
   white-space: pre;
 }
-.pull-request-review article pre {
+.pr-review article pre {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.pull-request-review fieldset {
+.pr-review fieldset {
   min-width: 0;
   border: 1px solid var(--border, #888);
   border-radius: 6px;
   margin-block: 10px;
 }
-.pull-request-review :focus-visible {
+.pr-review :focus-visible {
   outline: 2px solid currentColor;
   outline-offset: 3px;
 }
 @media (max-width: 600px) {
-  .pull-request-review button,
-  .pull-request-review summary,
-  .pull-request-review input:not([type="checkbox"]),
-  .pull-request-review select {
+  .pr-review button,
+  .pr-review summary,
+  .pr-review input:not([type="checkbox"]),
+  .pr-review select {
     min-height: 44px;
   }
 }

@@ -254,3 +254,49 @@ it("preserves unsaved review text when the PR moves to a new head", async () => 
   );
   expect(screen.getByText("Unsaved local draft.")).toBeVisible();
 });
+
+it("keeps inline edits on their own comment after another comment is removed", async () => {
+  setup();
+  fireEvent.click(await screen.findByText("Draft review · local"));
+  fireEvent.click(screen.getByRole("button", { name: "Add inline comment" }));
+  fireEvent.click(screen.getByRole("button", { name: "Add inline comment" }));
+  fireEvent.change(screen.getAllByLabelText("File path")[0], {
+    target: { value: "first.js" },
+  });
+  fireEvent.change(screen.getAllByLabelText("File path")[1], {
+    target: { value: "second.js" },
+  });
+  fireEvent.change(screen.getAllByLabelText("Diff line")[1], {
+    target: { value: "8" },
+  });
+  fireEvent.change(screen.getAllByLabelText("Side")[1], {
+    target: { value: "LEFT" },
+  });
+  fireEvent.change(screen.getAllByLabelText("Comment")[1], {
+    target: { value: "Keep the original case." },
+  });
+  expect(screen.getAllByLabelText("File path")[0]).toHaveValue("first.js");
+  expect(screen.getAllByLabelText("Diff line")[0]).toHaveValue(1);
+  expect(screen.getAllByLabelText("Side")[0]).toHaveValue("RIGHT");
+  expect(screen.getAllByLabelText("Comment")[0]).toHaveValue("");
+  fireEvent.click(screen.getByRole("button", { name: "Remove comment 1" }));
+  fireEvent.change(screen.getByLabelText("Comment"), {
+    target: { value: "Keep this original case covered." },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save local draft" }));
+  await screen.findByText("Draft saved locally.");
+  expect(savePullRequestState).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({
+      action: "draft",
+      comments: [
+        {
+          path: "second.js",
+          line: 8,
+          side: "LEFT",
+          body: "Keep this original case covered.",
+        },
+      ],
+    }),
+  );
+});

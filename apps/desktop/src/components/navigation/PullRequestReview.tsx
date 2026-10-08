@@ -53,7 +53,7 @@ export function PullRequestReview({
   });
   return (
     <details
-      className="pull-request-review"
+      className="pr-review"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>Pull requests</summary>
@@ -126,7 +126,7 @@ function PageControls({
   change: (page: number) => void;
 }) {
   return (
-    <div className="pull-request-review__actions">
+    <div className="pr-review__actions">
       <button
         type="button"
         disabled={page === 1}
@@ -307,7 +307,7 @@ function ReviewPages({
   return (
     <>
       <div
-        className="pull-request-review__actions"
+        className="pr-review__actions"
         aria-label="Review sections"
       >
         {[
@@ -346,7 +346,7 @@ function ReviewPages({
       )}
       {filtered?.map((row, index) =>
         tab === "files" ? (
-          <details key={row.path} className="pull-request-review__file">
+          <details key={row.path} className="pr-review__file">
             <summary>
               {row.path} · +{row.additions} −{row.deletions}
               {local?.review?.viewed[row.path] &&
@@ -433,6 +433,15 @@ function DraftReview({
   const [comments, setComments] = useState<PullRequestCommentDraft[]>(
     state.review?.comments ?? [],
   );
+  const updateComment = (
+    index: number,
+    change: Partial<PullRequestCommentDraft>,
+  ) =>
+    setComments((current) =>
+      current.map((comment, n) =>
+        n === index ? { ...comment, ...change } : comment,
+      ),
+    );
   const save = useMutation({
     mutationFn: async () =>
       savePullRequestState(await epoch(), {
@@ -474,11 +483,7 @@ function DraftReview({
             <input
               value={comment.path}
               onChange={(event) =>
-                setComments(
-                  comments.map((item, n) =>
-                    n === index ? { ...item, path: event.target.value } : item,
-                  ),
-                )
+                updateComment(index, { path: event.target.value })
               }
             />
           </label>
@@ -489,13 +494,7 @@ function DraftReview({
               min={1}
               value={comment.line}
               onChange={(event) =>
-                setComments(
-                  comments.map((item, n) =>
-                    n === index
-                      ? { ...item, line: Number(event.target.value) }
-                      : item,
-                  ),
-                )
+                updateComment(index, { line: Number(event.target.value) })
               }
             />
           </label>
@@ -504,17 +503,9 @@ function DraftReview({
             <select
               value={comment.side}
               onChange={(event) =>
-                setComments(
-                  comments.map((item, n) =>
-                    n === index
-                      ? {
-                          ...item,
-                          side:
-                            event.target.value === "LEFT" ? "LEFT" : "RIGHT",
-                        }
-                      : item,
-                  ),
-                )
+                updateComment(index, {
+                  side: event.target.value === "LEFT" ? "LEFT" : "RIGHT",
+                })
               }
             >
               <option value="RIGHT">New version</option>
@@ -527,11 +518,7 @@ function DraftReview({
               value={comment.body}
               maxLength={4000}
               onChange={(event) =>
-                setComments(
-                  comments.map((item, n) =>
-                    n === index ? { ...item, body: event.target.value } : item,
-                  ),
-                )
+                updateComment(index, { body: event.target.value })
               }
             />
           </label>
@@ -543,7 +530,7 @@ function DraftReview({
           </button>
         </fieldset>
       ))}
-      <div className="pull-request-review__actions">
+      <div className="pr-review__actions">
         <button
           type="button"
           disabled={comments.length >= 30}
