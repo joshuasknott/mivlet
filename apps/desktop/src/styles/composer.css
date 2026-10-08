@@ -393,7 +393,6 @@ img.agent-mention__avatar { width: 18px; height: 18px; margin-right: 2px; border
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
   min-width: 286px;
   width: 100%;
 }
