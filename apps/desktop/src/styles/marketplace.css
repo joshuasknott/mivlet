@@ -190,35 +190,15 @@
   color: #a259ff;
 }
 
-.marketplace-connector-icon--gitlab {
-  color: #fc6d26;
-}
-
-
-
-
-
-
-.marketplace-connector-icon--dropbox,
-.marketplace-connector-icon--box {
-  color: #0061ff;
-}
-
 .marketplace-connector-icon--canva {
   color: #7d5cff;
 }
 
-.marketplace-connector-icon--commerce {
-  color: #5b8c3a;
-}
-
-.marketplace-connector-icon--finance,
-.marketplace-connector-icon--analytics {
+.marketplace-connector-icon--finance {
   color: #3b7f6d;
 }
 
-.marketplace-connector-icon--security,
-.marketplace-connector-icon--compliance {
+.marketplace-connector-icon--security {
   color: #6d5bd0;
 }
 
