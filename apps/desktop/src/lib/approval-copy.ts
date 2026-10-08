@@ -109,7 +109,19 @@ export function isHighRisk(
 
 /** Short action summary: "Service · Action". */
 export function actionSummary(approval: ApprovalRequest): string {
-  return `${serviceLabel(approval.service)} · ${approval.action}`;
+  // Presentation only: retain the exact action and argument digest for native
+  // approval validation. Raw tool syntax remains available in action details.
+  const protectedActions: Record<string, string> = {
+    "request-secret": "Request a webhook signing secret",
+    "secret-request-status": "Check protected request status",
+    "webhook-signing-install": "Install a webhook verification key",
+    "webhook-signing-status": "Check webhook key status",
+    "webhook-signing-verify": "Check a webhook signature",
+    "webhook-signing-remove": "Remove a webhook verification key"
+  };
+  const tool = approval.action.split(" ", 1)[0];
+  const action = Object.hasOwn(protectedActions, tool) ? protectedActions[tool] : approval.action;
+  return `${serviceLabel(approval.service)} · ${action}`;
 }
 
 /**
