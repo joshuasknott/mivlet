@@ -8,6 +8,7 @@ import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-compu
 import type { RightPanelTab } from "./right-panel-state";
 import { RepositoryFiles } from "./RepositoryFiles";
 import { NativeExecutionSetup } from "./NativeExecutionSetup";
+import { NativeCommandJobs } from "./NativeCommandJobs";
 
 export function WorkspaceLibrary({
   workspaceId,
@@ -84,6 +85,7 @@ export function WorkspaceLibrary({
         </button>
       </header>
       <NativeExecutionSetup />
+      <NativeCommandJobs workspaceId={workspaceId} agents={agents} />
       <RepositoryFiles workspaceId={workspaceId} agents={agents} />
       <label className="workspace-library__search">
         <MagnifyingGlass size={17} aria-hidden="true" />

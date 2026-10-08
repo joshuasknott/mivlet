@@ -1,0 +1,50 @@
+.native-command-jobs {
+  border-block-end: 1px solid var(--line);
+  padding: 12px 0;
+  min-width: 0;
+}
+.native-command-jobs summary {
+  cursor: pointer;
+  min-height: 44px;
+  font-weight: 600;
+}
+.native-command-jobs p {
+  font-size: 13px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.native-command-jobs label {
+  display: grid;
+  gap: 6px;
+  margin-block: 10px;
+  font-size: 13px;
+}
+.native-command-jobs select {
+  min-width: 0;
+  width: 100%;
+  min-height: 44px;
+  background: var(--surface-raised, transparent);
+  color: inherit;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 6px;
+}
+.native-command-jobs button {
+  min-height: 44px;
+  padding: 6px 12px;
+}
+.native-command-jobs pre {
+  max-height: 320px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+}
+.native-command-jobs :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}

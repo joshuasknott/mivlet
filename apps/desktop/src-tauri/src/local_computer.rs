@@ -4,6 +4,7 @@ pub(crate) mod artifacts;
 pub(crate) mod authority;
 pub(crate) mod browser;
 pub(crate) mod coding;
+pub(crate) mod command_jobs;
 pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;
@@ -45,6 +46,7 @@ const MAX_ATTACHMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SAFE_UI_BYTES: u64 = 9_007_199_254_740_991;
 
 pub struct LocalComputerState {
+    jobs: command_jobs::JobManager,
     native: control::NativeControl,
     browsers: browser::BrowserManager,
     driver_directory: PathBuf,
@@ -187,6 +189,7 @@ impl LocalComputerState {
             resources.join("resources/execution-runtime/runtime")
         })?;
         Ok(Self {
+            jobs: command_jobs::JobManager::default(),
             native: control::NativeControl::default(),
             browsers: browser::BrowserManager::default(),
             driver_directory: if cfg!(debug_assertions) {
@@ -205,6 +208,7 @@ impl LocalComputerState {
     #[cfg(test)]
     pub(crate) fn for_test(root: PathBuf) -> Self {
         Self {
+            jobs: command_jobs::JobManager::default(),
             native: control::NativeControl::default(),
             browsers: browser::BrowserManager::default(),
             driver_directory: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
