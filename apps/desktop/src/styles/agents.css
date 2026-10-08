@@ -299,21 +299,6 @@
 .agent-editor__skills { display: flex; align-items: center; justify-content: space-between; width: 100%; min-height: 42px; margin-top: 10px; padding: 0 12px; color: var(--ink); background: var(--surface-hover); border: 0; border-radius: 11px; }
 .agent-editor__skills span { color: var(--ink-muted); }
 
-.live-screen {
-  width: 100%;
-  margin: 4px 0 12px;
-  padding: 0;
-  overflow: hidden;
-  color: #fff;
-  background: #191919;
-  border: 1px solid #303030;
-  border-radius: 11px;
-  text-align: left;
-  opacity: 1;
-}
-
-.live-screen img { display: block; width: 100%; aspect-ratio: 16 / 10; object-fit: cover; }
-
 .live-screen-modal,
 .agent-editor-backdrop,
 .agent-learning-backdrop {
