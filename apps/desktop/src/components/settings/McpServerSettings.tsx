@@ -100,7 +100,7 @@ export function McpServerSettings({
               onClick={() =>
                 void act(
                   stopMcpServer,
-                  "Server stopped and client-started Work fenced.",
+                  "Server stopped. Active tasks requested by clients were stopped.",
                 )
               }
             >
@@ -347,9 +347,9 @@ function Consent({
       </label>
       {access === "request-tasks" && (
         <p>
-          Agents use their configured instructions and memory. Client requests
-          remain untrusted. Consequential tools retain Mivlet approval checks;
-          client access never approves an action.
+          Agents use their configured instructions and memory, and share task
+          results with this client. Actions that require your approval still ask
+          you.
         </p>
       )}
       <details>

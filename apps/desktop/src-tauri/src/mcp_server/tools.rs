@@ -94,6 +94,17 @@ fn shared(item: &Work, grant: &Grant) -> bool {
 pub(super) fn invoke(engine: &Engine, token: &str, name: &str, value: Value) -> Result<Value> {
     let args: Arguments =
         serde_json::from_value(value.clone()).map_err(|_| invalid("Invalid tool arguments."))?;
+    if args.workspace_id.len() > 128
+        || [&args.agent_id, &args.work_id, &args.request_id]
+            .iter()
+            .any(|id| id.as_ref().is_some_and(|id| id.len() > 128))
+        || args
+            .text
+            .as_ref()
+            .is_some_and(|text| text.chars().count() > 2000)
+    {
+        return Err(invalid("Tool arguments exceed their declared size limits."));
+    }
     let (_, _, write) = names()
         .into_iter()
         .find(|(n, _, _)| *n == name)

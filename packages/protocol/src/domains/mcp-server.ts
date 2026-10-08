@@ -37,14 +37,14 @@ export interface McpConsentDecision {
   lifetimeHours: number;
 }
 export interface McpServerStatus {
-  endpoint?: string;
+  endpoint?: string | null;
   pending: McpConsentRequest[];
   grants: McpClientGrant[];
   history: {
     at: number;
     clientId: string;
     operation: string;
-    target?: string;
+    target?: string | null;
     outcome: string;
   }[];
   shareableWork: {

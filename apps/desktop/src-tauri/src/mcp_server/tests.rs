@@ -412,6 +412,45 @@ fn oauth_rejects_unregistered_redirects_wrong_pkce_clients_and_resources() {
     assert!(oauth::token(&e, fields).is_ok());
 }
 
+#[test]
+fn explicitly_shared_work_is_readable_but_not_mutable_by_another_task_grant() {
+    let e = engine("http://127.0.0.1:39440");
+    let owner = login(&e, Access::RequestTasks);
+    let item = task(&e, &owner, "shared-request");
+    let client = register(&e);
+    let ticket = authorize(&e, &client, "mivlet:read mivlet:tasks");
+    let request_id = e.oauth.lock().unwrap().pending()[0].id.clone();
+    oauth::decide(
+        &e,
+        Decision {
+            request_id,
+            approve: true,
+            workspace_id: "default".into(),
+            agent_ids: vec!["agent-one".into()],
+            work_ids: vec![item["id"].as_str().unwrap().into()],
+            access: Access::RequestTasks,
+            lifetime_hours: 1,
+        },
+    )
+    .unwrap();
+    let token = exchange(&e, &client, &ticket).0;
+    let read = json!({"workspaceId":"default","agentId":"agent-one","workId":item["id"]});
+    let result = tools::invoke(&e, &token, "mivlet_read_work", read).unwrap();
+    assert_eq!(result["id"], item["id"]);
+    assert!(result.get("capturedContext").is_none());
+    assert!(result.get("externalClient").is_none());
+    for name in ["mivlet_stop_work", "mivlet_message_work"] {
+        assert!(tools::invoke(&e, &token, name, json!({"workspaceId":"default","agentId":"agent-one","workId":item["id"],"requestId":"share-mutate","expectedGeneration":1,"text":"try to steer"})).is_err());
+    }
+    assert!(tools::invoke(
+        &e,
+        &token,
+        "mivlet_read_work",
+        json!({"workspaceId":"default","agentId":"agent-one","workId":"x".repeat(129)})
+    )
+    .is_err());
+}
+
 #[tokio::test]
 async fn production_http_rejects_bad_origins_hosts_tokens_sessions_and_large_requests() {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
