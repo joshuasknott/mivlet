@@ -52,7 +52,7 @@ pub fn resolve_workspace_root(_app: &tauri::AppHandle) -> Result<PathBuf, String
 /// The opaque request the TypeScript executor hands Rust for every tool call.
 /// `approval` is the same resolution request the shell used to grant — Rust
 /// re-validates it before running the tool (defense in depth).
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolExecutionRequest {
     pub tool: String,
@@ -75,7 +75,7 @@ pub struct ToolExecutionRequest {
 
 /// The tool result returned to JavaScript: either a success payload string or an
 /// error message the loop turns into a tool-role error message.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ToolResult {
     pub ok: bool,
@@ -353,6 +353,10 @@ fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<
         request.tool.clone(),
         request.arguments.clone(),
     )?;
+    verify_execution_permit(path, request)
+}
+
+fn verify_execution_permit(path: &Path, request: &ToolExecutionRequest) -> Result<(), String> {
     if is_computer_tool(&request.tool) {
         validate_computer_approval_binding(request)?;
     } else {
@@ -1329,6 +1333,41 @@ pub async fn execute_tool_call(
     request: ToolExecutionRequest,
     local_computers: tauri::State<'_, std::sync::Arc<crate::local_computer::LocalComputerState>>,
 ) -> Result<ToolResult, String> {
+    let handoff = crate::background_worker::commands::foreground_fence(&request.tool)?;
+    if crate::background_worker::commands::should_route(&request.tool)? {
+        // The provider binding lives in this process. The worker independently
+        // consumes the durable exact native permit before dispatch.
+        crate::managed_runtime::check_managed_runtime_tool(
+            request.approval.request.id.clone(),
+            request.tool.clone(),
+            request.arguments.clone(),
+        )?;
+        drop(handoff);
+        return crate::background_worker::commands::execute(request).await;
+    }
+    let _handoff = handoff;
+    execute_native_tool(app, request, local_computers, false).await
+}
+
+pub(crate) async fn execute_background_tool(
+    app: tauri::AppHandle,
+    request: ToolExecutionRequest,
+    local_computers: tauri::State<'_, std::sync::Arc<crate::local_computer::LocalComputerState>>,
+) -> Result<ToolResult, String> {
+    if !crate::background_worker::is_worker()
+        || !crate::background_worker::commands::supported(&request.tool)
+    {
+        return Err("Invalid native command handoff.".into());
+    }
+    execute_native_tool(app, request, local_computers, true).await
+}
+
+async fn execute_native_tool(
+    app: tauri::AppHandle,
+    request: ToolExecutionRequest,
+    local_computers: tauri::State<'_, std::sync::Arc<crate::local_computer::LocalComputerState>>,
+    provider_binding_checked: bool,
+) -> Result<ToolResult, String> {
     let tool = request.tool.clone();
     let arguments = request.arguments.clone();
     let request_id = request.approval.request.id.clone();
@@ -1375,7 +1414,12 @@ pub async fn execute_tool_call(
         );
         return Err(error);
     }
-    if let Err(error) = verify_tool_authority(&execution_approvals_path(&app)?, &request) {
+    let authority = if provider_binding_checked {
+        verify_execution_permit(&execution_approvals_path(&app)?, &request)
+    } else {
+        verify_tool_authority(&execution_approvals_path(&app)?, &request)
+    };
+    if let Err(error) = authority {
         audit_tool_outcome(
             ToolOutcomeAudit {
                 tool: &tool,
@@ -2499,6 +2543,37 @@ mod connector_authority_tests {
             },
         )
         .unwrap();
+    }
+
+    #[test]
+    fn native_handoff_round_trip_cannot_forge_change_or_reuse_a_permit() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("permits.json");
+        let mut approved = request("workspace-start");
+        approved.arguments = json!({"command":"node server.js","inputs":["server.js"],"network":false,"timeoutSeconds":60});
+        approved.workspace_id = Some("workspace".into());
+        approved.agent_id = Some("agent".into());
+        approved.computer_generation = Some(7);
+        approved.approval.request.data_used =
+            approval_argument_previews(&approved.tool, &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved.approval.request.data_used.extend([
+            argument_digest(&approved.arguments).unwrap(),
+            "Computer workspace: workspace".into(),
+            "Computer agent: agent".into(),
+            "Computer generation: 7".into(),
+        ]);
+        let encoded = serde_json::to_vec(&approved).unwrap();
+        let mut received: ToolExecutionRequest = serde_json::from_slice(&encoded).unwrap();
+        assert!(verify_execution_permit(&path, &received).is_err());
+        persist_permit(&path, &approved);
+        received.arguments["network"] = json!(true);
+        assert!(verify_execution_permit(&path, &received).is_err());
+        received = serde_json::from_slice(&encoded).unwrap();
+        verify_execution_permit(&path, &received).unwrap();
+        assert!(verify_execution_permit(&path, &received).is_err());
     }
 
     #[test]

@@ -1,4 +1,6 @@
 use super::Status;
+#[cfg(windows)]
+use tauri::Manager;
 use tauri::WebviewWindow;
 
 fn require_main(window: &WebviewWindow) -> Result<(), String> {
@@ -58,6 +60,12 @@ pub async fn background_worker_control(
             }
         }
         crate::execution_control::ensure_active_execution_allowed()?;
+        let _handoff = super::commands::handoff_fence()?;
+        if !super::owner_alive() {
+            window
+                .state::<std::sync::Arc<crate::local_computer::LocalComputerState>>()
+                .prepare_background_owner()?;
+        }
         super::persistence::set_enabled(store, true)?;
         if !super::owner_alive() {
             use std::os::windows::process::CommandExt;

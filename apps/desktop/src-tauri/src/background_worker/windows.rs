@@ -23,7 +23,7 @@ use windows_sys::Win32::{
 const LIMIT: usize = 4096;
 const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
 
-struct Handle(usize);
+pub(super) struct Handle(usize);
 impl Drop for Handle {
     fn drop(&mut self) {
         // SAFETY: uniquely owned, checked kernel handle; not inherited.
@@ -111,7 +111,7 @@ impl Owner {
     }
 }
 
-fn pipe_name(root: &Path) -> String {
+pub(super) fn pipe_name(root: &Path) -> String {
     let key = Sha256::digest(root.to_string_lossy().to_lowercase().as_bytes());
     format!(r"\\.\pipe\mivlet-background-{}", hex::encode(key))
 }
@@ -170,6 +170,15 @@ fn logon_sid() -> Result<String, String> {
 }
 
 pub(crate) fn server(root: &Path) -> Result<NamedPipeServer, String> {
+    server_named(&pipe_name(root), true, 1, LIMIT)
+}
+
+pub(super) fn server_named(
+    name: &str,
+    first: bool,
+    instances: usize,
+    limit: usize,
+) -> Result<NamedPipeServer, String> {
     let sddl: Vec<u16> = format!("D:P(A;;GA;;;{})", logon_sid()?)
         .encode_utf16()
         .chain(Some(0))
@@ -195,15 +204,12 @@ pub(crate) fn server(root: &Path) -> Result<NamedPipeServer, String> {
     // current Windows logon SID is admitted; remote clients are rejected.
     let result = unsafe {
         ServerOptions::new()
-            .first_pipe_instance(true)
+            .first_pipe_instance(first)
             .reject_remote_clients(true)
-            .max_instances(1)
-            .in_buffer_size(LIMIT as u32)
-            .out_buffer_size(LIMIT as u32)
-            .create_with_security_attributes_raw(
-                pipe_name(root),
-                ptr::addr_of!(attributes).cast_mut().cast(),
-            )
+            .max_instances(instances)
+            .in_buffer_size(limit as u32)
+            .out_buffer_size(limit as u32)
+            .create_with_security_attributes_raw(name, ptr::addr_of!(attributes).cast_mut().cast())
     };
     unsafe {
         LocalFree(descriptor);
@@ -211,7 +217,7 @@ pub(crate) fn server(root: &Path) -> Result<NamedPipeServer, String> {
     result.map_err(|_| "The authenticated background endpoint is unavailable.".into())
 }
 
-fn peer(pipe: HANDLE, is_server: bool) -> Result<Handle, String> {
+pub(super) fn peer(pipe: HANDLE, is_server: bool) -> Result<Handle, String> {
     let mut pid = 0;
     let ok = unsafe {
         if is_server {
@@ -281,11 +287,17 @@ struct Request {
 async fn read<S: AsyncReadExt + Unpin, T: serde::de::DeserializeOwned>(
     stream: &mut S,
 ) -> Result<T, String> {
+    read_frame(stream, LIMIT).await
+}
+pub(super) async fn read_frame<S: AsyncReadExt + Unpin, T: serde::de::DeserializeOwned>(
+    stream: &mut S,
+    limit: usize,
+) -> Result<T, String> {
     let length = stream
         .read_u32_le()
         .await
         .map_err(|_| "Background IPC disconnected.")? as usize;
-    if length == 0 || length > LIMIT {
+    if length == 0 || length > limit {
         return Err("Background IPC frame is too large.".into());
     }
     let mut bytes = vec![0; length];
@@ -299,8 +311,15 @@ async fn write<S: AsyncWriteExt + Unpin, T: Serialize>(
     stream: &mut S,
     value: &T,
 ) -> Result<(), String> {
+    write_frame(stream, value, LIMIT).await
+}
+pub(super) async fn write_frame<S: AsyncWriteExt + Unpin, T: Serialize>(
+    stream: &mut S,
+    value: &T,
+    limit: usize,
+) -> Result<(), String> {
     let bytes = serde_json::to_vec(value).map_err(|_| "Background IPC encoding failed.")?;
-    if bytes.len() > LIMIT {
+    if bytes.len() > limit {
         return Err("Background IPC frame is too large.".into());
     }
     stream

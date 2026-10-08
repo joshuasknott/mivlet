@@ -51,17 +51,19 @@ export function BackgroundExecutionSettings() {
         <div className="settings-preference-row">
           <span>
             <strong>
-              Keep supported text work running when you close Mivlet
+              Keep supported work and approved commands running when you close
+              Mivlet
             </strong>
             <small>
               New requests and schedules for Read Only agents using Codex,
               Claude or supported direct APIs can continue while Windows is
               awake and your account session is valid. Results and Stop stay in
-              the conversation.
+              the conversation. Approved native commands remain in Library,
+              where you can inspect output and Stop them after reconnecting.
             </small>
             <small>
-              Requests with files, connected apps, projects, delegation or
-              computer actions still need the window open. New approvals wait
+              New requests that need files, connected apps, projects, delegation
+              or computer actions still need the window open. New approvals wait
               for you. Restart interrupts active background work for review.
             </small>
           </span>

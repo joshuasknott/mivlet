@@ -56,6 +56,18 @@ pub(crate) fn enabled(store: &Store) -> Result<bool, String> {
         .with_conn(|conn| enabled_at(conn, store))
         .map_err(|e| e.to_string())
 }
+pub(super) fn generation(store: &Store) -> Result<u64, String> {
+    store
+        .with_conn(|conn| {
+            if !enabled_at(conn, store)? {
+                return Err(StoreError::Invalid(
+                    "Background execution is disabled.".into(),
+                ));
+            }
+            Ok(settings_at(conn, store)?.generation)
+        })
+        .map_err(|error| error.to_string())
+}
 
 pub(crate) fn enabled_at(conn: &Connection, store: &Store) -> crate::store::Result<bool> {
     let settings = settings_at(conn, store)?;

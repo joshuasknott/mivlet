@@ -1,6 +1,23 @@
 use super::super::authority::ComputerAuthority;
 use super::*;
 
+#[test]
+fn separate_repository_lock_instances_cannot_overlap() {
+    let root = tempfile::tempdir().unwrap();
+    let first = RepositoryLock {
+        directory: root.path().to_path_buf(),
+        local: Mutex::new(()),
+    };
+    let second = RepositoryLock {
+        directory: root.path().to_path_buf(),
+        local: Mutex::new(()),
+    };
+    let guard = first.try_lock().unwrap();
+    assert!(second.try_lock().is_err());
+    drop(guard);
+    assert!(second.try_lock().is_ok());
+}
+
 fn fixture() -> (
     tempfile::TempDir,
     PathBuf,

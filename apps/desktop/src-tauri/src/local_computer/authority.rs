@@ -1,5 +1,6 @@
 //! Durable scope generations and cancellable single-operation tickets. Desktop
 //! permission is separate, transient native state and is never loaded from disk.
+mod shared;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::HashMap,
@@ -21,6 +22,8 @@ struct Durable {
     version: u8,
     generation: u64,
     retired_docker: bool,
+    #[serde(default)]
+    next_operation: u64,
 }
 #[derive(Clone, Debug)]
 pub(crate) struct AuthoritySnapshot {
@@ -31,7 +34,6 @@ pub(crate) struct AuthoritySnapshot {
 struct Inner {
     durable: Durable,
     draining: bool,
-    next: u64,
     operations: HashMap<u64, Arc<AtomicBool>>,
 }
 pub(crate) struct ComputerAuthority {
@@ -45,6 +47,7 @@ pub(crate) struct OperationTicket {
     id: u64,
     pub generation: u64,
     cancellation: Arc<AtomicBool>,
+    _lease: shared::Lease,
 }
 
 impl ComputerAuthority {
@@ -52,22 +55,35 @@ impl ComputerAuthority {
         directory: &Path,
         plugins: Arc<AtomicU8>,
     ) -> Result<Arc<Self>, String> {
+        Self::load_mode(
+            directory,
+            plugins,
+            !crate::background_worker::is_worker() && crate::background_worker::ready(),
+        )
+    }
+    fn load_mode(
+        directory: &Path,
+        plugins: Arc<AtomicU8>,
+        reconnect: bool,
+    ) -> Result<Arc<Self>, String> {
         std::fs::create_dir_all(directory)
             .map_err(|_| "Computer authority storage is unavailable.")?;
         crate::paths::strict_canonicalize(directory)
             .map_err(|_| "Computer authority storage failed its security check.")?;
         let path = directory.join("native-control.json");
+        let _fence = shared::fence(&path)?;
         let legacy = directory.join("control.json");
         let durable = if path.exists() {
-            let saved: Durable = serde_json::from_slice(&read_state(&path)?)
-                .map_err(|_| "Computer authority needs recovery.")?;
-            if saved.version != 1 || saved.generation == 0 {
-                return Err("Computer authority is unsupported.".into());
-            }
+            let saved = shared::read(&path)?;
             Durable {
                 version: 1,
-                generation: next_generation(saved.generation)?,
+                generation: if reconnect {
+                    saved.generation
+                } else {
+                    next_generation(saved.generation)?
+                },
                 retired_docker: saved.retired_docker,
+                next_operation: saved.next_operation,
             }
         } else if legacy.exists() {
             // Read only compatible identity metadata. Keep the complete legacy
@@ -85,12 +101,14 @@ impl ComputerAuthority {
                 version: 1,
                 generation: next_generation(generation)?,
                 retired_docker: true,
+                next_operation: 0,
             }
         } else {
             Durable {
                 version: 1,
                 generation: 1,
                 retired_docker: false,
+                next_operation: 0,
             }
         };
         persist(&path, &durable)?;
@@ -100,7 +118,6 @@ impl ComputerAuthority {
             inner: Mutex::new(Inner {
                 durable,
                 draining: false,
-                next: 0,
                 operations: HashMap::new(),
             }),
             drained: Condvar::new(),
@@ -111,12 +128,26 @@ impl ComputerAuthority {
         Self::load_with_plugins(directory, Arc::new(AtomicU8::new(super::plugins::COMPUTER)))
     }
     pub(crate) fn snapshot(&self) -> Result<AuthoritySnapshot, String> {
-        let inner = self.inner.lock().map_err(|_| STALE)?;
+        let mut inner = self.inner.lock().map_err(|_| STALE)?;
+        let _fence = shared::fence(&self.path)?;
+        self.refresh(&mut inner)?;
         Ok(AuthoritySnapshot {
             generation: inner.durable.generation,
-            transitioning: inner.draining,
+            transitioning: inner.draining
+                || shared::live_before(&self.path, inner.durable.generation)?,
             retired_docker: inner.durable.retired_docker,
         })
+    }
+    fn refresh(&self, inner: &mut Inner) -> Result<(), String> {
+        let saved = shared::read(&self.path)?;
+        if saved.generation != inner.durable.generation {
+            for cancellation in inner.operations.values() {
+                cancellation.store(true, Ordering::Release);
+            }
+            inner.draining = !inner.operations.is_empty();
+        }
+        inner.durable = saved;
+        Ok(())
     }
     pub(crate) fn check_generation(&self, generation: u64) -> Result<AuthoritySnapshot, String> {
         let snapshot = self.snapshot()?;
@@ -144,14 +175,21 @@ impl ComputerAuthority {
         require_plugin: bool,
     ) -> Result<OperationTicket, String> {
         let mut inner = self.inner.lock().map_err(|_| STALE)?;
+        let _fence = shared::fence(&self.path)?;
+        self.refresh(&mut inner)?;
         if require_plugin && self.plugins.load(Ordering::Acquire) & super::plugins::COMPUTER == 0 {
             return Err("Enable Computer Use in Plugins before using this tool.".into());
         }
-        if generation != inner.durable.generation || inner.draining {
+        if generation != inner.durable.generation
+            || inner.draining
+            || shared::live_before(&self.path, generation)?
+        {
             return Err(STALE.into());
         }
-        inner.next = inner.next.checked_add(1).ok_or(STALE)?;
-        let id = inner.next;
+        inner.durable.next_operation = next_generation(inner.durable.next_operation)?;
+        let id = inner.durable.next_operation;
+        persist(&self.path, &inner.durable)?;
+        let lease = shared::operation(&self.path, generation, id)?;
         let cancellation = Arc::new(AtomicBool::new(false));
         inner.operations.insert(id, cancellation.clone());
         Ok(OperationTicket {
@@ -159,6 +197,7 @@ impl ComputerAuthority {
             id,
             generation,
             cancellation,
+            _lease: lease,
         })
     }
     pub(crate) fn begin_artifact(
@@ -169,6 +208,8 @@ impl ComputerAuthority {
     }
     pub(crate) fn revoke(&self, expected: u64) -> Result<u64, String> {
         let mut inner = self.inner.lock().map_err(|_| STALE)?;
+        let _fence = shared::fence(&self.path)?;
+        self.refresh(&mut inner)?;
         if inner.durable.generation != expected {
             return Err(STALE.into());
         }
@@ -184,22 +225,37 @@ impl ComputerAuthority {
         let deadline = Instant::now() + timeout;
         let mut inner = self.inner.lock().map_err(|_| STALE)?;
         loop {
-            if inner.durable.generation != generation {
-                return Err(STALE.into());
-            }
-            if inner.operations.is_empty() {
-                inner.draining = false;
-                return Ok(());
+            {
+                let _fence = shared::fence(&self.path)?;
+                self.refresh(&mut inner)?;
+                if inner.durable.generation != generation {
+                    return Err(STALE.into());
+                }
+                if inner.operations.is_empty() && !shared::live_before(&self.path, generation)? {
+                    inner.draining = false;
+                    return Ok(());
+                }
             }
             let remaining = deadline
                 .checked_duration_since(Instant::now())
                 .ok_or("A previous computer operation is still draining. Input remains stopped.")?;
             let (next, _) = self
                 .drained
-                .wait_timeout(inner, remaining)
+                .wait_timeout(inner, remaining.min(Duration::from_millis(50)))
                 .map_err(|_| STALE)?;
             inner = next;
         }
+    }
+    pub(crate) fn cancel_local(&self) {
+        if let Ok(mut inner) = self.inner.lock() {
+            inner.draining = true;
+            for cancellation in inner.operations.values() {
+                cancellation.store(true, Ordering::Release);
+            }
+        }
+    }
+    pub(super) fn has_local_operations(&self) -> Result<bool, String> {
+        Ok(!self.inner.lock().map_err(|_| STALE)?.operations.is_empty())
     }
     pub(super) fn revoke_and_drain_later(self: &Arc<Self>) {
         let generation = self.snapshot().and_then(|s| self.revoke(s.generation));
@@ -253,7 +309,9 @@ impl OperationTicket {
         operation: impl FnOnce() -> Result<T, String>,
     ) -> Result<T, String> {
         {
-            let inner = self.authority.inner.lock().map_err(|_| STALE)?;
+            let mut inner = self.authority.inner.lock().map_err(|_| STALE)?;
+            let _fence = shared::fence(&self.authority.path)?;
+            self.authority.refresh(&mut inner)?;
             if self.cancellation.load(Ordering::Acquire)
                 || inner.durable.generation != self.generation
                 || inner.draining
@@ -261,7 +319,7 @@ impl OperationTicket {
             {
                 Err(STALE.into())
             } else {
-                operation()
+                crate::background_worker::commands::with_authority(operation)
             }
         }
     }
@@ -270,6 +328,9 @@ impl Drop for OperationTicket {
     fn drop(&mut self) {
         if let Ok(mut inner) = self.authority.inner.lock() {
             inner.operations.remove(&self.id);
+            if inner.operations.is_empty() {
+                inner.draining = false;
+            }
             self.authority.drained.notify_all();
         }
     }
@@ -306,6 +367,51 @@ fn persist(path: &Path, durable: &Durable) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn separate_clients_share_ids_and_stop_waits_for_foreign_tickets() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = ComputerAuthority::load(root.path()).unwrap();
+        let client = ComputerAuthority::load_mode(
+            root.path(),
+            Arc::new(AtomicU8::new(super::super::plugins::COMPUTER)),
+            true,
+        )
+        .unwrap();
+        let first = owner.begin_agent(1).unwrap();
+        let second = client.begin_agent(1).unwrap();
+        assert_ne!(
+            first.execution_binding().operation_id,
+            second.execution_binding().operation_id
+        );
+        let next = client.revoke(1).unwrap();
+        assert!(first.check().is_err());
+        drop(second);
+        assert!(client.drain(next, Duration::from_millis(10)).is_err());
+        assert!(owner.begin_agent(next).is_err());
+        drop(first);
+        client.drain(next, Duration::from_secs(1)).unwrap();
+        assert!(owner.begin_agent(next).is_ok());
+    }
+    #[test]
+    fn closing_one_client_does_not_revoke_the_other_owners_ticket() {
+        let root = tempfile::tempdir().unwrap();
+        let owner = ComputerAuthority::load(root.path()).unwrap();
+        let client = ComputerAuthority::load_mode(
+            root.path(),
+            Arc::new(AtomicU8::new(super::super::plugins::COMPUTER)),
+            true,
+        )
+        .unwrap();
+        let running = owner.begin_agent(1).unwrap();
+        let viewing = client.begin_viewer(1).unwrap();
+        client.cancel_local();
+        assert!(viewing.check().is_err());
+        assert!(running.check().is_ok());
+        drop(viewing);
+        drop(client);
+        assert!(running.check().is_ok());
+        assert_eq!(owner.snapshot().unwrap().generation, 1);
+    }
     #[test]
     fn revocation_invalidates_queued_and_completed_results_before_drain() {
         let root = tempfile::tempdir().unwrap();

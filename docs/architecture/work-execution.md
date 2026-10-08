@@ -84,8 +84,8 @@ Claude and supported native API adapters (Gemini is excluded). Read Only agent
 schedules with the same restrictions use the existing occurrence ledger, frozen
 prompt and exact claim/bind/renew/finish path. Legacy research schedules retain
 their existing runner. Requests with unsupported capabilities stay with the
-desktop executor. The worker exposes no command, file, computer or connector
-tools, and it never approves an action. A provider tool or approval request
+desktop executor. This autonomous provider route exposes no command, file,
+computer or connector tools, and it never approves an action. A provider tool or approval request
 interrupts the attempt for explicit review and Continue in the app.
 Follow-ups and steering also require the foreground Continue path; a native
 turn never marks a new instruction delivered without actually supplying it.
@@ -108,11 +108,42 @@ An exclusive Windows file handle prevents duplicate account owners; a second
 handle marks readiness only after startup recovery. An account-derived local
 named pipe permits the current Windows logon SID, rejects remote clients and
 verifies peer process image and logon session in both directions. Its bounded
-protocol carries only status and Stop, never prompts or credentials. An owned
+control protocol carries only status and Stop. An owned
 Windows Job contains the worker and its provider descendants, with 48-process
 and 3 GiB limits and kill-on-close. No shell fallback, elevated service or job
 breakaway is used. Restore/delete holds the owner fence and requires the worker
 to stop before touching its storage.
+
+Approved native commands use the lifecycle from PR #140, on which this PR is
+explicitly stacked. `repository-run`, `repository-start`, `workspace-run`,
+`workspace-start` and command inspection/Stop route to the same native tool
+boundary inside the worker while background execution is enabled. The originating
+provider's transient binding is checked before handoff; the worker independently
+verifies the exact tool/arguments/workspace/agent/computer generation and consumes
+the existing single-use permit. It cannot mint approval or enable a host shell.
+A separate authenticated, generation-bound pipe carries these closed requests,
+with 128 KiB request and 1 MiB response limits, eight connections and four
+concurrent tool dispatches. Status/Stop has its own channel. An uncertain or lost
+receipt requires inspecting the existing job; the bridge never retries it.
+
+General settings refuses ownership transfer while foreground operations or jobs
+are active. Idle job scopes release their existing owner leases before the
+worker starts. Repository locks now include a cross-process file lease, retained
+by persistent jobs for their entire lifetime. Computer generations and operation
+IDs use short file fences; operation lifetime leases make Stop/drain observe
+both processes. A new worker incarnation increments computer generations, while
+reconnecting desktop views read them without revoking running jobs. Closing the
+window cancels its own operations, leaving worker-owned tickets alive; explicit
+computer Stop revokes the shared generation. Plugin disable, account expiry,
+global pause and worker Stop are monitored independently of provider activity.
+The worker's final launch/import commits also check durable worker revocation
+inside the store transaction. The shared executor's snapshot/import/timeout and
+descendant containment rules remain authoritative. Library uses the same native
+job history/output/Stop implementation through this bridge.
+An approved foreground tool can keep running after its originating provider view
+closes, but that does not migrate the foreground provider conversation. On
+reconnect, inspect its saved job and any imported output before continuing the
+interrupted Work; neither the tool nor the provider request is automatically replayed.
 
 There is one background attempt at a time, a 30-minute attempt limit, a 60 KiB
 context limit and a 128 KiB output limit. Buffered provider events are bounded.
@@ -121,8 +152,11 @@ sleep gaps, provider errors, approval requests and process crashes require
 review; no uncertain provider request is retried automatically. Restart fences
 the previous generation and closes active attempts while retaining checkpoints.
 There is no automatic crash relaunch or account-token refresh in this worker.
-Those lifecycle extensions and native command/tool ownership remain integration
-work; unit tests do not establish live closed-window provider acceptance.
+Those lifecycle extensions remain separate work. Native provider turns still
+pause for tool/approval requests; command handoff covers already approved desktop
+tool calls and their native job lifetime, not an unattended approval loop. The
+stacked integration needs native compilation and real closed-window command and
+provider acceptance; unit tests alone do not establish those capabilities.
 
 The design was reviewed against T3 Code commit
 `a4c9494b0e3606775cc5fc929fc138399288bd43`, especially
@@ -132,7 +166,8 @@ T3's documented service installer excludes Windows. Mivlet's implementation uses
 its own Work records and Windows primitives; see Microsoft's
 [named-pipe security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
 and [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
-documentation.
+documentation. Cross-process fences use Rust's native
+[file locking API](https://doc.rust-lang.org/std/fs/struct.File.html#method.try_lock).
 
 Unrelated Chat never enters a running request: the transcript is frozen at
 admission, later messages are excluded from captured context and run

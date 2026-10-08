@@ -1,5 +1,8 @@
 //! Account-scoped native execution owner. The renderer is a client, never a
 //! lifetime owner of background Work. No network listener or host shell exists.
+#[cfg(windows)]
+mod command_ipc;
+pub(crate) mod commands;
 mod control;
 pub(crate) mod dispatch;
 mod persistence;
@@ -14,7 +17,7 @@ pub(crate) use persistence::{enabled, owns_attempt, owns_work};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, Ordering};
 
-const PROTOCOL: u32 = 1;
+const PROTOCOL: u32 = 2;
 static WORKER: AtomicBool = AtomicBool::new(false);
 static STOP: AtomicBool = AtomicBool::new(false);
 
@@ -133,13 +136,26 @@ pub fn run(account: String) {
                         handle.exit(1);
                         return;
                     };
+                    let Ok(command_server) = command_ipc::server(root, true) else {
+                        handle.exit(1);
+                        return;
+                    };
                     let Ok(_ready) = windows::ready_lock(root) else {
                         handle.exit(1);
                         return;
                     };
                     let serving = windows::serve(handle.clone(), server);
                     let executing = dispatch::run(handle.clone());
-                    tokio::join!(serving, executing);
+                    let commands = command_ipc::serve(handle.clone(), command_server);
+                    let monitoring = commands::monitor(handle.clone());
+                    tokio::join!(serving, executing, commands, monitoring);
+                    crate::local_computer::shutdown_all(
+                        handle
+                            .state::<std::sync::Arc<crate::local_computer::LocalComputerState>>()
+                            .inner()
+                            .clone(),
+                    )
+                    .await;
                     crate::native_api::shutdown_account();
                     crate::codex_app_server::shutdown_all_runs();
                     crate::embedded_agent::shutdown_all();

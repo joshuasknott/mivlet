@@ -109,6 +109,15 @@ pub(crate) fn ensure_active_execution_allowed() -> Result<(), String> {
     }
 }
 
+pub(crate) fn allowed_at(conn: &rusqlite::Connection, store: &Store) -> crate::store::Result<bool> {
+    read_state(
+        conn,
+        store,
+        crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+    )
+    .map(|state| !state.paused)
+}
+
 #[tauri::command]
 pub fn execution_control_get(workspace_id: String) -> Result<ExecutionControlState, String> {
     let scope = authorized_scope::command_scope(Some(workspace_id), None, ScopeAccess::Read)?;
