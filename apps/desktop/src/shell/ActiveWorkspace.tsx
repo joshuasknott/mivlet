@@ -35,6 +35,7 @@ import { WorkspaceConversationChrome, buildConversationRenderer } from "./Worksp
 import { WorkspaceContextPanel } from "./WorkspaceContextPanel";
 import { WorkspaceDialogs } from "./workspace-dialogs";
 import { ExecutionWorker } from "./workspace-lazy";
+import { useBackgroundWork } from "./useBackgroundWork";
 import {
   agentSidebarPreviews,
   conversationIndicators,
@@ -77,6 +78,7 @@ export function ActiveWorkspace({
     () => new WorkspaceExecution(workspaceId, undefined, approvals),
   );
   onService(service);
+  useBackgroundWork(service);
   const state = useSyncExternalStore(
     service.subscribe,
     service.getSnapshot,

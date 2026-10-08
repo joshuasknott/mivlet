@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod automation;
+pub(crate) mod background;
 
 use chrono::{
     DateTime, Datelike, Days, Duration, LocalResult, NaiveDateTime, NaiveTime, SecondsFormat,

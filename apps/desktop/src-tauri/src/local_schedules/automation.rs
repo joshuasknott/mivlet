@@ -61,7 +61,7 @@ pub fn local_schedule_dispatch_stage(
         .map_err(|error| error.to_string())
 }
 
-fn stage_at(
+pub(super) fn stage_at(
     conn: &rusqlite::Connection,
     store: &Store,
     scope: &AuthorizedCommandScope,

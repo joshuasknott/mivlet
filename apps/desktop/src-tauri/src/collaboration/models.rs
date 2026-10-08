@@ -121,6 +121,9 @@ pub struct WorkAttachment {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
+    /// Native custody is persisted with the canonical Work, never in a second queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_owner: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<ScheduledWorkContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

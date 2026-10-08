@@ -17,6 +17,7 @@ mod antigravity_acp;
 mod approvals;
 mod authorized_scope;
 mod backends;
+mod background_worker;
 mod capability_grants;
 mod capability_registry;
 mod clerk_identity;
@@ -84,6 +85,10 @@ pub fn open_antigravity_browser_helper(raw_url: &str) -> bool {
 /// Closed native child process entry. It never initializes Tauri or account data.
 pub fn run_browser_child(arguments: &[std::ffi::OsString]) -> bool {
     local_computer::browser::run_child(arguments)
+}
+
+pub fn run_background_worker(account: String) {
+    background_worker::run(account);
 }
 
 #[cfg(debug_assertions)]
@@ -161,6 +166,8 @@ pub fn run() {
             local_computer::local_computer_cancel,
             window_controls::control_main_window,
             snapshot::runtime_status,
+            background_worker::background_worker_status,
+            background_worker::background_worker_control,
             execution_attempts::save_execution_attempt,
             execution_attempts::list_execution_attempts,
             execution_attempts::recover_interrupted_execution_attempts,

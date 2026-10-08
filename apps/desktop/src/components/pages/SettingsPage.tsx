@@ -7,6 +7,7 @@ import type { SettingsRuntime } from "../settings/settings-runtime";
 import { MemoryRecords } from "../settings/MemoryRecords";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { ProviderModelSettings } from "../settings/ProviderModelSettings";
+import { BackgroundExecutionSettings } from "../settings/BackgroundExecutionSettings";
 import {
   AppearanceSettingsView,
   ApprovalsSettingsView,
@@ -125,6 +126,7 @@ function GeneralSettings({
         </div>
       </section>
       <section className="settings-group" aria-labelledby="general-voice-heading"><h2 id="general-voice-heading">Voice input</h2><div className="settings-group__surface"><DictationPrivacySettings runtime={runtime} capability={dictationCapability} onStatus={onStatus} /></div></section>
+      <BackgroundExecutionSettings />
     </div>
   );
 }

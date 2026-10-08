@@ -2629,6 +2629,7 @@ pub async fn identity_refresh(_app: tauri::AppHandle) -> Result<IdentityStatus, 
 
 #[tauri::command]
 pub async fn identity_sign_out(app: tauri::AppHandle) -> Result<IdentityStatus, String> {
+    crate::background_worker::revoke().await;
     // Configuration may have become invalid since sign-in. Local credential
     // removal must still happen before reporting that diagnostic.
     let status =

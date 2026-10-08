@@ -68,6 +68,64 @@ switching panes, or closing every tab of a conversation neither stops nor
 detaches Work; it stays discoverable and cancellable from Work mode and the
 contextual Right Nav. View actions only change view state.
 
+### Opt-in native background text execution on Windows
+
+General settings can start, inspect, stop and restart an account-scoped native
+worker. The same packaged executable runs `--mivlet-background-worker` without
+creating a WebView. It continues after the desktop window closes; it is not a
+Windows service and does not register at login. Windows must remain awake and
+the account session must stay valid. An inherited launcher job is rejected
+instead of bypassing its containment. Start acknowledges the authenticated
+worker before the UI reports it running.
+
+This initial route accepts new Read Only text requests with no attachments,
+project, delegation, knowledge sources or connectors. It uses the shipped Codex,
+Claude and supported native API adapters (Gemini is excluded). Read Only agent
+schedules with the same restrictions use the existing occurrence ledger, frozen
+prompt and exact claim/bind/renew/finish path. Legacy research schedules retain
+their existing runner. Requests with unsupported capabilities stay with the
+desktop executor. The worker exposes no command, file, computer or connector
+tools, and it never approves an action. A provider tool or approval request
+interrupts the attempt for explicit review and Continue in the app.
+
+`Work.executionOwner = "native-background"` selects this owner. Claiming,
+checkpoints and completion check canonical Work identity and generation in the
+same encrypted SQLite transaction; completion saves the assistant message and
+terminal Work together. The renderer does not dispatch these records and its
+disposal does not stop them. Reopening the app reads the same records. Stop
+still changes the canonical generation, and the native loop observes that fence
+at its next 250 ms check. It never publishes a result from a superseded attempt.
+
+An exclusive Windows file handle prevents duplicate account owners; a second
+handle marks readiness only after startup recovery. An account-derived local
+named pipe permits the current Windows logon SID, rejects remote clients and
+verifies peer process image and logon session in both directions. Its bounded
+protocol carries only status and Stop, never prompts or credentials. An owned
+Windows Job contains the worker and its provider descendants, with 48-process
+and 3 GiB limits and kill-on-close. No shell fallback, elevated service or job
+breakaway is used. Restore/delete holds the owner fence and requires the worker
+to stop before touching its storage.
+
+There is one background attempt at a time, a 30-minute attempt limit, a 60 KiB
+context limit and a 128 KiB output limit. Buffered provider events are bounded.
+Output checkpoints are encrypted once per second. Stop, account revocation,
+sleep gaps, provider errors, approval requests and process crashes require
+review; no uncertain provider request is retried automatically. Restart fences
+the previous generation and closes active attempts while retaining checkpoints.
+There is no automatic crash relaunch or account-token refresh in this worker.
+Those lifecycle extensions and native command/tool ownership remain integration
+work; unit tests do not establish live closed-window provider acceptance.
+
+The design was reviewed against T3 Code commit
+`a4c9494b0e3606775cc5fc929fc138399288bd43`, especially
+`docs/user/background-service.md`, `docs/internals/connection-runtime.md`,
+`ProviderRuntimeRecoveryService.ts` and `BackgroundWorkStop.integration.test.ts`.
+T3's documented service installer excludes Windows. Mivlet's implementation uses
+its own Work records and Windows primitives; see Microsoft's
+[named-pipe security](https://learn.microsoft.com/en-us/windows/win32/ipc/named-pipe-security-and-access-rights)
+and [Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects)
+documentation.
+
 Unrelated Chat never enters a running request: the transcript is frozen at
 admission, later messages are excluded from captured context and run
 attribution, and membership/model changes bump generations so late results are
@@ -107,9 +165,10 @@ activity is explained as uncertain rather than presented as a failure.
 - **Stop** (`stop-work`/`stop-project`) is immediate: renderer sessions freeze
   streams and revoke computer control before the native fence cancels the
   request and its descendants; unrelated Work stays current.
-- **Dispose** is Stop for the whole workspace: it freezes streams, rejects new
+- **Dispose** is Stop for renderer-owned work: it freezes streams, rejects new
   serial work, and issues native `stop-work` immediately for `running` /
   `awaiting-approval` assignments, including orphans with no renderer session.
+  Native background Work is excluded; explicit Stop still fences either owner.
   Dispose binds each `stop-work` to the generation captured at freeze
   (`expectedGeneration`). Pending account refresh unmounts the owner; the next
   mount waits for that dispose to settle before remount recovery. If remount
@@ -126,7 +185,8 @@ activity is explained as uncertain rather than presented as a failure.
 
 ## Restart recovery and attachments
 
-At startup, `collaboration::recover` moves active Work to `awaiting-user`,
+At startup, `collaboration::recover` leaves Work with a live native background
+owner running and moves other active Work to `awaiting-user`,
 bumps the generation and records the reason; no provider attempt, approval or
 external effect is replayed. `continue-work` requires an explicit
 reconciliation acknowledgment and starts a fresh attempt with current context.
@@ -158,7 +218,8 @@ cannot resume automatically; explicit continuation after reconciliation removes
 the schedule claim and uses current user Work authority. Claim tokens remain
 ephemeral and are never recorded in Work or model context.
 
-Schedules run while Mivlet is open, online and the computer is awake. The native
+Ordinary schedules run while Mivlet is open, online and the computer is awake;
+the opt-in worker can own the restricted Read Only agent schedules above. The native
 lease and occurrence ledger coalesce missed recurring slots and prevent replay;
 this does not provide an offline or hosted worker. Existing schedules without an
 execution kind default to read-only research and retain their restricted Codex

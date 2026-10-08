@@ -113,6 +113,35 @@ function fixture(work: CollaborationWorkItem[]) {
   };
 }
 
+describe("native background custody", () => {
+  it("never admits native Work into a renderer provider session", async () => {
+    const { service } = fixture([fixtureWork("background", "a", { executionOwner: "native-background" })]);
+    await service.refresh();
+    service.admit(agents, models, [provider], "full-access");
+    expect(service.getSnapshot().sessions).toEqual([]);
+    await service.dispose();
+  });
+  it("window disposal preserves native work while stopping renderer-owned work", async () => {
+    const { service, command } = fixture([
+      fixtureWork("background", "a", { executionOwner: "native-background", status: "running" }),
+      fixtureWork("foreground", "b", { status: "running" }),
+    ]);
+    await service.refresh();
+    await service.dispose();
+    expect(command.mock.calls.filter(([, input]) => input.action === "stop-work")).toEqual([
+      ["fixture", { action: "stop-work", id: "foreground", expectedGeneration: 1 }],
+    ]);
+  });
+  it("explicit Stop still fences native Work after reconnect", async () => {
+    const { service, command } = fixture([fixtureWork("background", "a", { executionOwner: "native-background", status: "running" })]);
+    await service.refresh();
+    await service.stop("background");
+    expect(command).toHaveBeenCalledWith("fixture", expect.objectContaining({ action: "stop-work", id: "background" }));
+    expect(service.getSnapshot().data.work[0].status).toBe("cancelled");
+    await service.dispose();
+  });
+});
+
 describe("workspace execution (deterministic fixtures, no live provider)", () => {
   it("admits only a claimed automation, preserves its effort and waits across fresh turns", async () => {
     const work = fixtureWork("automation", "a", { schedule: { occurrenceId: "occurrence", reasoningEffort: "low" } });

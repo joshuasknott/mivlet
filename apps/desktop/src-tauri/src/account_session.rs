@@ -159,6 +159,7 @@ pub(crate) async fn restart(app: tauri::AppHandle) {
     if CLOSING.swap(true, Ordering::AcqRel) {
         return;
     }
+    crate::background_worker::revoke().await;
     // Hide and destroy the WebView before a different account may be admitted:
     // this drops microphones, audio, JS callbacks, query caches and drafts in RAM.
     if let Some(window) = app.get_webview_window("main") {

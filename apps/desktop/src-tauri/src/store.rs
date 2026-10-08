@@ -335,7 +335,12 @@ impl Store {
     ) -> Result<R> {
         let mut conn = self.conn.lock().expect("store connection mutex poisoned");
         self.check_account()?;
-        let tx = conn.transaction().map_err(StoreError::from)?;
+        // The desktop and background owner have separate connections. Reserve
+        // the writer before reading state: upgrading a deferred WAL snapshot
+        // can fail immediately and bypass SQLite's busy timeout.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(StoreError::from)?;
         let out = f(&tx)?;
         self.check_account()?;
         tx.commit().map_err(StoreError::from)?;
@@ -404,6 +409,11 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
     let db_path = app_data_dir.join(DB_FILENAME);
     let key_store = keys::NativeKeyStore::new()?;
     let pending_restore = app_data_dir.join(RESTORE_PENDING_FILENAME);
+    if pending_restore.exists()
+        && (crate::background_worker::is_worker() || crate::background_worker::owner_alive())
+    {
+        return Err("Stop the background worker before activating a pending local restore.".into());
+    }
     let key = match keys::resolve_for_database(
         &key_store,
         Store::database_exists(&db_path) || pending_restore.exists(),
@@ -1058,6 +1068,7 @@ pub fn prepare_local_data_restore(
     if confirmation != "restore local data" {
         return Err("Type \"restore local data\" to confirm the restore.".into());
     }
+    let _background_guard = crate::background_worker::maintenance_guard()?;
     let source = PathBuf::from(source);
     let canonical = crate::paths::strict_canonicalize(&source)
         .map_err(|_| "The selected backup is unavailable.".to_string())?;
@@ -1223,6 +1234,7 @@ pub fn delete_local_data(
     if confirmation != "delete local data" {
         return Err("Type \"delete local data\" to confirm local deletion.".to_string());
     }
+    let _background_guard = crate::background_worker::maintenance_guard()?;
     let store = GLOBAL_STORE
         .get()
         .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
@@ -1873,6 +1885,52 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 8);
+    }
+
+    #[test]
+    fn independent_connections_serialize_read_modify_write() {
+        let directory = TempDir::new().unwrap();
+        let key = vault::MasterKey::generate().unwrap();
+        let path = directory.path().join("parallel.sqlite");
+        let first = Store::open(&path, Vault::new(&key).unwrap()).unwrap();
+        let second = Store::open(&path, Vault::new(&key).unwrap()).unwrap();
+        let start = Arc::new(std::sync::Barrier::new(2));
+        let workers: Vec<_> = [first, second]
+            .into_iter()
+            .map(|store| {
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    for _ in 0..8 {
+                        store
+                            .transaction(|tx| {
+                                let count = repos::preferences::get(tx, &store, "counter")?
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0);
+                                std::thread::sleep(std::time::Duration::from_millis(20));
+                                repos::preferences::upsert(
+                                    tx,
+                                    &store,
+                                    "counter",
+                                    &serde_json::json!(count + 1),
+                                    "t",
+                                )
+                            })
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        let reopened = Store::open(&path, Vault::new(&key).unwrap()).unwrap();
+        assert_eq!(
+            reopened
+                .with_conn(|conn| repos::preferences::get(conn, &reopened, "counter"))
+                .unwrap(),
+            Some(serde_json::json!(16))
+        );
     }
 
     #[test]

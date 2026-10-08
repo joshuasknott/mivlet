@@ -392,6 +392,9 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             // An explicit, reconciled continuation is ordinary user Work. The
             // completed occurrence must never grant a fresh automation claim.
             item.schedule = None;
+            // Reconciliation is a new user-authorized foreground attempt; a
+            // crashed native attempt is never resurrected automatically.
+            item.execution_owner = None;
             item.conversation_generation = room.generation;
             item.context_revision = room
                 .project_id
