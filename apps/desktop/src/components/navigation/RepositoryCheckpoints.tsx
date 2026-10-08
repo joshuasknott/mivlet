@@ -111,7 +111,7 @@ export function RepositoryCheckpoints({
     onSuccess: () => {
       setMessage(
         action?.tool.endsWith("restore")
-          ? "Files restored. Run the project's checks again. A checkpoint of the previous code is saved below."
+          ? "Files restored. Run the project's checks again. The previous code is saved as a checkpoint."
           : action?.tool.endsWith("delete")
             ? "Checkpoint deleted."
             : "Checkpoint saved.",
@@ -181,9 +181,8 @@ export function RepositoryCheckpoints({
       {open && (
         <div className="repository-checkpoints__body">
           <p>
-            Save code states in this agent's private copy. Restore includes new
-            and deleted files. Ignored files, credential paths and Git metadata
-            are excluded.
+            Save and restore files in this agent's private copy. Ignored files,
+            credentials and Git metadata are excluded.
           </p>
           <form
             onSubmit={(event) => {
@@ -209,7 +208,7 @@ export function RepositoryCheckpoints({
               Save checkpoint
             </button>
           </form>
-          <div className="repository-checkpoints__actions">
+          <div className="repository-files__actions">
             <button
               type="button"
               onClick={() => {
@@ -234,8 +233,7 @@ export function RepositoryCheckpoints({
           </div>
           {disabled && (
             <p role="status">
-              Wait for the repository operation to finish, or reconcile its
-              interrupted state, before using checkpoints.
+              Finish or reconcile the repository operation before using checkpoints.
             </p>
           )}
           {busy && (
@@ -277,7 +275,7 @@ export function RepositoryCheckpoints({
                       {new Date(checkpoint.createdAt).toLocaleString()} ·{" "}
                       {checkpoint.fileCount} files
                     </span>
-                    <div className="repository-checkpoints__actions">
+                    <div className="repository-files__actions">
                       <button
                         type="button"
                         disabled={busy || disabled || !!action}
@@ -313,10 +311,9 @@ export function RepositoryCheckpoints({
             >
               <h4>Restore “{review.value.checkpoint.label}”</h4>
               <p>
-                {review.value.files.length} file changes. A checkpoint of the
-                current code will be saved first. Previous test verification
-                will be cleared. Git HEAD and conversation history stay in
-                place.
+                {review.value.files.length} file changes, including additions and
+                deletions. Current code is saved first; prior test verification
+                is cleared. Git HEAD and chat history stay unchanged.
               </p>
               <ul>
                 {review.value.files.map((file) => (
@@ -330,8 +327,7 @@ export function RepositoryCheckpoints({
               </pre>
               {review.value.truncated && (
                 <p role="status">
-                  The diff is truncated. Review the affected files with the
-                  agent before restoring.
+                  Diff truncated. Review full affected files with the agent before restoring.
                 </p>
               )}
               <details>
@@ -400,7 +396,7 @@ export function RepositoryCheckpoints({
                   disabled={execute.isPending}
                 />
               </label>
-              <div className="repository-checkpoints__actions">
+              <div className="repository-files__actions">
                 <button
                   type="submit"
                   disabled={

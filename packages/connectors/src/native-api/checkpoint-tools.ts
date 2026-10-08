@@ -27,25 +27,25 @@ function tool(
 export const CHECKPOINT_TOOLS: Record<string, BackendTool> = {
   "repository-checkpoint-list": tool(
     "list",
-    "List immutable file checkpoints of this agent's selected private repository copy. Includes native request provenance and exact SHA-256 trees. Separate from conversation history.",
+    "List immutable checkpoints of the selected private copy, request provenance and SHA-256 trees. Separate from chat history.",
     { repositoryId },
     "low",
   ),
   "repository-checkpoint-capture": tool(
     "capture",
-    "Save a meaningful code state before risky edits or after a verified milestone. Captures tracked and relevant new files; excludes ignored files, credentials and Git metadata. Bounded to 24 checkpoints/512 MiB. Original checkout unchanged.",
+    "Save tracked/new code before risky edits or after verification. Exclude ignored files, credentials and Git metadata. Max 24 checkpoints/512 MiB; original unchanged.",
     { repositoryId, label: { type: "string", maxLength: 160 } },
     "high",
   ),
   "repository-checkpoint-preview": tool(
     "preview",
-    "Review exact restore additions/deletions/changes and currentTreeId, outputTreeId, checkpoint.treeId, head. Read full files if diff is truncated. Ignored files preserved; conflicts fail closed. Never restores by itself.",
+    "Preview additions/deletions/changes and currentTreeId/outputTreeId/checkpoint.treeId/head. Truncated diff requires full-file review. Preserve ignored files; conflicts fail closed. Does not restore.",
     { repositoryId, checkpointId: text },
     "low",
   ),
   "repository-checkpoint-restore": tool(
     "restore",
-    "After explicit user approval restore reviewed FILES only in this exact private copy. Bind all hashes from fresh preview. Saves a before-restore checkpoint, invalidates test receipts; no source checkout, Git HEAD, conversation or external-effect rollback. Stop/drift/uncertainty refuses stale restore; use repository-recover after uncertain import.",
+    "Explicitly approved FILE restore in the selected private copy, binding fresh preview hashes. Checkpoint current code; invalidate test receipts. No original/Git HEAD/chat/external rollback. Stop/drift refuse; uncertain import needs repository-recover.",
     {
       repositoryId,
       checkpointId: text,
@@ -58,7 +58,7 @@ export const CHECKPOINT_TOOLS: Record<string, BackendTool> = {
   ),
   "repository-checkpoint-delete": tool(
     "delete",
-    "Explicitly delete one exact file checkpoint to release bounded storage. Current repository files remain unchanged. Never removes a repository copy.",
+    "Approved deletion of one exact checkpoint to release storage. Preserve current files and repository copy.",
     { repositoryId, checkpointId: text, expectedCheckpointTree: text },
     "critical",
   ),

@@ -37,17 +37,6 @@
   padding: 8px 12px;
   white-space: normal;
 }
-.repository-checkpoints button:focus-visible,
-.repository-checkpoints input:focus-visible,
-.repository-checkpoints summary:focus-visible {
-  outline: 2px solid currentColor;
-  outline-offset: 3px;
-}
-.repository-checkpoints__actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
 .repository-checkpoints__list {
   list-style: none;
   margin: 0;
@@ -77,16 +66,9 @@
   margin: 0 0 8px;
 }
 .repository-checkpoints pre {
-  max-height: 320px;
-  overflow: auto;
   font-size: 12px;
   padding: 8px;
   white-space: pre;
-}
-.repository-checkpoints code,
-.repository-checkpoints dd,
-.repository-checkpoints li {
-  overflow-wrap: anywhere;
 }
 .repository-checkpoints dd {
   margin: 4px 0 10px;
