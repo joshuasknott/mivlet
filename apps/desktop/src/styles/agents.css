@@ -228,14 +228,10 @@
 .account-dialog h2 { margin: 0 30px 12px 0; font-size: 22px; }
 .account-dialog p, .account-dialog small { color: var(--ink-muted); line-height: 1.6; }
 .account-dialog small { display: block; font-size: 12px; }
-.account-usage { margin: 24px 0; }
-.account-usage > div { display: flex; justify-content: space-between; gap: 24px; padding: 14px 0; border-bottom: 1px solid var(--line); }
-.account-usage dt { color: var(--ink-muted); }
-.account-usage dd { margin: 0; font-variant-numeric: tabular-nums; }
+.account-dialog--usage { width: min(760px, 100%); max-height: calc(100vh - 48px); overflow: auto; }
 .account-dialog footer { display: flex; justify-content: flex-end; gap: 8px; margin-top: 28px; }
 .account-dialog footer button { min-height: 40px; padding: 0 16px; color: var(--ink); background: transparent; border: 1px solid var(--line); border-radius: 11px; }
 .account-dialog footer .account-dialog__primary { color: var(--surface); background: var(--ink); border-color: var(--ink); }
-.account-dialog__empty { padding: 24px 0; }
 
 
 .agent-sidebar__profile > svg { opacity: .7; transition: opacity 120ms ease; }

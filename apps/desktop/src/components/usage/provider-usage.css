@@ -158,9 +158,6 @@
   display: grid;
   gap: 8px;
 }
-.provider-reset-control button {
-  min-height: 36px;
-}
 .provider-reset-control label {
   display: flex;
   align-items: center;

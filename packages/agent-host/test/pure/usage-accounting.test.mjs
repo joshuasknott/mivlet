@@ -5,7 +5,7 @@ import ts from "typescript";
 
 // This pure stream observer needs no Bun executable or provider credentials.
 const source = await readFile(
-  new URL("../src/usage-accounting.ts", import.meta.url),
+  new URL("../../src/usage-accounting.ts", import.meta.url),
   "utf8",
 );
 const compiled = ts.transpileModule(source, {

@@ -15,7 +15,7 @@ export function AccountDialog({ kind, name, onClose, onSignOut }: {
   useModalFocusTrap({ active: true, containerRef: ref, onClose: () => { if (!busy) onClose(); } });
   return (
     <div className="settings-modal-backdrop">
-      <section ref={ref} className="account-dialog" role="dialog" aria-modal="true" aria-labelledby="account-dialog-title" tabIndex={-1}>
+      <section ref={ref} className={`account-dialog${kind === "usage" ? " account-dialog--usage" : ""}`} role="dialog" aria-modal="true" aria-labelledby="account-dialog-title" tabIndex={-1}>
         <button className="settings-modal__close" type="button" aria-label="Close account dialog" disabled={busy} onClick={onClose}><X size={18} /></button>
         <h2 id="account-dialog-title">{kind === "usage" ? "Usage" : "Sign out of Mivlet?"}</h2>
         {kind === "usage" ? <ProviderUsageDetails /> : <>
