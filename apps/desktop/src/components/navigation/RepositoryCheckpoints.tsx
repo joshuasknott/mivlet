@@ -46,7 +46,7 @@ export function RepositoryCheckpoints({
     const computer = await loadRuntimeLocalComputer({ workspaceId, agentId });
     if (!computer?.plugins?.computer)
       throw new Error(
-        "Enable Computer Use in the desktop app to use checkpoints.",
+        "Open the desktop app and enable Computer Use.",
       );
     const target = {
       workspaceId,
@@ -76,7 +76,7 @@ export function RepositoryCheckpoints({
         checkpoint.id,
       );
       if (!value)
-        throw new Error("Open the desktop app to preview checkpoint files.");
+        throw new Error("Open the desktop app to preview files.");
       return { value, target };
     },
     onSuccess: setReview,
@@ -181,8 +181,7 @@ export function RepositoryCheckpoints({
       {open && (
         <div className="repository-checkpoints__body">
           <p>
-            Save or restore files in this agent's private copy. Excludes ignored files,
-            credentials and Git metadata.
+            Ignored files, credentials and Git metadata are excluded.
           </p>
           <form
             onSubmit={(event) => {
@@ -197,7 +196,7 @@ export function RepositoryCheckpoints({
                 value={label}
                 maxLength={160}
                 onChange={(event) => setLabel(event.target.value)}
-                placeholder="Tests passing before refactor"
+                placeholder="Before refactor"
                 disabled={busy || disabled || !!action}
               />
             </label>
@@ -239,9 +238,9 @@ export function RepositoryCheckpoints({
           {busy && (
             <p role="status">
               {execute.isPending
-                ? "Applying approved checkpoint action…"
+                ? "Applying approved action…"
                 : preview.isPending
-                  ? "Preparing exact file comparison…"
+                  ? "Comparing files…"
                   : "Loading checkpoints…"}
             </p>
           )}
@@ -249,7 +248,7 @@ export function RepositoryCheckpoints({
             <p role="alert">
               {error instanceof Error
                 ? error.message
-                : "Checkpoint operation failed. Inspect repository status."}
+                : "Checkpoint failed. Review repository status."}
             </p>
           )}
           {message && <p role="status">{message}</p>}
@@ -311,9 +310,9 @@ export function RepositoryCheckpoints({
             >
               <h4>Restore “{review.value.checkpoint.label}”</h4>
               <p>
-                {review.value.files.length} file changes, including additions and
-                deletions. Current code is saved first; prior test verification
-                is cleared. Git HEAD and chat history stay unchanged.
+                {review.value.files.length} file changes (added, modified or deleted).
+                Current code is saved first; test verification is cleared.
+                Git HEAD and chat stay unchanged.
               </p>
               <ul>
                 {review.value.files.map((file) => (
@@ -331,7 +330,7 @@ export function RepositoryCheckpoints({
                 </p>
               )}
               <details>
-                <summary>Exact checkpoint and provenance</summary>
+                <summary>Checkpoint provenance</summary>
                 <dl>
                   <dt>Checkpoint</dt>
                   <dd>{review.value.checkpoint.id}</dd>

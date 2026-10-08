@@ -1,6 +1,5 @@
 import type { BackendTool } from "@mivlet/protocol";
 import { NATIVE_EXECUTION_POLICY } from "./workspace-tools";
-import { CHECKPOINT_TOOLS } from "./checkpoint-tools";
 
 const id = {
   repositoryId: {
@@ -30,7 +29,48 @@ function tool(
   };
 }
 export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
-  ...CHECKPOINT_TOOLS,
+  "repository-checkpoint-list": tool(
+    "checkpoint-list",
+    "List private-copy file checkpoints, request provenance and SHA-256 trees.",
+    id,
+    ["repositoryId"],
+    "low",
+  ),
+  "repository-checkpoint-capture": tool(
+    "checkpoint-capture",
+    "Save tracked/new code before edits or after checks. Excludes ignored files, credentials and Git metadata. Limit 24 checkpoints/512 MiB; original unchanged.",
+    { ...id, label: { type: "string", maxLength: 160 } },
+    ["repositoryId", "label"],
+    "high",
+  ),
+  "repository-checkpoint-preview": tool(
+    "checkpoint-preview",
+    "File diff + currentTreeId/outputTreeId/checkpoint.treeId/head. Review full files if truncated. Preserve ignored files; reject conflicts.",
+    { ...id, checkpointId: text },
+    ["repositoryId", "checkpointId"],
+    "low",
+  ),
+  "repository-checkpoint-restore": tool(
+    "checkpoint-restore",
+    "Approved FILE restore using fresh preview hashes. Save current private-copy code; invalidate test verification. Original/HEAD/chat unchanged; no external undo. Refuse Stop/drift; uncertain import: repository-recover.",
+    {
+      ...id,
+      checkpointId: text,
+      expectedTree: text,
+      expectedCheckpointTree: text,
+      expectedOutput: text,
+      expectedHead: text,
+    },
+    ["repositoryId", "checkpointId", "expectedTree", "expectedCheckpointTree", "expectedOutput", "expectedHead"],
+    "critical",
+  ),
+  "repository-checkpoint-delete": tool(
+    "checkpoint-delete",
+    "Delete one approved exact checkpoint; preserve current files and repository copy.",
+    { ...id, checkpointId: text, expectedCheckpointTree: text },
+    ["repositoryId", "checkpointId", "expectedCheckpointTree"],
+    "critical",
+  ),
   "repository-recover": tool(
     "recover",
     "Reconcile uncertain import: keep receipt, release staging/backup; replay nothing. Else inspect GitHub branch/HEAD/base. Failed query proves no absence; retry needs fresh approval.",
