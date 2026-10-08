@@ -264,11 +264,19 @@ pub(crate) fn execute(
 ) -> Result<String, String> {
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let directory = directory(state, workspace, agent)?;
-    let jobs = state.command_jobs(workspace, agent)?;
     if tool == "repository-start" {
-        return jobs::start(directory, ticket, jobs, arguments);
+        return jobs::start(
+            directory,
+            ticket,
+            state.command_jobs(workspace, agent)?,
+            arguments,
+        );
     }
-    execute_observed(&directory, &ticket, tool, arguments, Some(&jobs))
+    // Repository inspection and recovery must not depend on command history.
+    let jobs = (tool == "repository-run")
+        .then(|| state.command_jobs(workspace, agent))
+        .transpose()?;
+    execute_observed(&directory, &ticket, tool, arguments, jobs.as_ref())
 }
 #[cfg(test)]
 fn execute_in(
