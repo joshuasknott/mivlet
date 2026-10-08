@@ -35,6 +35,7 @@ import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
 import type { ConversationTurn } from "../lib/conversation-presentation";
 import { SideChatContextNotice } from "../components/conversation/SideChats";
+import { ProviderContinuationControl } from "../components/conversation/ProviderContinuationControl";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -551,6 +552,23 @@ export function ConversationPane({
         </div>
       </div>
       <div className="conversation-pane-composer">
+        {history?.messages.length && profile ? <ProviderContinuationControl
+          workspaceId={service.workspaceId} conversationId={room.id} agentId={profile.id}
+          ownerKey={`${owner?.internalUserId}:${owner?.memberId ?? ""}`}
+          model={model} provider={runtime.backendProviders.find(p => p.id === model?.providerId)}
+          prompt={composer.text} attachmentCount={composer.attachments.length}
+          disabled={running.length > 0 || pending || Boolean(composer.replyWorkId) || runtime.accountWorkspacePending}
+          prepare={async () => { await runtime.flushSnapshot(); await service.refresh(); }}
+          onContinue={async (input, fingerprint) => {
+            if (!composer.beginSubmission()) throw new Error("This draft is already being submitted.");
+            try {
+              await service.command({ action: "start-provider-continuation", id: `work-${crypto.randomUUID()}`,
+                input, fingerprint, reconcile: true });
+              await composer.consume(composer.revision);
+              scroll.toLatest();
+            } finally { composer.endSubmission(); }
+          }}
+        /> : null}
         {composer.replyWorkId ? <p className="conversation-attention" role="status">Following up with {replyTarget?.agentName ?? "an unavailable agent"} in this effort. <button type="button" onClick={() => composer.setReplyWork(undefined)}>New request</button></p> : null}
         {empty ? <div className="team-conversation-welcome"><h1>What would you like to work on?</h1></div> : null}
         {scroll.showLatest ? (

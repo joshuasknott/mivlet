@@ -6,6 +6,8 @@ mod commands;
 mod context;
 mod exchanges;
 pub(crate) mod models;
+pub(crate) mod provider_continuation;
+pub(crate) mod provider_continuation_read;
 mod schedules;
 mod work;
 pub(crate) use schedules::{

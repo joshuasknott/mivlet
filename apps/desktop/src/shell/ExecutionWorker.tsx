@@ -40,6 +40,8 @@ import { stagedAttachmentRefs } from "../lib/workspace-execution";
 import { workspaceAgentDirectory } from "../lib/workspace-agent-directory";
 import { coordinationResource } from "../lib/coordination-resources";
 import { discardRuntimeLocalComputerAttachmentBatch } from "../runtime/domains/local-computer";
+import { applyProviderContinuation, providerContinuationHistory } from "../lib/provider-continuation";
+import { readProviderContinuation } from "../runtime/domains/provider-continuation";
 
 /** Mounted by the workspace root, never by a tab. Each admission runs once. */
 export function ExecutionWorker({
@@ -87,6 +89,16 @@ export function ExecutionWorker({
       if (approval.id.startsWith("mivlet-shared-")) await checkRuntimeManagedTool(approval.id, name, args);
       if (isCollaborationTool(name)) {
         const raw: Record<string, unknown> = JSON.parse(args);
+        if (name === "continuation-read") {
+          if (Object.keys(raw).some(key => !["sequence", "textOffset"].includes(key))
+            || typeof raw.sequence !== "number" || !Number.isSafeInteger(raw.sequence) || raw.sequence < 1
+            || typeof raw.textOffset !== "number" || !Number.isSafeInteger(raw.textOffset) || raw.textOffset < 0)
+            throw new Error("Invalid saved-history cursor.");
+          const result = await readProviderContinuation({ workspaceId: service.workspaceId,
+            ...scope, runId, sequence: raw.sequence, textOffset: raw.textOffset });
+          if (!service.current(session)) throw new Error("This continuation was stopped.");
+          return JSON.stringify(result);
+        }
         if (name === "workspace-agents") {
           if (Object.keys(raw).length) throw new Error("Agent discovery takes no arguments.");
           return JSON.stringify({ instructionAuthority: "none", totalAgents: latest.current.runtime.agents.length, agents: workspaceAgentDirectory(
@@ -286,7 +298,7 @@ export function ExecutionWorker({
           provider.capabilities.includes("approvals") &&
           session.model.capabilities?.tools !== false;
         if (toolCapable)
-          tools.push(...collaborationToolSpecs(projectMember));
+          tools.push(...collaborationToolSpecs(projectMember, Boolean(session.work.continuation)));
         if (room.kind === "group" && !toolCapable)
           throw new Error(
             "This model does not support the collaboration tools. Choose a tool-capable model for this participant.",
@@ -326,8 +338,7 @@ export function ExecutionWorker({
           .filter(Boolean)
           .join("\n\n");
         retainAttachmentPreviews(service.workspaceId, session.work.conversationId, staged.attachments);
-        const outcome = await controller.agent.run(
-          buildAgentRequest({
+        const request = buildAgentRequest({
             model: session.model.modelId,
             reasoningEffort: session.profile.reasoningEffort,
             prompt: session.work.userRequest,
@@ -335,11 +346,18 @@ export function ExecutionWorker({
             instructions,
             tools,
             maxTokens: validation.maxTokens,
-          }),
+          });
+        applyProviderContinuation(request, session.work.continuation, provider,
+            latest.current.runtime.modelOptions.find(option => option.id === session.model.id),
+            context.systemPrefix);
+        const outcome = await controller.agent.run(
+          request,
           context,
           session.permissionMode,
           undefined,
           {
+            historyPrefix: providerContinuationHistory(session.work.continuation),
+            contextWindowLimit: session.work.continuation?.contextWindow,
             maxTurns: 6,
             canonicalUserMessage:
               session.work.parentId || session.work.runIds.length > 0

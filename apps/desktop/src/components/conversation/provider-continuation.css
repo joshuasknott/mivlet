@@ -1,0 +1,13 @@
+.provider-continuation { font-size: 0.8125rem; padding: 0 0.5rem; }
+.provider-continuation-trigger { background: transparent; color: inherit; border: 0; min-height: 44px; text-decoration: underline; text-underline-offset: 3px; }
+.provider-continuation button:disabled { opacity: 0.5; cursor: default; }
+.provider-continuation-preview { padding: 1rem; border: 1px solid currentColor; border-radius: 12px; margin-bottom: 0.75rem; max-height: 55vh; overflow: auto; }
+.provider-continuation-preview h3 { margin-top: 0; font-size: 1rem; }
+.provider-continuation-preview p { line-height: 1.5; }
+.provider-continuation-preview small { display: block; overflow-wrap: anywhere; }
+.provider-continuation-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; }
+.provider-continuation-preview summary, .provider-continuation-preview label { display: block; padding: 0.6rem 0; cursor: pointer; }
+.provider-continuation-preview input { margin-right: 0.5rem; }
+.provider-continuation-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+.provider-continuation-actions button { min-height: 44px; padding: 0.5rem 1rem; }
+.provider-continuation :focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }

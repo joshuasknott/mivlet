@@ -178,6 +178,8 @@ pub fn run() {
             local_schedules::local_schedule_dispatch_abandon,
             local_projects::local_project_create,
             collaboration::collaboration_load,
+            collaboration::provider_continuation::provider_continuation_preview,
+            collaboration::provider_continuation_read::provider_continuation_read,
             collaboration::collaboration_command,
             local_projects::local_project_list,
             local_projects::local_project_update,

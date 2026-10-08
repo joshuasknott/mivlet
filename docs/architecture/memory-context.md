@@ -114,6 +114,90 @@ P3/P4/P5 call from an explicit user action:
 
 ## Provider boundary
 
+### Explicit provider continuation
+
+The conversation composer offers **Continue with selected model…** after the
+user writes the next request. Select another connected model in the ordinary
+picker to switch providers, or retain it for a fresh session. Stop active Work
+first. The preview shows the actual native selection and requires review of
+saved results and uncertain effects before admission. Draft attachments must be
+removed for this text-only action; historical attachment bytes are never copied,
+and the preview reports their missing references.
+
+`collaboration/provider_continuation.rs` reads the canonical account/member
+conversation and current scoped context. It preserves complete user/assistant
+records, roles, sequence, revision provenance, partial public replies, and
+completed `repository-run` results. It excludes tool calls, approvals, reasoning,
+redacted records and other raw tool payloads. Original user constraints have
+priority, followed by recent messages. Omitted records remain in the source
+conversation. Tool-capable routes advertise `continuation-read`: native live Work
+and run/generation checks fence paginated public source reads. Source edits or
+redaction invalidate retrieval; it cannot select a different conversation.
+
+The native budget charges UTF-8 bytes, JSON and attribution conservatively, caps
+history at 16,000 bytes, reserves at least 8,192 tokens or a quarter of the window,
+and accounts for the intact new request and captured context. Unknown model
+windows use a labelled 32,768-token fallback. These are admission estimates,
+not billed usage or guarantees for arbitrary tokenizers. The actual request is
+checked again against the current model catalogue, actual tools and instructions
+before dispatch. Prior-provider usage is never reused for a fresh session.
+
+A fingerprint binds the preview to account, workspace, conversation generation,
+source revisions, selected agent/model, request, admitted context and Work state.
+The existing native Work command checks it atomically and persists the packet
+with the ordinary encrypted Work record. Reusing an admission ID cannot enqueue
+another run. Stop, provider prerequisites, current identity, execution generation,
+approval and attachment authority remain in the existing worker. Restoring saved
+Work does not itself run a provider or replay effects.
+
+The currently installed desktop adapters do not expose a durable native-resume
+contract. In particular, native Codex startup explicitly uses ephemeral threads;
+its shared adapter's `resumeThread` method does not establish persisted native
+resume. Continuation therefore uses **portable-fresh-session**, with truthful
+wording rather than claiming native resume. No dependency or SQL migration is
+needed.
+
+Reference review: T3 Code commit
+`a4c9494b0e3606775cc5fc929fc138399288bd43`, specifically
+`ContextHandoffService.ts`, `ContextHandoffBudget.ts`,
+`ContextHandoffDelivery.ts`, their tests and `docs/user/portable-handoffs.md`.
+The official path history identifies introduction in merged PR #2829, commit
+`de343914273eceb852a1d1d739cd1d38df7796ee`.
+This is a Mivlet implementation of the behavior, not copied source. Official
+[Codex App Server](https://developers.openai.com/codex/app-server/) and
+[Claude session](https://platform.claude.com/docs/en/agent-sdk/sessions)
+contracts were reviewed; their resumability does not override Mivlet's current
+ephemeral native session policy.
+
+Concurrent integration: this branch starts at `77f661c3`, independently of the
+conversation UI branch. Continuation consumes the context capture's
+`contextSelection.includeHistory` flag when present. When integrating that
+branch's selected-history repository, change the two continuation source reads
+to its canonical selected-branch reader alongside context capture; do not allow
+unselected alternative answers into continuation. Preserve the UI branch's
+native exclusion checks and its existing context control. Read-only review of
+`codex/conversation-upgrade` at `c5b90d0c` confirmed the compatible signature
+`message::list_selected(conn, store, scope, thread_id)`. Replace `message::list`
+in `provider_continuation::prepare` and `provider_continuation_read::read` with
+that function during integration. Preview fingerprints and retrieval digests
+must both cover the same selected path. Add an integration regression with two
+alternative answers and an excluded-history selection before merging; the
+standalone baseline has neither branch selection nor that control.
+
+Local validation checkpoint (2026-10-08): desktop typecheck and production
+build, protocol parity/build, connector build and 79 distinct focused tests
+passed, including single-worker continuation, worker, recovery, cancellation
+and provider runs. Desktop and
+390px review controls were inspected with synthetic native responses; no live
+provider was called. Security lint, explicit-any, formatting, dead-code and
+dependency-cycle checks passed.
+Native compilation was interrupted without a test result; the encrypted-store
+close/reopen/recovery regression still requires execution. The built ordinary
+JS/CSS bundle exceeds its existing ceiling by 7.9 KiB raw and 1.1 KiB gzip.
+Baseline comparison, performance resolution and final native tests/Clippy
+remain required; no ceiling was increased. These are local implementation
+results, not provider, packaged-app or release acceptance.
+
 Summarisation is deterministic and local. No provider is called by the
 compaction pipeline, so a conversation can never be summarised by a different
 provider than the one that owns the turn. Provider credentials remain in native

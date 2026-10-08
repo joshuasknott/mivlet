@@ -9,6 +9,8 @@ use sha2::{Digest, Sha256};
 
 #[path = "exchange_regressions.rs"]
 mod exchange_regressions;
+#[path = "provider_continuation_tests.rs"]
+mod provider_continuation_tests;
 #[path = "scheduling_regressions.rs"]
 mod scheduling_regressions;
 #[path = "workspace_tests.rs"]
