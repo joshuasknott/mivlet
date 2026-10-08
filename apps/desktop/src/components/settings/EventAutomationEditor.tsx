@@ -162,26 +162,45 @@ export function EventAutomationEditor({
       }}
     >
       <strong>{schedule ? "Edit event trigger" : "New event trigger"}</strong>
-      <label>
-        Agent
-        <select
-          className="input"
-          required
-          autoFocus
-          value={agentId}
-          onChange={(change) => {
-            setAgentId(change.target.value);
-            invalidate();
-          }}
-        >
-          <option value="">Choose an agent</option>
-          {runtime.agents.map((candidate) => (
-            <option key={candidate.id} value={candidate.id}>
-              {candidate.name}
+      <div className="event-automations__pair">
+        <label>
+          Agent
+          <select
+            className="input"
+            required
+            autoFocus
+            value={agentId}
+            onChange={(change) => {
+              setAgentId(change.target.value);
+              invalidate();
+            }}
+          >
+            <option value="">Choose an agent</option>
+            {runtime.agents.map((candidate) => (
+              <option key={candidate.id} value={candidate.id}>
+                {candidate.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Event source
+          <select
+            className="input"
+            value={kind}
+            onChange={(change) => {
+              setKind(change.target.value as AutomationEventSource["kind"]);
+              invalidate();
+            }}
+          >
+            <option value="signed-json">Signed JSON event</option>
+            <option value="github-issues">GitHub issue events</option>
+            <option value="github-workflow-run">
+              GitHub workflow-run events
             </option>
-          ))}
-        </select>
-      </label>
+          </select>
+        </label>
+      </div>
       {agent ? (
         <small>
           {supported
@@ -189,23 +208,6 @@ export function EventAutomationEditor({
             : "Choose an agent with a connected provider and model that supports Mivlet tools."}
         </small>
       ) : null}
-      <label>
-        Event source
-        <select
-          className="input"
-          value={kind}
-          onChange={(change) => {
-            setKind(change.target.value as AutomationEventSource["kind"]);
-            invalidate();
-          }}
-        >
-          <option value="signed-json">Signed JSON event</option>
-          <option value="github-issues">GitHub issue events</option>
-          <option value="github-workflow-run">
-            GitHub workflow-run events
-          </option>
-        </select>
-      </label>
       {kind === "signed-json" ? (
         <label>
           Source identity
@@ -237,39 +239,45 @@ export function EventAutomationEditor({
           />
         </label>
       )}
-      <label>
-        Selected JSON fields, one per line
-        <textarea
-          className="input"
-          maxLength={2000}
-          value={fields}
-          onChange={(change) => {
-            setFields(change.target.value);
-            invalidate();
-          }}
-        />
-      </label>
-      <small>
-        Select up to 12 scalar fields. Each field is limited to 2,048 bytes.
-        Credentials and whole request bodies are excluded.
-      </small>
-      <label>
-        Task template
-        <textarea
-          className="input"
-          required
-          maxLength={16000}
-          value={prompt}
-          onChange={(change) => {
-            setPrompt(change.target.value);
-            invalidate();
-          }}
-        />
-      </label>
-      <small>
-        Use selected fields as {"{{body.summary}}"}. Substitutions are quoted,
-        untrusted evidence. They never grant permission.
-      </small>
+      <div className="event-automations__pair">
+        <div>
+          <label>
+            Selected JSON fields, one per line
+            <textarea
+              className="input"
+              maxLength={2000}
+              value={fields}
+              onChange={(change) => {
+                setFields(change.target.value);
+                invalidate();
+              }}
+            />
+          </label>
+          <small>
+            Select up to 12 scalar fields. Each field is limited to 2,048 bytes.
+            Credentials and whole request bodies are excluded.
+          </small>
+        </div>
+        <div>
+          <label>
+            Task template
+            <textarea
+              className="input"
+              required
+              maxLength={16000}
+              value={prompt}
+              onChange={(change) => {
+                setPrompt(change.target.value);
+                invalidate();
+              }}
+            />
+          </label>
+          <small>
+            Use selected fields as {"{{body.summary}}"}. Substitutions are
+            quoted, untrusted evidence. They never grant permission.
+          </small>
+        </div>
+      </div>
       <div className="event-automations__pair">
         <label>
           Ignore events older than (minutes)
@@ -349,61 +357,64 @@ export function EventAutomationEditor({
       )}
       <details>
         <summary>Preview the produced request</summary>
-        <label>
-          Example JSON payload
-          <textarea
-            className="input"
-            maxLength={256 * 1024}
-            value={sample}
-            onChange={(change) => {
-              setSample(change.target.value);
-              invalidate();
-            }}
-          />
-        </label>
-        <small>
-          Use synthetic data without credentials. Preview does not receive an
-          event or start Work.
-        </small>
-        <button
-          type="button"
-          className="button button--secondary"
-          disabled={pending}
-          onClick={() => {
-            const generation = previewGeneration.current;
-            void act(async () => {
-              const result = await previewEventTemplate({
-                event,
-                prompt,
-                sampleJson: sample,
+        <div className="event-automations__preview">
+          <label>
+            Example JSON payload
+            <textarea
+              className="input"
+              maxLength={256 * 1024}
+              value={sample}
+              onChange={(change) => {
+                setSample(change.target.value);
+                invalidate();
+              }}
+            />
+          </label>
+          <small>
+            Use synthetic data without credentials. Preview does not receive an
+            event or start Work.
+          </small>
+          <button
+            type="button"
+            className="button button--secondary"
+            disabled={pending}
+            onClick={() => {
+              const generation = previewGeneration.current;
+              void act(async () => {
+                const result = await previewEventTemplate({
+                  event,
+                  prompt,
+                  sampleJson: sample,
+                });
+                if (generation === previewGeneration.current)
+                  setPreview(result);
               });
-              if (generation === previewGeneration.current) setPreview(result);
-            });
-          }}
-        >
-          Preview event task
-        </button>
-        {preview ? (
-          <>
-            <pre>{preview.prompt}</pre>
-            {preview.missing.length > 0 ? (
-              <p role="alert">
-                Missing selected fields: {preview.missing.join(", ")}
-              </p>
-            ) : (
-              <p role="status">
-                Selected fields validated. Preview starts no work.
-              </p>
-            )}
-          </>
-        ) : null}
+            }}
+          >
+            Preview event task
+          </button>
+          {preview ? (
+            <>
+              <pre>{preview.prompt}</pre>
+              {preview.missing.length > 0 ? (
+                <p role="alert">
+                  Missing selected fields: {preview.missing.join(", ")}
+                </p>
+              ) : (
+                <p role="status">
+                  Selected fields validated. Preview starts no work.
+                </p>
+              )}
+            </>
+          ) : null}
+        </div>
       </details>
       {error ? (
         <p role="alert" tabIndex={-1} ref={errorElement}>
           {error}
         </p>
       ) : null}
-      <div className="profile-action-row">
+      <div className="event-automations__pair">
         <button
           type="submit"
           className="button button--primary"

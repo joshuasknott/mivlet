@@ -92,11 +92,24 @@ export function EventAutomations({
       </summary>
       {open ? (
         <div className="event-automations__body">
-          <p>
-            Start a saved task when an authenticated event arrives. Runs use the
-            agent’s current tools, saved permission ceiling, ordinary approvals
-            and Stop.
-          </p>
+          <div className="event-automations__header">
+            <p>
+              Start a saved task when an authenticated event arrives. Runs use
+              the agent’s current tools, saved permission ceiling, ordinary
+              approvals and Stop.
+            </p>
+            <button
+              type="button"
+              className="button button--secondary"
+              disabled={pending || editing !== undefined}
+              onClick={(event) => {
+                editorOpener.current = event.currentTarget;
+                setEditing(null);
+              }}
+            >
+              New event trigger
+            </button>
+          </div>
           <div className="event-automations__ingress">
             <strong>
               {ingress.data?.listening
@@ -115,60 +128,51 @@ export function EventAutomations({
             {ingress.error ? (
               <p role="alert">{message(ingress.error)}</p>
             ) : null}
-            <label>
-              Local port
-              <input
-                className="input"
-                type="number"
-                min={1024}
-                max={65535}
-                value={selectedPort}
-                onChange={(event) => setPort(event.target.value)}
-              />
-            </label>
-            <button
-              type="button"
-              className="button button--secondary"
-              disabled={
-                pending ||
-                ingress.isPending ||
-                !!ingress.error ||
-                !Number.isInteger(Number(selectedPort)) ||
-                Number(selectedPort) < 1024 ||
-                Number(selectedPort) > 65535
-              }
-              onClick={() =>
-                void act(
-                  () =>
-                    configureEventIngress({
-                      workspaceId,
-                      enabled: !ingress.data?.listening,
-                      port: ingress.data?.listening
-                        ? ingress.data.port
-                        : Number(selectedPort),
-                    }),
-                  ingress.data?.listening
-                    ? "Local event ingress stopped."
-                    : "Local event ingress enabled for this account.",
-                )
-              }
-            >
-              {ingress.data?.listening
-                ? "Stop local ingress"
-                : "Enable local ingress"}
-            </button>
+            <div className="event-automations__pair event-automations__ingress-controls">
+              <label>
+                Local port
+                <input
+                  className="input"
+                  type="number"
+                  min={1024}
+                  max={65535}
+                  value={selectedPort}
+                  onChange={(event) => setPort(event.target.value)}
+                />
+              </label>
+              <button
+                type="button"
+                className="button button--secondary"
+                disabled={
+                  pending ||
+                  ingress.isPending ||
+                  !!ingress.error ||
+                  !Number.isInteger(Number(selectedPort)) ||
+                  Number(selectedPort) < 1024 ||
+                  Number(selectedPort) > 65535
+                }
+                onClick={() =>
+                  void act(
+                    () =>
+                      configureEventIngress({
+                        workspaceId,
+                        enabled: !ingress.data?.listening,
+                        port: ingress.data?.listening
+                          ? ingress.data.port
+                          : Number(selectedPort),
+                      }),
+                    ingress.data?.listening
+                      ? "Local event ingress stopped."
+                      : "Local event ingress enabled for this account.",
+                  )
+                }
+              >
+                {ingress.data?.listening
+                  ? "Stop local ingress"
+                  : "Enable local ingress"}
+              </button>
+            </div>
           </div>
-          <button
-            type="button"
-            className="button button--secondary"
-            disabled={pending || editing !== undefined}
-            onClick={(event) => {
-              editorOpener.current = event.currentTarget;
-              setEditing(null);
-            }}
-          >
-            New event trigger
-          </button>
           {editing !== undefined ? (
             <EventAutomationEditor
               key={editing?.id ?? "new-event"}
