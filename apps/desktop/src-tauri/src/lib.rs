@@ -334,6 +334,8 @@ pub fn run() {
             local_computer::coding::coding_repository_attach,
             local_computer::coding::coding_repository_status,
             local_computer::execution_setup::native_execution_status,
+            local_computer::command_jobs::native_command_jobs,
+            local_computer::command_jobs::native_command_stop,
             local_computer::execution_setup::native_execution_setup,
             local_computer::local_computer_status,
             local_computer::local_computer_files,

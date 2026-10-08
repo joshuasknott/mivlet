@@ -172,12 +172,16 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName.startsWith("repository-")) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-")) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 
   const actionCore = `${toolName} ${dataUsed.join(" ")}`.trim().slice(0, 80);
-  const consequence = (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
+  const consequence = (toolName === "repository-start" || toolName === "workspace-start") && isRegistered
+    ? `Start the exact persistent Windows command for ${parsed.timeoutSeconds} seconds in an isolated snapshot. All writes discarded; native ownership and repository locks last until all descendants stop. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Stop or app closure terminates it. No automatic restart.`
+    : toolName === "command-stop" && isRegistered
+    ? "Stop this exact native job and all descendants. Wait for its terminal status; discard its snapshot."
+    : (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
     ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
     : toolName === "repository-publish" && isRegistered
     ? "Push reviewed code and create its pull request on the attached GitHub origin using your native GitHub CLI account."

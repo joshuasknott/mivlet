@@ -1,5 +1,6 @@
 //! Managed Git checkouts and isolated build execution. Never a desktop shell.
 mod git;
+mod jobs;
 pub(super) mod process;
 #[cfg(test)]
 mod tests;
@@ -237,13 +238,27 @@ pub(crate) fn execute(
 ) -> Result<String, String> {
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let directory = directory(state, workspace, agent)?;
-    execute_in(&directory, &ticket, tool, arguments)
+    let jobs = state.command_jobs(workspace, agent)?;
+    if tool == "repository-start" {
+        return jobs::start(directory, ticket, jobs, arguments);
+    }
+    execute_observed(&directory, &ticket, tool, arguments, Some(&jobs))
 }
+#[cfg(test)]
 fn execute_in(
     directory: &Path,
     ticket: &OperationTicket,
     tool: &str,
     arguments: Value,
+) -> Result<String, String> {
+    execute_observed(directory, ticket, tool, arguments, None)
+}
+fn execute_observed(
+    directory: &Path,
+    ticket: &OperationTicket,
+    tool: &str,
+    arguments: Value,
+    jobs: Option<&Arc<super::command_jobs::ScopeJobs>>,
 ) -> Result<String, String> {
     ticket.check()?;
     let input: Input =
@@ -339,6 +354,18 @@ fn execute_in(
             repo.last_command = Some(script.to_owned());
             repo.command_diff_id = None;
             save(directory, &repo)?;
+            let mut session = jobs
+                .map(|jobs| {
+                    jobs.start(
+                        ticket,
+                        Some(&repo.id),
+                        script,
+                        input.network.unwrap_or(false),
+                        timeout,
+                        false,
+                    )
+                })
+                .transpose()?;
             let (result, completed) = match process::native_run(
                 &root,
                 script,
@@ -346,6 +373,7 @@ fn execute_in(
                 timeout,
                 false,
                 ticket,
+                session.as_mut(),
             ) {
                 Ok(value) => value,
                 Err(error) => {

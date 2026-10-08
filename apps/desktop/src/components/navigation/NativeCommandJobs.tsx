@@ -1,0 +1,282 @@
+import { useEffect, useState } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import type {
+  MivletAgentProfile,
+  NativeCommandFrame,
+  NativeCommandJob,
+} from "@mivlet/protocol";
+import {
+  listNativeCommandJobs,
+  readNativeCommandOutput,
+  stopNativeCommandJob,
+} from "../../runtime/domains/command-jobs";
+import { loadRuntimeLocalComputer } from "../../runtime/domains/local-computer";
+import "./native-command-jobs.css";
+
+const active = (job: NativeCommandJob) =>
+  ["preparing", "running", "stopping"].includes(job.status);
+const errorText = (error: unknown) =>
+  error instanceof Error ? error.message : "Command inspection is unavailable.";
+
+export function retainCommandFrames(
+  previous: NativeCommandFrame[],
+  incoming: NativeCommandFrame[],
+) {
+  const frames = [
+    ...previous,
+    ...incoming.filter(
+      (frame) => frame.sequence > (previous.at(-1)?.sequence ?? 0),
+    ),
+  ];
+  let bytes = frames.reduce(
+    (sum, frame) => sum + new TextEncoder().encode(frame.text).length,
+    0,
+  );
+  while (frames.length > 512 || bytes > 64 * 1024)
+    bytes -= new TextEncoder().encode(frames.shift()!.text).length;
+  return frames;
+}
+
+export function NativeCommandJobs({
+  workspaceId,
+  agents,
+}: {
+  workspaceId: string;
+  agents: MivletAgentProfile[];
+}) {
+  const [open, setOpen] = useState(false);
+  const [selected, setSelected] = useState("");
+  const agent = agents.find((item) => item.id === selected) ?? agents[0];
+  return (
+    <details
+      className="native-command-jobs"
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>Commands</summary>
+      <p>
+        Live logs and running jobs for your agent. Closing this panel leaves
+        jobs running.
+      </p>
+      {agents.length > 1 && (
+        <label>
+          Agent{" "}
+          <select
+            aria-label="Command agent"
+            value={agent?.id ?? ""}
+            onChange={(event) => setSelected(event.target.value)}
+          >
+            {agents.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {open && agent ? (
+        <CommandList
+          key={`${workspaceId}:${agent.id}`}
+          workspaceId={workspaceId}
+          agentId={agent.id}
+        />
+      ) : !agent ? (
+        <p>Create an agent to run commands.</p>
+      ) : null}
+    </details>
+  );
+}
+function CommandList({
+  workspaceId,
+  agentId,
+}: {
+  workspaceId: string;
+  agentId: string;
+}) {
+  const [selected, setSelected] = useState("");
+  const epoch = async () => {
+    const computer = await loadRuntimeLocalComputer({ workspaceId, agentId });
+    if (!computer)
+      throw new Error("Open the desktop app to inspect native commands.");
+    return { workspaceId, agentId, expectedGeneration: computer.generation };
+  };
+  const query = useQuery({
+    queryKey: ["native-command-jobs", workspaceId, agentId],
+    retry: false,
+    gcTime: 0,
+    queryFn: async () => {
+      const target = await epoch();
+      const result = await listNativeCommandJobs(target);
+      if (!result)
+        throw new Error("Open the desktop app to inspect native commands.");
+      return { ...result, generation: target.expectedGeneration };
+    },
+    refetchInterval: 1000,
+  });
+  const jobs = query.data?.jobs ?? [];
+  const job = jobs.find((item) => item.id === selected) ?? jobs[0];
+  const stop = useMutation({
+    mutationFn: async (target: NativeCommandJob) =>
+      stopNativeCommandJob({
+        ...(await epoch()),
+        jobId: target.id,
+        jobGeneration: target.generation,
+      }),
+    onSuccess: () => {
+      void query.refetch();
+    },
+  });
+  return (
+    <div>
+      {query.isPending && <p role="status">Loading commands…</p>}
+      {(query.error || stop.error) && (
+        <p role="alert">{errorText(query.error || stop.error)}</p>
+      )}
+      {!query.isPending && !query.error && jobs.length === 0 && (
+        <p>
+          No commands yet. Ask your agent to run checks or start a development
+          server.
+        </p>
+      )}
+      {jobs.length > 0 && (
+        <label>
+          Command{" "}
+          <select
+            aria-label="Command history"
+            value={job?.id}
+            onChange={(event) => setSelected(event.target.value)}
+          >
+            {jobs.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.persistent ? "Job" : "Command"} {item.id.slice(0, 8)} ·{" "}
+                {item.status}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {job && (
+        <>
+          <p role="status">
+            {job.status.replaceAll("-", " ")}
+            {job.exitCode !== null ? ` · exit ${job.exitCode}` : ""}
+          </p>
+          <p>
+            Started {new Date(job.createdAt).toLocaleString()} ·{" "}
+            {job.timeoutSeconds}s limit · Network{" "}
+            {job.network ? "approved" : "off"}
+          </p>
+          {job.persistent && (
+            <p>
+              Fixed snapshot; job writes are discarded. App closure ends the
+              job.
+              {job.repositoryId &&
+                " Stop the job before changing its repository."}
+            </p>
+          )}
+          {job.message && <p>{job.message}</p>}
+          {active(job) && job.generation === query.data?.generation && (
+            <button
+              type="button"
+              disabled={stop.isPending || job.status === "stopping"}
+              onClick={() => stop.mutate(job)}
+            >
+              {job.status === "stopping" ? "Stopping…" : "Stop job"}
+            </button>
+          )}
+          <CommandOutput
+            key={`${job.id}:${job.generation}`}
+            workspaceId={workspaceId}
+            agentId={agentId}
+            job={job}
+          />
+        </>
+      )}
+    </div>
+  );
+}
+function CommandOutput({
+  workspaceId,
+  agentId,
+  job,
+}: {
+  workspaceId: string;
+  agentId: string;
+  job: NativeCommandJob;
+}) {
+  const [frames, setFrames] = useState<NativeCommandFrame[]>([]);
+  const [notice, setNotice] = useState("");
+  const [error, setError] = useState("");
+  const [redacted, setRedacted] = useState(false);
+  useEffect(() => {
+    let disposed = false;
+    let cursor = 0;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const poll = async () => {
+      try {
+        const computer = await loadRuntimeLocalComputer({
+          workspaceId,
+          agentId,
+        });
+        if (disposed) return;
+        if (!computer)
+          throw new Error("Open the desktop app to read native output.");
+        if (computer.generation !== job.generation) {
+          setNotice(
+            "This generation has ended. Retained job metadata is available; its output subscription is closed.",
+          );
+          return;
+        }
+        const result = await readNativeCommandOutput(
+          {
+            workspaceId,
+            agentId,
+            expectedGeneration: computer.generation,
+            jobId: job.id,
+            jobGeneration: job.generation,
+          },
+          cursor,
+        );
+        if (disposed) return;
+        if (!result)
+          throw new Error("Open the desktop app to read native output.");
+        if (result.outputUnavailable || !result.output) {
+          setNotice(
+            "Output is no longer retained. Job metadata is available; the command was not replayed.",
+          );
+          return;
+        }
+        if (result.output.dropped)
+          setNotice(
+            "Older output exceeded the scrollback limit and is no longer available.",
+          );
+        setRedacted(result.output.redacted);
+        setFrames((current) =>
+          retainCommandFrames(current, result.output!.frames),
+        );
+        cursor = result.output.nextCursor;
+        if (!result.output.closed) timer = setTimeout(() => void poll(), 500);
+      } catch (failure) {
+        if (!disposed) setError(errorText(failure));
+      }
+    };
+    void poll();
+    return () => {
+      disposed = true;
+      clearTimeout(timer);
+    };
+  }, [workspaceId, agentId, job.id, job.generation]);
+  return (
+    <div>
+      {notice && <p>{notice}</p>}
+      {redacted && <p>Some output was redacted or omitted.</p>}
+      {error && <p role="alert">{error}</p>}
+      <pre tabIndex={0} aria-label="Command output">
+        {frames.length
+          ? frames.map((frame) => frame.text).join("")
+          : notice || error
+            ? "Output unavailable."
+            : "No output yet."}
+      </pre>
+    </div>
+  );
+}

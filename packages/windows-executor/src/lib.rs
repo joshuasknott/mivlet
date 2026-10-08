@@ -7,6 +7,10 @@ mod acceptance;
 #[cfg(windows)]
 mod custody;
 mod files;
+#[cfg(all(test, windows))]
+mod lifecycle_acceptance;
+pub mod output;
+pub use output::OutputLog;
 mod repository_import;
 pub use repository_import::{
     acknowledge_recovery as acknowledge_repository_import, recover as recover_repository_import,
@@ -69,6 +73,16 @@ pub struct Receipt {
     pub network: bool,
     pub command_id: String,
     pub binding: Binding,
+    #[serde(default)]
+    pub persistent: bool,
+}
+
+/// Persistent jobs retain their isolated writable snapshot only while running.
+/// They never produce an importable seal, even when they exit successfully.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ExecutionMode {
+    Command,
+    Persistent,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -188,6 +202,9 @@ impl CompletedRun {
         self.verify_seal_current(&|| true)
     }
     fn verify_seal_current(&self, current: &dyn Fn() -> bool) -> Result<(), String> {
+        if self.receipt.persistent {
+            return Err("Persistent job snapshots are never importable.".into());
+        }
         if self.receipt.exit_code != Some(0) || self.receipt.interrupted {
             return Err("Failed or interrupted command snapshots cannot be imported.".into());
         }
@@ -218,10 +235,54 @@ pub fn run(
     current: impl Fn() -> bool,
     launch: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<CompletedRun, String> {
+    run_with_output(
+        resource_root,
+        input,
+        script,
+        network,
+        timeout_seconds,
+        limits,
+        binding,
+        ExecutionMode::Command,
+        OutputLog::new(|_, text| text.to_owned()),
+        current,
+        launch,
+    )
+}
+
+/// Native-owned streaming uses a bounded pull log, with no subscriber callbacks
+/// on the supervisor or pipe threads. The caller retains its exact approval,
+/// repository lock and operation ticket for the entire lifetime of this call.
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_output(
+    resource_root: &Path,
+    input: &Path,
+    script: &str,
+    network: bool,
+    timeout_seconds: u64,
+    limits: Limits,
+    binding: Binding,
+    mode: ExecutionMode,
+    output: OutputLog,
+    current: impl Fn() -> bool,
+    launch: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>,
+) -> Result<CompletedRun, String> {
+    struct Close(OutputLog);
+    impl Drop for Close {
+        fn drop(&mut self) {
+            self.0.close();
+        }
+    }
+    let _close = Close(output.clone());
+    let max_seconds = if mode == ExecutionMode::Persistent {
+        86_400
+    } else {
+        900
+    };
     if script.trim().is_empty()
         || script.len() > 8192
         || script.contains('\0')
-        || !(1..=900).contains(&timeout_seconds)
+        || !(1..=max_seconds).contains(&timeout_seconds)
     {
         return Err("Invalid native execution command or timeout.".into());
     }
@@ -242,6 +303,8 @@ pub fn run(
             timeout_seconds,
             limits,
             binding,
+            mode,
+            output,
             current,
             launch,
         )
@@ -254,6 +317,8 @@ pub fn run(
             network,
             limits,
             binding,
+            mode,
+            output,
             current,
             launch,
         );

@@ -29,6 +29,13 @@ function tool(
   };
 }
 export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
+  "repository-start": tool(
+    "start",
+    "Start a native persistent Windows command (for example a dev server) in a fixed isolated repository snapshot. Bundled Node/npm/Python/pip only; no host PATH/files/credentials or provider shell. Network defaults off; true adds internetClient without private-network or loopback exemptions. Explicit 1–86400 second lifetime. All writes discarded, even success. Repository stays locked until all descendants end. Use command-output/command-stop; never automatically restart. No interactive stdin or host-browser access grant.",
+    { ...id, command: text, network: { type: "boolean" }, timeoutSeconds: { type: "integer", minimum: 1, maximum: 86400 } },
+    ["repositoryId", "command", "network", "timeoutSeconds"],
+    "critical",
+  ),
   "repository-recover": tool(
     "recover",
     "Reconcile uncertain import: keep receipt, release staging/backup; replay nothing. Else inspect GitHub branch/HEAD/base. Failed query proves no absence; retry needs fresh approval.",
@@ -59,7 +66,7 @@ export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
   ),
   "repository-run": tool(
     "run",
-    NATIVE_EXECUTION_POLICY + "Search/build/test copies; project packages. Actual exit/bounded output/immutable receipt; failures fail. No Computer Use grants.",
+    NATIVE_EXECUTION_POLICY + "Search/build/test copies; project packages. Actual exit/bounded output/immutable receipt; failures fail. Live logs: command-jobs/command-output. No Computer Use grants.",
     {
       ...id,
       command: text,

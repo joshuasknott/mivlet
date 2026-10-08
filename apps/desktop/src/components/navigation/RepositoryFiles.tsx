@@ -172,10 +172,10 @@ function RepositoryDetails({
               bridge Mivlet tools. Other account routes are unavailable.
             </p>
             <p>
-              Windows with WSL Ubuntu, Bubblewrap, Python 3 and your Linux build
-              tools under /usr. Commands run inside the copied repository,
-              without Windows files, home files or credentials. Network access
-              requires an exact approval. No Windows shell fallback.
+              Windows x64 with native execution setup and bundled Node/npm and
+              Python/pip. Commands run inside an isolated snapshot, without host
+              files, credentials or host PATH. Network access requires an exact
+              approval. Additional toolchains must be explicitly supported.
             </p>
             <p>
               Commit and GitHub publication use the existing approvals.
@@ -185,7 +185,7 @@ function RepositoryDetails({
           </details>
           {status.data?.busy && (
             <p role="status">
-              Repository operation running. Output appears when it finishes.
+              Repository operation running. Open Commands to inspect live logs.
             </p>
           )}
           {status.data?.recoveryRequired && (
