@@ -27,25 +27,25 @@ function tool(
 export const CHECKPOINT_TOOLS: Record<string, BackendTool> = {
   "repository-checkpoint-list": tool(
     "list",
-    "List immutable checkpoints of the selected private copy, request provenance and SHA-256 trees. Separate from chat history.",
+    "List private-copy checkpoints with request provenance and SHA-256 trees; separate from chat history.",
     { repositoryId },
     "low",
   ),
   "repository-checkpoint-capture": tool(
     "capture",
-    "Save tracked/new code before risky edits or after verification. Exclude ignored files, credentials and Git metadata. Max 24 checkpoints/512 MiB; original unchanged.",
+    "Save tracked/new code before edits or after checks. Excludes ignored files, credentials and Git metadata. Limit 24 checkpoints/512 MiB; original unchanged.",
     { repositoryId, label: { type: "string", maxLength: 160 } },
     "high",
   ),
   "repository-checkpoint-preview": tool(
     "preview",
-    "Preview additions/deletions/changes and currentTreeId/outputTreeId/checkpoint.treeId/head. Truncated diff requires full-file review. Preserve ignored files; conflicts fail closed. Does not restore.",
+    "Preview added/deleted/changed files and currentTreeId/outputTreeId/checkpoint.treeId/head. Review full files if truncated. Preserves ignored files; conflicts fail closed. Read-only.",
     { repositoryId, checkpointId: text },
     "low",
   ),
   "repository-checkpoint-restore": tool(
     "restore",
-    "Explicitly approved FILE restore in the selected private copy, binding fresh preview hashes. Checkpoint current code; invalidate test receipts. No original/Git HEAD/chat/external rollback. Stop/drift refuse; uncertain import needs repository-recover.",
+    "Approved FILE restore in this private copy using fresh preview hashes. Saves current code; invalidates test verification. No original/Git HEAD/chat/external rollback. Refuses Stop/drift; uncertain import needs repository-recover.",
     {
       repositoryId,
       checkpointId: text,
@@ -58,7 +58,7 @@ export const CHECKPOINT_TOOLS: Record<string, BackendTool> = {
   ),
   "repository-checkpoint-delete": tool(
     "delete",
-    "Approved deletion of one exact checkpoint to release storage. Preserve current files and repository copy.",
+    "Approved deletion of one exact checkpoint. Releases storage; preserves current files and repository copy.",
     { repositoryId, checkpointId: text, expectedCheckpointTree: text },
     "critical",
   ),

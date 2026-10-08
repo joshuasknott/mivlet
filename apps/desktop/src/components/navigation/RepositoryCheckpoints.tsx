@@ -46,7 +46,7 @@ export function RepositoryCheckpoints({
     const computer = await loadRuntimeLocalComputer({ workspaceId, agentId });
     if (!computer?.plugins?.computer)
       throw new Error(
-        "Enable Computer Use in the desktop app to use repository checkpoints.",
+        "Enable Computer Use in the desktop app to use checkpoints.",
       );
     const target = {
       workspaceId,
@@ -111,7 +111,7 @@ export function RepositoryCheckpoints({
     onSuccess: () => {
       setMessage(
         action?.tool.endsWith("restore")
-          ? "Files restored. Run the project's checks again. The previous code is saved as a checkpoint."
+          ? "Files restored. Run checks again. Previous code saved as a checkpoint."
           : action?.tool.endsWith("delete")
             ? "Checkpoint deleted."
             : "Checkpoint saved.",
@@ -138,7 +138,7 @@ export function RepositoryCheckpoints({
       setAction(null);
       setReview(null);
       setConfirmation("");
-      setMessage("Stopped. Review repository status before continuing.");
+      setMessage("Stopped. Review repository status.");
       onChanged();
     },
   });
@@ -174,15 +174,15 @@ export function RepositoryCheckpoints({
   };
   return (
     <details
-      className="repository-checkpoints"
+      className="checkpoint-panel"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>File checkpoints</summary>
       {open && (
         <div className="repository-checkpoints__body">
           <p>
-            Save and restore files in this agent's private copy. Ignored files,
-            credentials and Git metadata are excluded.
+            Save or restore files in this agent's private copy. Excludes ignored files,
+            credentials and Git metadata.
           </p>
           <form
             onSubmit={(event) => {
@@ -233,7 +233,7 @@ export function RepositoryCheckpoints({
           </div>
           {disabled && (
             <p role="status">
-              Finish or reconcile the repository operation before using checkpoints.
+              Finish or reconcile the repository operation first.
             </p>
           )}
           {busy && (
@@ -327,7 +327,7 @@ export function RepositoryCheckpoints({
               </pre>
               {review.value.truncated && (
                 <p role="status">
-                  Diff truncated. Review full affected files with the agent before restoring.
+                  Diff truncated. Review full files with the agent before restoring.
                 </p>
               )}
               <details>

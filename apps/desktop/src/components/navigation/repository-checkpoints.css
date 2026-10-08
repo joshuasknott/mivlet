@@ -1,10 +1,10 @@
-.repository-checkpoints {
+.checkpoint-panel {
   margin-top: 16px;
   border-top: 1px solid var(--line, #dededc);
   padding-top: 12px;
   min-width: 0;
 }
-.repository-files .repository-checkpoints summary {
+.repository-files .checkpoint-panel summary {
   min-height: 44px;
   align-content: center;
   cursor: pointer;
@@ -15,13 +15,13 @@
   padding-top: 10px;
   min-width: 0;
 }
-.repository-checkpoints form,
-.repository-checkpoints .repository-checkpoints__body label {
+.checkpoint-panel form,
+.checkpoint-panel .repository-checkpoints__body label {
   display: grid;
   gap: 8px;
   min-width: 0;
 }
-.repository-checkpoints input {
+.checkpoint-panel input {
   width: 100%;
   min-width: 0;
   min-height: 44px;
@@ -32,7 +32,7 @@
   background: var(--surface, transparent);
   color: inherit;
 }
-.repository-checkpoints .repository-checkpoints__body button {
+.checkpoint-panel .repository-checkpoints__body button {
   min-height: 44px;
   padding: 8px 12px;
   white-space: normal;
@@ -65,12 +65,12 @@
 .repository-checkpoints__review h4 {
   margin: 0 0 8px;
 }
-.repository-checkpoints pre {
+.checkpoint-panel pre {
   font-size: 12px;
   padding: 8px;
   white-space: pre;
 }
-.repository-checkpoints dd {
+.checkpoint-panel dd {
   margin: 4px 0 10px;
   font-family: monospace;
   font-size: 12px;
