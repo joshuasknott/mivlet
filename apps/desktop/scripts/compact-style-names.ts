@@ -135,7 +135,9 @@ export function compactStyleNames(sourceRoot: string): Plugin {
   const root = sourceRoot.replaceAll("\\", "/");
   return {
     name: "mivlet-compact-style-names",
-    enforce: "pre",
+    // Vite expands CSS @imports before normal transforms. Running as a pre
+    // transform misses those selectors while still renaming their JSX uses.
+    // Keep this before Vite's CSS emission so all imported layers share the map.
     apply: "build",
     buildStart() {
       const paths = files(sourceRoot);
