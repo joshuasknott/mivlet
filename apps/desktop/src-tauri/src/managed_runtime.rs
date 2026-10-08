@@ -19,11 +19,13 @@ use std::{
 };
 
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
+mod usage;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tauri::{AppHandle, Emitter};
+pub(crate) use usage::claude_usage;
 
 use crate::models::{BackendModel, BackendVerifyResult};
 mod image_input;
@@ -1466,7 +1468,10 @@ fn handle_claude_line(
         if input > 0 || output > 0 || cost.is_some() {
             let _ = app.emit(
                 channel,
-                json!({"type":"usage","inputTokens":input,"outputTokens":output,"costUsd":cost}),
+                json!({"type":"usage","inputTokens":input + value.pointer("/usage/cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0),
+                    "outputTokens":output,"costUsd":cost,"costEstimated":true,
+                    "cachedInputTokens":value.pointer("/usage/cache_read_input_tokens").and_then(Value::as_u64),
+                    "cacheWriteTokens":value.pointer("/usage/cache_creation_input_tokens").and_then(Value::as_u64)}),
             );
         }
         if value.get("is_error").and_then(Value::as_bool) == Some(true) {
@@ -1546,6 +1551,7 @@ fn start_claude_turn(
     thread::spawn(move || {
         let stderr_thread = thread::spawn(move || read_limited(stderr, MAX_COMMAND_OUTPUT));
         let initialize_id = format!("mivlet-init-{request_id}");
+        let usage_run_id = request.options._run_id.clone();
         let mut prompt_sent = false;
         let mut completed = false;
         let mut emitted_text = false;
@@ -1568,6 +1574,9 @@ fn start_claude_turn(
             let Ok(value) = serde_json::from_str::<Value>(&line) else {
                 continue;
             };
+            if crate::provider_usage::claude_event_is_limit(&value) {
+                crate::provider_usage::record_limit_failure("claude", usage_run_id.as_deref());
+            }
             if !prompt_sent
                 && value.get("type").and_then(Value::as_str) == Some("control_response")
                 && value
@@ -1727,6 +1736,13 @@ fn sse_frames(buffer: &mut Vec<u8>) -> Vec<Value> {
 
 #[derive(Default)]
 struct OpenCodeStreamState {
+    input_tokens: u64,
+    output_tokens: u64,
+    cached_input_tokens: Option<u64>,
+    cache_write_tokens: Option<u64>,
+    reasoning_tokens: Option<u64>,
+    cost_usd: f64,
+    cost_unknown: bool,
     assistant_messages: HashSet<String>,
     emitted_usage: HashSet<String>,
     text_by_part: HashMap<String, String>,
@@ -1794,7 +1810,35 @@ fn handle_open_code_event(
                         .unwrap_or_default();
                     let cost = info.get("cost").and_then(Value::as_f64);
                     if input > 0 || output > 0 || cost.is_some() {
-                        let _ = app.emit(channel, json!({"type":"usage","inputTokens":input,"outputTokens":output,"costUsd":cost}));
+                        let read = info.pointer("/tokens/cache/read").and_then(Value::as_u64);
+                        state.input_tokens = state
+                            .input_tokens
+                            .saturating_add(input)
+                            .saturating_add(read.unwrap_or(0));
+                        state.output_tokens = state.output_tokens.saturating_add(output);
+                        for (total, value) in [
+                            (&mut state.cached_input_tokens, read),
+                            (
+                                &mut state.cache_write_tokens,
+                                info.pointer("/tokens/cache/write").and_then(Value::as_u64),
+                            ),
+                            (
+                                &mut state.reasoning_tokens,
+                                info.pointer("/tokens/reasoning").and_then(Value::as_u64),
+                            ),
+                        ] {
+                            if let Some(value) = value {
+                                *total = Some(total.unwrap_or(0).saturating_add(value));
+                            }
+                        }
+                        if let Some(cost) = cost.filter(|v| v.is_finite() && *v >= 0.0) {
+                            state.cost_usd += cost;
+                        } else {
+                            state.cost_unknown = true;
+                        }
+                        let _ = app.emit(channel, json!({"type":"usage","inputTokens":state.input_tokens,"outputTokens":state.output_tokens,
+                            "cachedInputTokens":state.cached_input_tokens,"cacheWriteTokens":state.cache_write_tokens,"reasoningTokens":state.reasoning_tokens,
+                            "costUsd":state.cost_usd,"costUnknown":state.cost_unknown,"costEstimated":true}));
                     }
                 }
             }

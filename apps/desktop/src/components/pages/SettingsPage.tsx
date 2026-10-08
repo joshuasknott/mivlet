@@ -7,6 +7,7 @@ import type { SettingsRuntime } from "../settings/settings-runtime";
 import { MemoryRecords } from "../settings/MemoryRecords";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { ProviderModelSettings } from "../settings/ProviderModelSettings";
+import { ProviderUsageDetails } from "../usage/ProviderUsageDetails";
 import {
   AppearanceSettingsView,
   ApprovalsSettingsView,
@@ -72,7 +73,7 @@ export function SettingsPage({
         ) : activeTab === "models" ? (
           <ProviderModelSettings models={runtime.allModelOptions ?? []} hiddenModelIds={runtime.hiddenModelIds ?? []} onChange={runtime.setModelVisible} />
 
-        ) : (
+        ) : activeTab === "usage" ? <ProviderUsageDetails /> : (
           <MemorySettingsPage
             runtime={runtime}
             onStatus={reportStatus}

@@ -71,6 +71,9 @@ async function* mapCodexEvents(
         type: "usage",
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
+        cachedInputTokens: event.cachedInputTokens,
+        cacheWriteTokens: event.cacheWriteTokens,
+        reasoningTokens: event.reasoningTokens,
         costUsd: event.costUsd ?? 0,
         costEstimated: event.costUsd === undefined,
         costUnknown: event.costUsd === undefined

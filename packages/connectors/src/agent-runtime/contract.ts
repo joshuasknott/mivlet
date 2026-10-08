@@ -198,7 +198,12 @@ export type CodexAppServerEvent =
       type: "usage";
       inputTokens: number;
       outputTokens: number;
-      costUsd?: number;
+      cachedInputTokens?: number;
+      cacheWriteTokens?: number;
+      reasoningTokens?: number;
+      costUsd?: number | null;
+      costEstimated?: boolean;
+      costUnknown?: boolean;
     }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
   | { type: "error"; message: string }

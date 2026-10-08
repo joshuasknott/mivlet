@@ -26,6 +26,8 @@ interface ToolBuffer {
 export interface AnthropicStreamState {
   toolBuffers: Map<number, ToolBuffer>;
   inputTokens: number;
+  cachedInputTokens?: number;
+  cacheWriteTokens?: number;
   terminalSeen: boolean;
 }
 
@@ -127,6 +129,9 @@ export function parseAnthropicLine(
     const message = chunk.message as Record<string, unknown> | undefined;
     const usage = message?.usage as Record<string, number> | undefined;
     state.inputTokens = usage?.input_tokens ?? 0;
+    state.cachedInputTokens = usage?.cache_read_input_tokens;
+    state.cacheWriteTokens = usage?.cache_creation_input_tokens;
+    state.inputTokens += state.cachedInputTokens ?? 0;
   }
 
   if (type === "content_block_start") {
@@ -178,6 +183,8 @@ export function parseAnthropicLine(
         type: "usage",
         inputTokens: state.inputTokens,
         outputTokens: usage.output_tokens ?? 0,
+        cachedInputTokens: state.cachedInputTokens,
+        cacheWriteTokens: state.cacheWriteTokens,
         costUsd: priceFor("anthropic", state.inputTokens, usage.output_tokens ?? 0),
         costEstimated: true,
         costUnknown: !hasKnownPrice("anthropic")

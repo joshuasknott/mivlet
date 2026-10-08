@@ -250,6 +250,7 @@ fn new_work(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        reset_continuation: None,
         schedule: None,
         steering: vec![],
         messages: vec![],
@@ -855,6 +856,12 @@ pub(super) fn invalidate_descendants(
             && item.status != WorkStatus::Cancelled
         {
             item.generation += 1;
+            if let Some(reset) = &mut item.reset_continuation {
+                if reset.state == "armed" {
+                    reset.state = "review-required".into();
+                    reset.reason = Some(reason.into());
+                }
+            }
             item.status = status.clone();
             item.reason = Some(reason.into());
             item.updated_at = ctx.time.into();

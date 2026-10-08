@@ -9,7 +9,7 @@ use std::{
     env,
     ffi::OsString,
     fs,
-    io::{BufRead, BufReader, Write},
+    io::{BufRead, BufReader, Read, Write},
     path::{Path, PathBuf},
     process::{ChildStdin, Command, Stdio},
     sync::{
@@ -275,6 +275,110 @@ fn codex_command(path: &PathBuf) -> Result<Command, String> {
         .env_remove("CODEX_ACCESS_TOKEN")
         .args(["-c", "cli_auth_credentials_store=\"keyring\""]);
     Ok(command)
+}
+
+/// Read-only usage probe in the same account-owned custody as ordinary turns.
+/// No prompt, personal CODEX_HOME, token export, or reset-credit redemption.
+pub(crate) fn usage_probe() -> Result<(Value, Value), String> {
+    let owner = crate::backends::require_current_internal_user()?;
+    let path = find_codex_executable().ok_or_else(missing_codex_runtime_message)?;
+    let mut command = codex_command(&path)?;
+    command
+        .current_dir(env::temp_dir())
+        .args([
+            "-c",
+            "features.shell_tool=false",
+            "-c",
+            "features.unified_exec=false",
+            "-c",
+            "features.memories=false",
+            "-c",
+            "project_doc_max_bytes=0",
+            "-c",
+            "mcp_servers={}",
+            "app-server",
+            "--stdio",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null());
+    let mut child = crate::provider_process::SupervisedChild::spawn(command)
+        .map_err(|_| "Codex could not start to report usage.")?;
+    let stdin = Arc::new(Mutex::new(
+        child
+            .stdin
+            .take()
+            .ok_or("Codex usage stdin is unavailable.")?,
+    ));
+    let stdout = child
+        .stdout
+        .take()
+        .ok_or("Codex usage stdout is unavailable.")?;
+    let (sender, receiver) = mpsc::sync_channel(8);
+    let reader = thread::spawn(move || {
+        let mut reader = BufReader::new(stdout);
+        loop {
+            let mut line = Vec::new();
+            if reader
+                .by_ref()
+                .take(128 * 1024 + 1)
+                .read_until(b'\n', &mut line)
+                .unwrap_or(0)
+                == 0
+                || line.len() > 128 * 1024
+            {
+                break;
+            }
+            if let Ok(value) = serde_json::from_slice::<Value>(&line) {
+                if sender.send(value).is_err() {
+                    break;
+                }
+            }
+        }
+    });
+    let result = (|| {
+        write_json_line(
+            &stdin,
+            &json!({"id":1,"method":"initialize","params":{
+            "clientInfo":{"name":"mivlet","version":env!("CARGO_PKG_VERSION")},
+            "capabilities":{"experimentalApi":true}}}),
+        )?;
+        let initialized =
+            receive_codex_value(&receiver, Duration::from_secs(12), |v| v["id"] == 1)?;
+        if initialized.get("error").is_some() {
+            return Err("Codex usage initialization failed.".into());
+        }
+        write_json_line(&stdin, &json!({"method":"initialized"}))?;
+        write_json_line(
+            &stdin,
+            &json!({"id":2,"method":"account/read","params":{"refreshToken":false}}),
+        )?;
+        let account = receive_codex_value(&receiver, Duration::from_secs(12), |v| v["id"] == 2)?;
+        if account
+            .pointer("/result/account/type")
+            .and_then(Value::as_str)
+            != Some("chatgpt")
+        {
+            return Err("Connect ChatGPT in Mivlet to read subscription allowance.".into());
+        }
+        write_json_line(&stdin, &json!({"id":3,"method":"account/rateLimits/read"}))?;
+        let limits = receive_codex_value(&receiver, Duration::from_secs(12), |v| v["id"] == 3)?;
+        if limits.get("error").is_some() {
+            return Err("This Codex runtime could not report allowance.".into());
+        }
+        if crate::backends::require_current_internal_user()? != owner {
+            return Err("The account changed during the usage check.".into());
+        }
+        Ok((
+            account["result"]["account"].clone(),
+            limits["result"].clone(),
+        ))
+    })();
+    let _ = child.kill();
+    let _ = child.wait();
+    drop(receiver);
+    let _ = reader.join();
+    result
 }
 
 fn codex_executable_command(path: &PathBuf) -> Command {
@@ -899,6 +1003,12 @@ fn read_codex_stdout(
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+        if crate::provider_usage::codex_event_is_limit(&value) {
+            crate::provider_usage::record_limit_failure(
+                "chatgpt",
+                request.options.run_id.as_deref(),
+            );
+        }
         if is_rpc_response(&value, 2) {
             if value.get("error").is_some() {
                 let message = value
@@ -1213,16 +1323,20 @@ fn handle_codex_method(
         }
         "thread/tokenUsage/updated" => {
             let input = value
-                .pointer("/params/tokenUsage/last/inputTokens")
+                .pointer("/params/tokenUsage/total/inputTokens")
+                .or_else(|| value.pointer("/params/tokenUsage/last/inputTokens"))
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             let output = value
-                .pointer("/params/tokenUsage/last/outputTokens")
+                .pointer("/params/tokenUsage/total/outputTokens")
+                .or_else(|| value.pointer("/params/tokenUsage/last/outputTokens"))
                 .and_then(Value::as_u64)
                 .unwrap_or(0);
             let _ = app.emit(
                 channel,
-                json!({ "type": "usage", "inputTokens": input, "outputTokens": output }),
+                json!({ "type": "usage", "inputTokens": input, "outputTokens": output,
+                    "cachedInputTokens": value.pointer("/params/tokenUsage/total/cachedInputTokens").or_else(|| value.pointer("/params/tokenUsage/last/cachedInputTokens")).and_then(Value::as_u64),
+                    "reasoningTokens": value.pointer("/params/tokenUsage/total/reasoningOutputTokens").or_else(|| value.pointer("/params/tokenUsage/last/reasoningOutputTokens")).and_then(Value::as_u64) }),
             );
         }
         "turn/completed" => {

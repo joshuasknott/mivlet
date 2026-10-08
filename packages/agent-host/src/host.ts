@@ -55,6 +55,9 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
   let finish: "stop" | "length" = "stop";
   let inputTokens = 0;
   let outputTokens = 0;
+  let cachedInputTokens: number | undefined;
+  let cacheWriteTokens: number | undefined;
+  let reasoningTokens: number | undefined;
   const seen = new Set<string>();
   const observed = new Set<string>();
   const barriers = new Map<string, () => void>();
@@ -169,11 +172,18 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
         if (event.type === "session.step.ended") {
           if (data.finish === "length") finish = "length";
           const tokens = data.tokens && typeof data.tokens === "object"
-            ? data.tokens as { input?: unknown; output?: unknown }
+            ? data.tokens as { input?: unknown; output?: unknown; reasoning?: unknown; cache?: { read?: unknown; write?: unknown } }
             : {};
           inputTokens += typeof tokens.input === "number" && Number.isFinite(tokens.input) ? Math.max(0, tokens.input) : 0;
           outputTokens += typeof tokens.output === "number" && Number.isFinite(tokens.output) ? Math.max(0, tokens.output) : 0;
-          boundary.event({ type: "usage", inputTokens, outputTokens, costUsd: 0, costUnknown: true });
+          const measured = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
+          const read = measured(tokens.cache?.read);
+          const write = measured(tokens.cache?.write);
+          const reasoning = measured(tokens.reasoning);
+          if (read !== undefined) { cachedInputTokens = (cachedInputTokens ?? 0) + read; inputTokens += read; }
+          if (write !== undefined) cacheWriteTokens = (cacheWriteTokens ?? 0) + write;
+          if (reasoning !== undefined) reasoningTokens = (reasoningTokens ?? 0) + reasoning;
+          boundary.event({ type: "usage", inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens, reasoningTokens, costUsd: 0, costUnknown: true });
         }
         if (event.type === "session.execution.succeeded") return;
         if (event.type === "session.execution.failed") throw new Error("OpenCode could not complete this provider turn.");

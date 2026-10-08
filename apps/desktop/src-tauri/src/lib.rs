@@ -61,6 +61,7 @@ mod permission_policy;
 #[cfg(test)]
 mod product_spine_parity;
 mod provider_process;
+mod provider_usage;
 mod search;
 mod secret_redaction;
 mod snapshot;
@@ -152,6 +153,10 @@ pub fn run() {
             }
         })
         .invoke_handler(account_session::guard(tauri::generate_handler![
+            provider_usage::provider_usage_report,
+            provider_usage::provider_allowance,
+            provider_usage::refresh_provider_allowance,
+            provider_usage::set_provider_usage_price,
             account_session::account_theme,
             local_computer::control::local_app_stop,
             local_computer::artifacts::local_computer_open_artifact,

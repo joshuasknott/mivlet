@@ -7,6 +7,8 @@ import { SettingsModal } from "../settings/SettingsModal";
 import type { SettingsTab } from "../pages/settings-tabs";
 import { AccountDialog } from "./AccountDialog";
 import { AccountMenu } from "./AccountMenu";
+import { readProviderUsage } from "../../runtime/domains/provider-usage";
+vi.mock("../../runtime/domains/provider-usage", async importOriginal => ({ ...await importOriginal<typeof import("../../runtime/domains/provider-usage")>(), readProviderUsage: vi.fn() }));
 
 function AccountSettingsHarness() {
   const [open, setOpen] = useState(false);
@@ -47,7 +49,7 @@ describe("account controls", () => {
     let rejectSignOut!: (error: Error) => void;
     const onSignOut = vi.fn(() => new Promise<void>((_resolve, reject) => { rejectSignOut = reject; }));
     const onClose = vi.fn();
-    render(<AccountDialog kind="sign-out" name="Joshua" records={[]} onSignOut={onSignOut} onClose={onClose} />);
+    render(<AccountDialog kind="sign-out" name="Joshua" onSignOut={onSignOut} onClose={onClose} />);
     expect(onSignOut).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "Sign out" }));
     expect(screen.getByRole("button", { name: "Signing out…" })).toBeDisabled();
@@ -61,11 +63,10 @@ describe("account controls", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
-  it("does not present unreported costs as free usage or invent subscription limits", () => {
-    render(<AccountDialog kind="usage" name="Joshua" records={[
-      { inputTokens: 100, outputTokens: 50, costUsd: 0, costUnknown: true }
-    ]} onSignOut={vi.fn()} onClose={vi.fn()} />);
-    expect(screen.getByText("Unavailable")).toBeInTheDocument();
+  it("does not present unreported costs as free usage or invent subscription limits", async () => {
+    vi.mocked(readProviderUsage).mockResolvedValue({ checkedAt: "2026-10-08T12:00:00Z", since: "2026-09-08T12:00:00Z", coverage: "saved-mivlet-attempts", allowances: [], prices: [], models: [{ providerId: "openai", model: "fixture", attempts: 1, inputTokens: 100, outputTokens: 50, reportedCostUsd: 0, reportedCostAttempts: 0, estimatedCostUsd: 0, estimatedCostAttempts: 0, unpricedAttempts: 1, latestObservedAt: "2026-10-08T12:00:00Z" }] });
+    render(<AccountDialog kind="usage" name="Joshua" onSignOut={vi.fn()} onClose={vi.fn()} />);
+    await waitFor(() => expect(screen.getAllByText("Unavailable")).toHaveLength(2));
     expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();

@@ -189,6 +189,55 @@ The obsolete History and Project WorkItems implementations have been removed.
 
 ## Verification
 
+### Provider usage and reset continuation
+
+Usage is a derived view of the canonical encrypted attempt ledger, covering the
+last 30 days including partial failed and interrupted attempts. It adds no
+conversation or output store. Repeated streaming frames replace the current
+provider turn's snapshot; distinct tool turns accumulate within that attempt.
+Cached reads are included in input, cache writes are additive, and reasoning is
+included in output. Missing categories remain unknown. Provider-reported amounts,
+API-equivalent estimates and unpriced attempts stay separate. OpenRouter's
+documented response `usage.cost` is provider-reported; Claude/OpenCode SDK prices
+are estimates. Optional user-entered rates require an exact model, HTTPS source,
+observation date and separate nonzero cache-category rates.
+
+The model-picker entry reads only cached allowance, and full history aggregation
+is lazy. Each provider refresh is independent, retaining stale saved measurements
+when collection fails. The native probe launches only the account-owned managed
+Codex app-server (`account/read`, `account/rateLimits/read`) or Claude SDK
+(`get_usage` control request); it submits no user prompt. Personal CLI profiles,
+auth files and transcripts are never searched. Unknown protocol/runtime support
+or unsupported routes report unavailable. Codex preserves provider-reported
+bucket durations and optional reset dates; Claude's supported five-hour, weekly
+and model-scoped windows are normalized to UTC. Measurements expire after five
+minutes and reconnect/account changes invalidate their authority. Identity is an
+opaque native hash; where no stable provider account ID is reported, the UI says
+that only the managed connection is identified.
+
+After a native typed provider limit failure, the user can request one continuation
+for an exact exhausted allowance/reset opportunity and reconcile prior effects.
+This choice is saved on existing Work. At the reset, fresh post-reset allowance,
+provider identity, latest failed run, Work/conversation generations, model,
+project revision, participant and parent validity are checked. Admission consumes
+the choice in the same transaction and calls ordinary `ContinueWork`, retaining
+permission lowering, frozen context, fresh attempts and normal approvals. Stop,
+steering, manual continuation, failed validation and restart require renewed
+review. The app must remain open. There is no quota-turn retry loop or background
+replay of external effects.
+
+Behavior references were inspected at T3 Code commit
+`a4c9494b0e3606775cc5fc929fc138399288bd43`: provider usage mapping and one-shot
+reset recovery, plus PRs [15108](https://github.com/pingdotgg/t3code/pull/15108)
+(model/category costs), [15149](https://github.com/pingdotgg/t3code/pull/15149)
+(warm cached data), [16970](https://github.com/pingdotgg/t3code/pull/16970)
+(provider filtering), and [17147](https://github.com/pingdotgg/t3code/pull/17147)
+(independent loading). Mivlet retains its own native custody and Work authority.
+Protocol sources: [Codex app-server](https://learn.chatgpt.com/docs/app-server)
+and [OpenRouter usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting).
+Fixture tests establish parsing, storage and admission fences; authenticated
+provider/runtime acceptance and packaged desktop behavior remain separate gates.
+
 Native tests cover bounded attachment references, bind refresh, old-record
 decode, schedule origin, recovery retention without replay, steering fences,
 suspension, remount orphan fencing, and terminal-attempt immutability.

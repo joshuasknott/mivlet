@@ -1,0 +1,176 @@
+.provider-allowance-indicator {
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 6px 8px;
+  min-height: 32px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.provider-allowance-indicator:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.provider-usage-dialog {
+  width: min(760px, calc(100vw - 32px));
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  padding: 24px;
+  border-radius: 16px;
+  color: var(--ink);
+  background: var(--surface-overlay);
+  box-shadow: 0 12px 80px #0003;
+}
+.provider-usage-dialog > header,
+.provider-usage-allowance > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.provider-usage-dialog h2 {
+  margin: 0;
+  font-size: 20px;
+}
+.provider-usage-details {
+  display: grid;
+  gap: 20px;
+  font-size: 13px;
+}
+.provider-usage-details p {
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.provider-usage-details h3 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+.provider-usage-details button,
+.provider-usage-dialog > header button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.provider-usage-details button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.provider-usage-details select,
+.provider-usage-details input {
+  min-height: 36px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  padding: 6px;
+  font: inherit;
+}
+.provider-usage-details label {
+  display: grid;
+  gap: 6px;
+}
+.provider-usage-filter {
+  max-width: 240px;
+}
+.provider-usage-intro,
+.provider-usage-details small {
+  color: var(--ink-muted);
+}
+.provider-usage-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+.provider-usage-totals dt {
+  font-size: 12px;
+}
+.provider-usage-totals dd {
+  font-size: 22px;
+  margin: 4px 0 0;
+}
+.provider-usage-allowance {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+.provider-usage-allowance[data-status="stale"] progress {
+  opacity: 0.45;
+}
+.provider-usage-window {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.provider-usage-window progress {
+  width: 100%;
+  height: 6px;
+  accent-color: currentColor;
+}
+.provider-usage-models {
+  display: grid;
+  gap: 6px;
+}
+.provider-usage-models button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+.provider-usage-models strong,
+.provider-usage-models small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.provider-usage-model-detail dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.provider-usage-model-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.provider-usage-price-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.provider-usage-details form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+.provider-reset-control {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+.provider-reset-control button {
+  min-height: 36px;
+}
+@media (max-width: 520px) {
+  .provider-usage-dialog {
+    padding: 16px;
+  }
+  .provider-usage-models button {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .provider-usage-price-fields {
+    grid-template-columns: 1fr;
+  }
+  .provider-usage-totals dd {
+    font-size: 18px;
+  }
+}

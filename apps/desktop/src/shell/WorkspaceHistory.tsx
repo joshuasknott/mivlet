@@ -31,7 +31,7 @@ export function WorkspaceHistory({ room, runtime, service, state, selectedWorkId
   const selected = work.find(item => item.id === selection);
   return selected ? <section aria-label="History details">
     <button type="button" onClick={() => setSelection(null)}>Back to history</button>
-    <WorkDetails key={selected.id} item={selected} onOpen={onOpenConversation}
+    <WorkDetails key={selected.id} item={selected} onOpen={onOpenConversation} onProviderReset={command => service.command(command)}
       onStop={id => service.stop(id)}
       onContinue={async (id, generation) => { await service.command({ action: "continue-work", id, expectedGeneration: generation, reconcile: true }); }}
       onSteer={async (id, generation, text) => { await service.steer(id, generation, text); }}
