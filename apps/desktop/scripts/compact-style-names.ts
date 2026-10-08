@@ -7,6 +7,8 @@ interface Source {
   fileName: string;
   code: string;
 }
+const styleToken =
+  /(?<![a-zA-Z0-9_-])(?:--[a-z][a-z0-9-]*|[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*)/g;
 function safeModifier(node: ts.Expression | undefined): boolean {
   if (!node) return false;
   if (ts.isStringLiteralLike(node))
@@ -68,13 +70,16 @@ export function styleNameMap(
           parent = parent.parent;
         }
         const text = node.text;
+        // Use the same token boundaries as replacement. A longer opaque ID
+        // such as dialog-panel-title does not use (or rewrite) dialog-panel.
+        const tokens = new Set(text.match(styleToken) ?? []);
         if (classAttribute && /^--[a-z][a-z0-9-]*$/.test(text)) modifierVariables.add(text);
         if (ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === ts.SyntaxKind.PlusToken) {
           const suffix = /[a-z][a-z0-9_-]*$/.exec(text)?.[0];
           if (suffix) dynamic.push(suffix);
         }
         for (const name of candidates) {
-          if (text.includes(name)) (classAttribute ? seen : opaque).add(name);
+          if (tokens.has(name)) (classAttribute ? seen : opaque).add(name);
         }
         if (ts.isTemplateHead(node) || ts.isTemplateMiddle(node)) {
           const suffix = /[a-z][a-z0-9_-]*$/.exec(text)?.[0];
@@ -125,7 +130,7 @@ export function compactStyleText(
   names: ReadonlyMap<string, string>,
 ): string {
   return text.replace(
-    /(?<![a-zA-Z0-9_-])(?:--[a-z][a-z0-9-]*|[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*)/g,
+    styleToken,
     (token) => names.get(token) ?? token,
   );
 }
