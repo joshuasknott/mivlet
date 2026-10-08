@@ -108,7 +108,8 @@ export function shapeAnthropicRequest(request: NativeCompletionRequest): unknown
  */
 export function parseAnthropicLine(
   dataLine: string,
-  state: AnthropicStreamState = newAnthropicState()
+  state: AnthropicStreamState = newAnthropicState(),
+  usageOnly = false
 ): BackendAgentEvent[] {
   const payload = extractPayload(dataLine);
   if (!payload) return [];
@@ -124,6 +125,7 @@ export function parseAnthropicLine(
 
   const type = chunk.type as string;
   const events: BackendAgentEvent[] = [];
+  if (usageOnly && type !== "message_start" && type !== "message_delta") return events;
 
   if (type === "message_start") {
     const message = chunk.message as Record<string, unknown> | undefined;
@@ -132,6 +134,16 @@ export function parseAnthropicLine(
     state.cachedInputTokens = usage?.cache_read_input_tokens;
     state.cacheWriteTokens = usage?.cache_creation_input_tokens;
     state.inputTokens += state.cachedInputTokens ?? 0;
+    if (usage) {
+      // Input is already measured at message start. Preserve that receipt even
+      // if the provider fails before its final cumulative output snapshot.
+      events.push({
+        type: "usage", inputTokens: state.inputTokens, outputTokens: usage.output_tokens ?? 0,
+        cachedInputTokens: state.cachedInputTokens, cacheWriteTokens: state.cacheWriteTokens,
+        costUsd: priceFor("anthropic", state.inputTokens, usage.output_tokens ?? 0),
+        costEstimated: true, costUnknown: !hasKnownPrice("anthropic")
+      });
+    }
   }
 
   if (type === "content_block_start") {

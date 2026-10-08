@@ -60,7 +60,10 @@ fn claude_percentages_are_not_rescaled_and_missing_categories_stay_unknown() {
     assert!(report.reset_opportunity.is_none());
     assert_eq!(report.identity_kind, "managed-connection");
     assert!(fresh(&report, AT));
+    assert!(fresh(&report, "2026-10-08T12:05:00.000Z"));
+    assert!(!fresh(&report, "2026-10-08T12:05:00.001Z"));
     assert!(!fresh(&report, "2026-10-08T12:05:01.000Z"));
+    assert!(!fresh(&report, "2026-10-08T11:59:59.999Z"));
     assert!(!fresh(&report, "2026-10-08T11:59:59.000Z"));
 }
 #[test]

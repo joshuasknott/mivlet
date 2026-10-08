@@ -7,6 +7,24 @@ import { runAgentLoop } from "./agent-loop";
 import { SequencedFixtureTransport } from "./transport";
 
 describe("provider usage measurements", () => {
+  it("usage-only observation never accumulates tool arguments or returns conversation content", () => {
+    const state = newAnthropicState();
+    expect(
+      parseAnthropicLine(
+        'data: {"type":"content_block_start","index":0,"content_block":{"type":"tool_use","id":"fixture-call","name":"fixture-tool"}}',
+        state,
+        true,
+      ),
+    ).toEqual([]);
+    expect(state.toolBuffers.size).toBe(0);
+    expect(
+      parseOpenAiLine(
+        "openai",
+        'data: {"choices":[{"delta":{"content":"private fixture text","tool_calls":[{"id":"fixture-call","function":{"name":"fixture-tool","arguments":"{}"}}]}}],"usage":{"prompt_tokens":100,"completion_tokens":20}}',
+        true,
+      ).map((event) => event.type),
+    ).toEqual(["usage"]);
+  });
   it("accepts OpenRouter reported zero, preserves categories and rejects untrusted costs on other routes", () => {
     const line =
       'data: {"usage":{"prompt_tokens":120,"completion_tokens":50,"cost":0,"prompt_tokens_details":{"cached_tokens":30,"cache_write_tokens":20},"completion_tokens_details":{"reasoning_tokens":10}}}';
@@ -31,10 +49,18 @@ describe("provider usage measurements", () => {
   });
   it("normalizes Anthropic cache reads and writes without inventing categories", () => {
     const state = newAnthropicState();
-    parseAnthropicLine(
-      'data: {"type":"message_start","message":{"usage":{"input_tokens":60,"cache_read_input_tokens":40,"cache_creation_input_tokens":10}}}',
-      state,
-    );
+    expect(
+      parseAnthropicLine(
+        'data: {"type":"message_start","message":{"usage":{"input_tokens":60,"cache_read_input_tokens":40,"cache_creation_input_tokens":10}}}',
+        state,
+      )[0],
+    ).toMatchObject({
+      type: "usage",
+      inputTokens: 100,
+      outputTokens: 0,
+      cachedInputTokens: 40,
+      cacheWriteTokens: 10,
+    });
     expect(
       parseAnthropicLine(
         'data: {"type":"message_delta","usage":{"output_tokens":20}}',

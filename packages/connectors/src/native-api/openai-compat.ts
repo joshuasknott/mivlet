@@ -186,7 +186,8 @@ function toToolCallEvent(providerId: string, raw: OpenAiToolCallDelta): BackendA
 /** Parse a single OpenAI SSE line into zero or more normalized events. */
 export function parseOpenAiLine(
   providerId: string,
-  line: string
+  line: string,
+  usageOnly = false
 ): BackendAgentEvent[] {
   const payload = extractPayload(line);
   if (!payload) {
@@ -203,6 +204,7 @@ export function parseOpenAiLine(
   }
 
   const events: BackendAgentEvent[] = [];
+  if (usageOnly) return chunk.usage ? [usageEvent(providerId, chunk.usage)] : [];
   const choice = chunk.choices?.[0];
   if (choice?.delta?.content) {
     events.push({ type: "text-delta", text: choice.delta.content });

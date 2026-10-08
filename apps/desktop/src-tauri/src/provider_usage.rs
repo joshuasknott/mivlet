@@ -318,8 +318,10 @@ pub(crate) fn fresh(report: &Allowance, at: &str) -> bool {
     let Ok(now) = DateTime::parse_from_rfc3339(at) else {
         return false;
     };
-    let age = now.signed_duration_since(observed).num_seconds();
-    report.status == "available" && (0..=MAX_AGE_SECONDS).contains(&age)
+    let age = now.signed_duration_since(observed);
+    report.status == "available"
+        && age >= Duration::zero()
+        && age <= Duration::seconds(MAX_AGE_SECONDS)
 }
 pub(crate) fn store_allowance(
     conn: &Connection,
@@ -439,6 +441,9 @@ pub(crate) async fn refresh_provider_allowance(
     store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
+            if scope.internal_user_id != owner {
+                return Err(invalid("The account changed during collection."));
+            }
             if !backend_connection::list_records(conn, &owner)?
                 .iter()
                 .any(|c| c.provider_id == provider_id && c.updated_at == connection_revision)

@@ -3,7 +3,7 @@ import { Plugin } from "@opencode/plugin";
 import { Error as ToolError } from "@opencode/plugin/promise/tool";
 import type { SessionContext } from "@opencode/plugin/promise/session";
 import type { AgentTurnRequest, BackendAgentEvent } from "@mivlet/protocol";
-import { parseOpenAiStreamLine, newOpenAiStreamState } from "@mivlet/connectors/native-api/openai-compat";
+import { parseOpenAiLine } from "@mivlet/connectors/native-api/openai-compat";
 import { parseAnthropicLine, newAnthropicState } from "@mivlet/connectors/native-api/anthropic";
 import { createUsageAccounting, type StepTokens } from "./usage-accounting";
 
@@ -57,8 +57,8 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
   let sessionId = "";
   let finish: "stop" | "length" = "stop";
   const usage = createUsageAccounting(() => {
-    if (input.providerId === "anthropic") { const state = newAnthropicState(); return line => parseAnthropicLine(line, state); }
-    const state = newOpenAiStreamState(); return line => parseOpenAiStreamLine(input.providerId, line, state);
+    if (input.providerId === "anthropic") { const state = newAnthropicState(); return line => parseAnthropicLine(line, state, true); }
+    return line => parseOpenAiLine(input.providerId, line, true);
   }, event => { check(); boundary.event(event); });
   const seen = new Set<string>();
   const observed = new Set<string>();
