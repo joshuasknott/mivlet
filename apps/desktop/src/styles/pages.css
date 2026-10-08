@@ -333,8 +333,7 @@
    input is uncontrolled: the secret is read once at submit and passed straight
    to the credential boundary, then cleared — it never enters React state. */
 
-.provider-access-row button,
-.settings-local-storage button {
+.provider-access-row button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -348,8 +347,7 @@
   font-weight: 500;
 }
 
-.provider-access-row button:hover:not(:disabled),
-.settings-local-storage button:hover {
+.provider-access-row button:hover:not(:disabled) {
   color: var(--ink);
   background: var(--surface-raised);
   border-color: var(--line-strong);
@@ -358,35 +356,6 @@
 .provider-access-row button:disabled {
   opacity: 0.5;
   cursor: not-allowed;
-}
-
-.settings-local-storage {
-  display: grid;
-  grid-template-columns: 26px minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding-top: 28px;
-  border-top: 1px solid var(--line);
-}
-
-.settings-local-storage > span {
-  display: grid;
-  place-items: center;
-  color: var(--ink-muted);
-}
-
-.settings-local-storage strong {
-  display: block;
-  color: var(--ink);
-  font-size: var(--text-16);
-  font-weight: 500;
-}
-
-.settings-local-storage p {
-  margin: 5px 0 0;
-  color: var(--ink-soft);
-  font-size: var(--text-13);
-  line-height: 1.45;
 }
 
 .mcp-settings {
@@ -581,7 +550,6 @@
 }
 
 .provider-method-detail__heading p,
-.provider-method-detail__action p,
 .provider-method-detail__instructions p {
   margin: 4px 0 0;
   color: var(--ink-muted);
@@ -642,7 +610,6 @@
   opacity: 0.55;
 }
 
-.provider-method-detail__action,
 .provider-method-detail__instructions,
 .provider-method-detail__connected {
   display: flex;
@@ -763,9 +730,6 @@
 .settings-modal .toggle-row { padding: 10px 0; border: 0; border-radius: 0; background: transparent; gap: 24px; }
 .settings-modal .toggle-row strong { font-size: 13px; font-weight: 500; }
 .settings-modal .toggle-row small { max-width: 420px; }
-.settings-modal .settings-local-storage { margin-top: 24px; padding: 16px 0 0; border: 0; border-top: 1px solid var(--line); background: transparent; }
-.settings-modal .settings-local-storage strong { font-size: 12px; font-weight: 500; }
-.settings-modal .settings-local-storage p { font-size: 11px; line-height: 1.65; }
 .settings-disclosure { margin: 20px 0; border-top: 1px solid var(--line); padding-top: 15px; }
 .settings-disclosure summary { font-size: 12px; color: var(--ink-muted); cursor: pointer; }
 @media (max-width: 650px) { .settings-modal__label { padding-bottom: 8px; } }
@@ -797,7 +761,6 @@
 .settings-page .profile-clean-card, .settings-page .provider-access-list { box-shadow: none; border-color: var(--line); background: transparent; }
 .settings-page .profile-clean-card__content { padding: 0; }
 .settings-page .profile-section { padding: 20px 0; }
-.settings-page .settings-local-storage { margin-top: 8px; padding: 16px 0; background: transparent; border: 0; }
 .settings-page .mcp-settings__empty { margin: 8px 0 24px; padding: 28px 20px; color: var(--ink-muted); background: var(--surface-hover); border: 0; border-radius: 10px; line-height: 1.6; }
 .settings-page .settings-disclosure { margin-top: 16px; }
 @media (max-width: 650px) { .settings-preference-row { gap: 12px; flex-wrap: wrap; } }
