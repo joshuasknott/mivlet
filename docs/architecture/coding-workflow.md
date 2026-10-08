@@ -72,6 +72,71 @@ snapshots are discarded, so their partial file writes never update the managed
 checkout. Successful snapshots are validated, hash-checked and imported while
 the operation's generation remains current. Source checkouts stay untouched.
 
+## File checkpoints
+
+Library → Repository → File checkpoints saves recoverable code states in the
+selected agent's private copy. Name a state, save it through the normal approval,
+then choose **Preview restore** to see real additions, modifications and deletions.
+Restore needs a fresh, explicit one-use approval for that checkpoint, its exact
+SHA-256 file tree, the reviewed current tree, resulting tree and current Git HEAD.
+It saves a **Before checkpoint restore** checkpoint first. Run checks again after
+restoring: prior command verification is invalidated even if a previous test passed.
+
+The shared provider tool registry exposes `repository-checkpoint-list`,
+`repository-checkpoint-capture`, `repository-checkpoint-preview`,
+`repository-checkpoint-restore` and `repository-checkpoint-delete`. Each goes
+through the existing scoped coding authority. Capture a checkpoint before risky
+edits or after a useful verified milestone; captures are explicit, not an implied
+checkpoint after every message. Checkpoint metadata retains repository identity,
+native request ID, generation, capture time, Git HEAD, label and file hashes.
+This does not rewind conversations, provider sessions, commits or external effects.
+
+Snapshots include tracked files and non-ignored new files, including tracked
+deletions. Credential paths (`.env*`, private keys, credential directories and
+package credential configuration), Git metadata, submodules, unmerged indexes,
+symlinks/reparse points, hardlinks, unsupported Windows filenames and LFS pointers
+are excluded or rejected. A private copy must be a regular self-contained tree;
+unexpected aliases fail closed. Arbitrary secrets inside ordinary code cannot be
+identified reliably: use repositories whose code is suitable for the connected
+model. File diffs pass through the existing native redaction and bounded-output
+policy. Truncated diffs are labelled and the complete changed-file list is retained.
+
+Restore preserves current ignored and credential files. If a saved path now
+conflicts with a changed ignored file, restore refuses rather than overwriting it.
+Only deterministic, canonical `scope/coding/<repository-id>/checkout` paths are
+eligible. No caller can nominate the original checkout, another agent's copy, a
+shared root, or a parent/child overlap. All attachment, command, file, commit,
+publication and checkpoint operations share the in-process repository lock and a
+nonblocking OS file lease. A second process cannot restore through a live owner.
+
+Native preparation runs outside the Stop fence and polls cancellation. The
+existing `native-import.json` transaction then binds a fresh restore transaction ID,
+checkpoint ID, scope/generation/operation and input/output/previous hashes. The
+short generation fence commits directory renames and persists invalidated
+verification state. The previous tree and durable intent survive until
+acknowledgement. Status/restart inspect the same import journal; a missing checkout
+can recover its previous tree, but staged checkpoint files are never imported
+automatically. Uncertain outcomes block further mutation until `repository-recover`
+reconciles the existing checkout. Stop cannot admit stale prepared files.
+
+Storage is bounded to 24 saved checkpoints and 512 MiB of saved file content per
+copy, plus bounded manifests. One snapshot permits 64 MiB, 16 MiB per file and
+4096 file/directory entries; the NUL-delimited Git inventory also has the existing
+64 KiB output cap. Restore preparation uses the native coding tree limits
+(2 GiB/200,000 entries), because ignored files must survive. Fixed staging names
+bound interrupted capture, diff, deletion and restore preparations; the existing
+import transaction retains at most its staged and previous trees until recovery.
+Delete an old checkpoint explicitly to release saved storage. Checkpoints do not
+garbage-collect repository copies and do not introduce another SQL migration.
+
+The source reference is [T3 Code at a4c9494](https://github.com/pingdotgg/t3code/tree/a4c9494b0e3606775cc5fc929fc138399288bd43):
+`CheckpointStore`, the Git driver's temporary-index capture and tests,
+`CheckpointCaptureService`, `CheckpointRollbackService`, and
+`CheckpointRestoreSafety`/scope-ownership tests. They informed immutable identities,
+file/conversation separation and shared-workspace refusal. No T3 source or assets
+were copied. Mivlet retains native file custody and its existing approval/import
+authority rather than adopting the T3 server runtime.
+
 ## Commits and publication
 
 All repository approvals bind the full canonical argument digest, tool, account,
@@ -119,6 +184,17 @@ covers real local Git copies, original-work preservation, scoped file writes,
 stale review rejection, exact commits, generation revocation and recovery locks.
 The permit test `repository_permits_bind_full_payload_scope_generation_and_consume_once`
 covers substitution and replay at the native approval boundary.
+
+Checkpoint coverage also includes `checkpoint_restore_permit_binds_every_hash_request_scope_and_is_single_use`
+and `local_computer::coding::checkpoints` in the desktop native suite. These use
+real disposable Git copies to cover new/modified/deleted files, file/directory
+replacement, ignored-file preservation and conflicts, stale review, corruption,
+scope changes, Stop, OS custody, bounds, deletion and pre-restore undo.
+`cargo test --manifest-path packages/windows-executor/Cargo.toml repository_`
+includes a supervisor that kills a separate process after each restore rename;
+restart must retain or recover the previous tree without replaying the restore.
+Renderer tests in `RepositoryCheckpoints.test.tsx` and the checkpoint runtime
+domain verify the approval flow and scope binding with mocked native transport.
 
 On a configured unelevated Windows machine, explicitly run
 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml native_coding_acceptance -- --ignored --nocapture`.

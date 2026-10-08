@@ -74,6 +74,11 @@
   "toolEffects": {
     "repository-status": "local-read",
     "repository-read": "local-read",
+    "repository-checkpoint-list": "local-read",
+    "repository-checkpoint-preview": "local-read",
+    "repository-checkpoint-capture": "local-write",
+    "repository-checkpoint-restore": "local-write",
+    "repository-checkpoint-delete": "delete",
     "repository-write": "local-write",
     "repository-run": "shell-execution",
     "workspace-run": "shell-execution",

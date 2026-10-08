@@ -39,6 +39,10 @@ a deployed or production-validated service.
   Node/npm and isolated Python/pip are bundled; publication additionally requires GitHub CLI login. Available through
   Codex, Claude SDK and direct API routes that bridge Mivlet tools. See the
   [coding workflow and its limits](docs/architecture/coding-workflow.md).
+  File checkpoints save named code states in the private copy, preview real file
+  changes, and restore an explicitly approved tree with a recoverable before-restore
+  checkpoint. Original checkouts, Git HEAD and conversation history stay intact;
+  restored files need fresh verification. See [checkpoint limits and recovery](docs/architecture/coding-workflow.md#file-checkpoints).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens

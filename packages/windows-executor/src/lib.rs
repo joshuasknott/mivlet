@@ -7,6 +7,7 @@ mod acceptance;
 #[cfg(windows)]
 mod custody;
 mod files;
+pub mod repository_files;
 mod repository_import;
 pub use repository_import::{
     acknowledge_recovery as acknowledge_repository_import, recover as recover_repository_import,

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import {
@@ -10,6 +10,11 @@ import {
   loadRuntimeLocalComputer,
 } from "../../runtime/domains/local-computer";
 import "./repository-files.css";
+const RepositoryCheckpoints = lazy(() =>
+  import("./RepositoryCheckpoints").then((module) => ({
+    default: module.RepositoryCheckpoints,
+  })),
+);
 
 export function RepositoryFiles({
   workspaceId,
@@ -235,6 +240,16 @@ function RepositoryDetails({
               </a>
             </p>
           )}
+          <Suspense fallback={<p>Loading file checkpoints…</p>}>
+            <RepositoryCheckpoints
+              key={repo.id}
+              workspaceId={workspaceId}
+              agentId={agentId}
+              repositoryId={repo.id}
+              disabled={!!status.data?.busy || !!status.data?.recoveryRequired}
+              onChanged={() => void status.refetch()}
+            />
+          </Suspense>
         </>
       )}
     </div>

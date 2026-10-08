@@ -1,5 +1,6 @@
 import type { BackendTool } from "@mivlet/protocol";
 import { NATIVE_EXECUTION_POLICY } from "./workspace-tools";
+import { CHECKPOINT_TOOLS } from "./checkpoint-tools";
 
 const id = {
   repositoryId: {
@@ -29,6 +30,7 @@ function tool(
   };
 }
 export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
+  ...CHECKPOINT_TOOLS,
   "repository-recover": tool(
     "recover",
     "Reconcile uncertain import: keep receipt, release staging/backup; replay nothing. Else inspect GitHub branch/HEAD/base. Failed query proves no absence; retry needs fresh approval.",
