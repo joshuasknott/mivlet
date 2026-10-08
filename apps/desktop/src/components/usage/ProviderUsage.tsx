@@ -31,7 +31,7 @@ export function ProviderUsageDialog({
   });
   return (
     <div
-      className="settings-modal-backdrop"
+      className="provider-usage-backdrop"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}

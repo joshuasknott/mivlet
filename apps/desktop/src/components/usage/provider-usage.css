@@ -41,6 +41,7 @@
   font-size: 13px;
 }
 .provider-usage-details p {
+  overflow-wrap: anywhere;
   line-height: 1.6;
   margin: 8px 0;
 }
@@ -160,6 +161,14 @@
   min-height: 36px;
 }
 @media (max-width: 520px) {
+  .provider-allowance-indicator,
+  .provider-usage-details button,
+  .provider-usage-details input,
+  .provider-usage-details select,
+  .provider-reset-control button,
+  .provider-usage-dialog > header button {
+    min-height: 44px;
+  }
   .provider-usage-dialog {
     padding: 16px;
   }
@@ -173,4 +182,12 @@
   .provider-usage-totals dd {
     font-size: 18px;
   }
+}
+.provider-usage-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 24%);
 }

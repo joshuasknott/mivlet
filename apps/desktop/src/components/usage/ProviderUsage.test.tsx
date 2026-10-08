@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderAllowance, ProviderUsageReport } from "@mivlet/protocol";
 import { ProviderUsageDetails } from "./ProviderUsageDetails";
+import { ProviderAllowanceIndicator } from "./ProviderUsage";
 import {
   currentAllowance,
   allowanceLabel,
@@ -75,6 +76,23 @@ beforeEach(() => {
   vi.mocked(readProviderUsage).mockResolvedValue(report);
 });
 describe("provider usage", () => {
+  it("opens details from the additive control, traps focus and restores the trigger", async () => {
+    const user = userEvent.setup();
+    render(<ProviderAllowanceIndicator providerId="chatgpt" />);
+    const trigger = screen.getByRole("button", { name: /Provider usage/ });
+    await user.click(trigger);
+    await screen.findByRole("combobox");
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Close usage" })).toHaveFocus(),
+    );
+    await user.keyboard("{Shift>}{Tab}{/Shift}");
+    expect(screen.getByRole("dialog")).toContainElement(
+      document.activeElement as HTMLElement,
+    );
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
   it("keeps unknown costs distinct from a reported zero and filters model detail", async () => {
     const user = userEvent.setup();
     render(<ProviderUsageDetails />);
