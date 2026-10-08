@@ -218,6 +218,10 @@ desktop/narrow light/dark checks. The five component tests and the production
 style-transformed fixture pass; review acknowledgement, stale-response handling,
 Stop gating and error/cancel focus return remain intact. Generated references and
 screenshots are local evidence, not shipped assets or live-provider evidence.
+The review-only presentation loads on demand after the user requests a preview.
+The eager control retains provider checks, generation fences, admission and focus
+ownership; module loading failures use the same recoverable preparation error.
+All chunks remain counted by the existing common-bundle budget.
 
 Summarisation is deterministic and local. No provider is called by the
 compaction pipeline, so a conversation can never be summarised by a different

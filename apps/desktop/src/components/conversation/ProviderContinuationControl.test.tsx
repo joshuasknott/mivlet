@@ -17,6 +17,7 @@ describe("provider continuation review", () => {
     const p = props(); render(<ProviderContinuationControl {...p} />);
     fireEvent.click(screen.getByRole("button", { name: "Continue with selected model…" }));
     await screen.findByRole("region", { name: "Provider continuation preview" });
+    await screen.findByRole("button", { name: /^Continue$/ });
     expect(screen.getByRole("region")).toHaveFocus();
     expect(p.onContinue).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: /^Continue$/ })).toBeDisabled();
