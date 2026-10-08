@@ -10,6 +10,6 @@ export const tabs: { id: SettingsTab; label: string }[] = [
   { id: "general", label: "General" },
   { id: "providers", label: "Providers" },
   { id: "models", label: "Models" },
-  { id: "usage", label: "Usage" },
+  { id: "usage", label: "Usage breakdowns" },
   { id: "privacy", label: "Memory" }
 ];

@@ -1,26 +1,22 @@
 import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { ProviderAllowance } from "@mivlet/protocol";
 import {
   allowanceLabel,
   currentAllowance,
   readProviderAllowance,
+  isSubscriptionProvider,
 } from "../../runtime/domains/provider-usage";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import "./provider-usage.css";
 
 const Details = lazy(() =>
   import("../pages/SettingsPage").then((module) => ({
-    default: module.ProviderUsageDetails,
+    default: module.SubscriptionUsage,
   })),
 );
 
-function ProviderUsageDialog({
-  providerId,
-  onClose,
-}: {
-  providerId?: string;
-  onClose: () => void;
-}) {
+function ProviderUsageDialog({ onClose }: { onClose: () => void }) {
   const root = useRef<HTMLElement>(null);
   const close = useRef<HTMLButtonElement>(null);
   useModalFocusTrap({
@@ -45,18 +41,18 @@ function ProviderUsageDialog({
         tabIndex={-1}
       >
         <header>
-          <h2 id="provider-usage-title">Usage and allowance</h2>
+          <h2 id="provider-usage-title">Usage</h2>
           <button
             ref={close}
             type="button"
             onClick={onClose}
             aria-label="Close usage"
           >
-            Close
+            <X size={18} aria-hidden="true" />
           </button>
         </header>
         <Suspense fallback={<p role="status">Loading usage…</p>}>
-          <Details initialProviderId={providerId} />
+          <Details />
         </Suspense>
       </section>
     </div>
@@ -74,7 +70,7 @@ export function ProviderAllowanceIndicator({
   useEffect(() => {
     let current = true;
     setReport(null);
-    if (!providerId) return;
+    if (!providerId || !isSubscriptionProvider(providerId)) return;
     const read = () => {
       void readProviderAllowance(providerId)
         .then((value) => {
@@ -91,7 +87,7 @@ export function ProviderAllowanceIndicator({
       window.clearInterval(timer);
     };
   }, [providerId, open]);
-  if (!providerId) return null;
+  if (!providerId || !isSubscriptionProvider(providerId)) return null;
   const measured = currentAllowance(report);
   return (
     <>
@@ -108,12 +104,7 @@ export function ProviderAllowanceIndicator({
             ? "Usage stale"
             : "Usage"}
       </button>
-      {open ? (
-        <ProviderUsageDialog
-          providerId={providerId}
-          onClose={() => setOpen(false)}
-        />
-      ) : null}
+      {open ? <ProviderUsageDialog onClose={() => setOpen(false)} /> : null}
     </>
   );
 }

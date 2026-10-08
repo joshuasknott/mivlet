@@ -10,15 +10,22 @@ import {
   currentAllowance,
   allowanceLabel,
   readProviderUsage,
+  readProviderAllowance,
   refreshProviderAllowance,
 } from "../../runtime/domains/provider-usage";
 
 vi.mock("../../runtime/domains/provider-usage", async (original) => ({
   ...(await original<typeof import("../../runtime/domains/provider-usage")>()),
   readProviderUsage: vi.fn(),
+  readProviderAllowance: vi.fn(),
   refreshProviderAllowance: vi.fn(),
   saveProviderUsagePrice: vi.fn(),
 }));
+vi.mock("../../runtime/domains/providers", () => ({
+  listRuntimeBackends: vi.fn(),
+}));
+import { listRuntimeBackends } from "../../runtime/domains/providers";
+import { listBackendProviders } from "@mivlet/connectors/backends/registry";
 const at = new Date().toISOString();
 const allowance = (providerId: string): ProviderAllowance => ({
   providerId,
@@ -75,14 +82,25 @@ const report: ProviderUsageReport = {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(readProviderUsage).mockResolvedValue(report);
+  vi.mocked(readProviderAllowance).mockImplementation(async (id) =>
+    allowance(id),
+  );
+  vi.mocked(listRuntimeBackends).mockResolvedValue(
+    listBackendProviders().map((provider) => ({
+      ...provider,
+      authState: provider.id === "codex" ? "connected" : "needs-auth",
+    })),
+  );
 });
 describe("provider usage", () => {
-  it("opens details from the additive control, traps focus and restores the trigger", async () => {
+  it("opens subscription usage from the additive control, traps focus and restores the trigger", async () => {
     const user = userEvent.setup();
     render(<ProviderAllowanceIndicator providerId="codex" />);
     const trigger = screen.getByRole("button", { name: /Provider usage/ });
     await user.click(trigger);
-    await screen.findByRole("combobox");
+    await screen.findByRole("progressbar");
+    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+    expect(readProviderUsage).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: "Close usage" })).toHaveFocus(),
     );
@@ -144,7 +162,7 @@ describe("provider usage", () => {
       }),
     );
     await waitFor(() =>
-      expect(screen.getByText("5% remaining")).toBeInTheDocument(),
+      expect(screen.getByText("95% used")).toBeInTheDocument(),
     );
     expect(refreshProviderAllowance).toHaveBeenCalledTimes(2);
   });
@@ -160,7 +178,7 @@ describe("provider usage", () => {
     const measurement = allowance("codex");
     const observed = Date.parse(at);
     expect(allowanceLabel(currentAllowance(measurement, observed))).toBe(
-      "20% remaining",
+      "80% used",
     );
     expect(currentAllowance(measurement, observed + 300001)?.status).toBe(
       "stale",

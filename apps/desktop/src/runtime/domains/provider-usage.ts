@@ -4,6 +4,11 @@ import type {
   ProviderUsageReport,
 } from "@mivlet/protocol";
 import { invokeNative } from "../bridge";
+import { providerDriverForInstance } from "@mivlet/connectors/backends/driver-registry";
+
+/** Account routes own subscriptions; API-key and custom routes do not. */
+export const isSubscriptionProvider = (providerId: string) =>
+  providerDriverForInstance(providerId)?.category === "account";
 
 export const readProviderUsage = () =>
   invokeNative<ProviderUsageReport>("provider_usage_report");
@@ -31,9 +36,10 @@ export function allowanceLabel(report: ProviderAllowance | null): string {
   if (report.status === "stale") return "Allowance stale";
   if (report.status !== "available" || !report.windows.length)
     return "Allowance unavailable";
-  const remaining = Math.max(
-    0,
-    100 - Math.max(...report.windows.map((window) => window.usedPercent)),
-  );
-  return `${Math.floor(remaining)}% remaining`;
+  const values = report.windows
+    .map((window) => window.usedPercent)
+    .filter((value) => Number.isFinite(value) && value >= 0 && value <= 100);
+  return values.length
+    ? `${Math.max(...values).toLocaleString()}% used`
+    : "Allowance unavailable";
 }

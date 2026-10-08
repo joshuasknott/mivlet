@@ -191,7 +191,13 @@ The obsolete History and Project WorkItems implementations have been removed.
 
 ### Provider usage and reset continuation
 
-Usage is a derived view of the canonical encrypted attempt ledger, covering the
+The account Usage view shows only connected account providers and their reported
+subscription windows, with percent used and reported reset times. API-key and
+custom routes are excluded. Missing measurements remain unavailable; stale
+measurements are explicitly marked. Its Settings link opens Usage breakdowns,
+where token, model, cost and attempt details remain available.
+
+Usage breakdowns are a derived view of the canonical encrypted attempt ledger, covering the
 last 30 days including partial failed and interrupted attempts. It adds no
 conversation or output store. Repeated streaming frames replace the current
 provider turn's snapshot; distinct tool turns accumulate within that attempt.

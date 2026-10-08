@@ -21,6 +21,7 @@ export { tabs } from "./settings-tabs";
 // Account and usage share this deferred entry, avoiding separately compressed
 // settings chunks while retaining the existing SettingsPage download ceiling.
 export { ProviderUsageDetails };
+export { SubscriptionUsage } from "../usage/SubscriptionUsage";
 export { AccountDialog } from "../agents/AccountDialog";
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
