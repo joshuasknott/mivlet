@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
@@ -8,7 +8,12 @@ import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-compu
 import type { RightPanelTab } from "./right-panel-state";
 import { RepositoryFiles } from "./RepositoryFiles";
 import { NativeExecutionSetup } from "./NativeExecutionSetup";
-import { NativeCommandJobs } from "./NativeCommandJobs";
+
+const NativeCommandJobs = lazy(() =>
+  import("./NativeCommandJobs").then((module) => ({
+    default: module.NativeCommandJobs,
+  })),
+);
 
 export function WorkspaceLibrary({
   workspaceId,
@@ -85,7 +90,9 @@ export function WorkspaceLibrary({
         </button>
       </header>
       <NativeExecutionSetup />
-      <NativeCommandJobs workspaceId={workspaceId} agents={agents} />
+      <Suspense fallback={<p role="status">Loading commands…</p>}>
+        <NativeCommandJobs workspaceId={workspaceId} agents={agents} />
+      </Suspense>
       <RepositoryFiles workspaceId={workspaceId} agents={agents} />
       <label className="workspace-library__search">
         <MagnifyingGlass size={17} aria-hidden="true" />
