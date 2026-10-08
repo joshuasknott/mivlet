@@ -55,9 +55,7 @@ export function NativeCommandJobs({
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>Commands</summary>
-      <p>
-        Live logs for your agent. Closing this panel keeps jobs running.
-      </p>
+      <p>Live logs for your agent. Closing this panel keeps jobs running.</p>
       {agents.length > 1 && (
         <label>
           Agent{" "}
@@ -152,32 +150,43 @@ function CommandList({
       )}
       {job && (
         <>
-          <p role="status">
-            {job.status.replaceAll("-", " ")}
-            {job.exitCode !== null ? ` · exit ${job.exitCode}` : ""}
-          </p>
-          <p>
-            Started {new Date(job.createdAt).toLocaleString()} ·{" "}
-            {job.timeoutSeconds}s limit · Network{" "}
-            {job.network ? "approved" : "off"}
-          </p>
+          <header>
+            <p role="status">
+              {job.status.replaceAll("-", " ")}
+              {job.exitCode !== null ? ` · exit ${job.exitCode}` : ""}
+            </p>
+            <span>{job.persistent ? "Persistent job" : "Command"}</span>
+            {active(job) && job.generation === query.data?.generation && (
+              <button
+                type="button"
+                disabled={stop.isPending || job.status === "stopping"}
+                onClick={() => stop.mutate(job)}
+              >
+                {job.status === "stopping" ? "Stopping…" : "Stop job"}
+              </button>
+            )}
+          </header>
+          <dl>
+            <div>
+              <dt>Started</dt>
+              <dd>{new Date(job.createdAt).toLocaleString()}</dd>
+            </div>
+            <div>
+              <dt>Time limit</dt>
+              <dd>{job.timeoutSeconds}s</dd>
+            </div>
+            <div>
+              <dt>Network</dt>
+              <dd>{job.network ? "Approved" : "Off"}</dd>
+            </div>
+          </dl>
           {job.persistent && (
             <p>
               Snapshot writes are discarded; Stop ends the job.
-              {job.repositoryId &&
-                " Stop before editing the repository."}
+              {job.repositoryId && " Stop before editing the repository."}
             </p>
           )}
           {job.message && <p>{job.message}</p>}
-          {active(job) && job.generation === query.data?.generation && (
-            <button
-              type="button"
-              disabled={stop.isPending || job.status === "stopping"}
-              onClick={() => stop.mutate(job)}
-            >
-              {job.status === "stopping" ? "Stopping…" : "Stop job"}
-            </button>
-          )}
           <CommandOutput
             key={`${job.id}:${job.generation}`}
             workspaceId={workspaceId}
@@ -255,8 +264,7 @@ function CommandOutput({
   }, [workspaceId, agentId, job.id, job.generation, retry]);
   return (
     <div>
-      {notice && <p>{notice}</p>}
-      {redacted && <p>Some output was redacted or omitted.</p>}
+      <h3>Output</h3>
       {error && (
         <>
           <p role="alert">{error}</p>
@@ -278,6 +286,8 @@ function CommandOutput({
             ? "Output unavailable."
             : "No output yet."}
       </pre>
+      {notice && <p>{notice}</p>}
+      {redacted && <p>Some output was redacted or omitted.</p>}
     </div>
   );
 }
