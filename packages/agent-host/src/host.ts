@@ -3,6 +3,9 @@ import { Plugin } from "@opencode/plugin";
 import { Error as ToolError } from "@opencode/plugin/promise/tool";
 import type { SessionContext } from "@opencode/plugin/promise/session";
 import type { AgentTurnRequest, BackendAgentEvent } from "@mivlet/protocol";
+import { parseOpenAiStreamLine, newOpenAiStreamState } from "@mivlet/connectors/native-api/openai-compat";
+import { parseAnthropicLine, newAnthropicState } from "@mivlet/connectors/native-api/anthropic";
+import { createUsageAccounting, type StepTokens } from "./usage-accounting";
 
 export interface HostInput {
   request: AgentTurnRequest;
@@ -53,11 +56,10 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
   let toolCalls = 0;
   let sessionId = "";
   let finish: "stop" | "length" = "stop";
-  let inputTokens = 0;
-  let outputTokens = 0;
-  let cachedInputTokens: number | undefined;
-  let cacheWriteTokens: number | undefined;
-  let reasoningTokens: number | undefined;
+  const usage = createUsageAccounting(() => {
+    if (input.providerId === "anthropic") { const state = newAnthropicState(); return line => parseAnthropicLine(line, state); }
+    const state = newOpenAiStreamState(); return line => parseOpenAiStreamLine(input.providerId, line, state);
+  }, event => { check(); boundary.event(event); });
   const seen = new Set<string>();
   const observed = new Set<string>();
   const barriers = new Map<string, () => void>();
@@ -75,12 +77,12 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
         const raw = await http.text();
         if (raw.length > 2 * 1024 * 1024) throw new Error("Model request too large.");
         const body: unknown = JSON.parse(raw);
-        return await boundary.model(providerRequestBody(
+        return usage.observe(await boundary.model(providerRequestBody(
           body,
           input.providerId,
           request.model,
           request.maxTokens,
-        ));
+        )));
       } catch {
         return Response.json({ error: { message: "Mivlet provider boundary refused this request." } }, { status: 502 });
       }
@@ -171,19 +173,7 @@ export async function runHost(input: HostInput, boundary: HostBoundary): Promise
         }
         if (event.type === "session.step.ended") {
           if (data.finish === "length") finish = "length";
-          const tokens = data.tokens && typeof data.tokens === "object"
-            ? data.tokens as { input?: unknown; output?: unknown; reasoning?: unknown; cache?: { read?: unknown; write?: unknown } }
-            : {};
-          inputTokens += typeof tokens.input === "number" && Number.isFinite(tokens.input) ? Math.max(0, tokens.input) : 0;
-          outputTokens += typeof tokens.output === "number" && Number.isFinite(tokens.output) ? Math.max(0, tokens.output) : 0;
-          const measured = (value: unknown) => typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : undefined;
-          const read = measured(tokens.cache?.read);
-          const write = measured(tokens.cache?.write);
-          const reasoning = measured(tokens.reasoning);
-          if (read !== undefined) { cachedInputTokens = (cachedInputTokens ?? 0) + read; inputTokens += read; }
-          if (write !== undefined) cacheWriteTokens = (cacheWriteTokens ?? 0) + write;
-          if (reasoning !== undefined) reasoningTokens = (reasoningTokens ?? 0) + reasoning;
-          boundary.event({ type: "usage", inputTokens, outputTokens, cachedInputTokens, cacheWriteTokens, reasoningTokens, costUsd: 0, costUnknown: true });
+          usage.completeStep(event.id, data.tokens && typeof data.tokens === "object" ? data.tokens as StepTokens : {});
         }
         if (event.type === "session.execution.succeeded") return;
         if (event.type === "session.execution.failed") throw new Error("OpenCode could not complete this provider turn.");

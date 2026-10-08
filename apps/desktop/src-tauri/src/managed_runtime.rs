@@ -1465,13 +1465,23 @@ fn handle_claude_line(
             .and_then(Value::as_u64)
             .unwrap_or_default();
         let cost = value.get("total_cost_usd").and_then(Value::as_f64);
-        if input > 0 || output > 0 || cost.is_some() {
+        let read = value
+            .pointer("/usage/cache_read_input_tokens")
+            .and_then(Value::as_u64);
+        let write = value
+            .pointer("/usage/cache_creation_input_tokens")
+            .and_then(Value::as_u64);
+        if input > 0
+            || output > 0
+            || read.unwrap_or(0) > 0
+            || write.unwrap_or(0) > 0
+            || cost.is_some()
+        {
             let _ = app.emit(
                 channel,
-                json!({"type":"usage","inputTokens":input + value.pointer("/usage/cache_read_input_tokens").and_then(Value::as_u64).unwrap_or(0),
+                json!({"type":"usage","inputTokens":input.saturating_add(read.unwrap_or(0)),
                     "outputTokens":output,"costUsd":cost,"costEstimated":true,
-                    "cachedInputTokens":value.pointer("/usage/cache_read_input_tokens").and_then(Value::as_u64),
-                    "cacheWriteTokens":value.pointer("/usage/cache_creation_input_tokens").and_then(Value::as_u64)}),
+                    "cachedInputTokens":read,"cacheWriteTokens":write}),
             );
         }
         if value.get("is_error").and_then(Value::as_bool) == Some(true) {
@@ -1809,8 +1819,14 @@ fn handle_open_code_event(
                         .and_then(Value::as_u64)
                         .unwrap_or_default();
                     let cost = info.get("cost").and_then(Value::as_f64);
-                    if input > 0 || output > 0 || cost.is_some() {
-                        let read = info.pointer("/tokens/cache/read").and_then(Value::as_u64);
+                    let read = info.pointer("/tokens/cache/read").and_then(Value::as_u64);
+                    let write = info.pointer("/tokens/cache/write").and_then(Value::as_u64);
+                    if input > 0
+                        || output > 0
+                        || read.unwrap_or(0) > 0
+                        || write.unwrap_or(0) > 0
+                        || cost.is_some()
+                    {
                         state.input_tokens = state
                             .input_tokens
                             .saturating_add(input)
@@ -1818,10 +1834,7 @@ fn handle_open_code_event(
                         state.output_tokens = state.output_tokens.saturating_add(output);
                         for (total, value) in [
                             (&mut state.cached_input_tokens, read),
-                            (
-                                &mut state.cache_write_tokens,
-                                info.pointer("/tokens/cache/write").and_then(Value::as_u64),
-                            ),
+                            (&mut state.cache_write_tokens, write),
                             (
                                 &mut state.reasoning_tokens,
                                 info.pointer("/tokens/reasoning").and_then(Value::as_u64),

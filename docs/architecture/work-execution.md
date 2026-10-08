@@ -201,6 +201,11 @@ API-equivalent estimates and unpriced attempts stay separate. OpenRouter's
 documented response `usage.cost` is provider-reported; Claude/OpenCode SDK prices
 are estimates. Optional user-entered rates require an exact model, HTTPS source,
 observation date and separate nonzero cache-category rates.
+The ordinary embedded API host observes usage in the existing native response
+stream and passes the same bytes/headers to its SDK. This observer keeps partial
+receipts before failure, replaces per-call snapshots and deduplicates completed
+steps; older unsupported wire data can retain SDK token measurements with unknown
+cost. It does not add a remote call, buffer entire responses or collect transcripts.
 
 The model-picker entry reads only cached allowance, and full history aggregation
 is lazy. Each provider refresh is independent, retaining stale saved measurements
