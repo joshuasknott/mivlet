@@ -126,6 +126,11 @@ mod tests {
             CREATE TABLE local_schedule_occurrence(workspace_id TEXT NOT NULL,owner_subject TEXT NOT NULL,id TEXT NOT NULL,schedule_id TEXT NOT NULL,PRIMARY KEY(workspace_id,owner_subject,id),FOREIGN KEY(workspace_id,owner_subject,schedule_id) REFERENCES local_schedule(workspace_id,owner_subject,id) ON DELETE CASCADE);
             INSERT INTO local_schedule VALUES('workspace','account','clock','daily',x'0123456789','keep');
             INSERT INTO local_schedule_occurrence VALUES('workspace','account','occurrence','clock');").unwrap();
+        conn.pragma_update(None, "foreign_keys", "ON").unwrap();
+        assert!(
+            matches!(apply(&conn), Err(StoreError::Invalid(message)) if message.contains("foreign-key maintenance fence"))
+        );
+        conn.pragma_update(None, "foreign_keys", "OFF").unwrap();
         apply(&conn).unwrap();
         apply(&conn).unwrap();
         conn.pragma_update(None, "foreign_keys", "ON").unwrap();

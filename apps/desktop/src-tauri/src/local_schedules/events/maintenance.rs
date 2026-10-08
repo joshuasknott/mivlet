@@ -3,15 +3,11 @@
 use super::super::*;
 
 pub(super) fn start() {
-    let Ok(fence) = crate::account_session::AccountDispatchFence::capture() else {
-        return;
-    };
-    let fence = std::sync::Arc::new(fence);
     tauri::async_runtime::spawn(async move {
         loop {
-            let fence = fence.clone();
             let active = tauri::async_runtime::spawn_blocking(move || {
                 (|| {
+                    let fence = crate::account_session::AccountDispatchFence::capture()?;
                     let store = global_store()?;
                     let scope = authorized_scope::active_command_scope(ScopeAccess::Write)?;
                     store

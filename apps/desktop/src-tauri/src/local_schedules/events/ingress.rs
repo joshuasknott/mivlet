@@ -128,7 +128,6 @@ impl EventIngress {
         let state = HttpState {
             rate: self.rate.clone(),
             capacity: self.capacity.clone(),
-            fence: Arc::new(crate::account_session::AccountDispatchFence::capture()?),
         };
         let router = Router::new()
             .route("/events/{schedule}/{route}", post(handle))
@@ -153,7 +152,6 @@ impl EventIngress {
 struct HttpState {
     rate: Arc<Mutex<HashMap<String, (i64, u32)>>>,
     capacity: Arc<tokio::sync::Semaphore>,
-    fence: Arc<crate::account_session::AccountDispatchFence>,
 }
 fn reply(status: u16, reason: &str, id: Option<String>) -> Response {
     let body = serde_json::json!({"outcome":reason,"deliveryId":id}).to_string();
@@ -184,7 +182,7 @@ async fn handle(
     {
         return reply(404, "unknown_endpoint", None);
     }
-    if state.fence.with_current(|| Ok(())).is_err() {
+    if crate::account_session::is_restarting() {
         return reply(503, "account_unavailable", None);
     }
     // Browser requests never constitute a supported event source. No CORS or
@@ -244,9 +242,14 @@ async fn handle(
         Ok(Err(_)) => return reply(413, "payload_too_large", None),
         Err(_) => return reply(408, "payload_timeout", None),
     };
-    let fence = state.fence.clone();
     let result = tauri::async_runtime::spawn_blocking(move || {
         (|| {
+            // A new receipt captures the current generation of the process-
+            // pinned account. Normal token renewal must not leave a long-lived
+            // listener with an expired fence; this receipt never refreshes it
+            // after verification or before its final SQL commit.
+            let fence = crate::account_session::AccountDispatchFence::capture()
+                .map_err(|_| "account_unavailable".to_string())?;
             let store = global_store()?;
             let scope = authorized_scope::active_command_scope(ScopeAccess::Write)?;
             delivery::receive(
@@ -278,7 +281,7 @@ async fn handle(
                         preview,
                     )
                 },
-                fence.as_ref(),
+                &fence,
             )
             .map_err(|_| "Event delivery could not be persisted.".to_string())
         })()
@@ -286,6 +289,9 @@ async fn handle(
     .await;
     match result {
         Ok(Ok(receipt)) => reply(receipt.status, receipt.reason, receipt.id),
+        Ok(Err(reason)) if reason == "account_unavailable" => {
+            reply(503, "account_unavailable", None)
+        }
         _ => reply(503, "ingress_unavailable", None),
     }
 }
