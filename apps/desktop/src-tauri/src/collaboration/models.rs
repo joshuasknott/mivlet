@@ -135,6 +135,8 @@ pub struct Work {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub continuation: Option<super::provider_continuation::Continuation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_client: Option<crate::mcp_server::ExternalWorkContext>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<ScheduledWorkContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured_context: Option<CapturedWorkContext>,

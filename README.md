@@ -128,6 +128,11 @@ a deployed or production-validated service.
   behind Mivlet authority, and retains readable ordinary results on failure.
   See [MCP Apps](docs/architecture/mcp-apps.md) for supported capabilities and
   [verification](docs/development/verification.md) for evidence and limitations.
+- An authenticated local MCP server lets external assistants inspect explicitly
+  shared Work and request tasks from selected agents. Native desktop consent,
+  read-only defaults, expiry, revocation and scoped access history preserve
+  Mivlet authority. Remote access requires an operator-provided HTTPS proxy;
+  the app does not publish an endpoint. See [external assistants](docs/architecture/mcp-server.md).
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.

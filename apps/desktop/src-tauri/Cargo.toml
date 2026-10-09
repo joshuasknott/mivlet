@@ -17,6 +17,7 @@ path = "src/main.rs"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
+axum = { version = "=0.8.9", default-features = false, features = ["http1", "json", "tokio"] }
 mivlet-windows-executor = { path = "../../../packages/windows-executor" }
 serde = { version = "1", features = ["derive"] }
 # Exact approval digests must preserve JSON's decimal -> IEEE-754 round trip.
@@ -46,7 +47,6 @@ tokio = { version = "1", features = ["sync", "rt", "macros", "time", "net", "io-
 futures-util = "0.3"
 sha2 = "0.10"
 ring = "=0.17.14"
-axum = { version = "=0.8.9", default-features = false, features = ["http1", "tokio"] }
 zeroize = "=1.9.0"
 base64 = "0.22"
 getrandom = "0.3"

@@ -5,6 +5,7 @@ import { useState } from "react";
 import type { VoiceCapability } from "@mivlet/protocol";
 import type { SettingsRuntime } from "../settings/settings-runtime";
 import { MemoryRecords } from "../settings/MemoryRecords";
+import { McpServerSettings } from "../settings/McpServerSettings";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { ProviderModelSettings } from "../settings/ProviderModelSettings";
 import { BackgroundExecutionSettings } from "../settings/BackgroundExecutionSettings";
@@ -112,6 +113,7 @@ function GeneralSettings({
   onThemeChange: (theme: "light" | "dark") => void;
   onStatus: (message: string) => void;
 }) {
+  const [externalOpen, setExternalOpen] = useState(false);
   const accountConfigured =
     runtime.identityStatus.enabled && runtime.accountWorkspaceStatus.configured;
 
@@ -132,6 +134,7 @@ function GeneralSettings({
           <ApprovalsSettingsView runtime={runtime} onStatus={onStatus} />
         </div>
       </section>
+      <section className="settings-group" aria-labelledby="external-assistants-heading"><h2 id="external-assistants-heading">External assistants</h2><details className="settings-disclosure" onToggle={(event) => setExternalOpen(event.currentTarget.open)}><summary>Manage MCP server and client access</summary>{externalOpen && <McpServerSettings workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId} agents={runtime.agents} />}</details></section>
       <section className="settings-group" aria-labelledby="general-voice-heading"><h2 id="general-voice-heading">Voice input</h2><div className="settings-group__surface"><DictationPrivacySettings runtime={runtime} capability={dictationCapability} onStatus={onStatus} /></div></section>
       <BackgroundExecutionSettings />
     </div>
