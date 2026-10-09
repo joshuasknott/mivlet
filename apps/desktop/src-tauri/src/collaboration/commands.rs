@@ -118,6 +118,12 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             expected_generation,
         } => super::provider_resets::cancel(ctx, &id, expected_generation)?,
         Command::DispatchProviderResets => super::provider_resets::dispatch(ctx)?,
+        Command::StartProviderContinuation {
+            id,
+            input,
+            fingerprint,
+            reconcile,
+        } => provider_continuation::start(ctx, &id, &input, &fingerprint, reconcile)?,
         Command::SteerWork {
             id: key,
             expected_generation,

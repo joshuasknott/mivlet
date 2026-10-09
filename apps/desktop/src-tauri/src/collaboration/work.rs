@@ -361,6 +361,7 @@ fn new_work_with_parent(
     }
     Ok(Work {
         reset_continuation: None,
+        continuation: None,
         schedule: None,
         steering: vec![],
         messages: vec![],

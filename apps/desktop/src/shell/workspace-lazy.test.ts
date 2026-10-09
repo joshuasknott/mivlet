@@ -19,6 +19,7 @@ const routes = [
 ] as const;
 const islands = [
   ...routes.map(([, specifier]) => specifier),
+  "../components/navigation/WorkspaceLibrary",
   "../components/agents/AccountDialog",
 ];
 

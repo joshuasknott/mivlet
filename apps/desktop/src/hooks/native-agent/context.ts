@@ -115,6 +115,7 @@ export async function planAttemptContext(input: {
   request: AgentTurnRequest;
   contextPrefix: string;
   selectedModel?: BackendModel;
+  contextWindowLimit?: number;
   provider?: BackendProvider;
   backendType: string;
   requestThreadId: string | undefined;
@@ -129,11 +130,15 @@ export async function planAttemptContext(input: {
       prefix: string;
     }
 > {
+  const reportedWindow = input.selectedModel?.capabilities?.contextWindow;
+  const contextWindowTokens = input.contextWindowLimit === undefined
+    ? reportedWindow
+    : Math.min(reportedWindow ?? input.contextWindowLimit, input.contextWindowLimit);
   let contextPlan = await planConversationContext({
     history: input.history,
     request: input.request,
     contextPrefix: input.contextPrefix,
-    contextWindowTokens: input.selectedModel?.capabilities?.contextWindow,
+    contextWindowTokens,
     backendType: input.provider?.backendType ?? input.backendType,
   });
   let prefix = input.contextPrefix;
@@ -149,7 +154,7 @@ export async function planAttemptContext(input: {
       history: input.historyEntries,
       request: input.request,
       contextPrefix: input.contextPrefix,
-      contextWindowTokens: input.selectedModel?.capabilities?.contextWindow,
+      contextWindowTokens,
       backendType: input.provider?.backendType ?? input.backendType,
       dependencies: {
         listSummaries: listRuntimeContextSummaries,

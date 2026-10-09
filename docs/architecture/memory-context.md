@@ -137,6 +137,106 @@ P3/P4/P5 call from an explicit user action:
 
 ## Provider boundary
 
+### Explicit provider continuation
+
+The conversation composer offers **Continue with selected model…** after the
+user writes the next request. Select another connected model in the ordinary
+picker to switch providers, or retain it for a fresh session. Stop active Work
+first. The preview shows the actual native selection and requires review of
+saved results and uncertain effects before admission. Draft attachments must be
+removed for this text-only action; historical attachment bytes are never copied,
+and the preview reports their missing references.
+
+`collaboration/provider_continuation.rs` reads the canonical account/member
+conversation and current scoped context. It preserves complete user/assistant
+records, roles, sequence, revision provenance, partial public replies, and
+completed `repository-run` results. It excludes tool calls, approvals, reasoning,
+redacted records and other raw tool payloads. Original user constraints have
+priority, followed by recent messages. Omitted records remain in the source
+conversation. Tool-capable routes advertise `continuation-read`: native live Work
+and run/generation checks fence paginated public source reads. Source edits or
+redaction invalidate retrieval; it cannot select a different conversation.
+
+The native budget charges UTF-8 bytes, JSON and attribution conservatively, caps
+history at 16,000 bytes, reserves at least 8,192 tokens or a quarter of the window,
+and accounts for the intact new request and captured context. Unknown model
+windows use a labelled 32,768-token fallback. These are admission estimates,
+not billed usage or guarantees for arbitrary tokenizers. The actual request is
+checked again against the current model catalogue, actual tools and instructions
+before dispatch. Prior-provider usage is never reused for a fresh session.
+
+A fingerprint binds the preview to account, workspace, conversation generation,
+source revisions, selected agent/model, request, admitted context and Work state.
+The existing native Work command checks it atomically and persists the packet
+with the ordinary encrypted Work record. Reusing an admission ID cannot enqueue
+another run. Stop, provider prerequisites, current identity, execution generation,
+approval and attachment authority remain in the existing worker. Restoring saved
+Work does not itself run a provider or replay effects.
+
+The currently installed desktop adapters do not expose a durable native-resume
+contract. In particular, native Codex startup explicitly uses ephemeral threads;
+its shared adapter's `resumeThread` method does not establish persisted native
+resume. Continuation therefore uses **portable-fresh-session**, with truthful
+wording rather than claiming native resume. No dependency or SQL migration is
+needed.
+
+Reference review: T3 Code commit
+`a4c9494b0e3606775cc5fc929fc138399288bd43`, specifically
+`ContextHandoffService.ts`, `ContextHandoffBudget.ts`,
+`ContextHandoffDelivery.ts`, their tests and `docs/user/portable-handoffs.md`.
+The official path history identifies introduction in merged PR #2829, commit
+`de343914273eceb852a1d1d739cd1d38df7796ee`.
+This is a Mivlet implementation of the behavior, not copied source. Official
+[Codex App Server](https://developers.openai.com/codex/app-server/) and
+[Claude session](https://platform.claude.com/docs/en/agent-sdk/sessions)
+contracts were reviewed; their resumability does not override Mivlet's current
+ephemeral native session policy.
+
+Conversation-branch integration: continuation preview reads the canonical
+selected path. Paginated retrieval resolves the frozen source head from its
+unique sequence and reads that branch, even if the selected head later changes.
+The digest still rejects edits or redaction, and excluding history prevents
+retrieval. Unselected alternative answers never enter the continuation packet.
+The composer blocks continuation during branch navigation or an output revision.
+
+Local validation checkpoint (2026-10-08): desktop typecheck and production
+build, protocol parity/build, connector build and 79 distinct focused tests
+passed, including single-worker continuation, worker, recovery, cancellation
+and provider runs. Desktop and
+390px review controls were inspected with synthetic native responses; no live
+provider was called. Security lint, explicit-any, formatting, dead-code and
+dependency-cycle checks passed.
+The initial native compilation was interrupted and the pre-stack bundle
+exceeded its ceiling. After inheriting the separate dependency-audit and style
+compaction fixes, exact revision `93fb8ab7` passed
+[full validation](https://github.com/joshuasknott/mivlet/actions/runs/37837485639),
+including native tests/Clippy, encrypted-store close/reopen/recovery and unchanged
+performance budgets. Those earlier gates are resolved.
+
+Subsequent focused acceptance compiled the real control and application CSS
+through the production style transform in an isolated 42-module fixture.
+Desktop (1280px) and narrow (390px), light/dark, long provenance, empty history,
+empty draft, delayed stale preview, preview failure, admission denial, review
+gating, Cancel, simulated Stop and successful simulated admission were inspected.
+A keyboard focus loss after denial was reproduced and fixed: review completion
+focuses the preview region, while preview/admission failure returns focus to the
+trigger. Five focused component tests pass after that correction. No horizontal
+overflow or browser errors were observed; action targets remain 44px high.
+Transport and provider were explicitly simulated. Selected-branch integration,
+installed-app behavior and live-provider acceptance remain separate requirements.
+
+The continuation review now groups session identity, transfer counts, attachment
+notices and public source cards using shared tokens, controls and Phosphor icons.
+A built-in imagegen reference preceded implementation. The isolated fixture's
+`output/continuation-acceptance/design-qa.md` records reference comparison and
+desktop/narrow light/dark checks. The five component tests and the production
+style-transformed fixture pass; review acknowledgement, stale-response handling,
+Stop gating and error/cancel focus return remain intact. Generated references and
+screenshots are local evidence, not shipped assets or live-provider evidence.
+The continuation control loads only when a conversation has saved history and
+an agent profile, using the conversation pane's existing lazy-component pattern.
+The complete control retains provider checks, generation fences, admission and
+focus ownership. All chunks remain counted by the existing common-bundle budget.
 Native Work captures and explicit live conversation shares read canonical
 string message revisions, with compatibility for older object-shaped text.
 Both use the selected branch; another answer branch cannot enter inherited

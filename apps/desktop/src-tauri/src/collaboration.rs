@@ -8,6 +8,8 @@ mod exchanges;
 pub(crate) mod models;
 mod provider_resets;
 mod output_revisions;
+pub(crate) mod provider_continuation;
+pub(crate) mod provider_continuation_read;
 mod schedules;
 pub(crate) mod ui;
 mod work;

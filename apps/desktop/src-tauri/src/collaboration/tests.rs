@@ -15,6 +15,8 @@ mod exchange_regressions;
 mod provider_reset_regressions;
 #[path = "output_revision_tests.rs"]
 mod output_revision_tests;
+#[path = "provider_continuation_tests.rs"]
+mod provider_continuation_tests;
 #[path = "scheduling_regressions.rs"]
 mod scheduling_regressions;
 #[path = "ui_tests.rs"]

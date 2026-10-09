@@ -130,6 +130,8 @@ pub struct Work {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reset_continuation: Option<ResetContinuation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<super::provider_continuation::Continuation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<ScheduledWorkContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub captured_context: Option<CapturedWorkContext>,
@@ -394,6 +396,12 @@ pub enum AgentCommand {
     deny_unknown_fields
 )]
 pub enum Command {
+    StartProviderContinuation {
+        id: String,
+        input: super::provider_continuation::Input,
+        fingerprint: String,
+        reconcile: bool,
+    },
     SteerWork {
         id: String,
         expected_generation: u32,
