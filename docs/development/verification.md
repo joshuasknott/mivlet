@@ -117,7 +117,8 @@ Native command lifecycle checks use the same prepared, verified Windows runtime
 as ordinary execution. Run focused `command_jobs` tests and
 `native_command_lifecycle_permits` in the desktop crate, and the executor's
 `output::tests`. Opt-in actual-process checks are
-`native_live_persistent_server_acceptance`, `native_live_build_and_test_acceptance`,
+`native_live_persistent_server_acceptance`, `native_live_persistent_process_acceptance`,
+`native_live_build_and_test_acceptance`,
 and `native_successful_persistent_job_never_imports` in
 `packages/windows-executor/Cargo.toml`, plus
 `native_persistent_repository_job_lifecycle_acceptance` in the desktop crate.
@@ -125,6 +126,8 @@ Use `-- --ignored --nocapture --test-threads=1` and serialize these with the oth
 native custody acceptances. They run disposable LPAC commands; they do not prove
 signed-installer, live-provider or host-browser access. Never add a loopback
 exemption or host-shell fallback to make a development-server check pass.
+The process check verifies live redaction, Stop and pinned descendant termination
+without networking; the server check separately requires loopback support.
 
 Claude SDK initialization has a separate opt-in check:
 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml native_claude_sdk_initialization_acceptance -- --ignored --nocapture`.

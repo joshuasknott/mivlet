@@ -10,7 +10,10 @@ use std::{
 };
 fn resources() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../apps/desktop/src-tauri/resources/execution-runtime/runtime")
+        .ancestors()
+        .nth(2)
+        .expect("Executor package belongs to the workspace")
+        .join("apps/desktop/src-tauri/resources/execution-runtime/runtime")
 }
 fn binding(operation_id: u64) -> Binding {
     Binding {
@@ -23,8 +26,8 @@ fn binding(operation_id: u64) -> Binding {
 #[test]
 #[ignore = "Real LPAC process: requires prepared bundled runtimes and native execution setup"]
 fn native_live_persistent_server_acceptance() {
-    let source = tempfile::tempdir().unwrap();
-    fs::write(source.path().join("server.js"), r#"
+    persistent_job_lifecycle_acceptance(
+        r#"
 const fs=require('node:fs'), http=require('node:http'), cp=require('node:child_process');
 const child=cp.spawn(process.execPath,['-e',"setTimeout(()=>require('fs').writeFileSync('late.txt','escaped'),15000)"],{detached:true,stdio:'ignore'}); child.unref();
 const server=http.createServer((req,res)=>res.end('disposable native development server'));
@@ -35,7 +38,33 @@ server.listen(0,'127.0.0.1',()=>{
   setTimeout(()=>process.stdout.write('canary-value\n'),50);
 });
 setInterval(()=>console.log('server heartbeat'),200);
-"#).unwrap();
+"#,
+        "SERVER_LISTENING",
+        1,
+    );
+}
+
+#[test]
+#[ignore = "Real LPAC live output and Stop: requires bundled runtimes and native setup"]
+fn native_live_persistent_process_acceptance() {
+    persistent_job_lifecycle_acceptance(
+        r#"
+const fs=require('node:fs'), cp=require('node:child_process');
+const child=cp.spawn(process.execPath,['-e',"setTimeout(()=>require('fs').writeFileSync('late.txt','escaped'),15000)"],{detached:true,stdio:'ignore'}); child.unref();
+fs.writeFileSync('ready.json',JSON.stringify({pid:child.pid}));
+console.log('PROCESS_READY CHILD='+child.pid);
+process.stdout.write('token=synthetic-');
+setTimeout(()=>process.stdout.write('canary-value\n'),50);
+setInterval(()=>console.log('process heartbeat'),200);
+"#,
+        "PROCESS_READY",
+        4,
+    );
+}
+
+fn persistent_job_lifecycle_acceptance(script: &str, ready_marker: &str, operation_id: u64) {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("persistent.js"), script).unwrap();
     let cancel = Arc::new(AtomicBool::new(false));
     let stopped = cancel.clone();
     let log =
@@ -46,11 +75,11 @@ setInterval(()=>console.log('server heartbeat'),200);
         run_with_output(
             &resources(),
             &path,
-            "node server.js",
+            "node persistent.js",
             false,
             60,
             Limits::ANALYSIS,
-            binding(1),
+            binding(operation_id),
             ExecutionMode::Persistent,
             log,
             || !stopped.load(Ordering::Acquire),
@@ -66,14 +95,14 @@ setInterval(()=>console.log('server heartbeat'),200);
         for frame in page.frames {
             seen.push_str(&frame.text);
         }
-        if seen.contains("SERVER_LISTENING") && seen.contains("[REDACTED]") {
+        if seen.contains(ready_marker) && seen.contains("[REDACTED]") {
             break;
         }
         if worker.is_finished() || Instant::now() >= deadline {
             cancel.store(true, Ordering::Release);
             panic!(
-                "Server failed to produce live output: {seen}; result: {:?}",
-                worker.join().unwrap().err()
+                "Persistent job failed to produce live output: {seen}; result: {:?}",
+                worker.join().unwrap().map(|run| run.receipt().clone())
             );
         }
         std::thread::sleep(Duration::from_millis(25));
@@ -195,7 +224,10 @@ fn native_live_build_and_test_acceptance() {
     assert_eq!(
         completed.receipt().exit_code,
         Some(0),
-        "{}",
+        "Restricted build/test failed: interrupted={}, reason={:?}, elapsed={}ms\n{}",
+        completed.receipt().interrupted,
+        completed.receipt().reason,
+        completed.receipt().elapsed_ms,
         completed.receipt().output
     );
     assert!(!completed.receipt().interrupted);
