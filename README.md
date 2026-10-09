@@ -39,6 +39,23 @@ a deployed or production-validated service.
   Node/npm and isolated Python/pip are bundled; publication additionally requires GitHub CLI login. Available through
   Codex, Claude SDK and direct API routes that bridge Mivlet tools. See the
   [coding workflow and its limits](docs/architecture/coding-workflow.md).
+  File checkpoints save named code states in the private copy, preview real file
+  changes, and restore an explicitly approved tree with a recoverable before-restore
+  checkpoint. Original checkouts, Git HEAD and conversation history stay intact;
+  restored files need fresh verification. See [checkpoint limits and recovery](docs/architecture/coding-workflow.md#file-checkpoints).
+- Bounded live command logs and native persistent jobs for repository snapshots
+  or selected workspace files. Library's Commands section shows status and Stop.
+  Persistent jobs require an explicit lifetime, retain isolation and repository
+  locks, and discard every file change. Desktop-owned jobs end with the app;
+  the opt-in [background owner](docs/architecture/work-execution.md#opt-in-native-background-text-execution-on-windows)
+  retains approved commands after the window closes. Restart never replays jobs.
+  See the [native lifecycle](docs/architecture/native-execution.md#live-output-and-controlled-jobs).
+- GitHub PR review for attached repositories: paginated changes, checks and
+  comments, revision-aware viewed files, local review drafts, explicitly approved
+  managed-branch updates and review actions, and bounded optional PR watches
+  that wake existing Work while the desktop is open. Uncertain writes require
+  read-only reconciliation; credentials stay native. See the
+  [PR workflow](docs/architecture/coding-workflow.md#pull-request-review-and-updates).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens
@@ -74,6 +91,12 @@ a deployed or production-validated service.
 - Encrypted SQLite persistence for conversations, attached files, memory,
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
+- Protected secret requests on supported Mivlet tool bridges: the human supplies
+  or declines a webhook signing secret in native Windows entry. Agents receive
+  an expiring, scoped, one-use reference; the value stays in account-keyed native
+  credential custody. A native webhook verifier consumes it, with local signature
+  checks, status and approved revocation. This does not deploy webhook ingress or
+  dispatch events. See [protected requests](docs/architecture/local-teammate-computer.md#protected-secret-requests).
 - Conversation controls use assistant-ui over Mivlet's canonical history. Earlier
   messages can be edited into durable branches, answers regenerated, and saved
   alternatives reopened without replaying completed actions. OpenUI renders a

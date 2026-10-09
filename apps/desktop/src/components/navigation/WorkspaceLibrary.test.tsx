@@ -75,6 +75,7 @@ describe("workspace Library", () => {
       }),
     );
     expect(screen.getByText("1 file")).toBeVisible();
+    expect(await screen.findByText("Commands")).toBeVisible();
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "missing" },
     });

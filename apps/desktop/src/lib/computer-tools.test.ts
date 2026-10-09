@@ -57,7 +57,10 @@ describe("conversation computer tools", () => {
   });
   it("fails closed for unknown settings and removes stale connected computer tools", () => {
     const previous = conversationComputerTools([], true, true, enabled);
-    expect(conversationComputerTools(previous, true, true).map(tool => tool.name)).toEqual(["web-fetch"]);
+    expect(conversationComputerTools(previous, true, true).map(tool => tool.name)).toEqual([
+      "request-secret", "secret-request-status", "webhook-signing-install",
+      "webhook-signing-status", "webhook-signing-verify", "webhook-signing-remove", "web-fetch",
+    ]);
   });
   it("replaces stale browser specifications and removes retired action and shell tools", () => {
     const previous = ["run-shell", "local-browser-action", "local-browser-observe"].map(name => ({ name, description: "old", parameters: "{}" }));

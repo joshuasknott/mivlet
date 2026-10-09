@@ -19,6 +19,24 @@ import {
 import vocabulary from "./permission-policy.json" with { type: "json" };
 
 describe("permission profile policy", () => {
+  it("permits scoped continuation reads without granting continuation actions or waiving risk approvals", () => {
+    const effect = effectForTool("continuation-read");
+    expect(effect).toBe("coordination");
+    if (!effect) throw new Error("Continuation read must have an explicit effect.");
+    for (const mode of ["read-only", "trusted-scope", "full-access"] as const) {
+      expect(evaluatePermissionPolicy({ mode, effect, riskLevel: "low" })).toMatchObject({
+        allowed: true, approvalRequired: false,
+      });
+      expect(evaluatePermissionPolicy({ mode, effect, riskLevel: "high" })).toMatchObject({
+        allowed: true, approvalRequired: true,
+      });
+    }
+    for (const action of ["start-provider-continuation", "continue-work", "provider_continuation_preview", "provider_continuation_read"]) {
+      expect(effectForTool(action), action).toBeNull();
+    }
+    expect(evaluatePermissionPolicy({ mode: "read-only", effect: "shell-execution" }).allowed).toBe(false);
+  });
+
   it("preserves public modes while exposing user-facing profiles", () => {
     expect(permissionProfileForMode("read-only")).toBe("read-only");
     expect(permissionProfileForMode("trusted-scope")).toBe("trusted");
@@ -91,6 +109,29 @@ describe("permission profile policy", () => {
     expect(effectForTool("teammate-message")).toBe("coordination");
     expect(effectForTool("connector-call")).toBe("connector-write");
     expect(effectForTool("connector-action")).toBe("connector-write");
+  });
+
+  it("keeps command starts approval-gated and separates observation from Stop", () => {
+    for (const tool of ["repository-start", "workspace-start"]) {
+      const effect = effectForTool(tool)!;
+      expect(effect).toBe("shell-execution");
+      for (const mode of ["read-only", "trusted-scope"] as const) {
+        expect(evaluatePermissionPolicy({ mode, effect, riskLevel: "critical" }).allowed).toBe(false);
+      }
+      expect(evaluatePermissionPolicy({ mode: "full-access", effect, riskLevel: "critical" }))
+        .toMatchObject({ allowed: true, approvalRequired: true });
+    }
+    for (const tool of ["command-jobs", "command-output"]) {
+      const effect = effectForTool(tool)!;
+      expect(effect).toBe("local-read");
+      expect(evaluatePermissionPolicy({ mode: "read-only", effect }))
+        .toMatchObject({ allowed: true, approvalRequired: false });
+    }
+    const effect = effectForTool("command-stop")!;
+    expect(effect).toBe("app-state-mutation");
+    expect(evaluatePermissionPolicy({ mode: "read-only", effect, riskLevel: "high" }).allowed).toBe(false);
+    expect(evaluatePermissionPolicy({ mode: "full-access", effect, riskLevel: "high" }))
+      .toMatchObject({ allowed: true, approvalRequired: true });
   });
 
   it("maps browser automation actions onto the shared permission effects", () => {

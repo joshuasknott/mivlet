@@ -62,13 +62,22 @@ pub(crate) fn prepare_run(
     binding: &crate::Binding,
     command_id: &str,
     network: bool,
+    persistent: bool,
 ) -> Result<(ExecutionDirectory, Lease), String> {
     let _initialization = initialization(root)?;
     let mut directory = ExecutionDirectory::create(root.join(format!("preparing-{id}")))?;
     let Lease {
         _installation,
         _run,
-    } = begin(root, directory.path(), id, binding, command_id, network)?;
+    } = begin(
+        root,
+        directory.path(),
+        id,
+        binding,
+        command_id,
+        network,
+        persistent,
+    )?;
     // Windows cannot rename this directory with the exclusive child-file lease
     // open. The installation initialization lock excludes every recoverer while
     // we close it, publish the complete intent, and reacquire final run custody.
@@ -111,6 +120,7 @@ pub(crate) fn begin(
     binding: &crate::Binding,
     command_id: &str,
     network: bool,
+    persistent: bool,
 ) -> Result<Lease, String> {
     let installation = installation(root, false)?;
     let file = OpenOptions::new()
@@ -122,7 +132,7 @@ pub(crate) fn begin(
         .map_err(|_| "Cannot acquire native execution custody.")?;
     write_once(
         &run.join("prepared.json"),
-        &serde_json::json!({"version":1,"runId":id,"profile":format!("Mivlet.Exec.{id}"),"binding":binding,"commandId":command_id,"network":network,"state":"uncertain","notice":"No command or output is replayed after interruption."}),
+        &serde_json::json!({"version":1,"runId":id,"profile":format!("Mivlet.Exec.{id}"),"binding":binding,"commandId":command_id,"network":network,"persistent":persistent,"state":"uncertain","notice":"No command or output is replayed after interruption."}),
     )?;
     Ok(Lease {
         _installation: installation,
@@ -286,6 +296,7 @@ mod tests {
             &"b".repeat(48),
             &binding,
             &"c".repeat(64),
+            false,
             false,
         )
         .unwrap();

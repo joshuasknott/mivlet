@@ -127,6 +127,13 @@ pub struct WorkAttachment {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
+    /// Native custody is persisted with the canonical Work, never in a second queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_continuation: Option<ResetContinuation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<super::provider_continuation::Continuation>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub external_client: Option<crate::mcp_server::ExternalWorkContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -208,6 +215,8 @@ pub struct Work {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScheduledWorkContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<crate::local_schedules::events::models::EventWorkOrigin>,
     pub occurrence_id: String,
     pub reasoning_effort: Option<String>,
 }
@@ -237,6 +246,21 @@ pub struct WorkSteering {
     pub id: String,
     pub text: String,
     pub created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResetContinuation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_revision: Option<String>,
+    pub opportunity_id: String,
+    pub resets_at: String,
+    pub provider_id: String,
+    pub identity: String,
+    pub generation: u32,
+    pub run_id: String,
+    pub state: String,
+    pub reason: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -379,6 +403,12 @@ pub enum AgentCommand {
     deny_unknown_fields
 )]
 pub enum Command {
+    StartProviderContinuation {
+        id: String,
+        input: super::provider_continuation::Input,
+        fingerprint: String,
+        reconcile: bool,
+    },
     SteerWork {
         id: String,
         expected_generation: u32,
@@ -490,6 +520,17 @@ pub enum Command {
         expected_generation: u32,
         reconcile: bool,
     },
+    ArmProviderReset {
+        id: String,
+        expected_generation: u32,
+        opportunity_id: String,
+        reconcile: bool,
+    },
+    CancelProviderReset {
+        id: String,
+        expected_generation: u32,
+    },
+    DispatchProviderResets,
     WorkStatus {
         id: String,
         generation: u32,

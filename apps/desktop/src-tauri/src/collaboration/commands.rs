@@ -105,6 +105,25 @@ pub(super) fn hydrate_fact_source(
 
 pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
     match command {
+        Command::ArmProviderReset {
+            id,
+            expected_generation,
+            opportunity_id,
+            reconcile,
+        } => {
+            super::provider_resets::arm(ctx, &id, expected_generation, &opportunity_id, reconcile)?
+        }
+        Command::CancelProviderReset {
+            id,
+            expected_generation,
+        } => super::provider_resets::cancel(ctx, &id, expected_generation)?,
+        Command::DispatchProviderResets => super::provider_resets::dispatch(ctx)?,
+        Command::StartProviderContinuation {
+            id,
+            input,
+            fingerprint,
+            reconcile,
+        } => provider_continuation::start(ctx, &id, &input, &fingerprint, reconcile)?,
         Command::SteerWork {
             id: key,
             expected_generation,
@@ -130,6 +149,10 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 ));
             }
             let uncertain = !item.run_ids.is_empty();
+            super::provider_resets::require_review(
+                &mut item,
+                "Work was steered. Review saved outcomes before choosing a new continuation.",
+            );
             item.generation += 1;
             item.current_run_id = None;
             item.steering.push(WorkSteering {
@@ -460,24 +483,8 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             {
                 return Err(invalid("Inspect the latest saved results and reconcile external effects before continuing."));
             }
-            let room = ctx.room(&item.conversation_id)?;
+            let room = continuation_context(ctx, &item)?;
             let agent = profile(ctx.profiles, &item.agent_id)?;
-            if !item.workspace_recipient
-                && !room
-                    .participants
-                    .iter()
-                    .any(|p| p.agent_id == item.agent_id)
-            {
-                return Err(invalid("This teammate is no longer a participant. Create a new assignment for a current participant."));
-            }
-            let root = ctx.item(&item.root_id)?;
-            if root.id != item.id
-                && matches!(root.status, WorkStatus::Cancelled | WorkStatus::Completed)
-            {
-                return Err(invalid(
-                    "Start a new request; this assignment's parent has ended.",
-                ));
-            }
             if item.captured_context.is_none() {
                 item.captured_context = Some(super::context::capture(ctx, &room, agent)?);
             }
@@ -498,6 +505,13 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             // An explicit, reconciled continuation is ordinary user Work. The
             // completed occurrence must never grant a fresh automation claim.
             item.schedule = None;
+            // Reconciliation is a new user-authorized foreground attempt; a
+            // crashed native attempt is never resurrected automatically.
+            item.execution_owner = None;
+            super::provider_resets::require_review(
+                &mut item,
+                "An ordinary continuation replaced the reset request.",
+            );
             item.conversation_generation = room.generation;
             item.context_revision = room
                 .project_id
@@ -643,6 +657,27 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
         }
     }
     Ok(())
+}
+
+/// Shared admission prerequisite for ordinary and reset continuations.
+pub(super) fn continuation_context(ctx: &Context<'_>, item: &Work) -> Result<Conversation> {
+    let room = ctx.room(&item.conversation_id)?;
+    profile(ctx.profiles, &item.agent_id)?;
+    if !item.workspace_recipient
+        && !room
+            .participants
+            .iter()
+            .any(|p| p.agent_id == item.agent_id)
+    {
+        return Err(invalid("This agent is no longer a participant. Create a new assignment for a current participant."));
+    }
+    let root = ctx.item(&item.root_id)?;
+    if root.id != item.id && matches!(root.status, WorkStatus::Cancelled | WorkStatus::Completed) {
+        return Err(invalid(
+            "Start a new request; this assignment's parent has ended.",
+        ));
+    }
+    Ok(room)
 }
 
 fn invalidate_room(ctx: &Context<'_>, room: &str, reason: &str) -> Result<()> {

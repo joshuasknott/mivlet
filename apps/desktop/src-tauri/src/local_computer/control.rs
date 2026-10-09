@@ -70,6 +70,7 @@ struct Inner {
     retiring: Option<Arc<AtomicBool>>,
 }
 struct BrowserLaunch {
+    protected_input: bool,
     key: Scope,
     request: String,
     identity: Arc<()>,
@@ -222,10 +223,11 @@ impl NativeControl {
                 .as_ref()
                 .is_some_and(|done| !done.load(Ordering::Acquire))
         {
-            return Err("Computer control is busy. Open the owned browser before selecting an app; stopped control requires a fresh request.".into());
+            return Err("Computer control is busy. Finish or stop the current action before starting another request.".into());
         }
         let identity = Arc::new(());
         inner.launching = Some(BrowserLaunch {
+            protected_input: false,
             key: Scope {
                 workspace: workspace.into(),
                 agent: agent.into(),
@@ -284,7 +286,13 @@ impl NativeControl {
                     .launching
                     .as_ref()
                     .filter(|launch| launch.key.workspace == workspace && launch.key.agent == agent)
-                    .map(|_| "Mivlet browser".into())
+                    .map(|launch| {
+                        if launch.protected_input {
+                            "Protected secret entry".into()
+                        } else {
+                            "Mivlet browser".into()
+                        }
+                    })
             }),
             title: choice.map(|c| c.title.clone()),
             message: inner.message.clone(),
@@ -323,6 +331,13 @@ impl NativeControl {
     }
 
     pub(super) fn activity_label(&self) -> &'static str {
+        if self
+            .inner
+            .lock()
+            .is_ok_and(|i| i.launching.as_ref().is_some_and(|l| l.protected_input))
+        {
+            return "Waiting for protected secret entry";
+        }
         match self
             .inner
             .lock()
@@ -332,6 +347,29 @@ impl NativeControl {
             Some(DeliveryMode::Background) => "Agent is using an app in the background",
             _ => "Agent is using the foreground window",
         }
+    }
+
+    pub(super) fn reserve_protected_input(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        request: &str,
+        authority: Arc<ComputerAuthority>,
+    ) -> Result<BrowserLaunchGuard<'_>, String> {
+        // The same exclusive reservation blocks existing/pending application
+        // control, new selections and browser launches; native Stop revokes it.
+        let guard =
+            self.reserve_browser_launch(workspace, agent, generation, request, authority)?;
+        let mut inner = self.inner.lock().map_err(|_| STALE)?;
+        let launch = inner
+            .launching
+            .as_mut()
+            .filter(|l| Arc::ptr_eq(&l.identity, &guard.identity))
+            .ok_or(STALE)?;
+        launch.protected_input = true;
+        drop(inner);
+        Ok(guard)
     }
 
     /// Native input hooks report only a target HWND, never key values or text.

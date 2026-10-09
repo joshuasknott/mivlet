@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { isLiveSource } from "@mivlet/knowledge";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -14,12 +14,18 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-computer";
 import { listRuntimeOutputs } from "../../runtime/domains/outputs";
 import type { RightPanelTab } from "./right-panel-state";
-import { RepositoryFiles } from "./RepositoryFiles";
 import { NativeExecutionSetup } from "./NativeExecutionSetup";
+import { NativeCommandJobs } from "./NativeCommandJobs";
 import { MessageAttachments } from "../conversation/MessageAttachments";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import { subscribeOutputPinned } from "../../lib/output-revision-events";
 import type { ReactNode } from "react";
+
+const RepositoryFiles = lazy(() =>
+  import("./RepositoryFiles").then((module) => ({
+    default: module.RepositoryFiles,
+  })),
+);
 
 export function WorkspaceLibrary({
   workspaceId,
@@ -176,7 +182,10 @@ export function WorkspaceLibrary({
         )}
       </header>
       <NativeExecutionSetup />
-      <RepositoryFiles workspaceId={workspaceId} agents={agents} />
+      <NativeCommandJobs workspaceId={workspaceId} agents={agents} />
+      <Suspense fallback={<p role="status">Loading repository…</p>}>
+        <RepositoryFiles workspaceId={workspaceId} agents={agents} />
+      </Suspense>
       <label className="workspace-library__search">
         <MagnifyingGlass size={17} aria-hidden="true" />
         <input

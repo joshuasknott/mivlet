@@ -1,4 +1,5 @@
 import type {
+  AgentTurnRequest,
   ApprovalRequest,
   BackendAgentEvent,
   BackendModel,
@@ -124,6 +125,10 @@ export interface UseNativeAgentOptions {
 }
 
 export interface NativeAgentRunControl {
+  /** Native-reviewed historical evidence; never persisted again as current input. */
+  historyPrefix?: AgentTurnRequest["messages"];
+  /** Conservative target-window ceiling for portable sessions with unknown metadata. */
+  contextWindowLimit?: number;
   /** Confirmed assistant text only, after its durable checkpoint; never reasoning. */
   onTextDelta?: (text: string) => void;
   maxTurns?: number;

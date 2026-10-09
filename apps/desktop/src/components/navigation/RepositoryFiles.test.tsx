@@ -15,6 +15,7 @@ import {
   cancelRuntimeLocalComputer,
   loadRuntimeLocalComputer,
 } from "../../runtime/domains/local-computer";
+import { inspectRepositoryCopies } from "../../runtime/domains/repository-copies";
 
 vi.mock("../../runtime/domains/coding", () => ({
   attachCodingRepository: vi.fn(),
@@ -23,6 +24,12 @@ vi.mock("../../runtime/domains/coding", () => ({
 vi.mock("../../runtime/domains/local-computer", () => ({
   cancelRuntimeLocalComputer: vi.fn(),
   loadRuntimeLocalComputer: vi.fn(),
+}));
+vi.mock("../../runtime/domains/repository-copies", () => ({
+  inspectRepositoryCopies: vi.fn(),
+  previewRepositoryCopyCleanup: vi.fn(),
+  deleteRepositoryCopy: vi.fn(),
+  selectRepositoryCopy: vi.fn(),
 }));
 const agents = [
   { id: "mira", name: "Mira" },
@@ -55,7 +62,7 @@ const repository: CodingRepositoryStatus = {
     truncated: false,
   },
 };
-function setup() {
+function setup(open = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -64,7 +71,8 @@ function setup() {
       <RepositoryFiles workspaceId="workspace" agents={agents} />
     </QueryClientProvider>,
   );
-  fireEvent.click(screen.getByText("Repository", { selector: "summary" }));
+  if (open)
+    fireEvent.click(screen.getByText("Repository", { selector: "summary" }));
 }
 beforeEach(() => {
   vi.resetAllMocks();
@@ -73,8 +81,31 @@ beforeEach(() => {
     plugins: { computer: true },
   } as LocalComputerSnapshot);
   vi.mocked(inspectCodingRepository).mockResolvedValue(repository);
+  vi.mocked(inspectRepositoryCopies).mockResolvedValue({
+    copies: [],
+    busy: false,
+  });
 });
 describe("repository in Files", () => {
+  it("opens retained copies on demand and preserves the selected native scope", async () => {
+    setup(false);
+    expect(screen.queryByText("Retained copies")).not.toBeInTheDocument();
+    expect(loadRuntimeLocalComputer).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("combobox", { name: "Agent" }), {
+      target: { value: "ben" },
+    });
+    fireEvent.click(screen.getByText("Repository", { selector: "summary" }));
+    const summary = await screen.findByText("Retained copies");
+    expect(inspectRepositoryCopies).not.toHaveBeenCalled();
+    fireEvent.click(summary);
+    await waitFor(() =>
+      expect(inspectRepositoryCopies).toHaveBeenCalledWith({
+        workspaceId: "workspace",
+        agentId: "ben",
+        expectedGeneration: 7,
+      }),
+    );
+  });
   it("attaches to the selected saved agent and current native generation", async () => {
     setup();
     fireEvent.change(screen.getByRole("combobox", { name: "Agent" }), {

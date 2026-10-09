@@ -8,6 +8,8 @@ import { MemoryRecords } from "../settings/MemoryRecords";
 import { McpServerSettings } from "../settings/McpServerSettings";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { ProviderModelSettings } from "../settings/ProviderModelSettings";
+import { BackgroundExecutionSettings } from "../settings/BackgroundExecutionSettings";
+import { ProviderUsageDetails } from "../usage/ProviderUsageDetails";
 import {
   AppearanceSettingsView,
   ApprovalsSettingsView,
@@ -18,6 +20,12 @@ import type { SettingsTab } from "./settings-tabs";
 
 export type { SettingsTab } from "./settings-tabs";
 export { tabs } from "./settings-tabs";
+export { LocalSchedules } from "../settings/LocalSchedules";
+// Account and usage share this deferred entry, avoiding separately compressed
+// settings chunks while retaining the existing SettingsPage download ceiling.
+export { ProviderUsageDetails };
+export { SubscriptionUsage } from "../usage/SubscriptionUsage";
+export { AccountDialog } from "../agents/AccountDialog";
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
   status: "unavailable",
@@ -73,7 +81,7 @@ export function SettingsPage({
         ) : activeTab === "models" ? (
           <ProviderModelSettings models={runtime.allModelOptions ?? []} hiddenModelIds={runtime.hiddenModelIds ?? []} onChange={runtime.setModelVisible} />
 
-        ) : (
+        ) : activeTab === "usage" ? <ProviderUsageDetails /> : (
           <MemorySettingsPage
             runtime={runtime}
             onStatus={reportStatus}
@@ -81,7 +89,7 @@ export function SettingsPage({
         )}
 
         {status?.tab === activeTab && status.message ? (
-          <p className="settings-status" role="status">
+          <p className="settings-status" role="status" aria-label="Settings update">
             {status.message}
           </p>
         ) : null}
@@ -128,6 +136,7 @@ function GeneralSettings({
       </section>
       <section className="settings-group" aria-labelledby="external-assistants-heading"><h2 id="external-assistants-heading">External assistants</h2><details className="settings-disclosure" onToggle={(event) => setExternalOpen(event.currentTarget.open)}><summary>Manage MCP server and client access</summary>{externalOpen && <McpServerSettings workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId} agents={runtime.agents} />}</details></section>
       <section className="settings-group" aria-labelledby="general-voice-heading"><h2 id="general-voice-heading">Voice input</h2><div className="settings-group__surface"><DictationPrivacySettings runtime={runtime} capability={dictationCapability} onStatus={onStatus} /></div></section>
+      <BackgroundExecutionSettings />
     </div>
   );
 }

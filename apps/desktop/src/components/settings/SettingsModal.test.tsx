@@ -5,11 +5,13 @@ import { describe, expect, it } from "vitest";
 import { SettingsModal } from "./SettingsModal";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import type { SettingsTab } from "../pages/settings-tabs";
+import { tabs } from "../pages/settings-tabs";
 
 const TAB_TITLES: Record<SettingsTab, string> = {
   general: "General",
   providers: "Providers",
   models: "Models",
+  usage: "Usage",
   privacy: "Memory",
 };
 
@@ -191,7 +193,7 @@ describe("SettingsModal", () => {
     );
 
     const close = screen.getByRole("button", { name: "Close settings" });
-    for (let index = 0; index < 4; index += 1) await user.tab();
+    for (let index = 0; index < tabs.length; index += 1) await user.tab();
     expect(close).toHaveFocus();
     await user.keyboard("{Enter}");
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
