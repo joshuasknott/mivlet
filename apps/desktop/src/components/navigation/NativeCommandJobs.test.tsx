@@ -111,6 +111,43 @@ describe("NativeCommandJobs", () => {
       }),
     );
   });
+  it("reconnects output explicitly without restarting or stopping the command", async () => {
+    vi.mocked(readNativeCommandOutput).mockRejectedValueOnce(
+      new Error("Output disconnected."),
+    );
+    mount();
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Output disconnected.",
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Retry output" }));
+    await screen.findByText("build passed");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(readNativeCommandOutput).toHaveBeenLastCalledWith(
+      {
+        workspaceId: "workspace-one",
+        agentId: "agent-one",
+        expectedGeneration: 4,
+        jobId: job.id,
+        jobGeneration: 4,
+      },
+      0,
+    );
+    expect(stopNativeCommandJob).not.toHaveBeenCalled();
+  });
+  it("rechecks generation before retrying output and refuses a superseded job", async () => {
+    vi.mocked(readNativeCommandOutput).mockRejectedValueOnce(
+      new Error("Output disconnected."),
+    );
+    mount();
+    await screen.findByRole("button", { name: "Retry output" });
+    vi.mocked(loadRuntimeLocalComputer).mockResolvedValue({
+      generation: 5,
+    } as Awaited<ReturnType<typeof loadRuntimeLocalComputer>>);
+    fireEvent.click(screen.getByRole("button", { name: "Retry output" }));
+    await screen.findByText(/This generation has ended/);
+    expect(readNativeCommandOutput).toHaveBeenCalledTimes(1);
+    expect(stopNativeCommandJob).not.toHaveBeenCalled();
+  });
   it("never reads output from a revoked generation", async () => {
     vi.mocked(loadRuntimeLocalComputer).mockResolvedValue({
       generation: 5,

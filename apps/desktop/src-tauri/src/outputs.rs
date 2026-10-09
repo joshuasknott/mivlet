@@ -1265,6 +1265,10 @@ mod tests {
                 )
                 .is_err());
                 let delegated = Work {
+                    external_client: None,
+                    execution_owner: None,
+                    reset_continuation: None,
+                    continuation: None,
                     schedule: None,
                     captured_context: None,
                     steering: vec![],

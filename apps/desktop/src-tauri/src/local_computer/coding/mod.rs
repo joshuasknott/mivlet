@@ -1,8 +1,10 @@
 //! Managed Git checkouts and isolated build execution. Never a desktop shell.
 pub(crate) mod checkpoints;
+pub(crate) mod copy_manager;
 mod git;
 mod jobs;
 pub(super) mod process;
+pub(crate) mod pull_requests;
 #[cfg(test)]
 mod tests;
 use super::{authority::OperationTicket, LocalComputerState};
@@ -13,7 +15,7 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 use tauri::State;
 
@@ -36,14 +38,40 @@ pub struct Repository {
     pub publication: Option<String>,
 }
 
-fn lock(directory: &Path) -> Result<Arc<Mutex<()>>, String> {
-    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+struct RepositoryLock {
+    directory: PathBuf,
+    local: Mutex<()>,
+}
+struct RepositoryGuard<'a> {
+    _local: MutexGuard<'a, ()>,
+    _process: fs::File,
+}
+impl RepositoryLock {
+    fn try_lock(&self) -> Result<RepositoryGuard<'_>, String> {
+        let local = self.local.try_lock().map_err(|_| "Repository is busy.")?;
+        let process = super::leases::acquire(
+            &self.directory.join("repository-operation.lock"),
+            std::time::Duration::ZERO,
+        )?;
+        Ok(RepositoryGuard {
+            _local: local,
+            _process: process,
+        })
+    }
+}
+fn lock(directory: &Path) -> Result<Arc<RepositoryLock>, String> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<RepositoryLock>>>> = OnceLock::new();
     Ok(LOCKS
         .get_or_init(Mutex::default)
         .lock()
         .map_err(|_| "Repository is unavailable.")?
         .entry(directory.to_owned())
-        .or_default()
+        .or_insert_with(|| {
+            Arc::new(RepositoryLock {
+                directory: directory.to_owned(),
+                local: Mutex::new(()),
+            })
+        })
         .clone())
 }
 fn directory(state: &LocalComputerState, workspace: &str, agent: &str) -> Result<PathBuf, String> {
@@ -53,6 +81,7 @@ fn directory(state: &LocalComputerState, workspace: &str, agent: &str) -> Result
         .map_err(|_| "Repository storage failed validation.".into())
 }
 fn save(directory: &Path, repo: &Repository) -> Result<(), String> {
+    copy_manager::save_copy(directory, repo)?;
     let bytes = serde_json::to_vec(repo).map_err(|_| "Repository state could not be saved.")?;
     if bytes.len() > STATE_LIMIT {
         return Err("Repository state exceeds its storage limit.".into());
@@ -150,7 +179,7 @@ fn status(directory: &Path, ticket: &OperationTicket) -> Result<Value, String> {
         git::changes(directory, &repo, ticket)?
     };
     Ok(
-        json!({"repository": repo, "busy": busy, "recoveryRequired": !busy && repo.operation != "idle", "changes": changes, "importRecovery": recovery}),
+        json!({"repository": repo, "busy": busy, "recoveryRequired": !busy && (repo.operation != "idle" || pull_requests::has_pending(directory, &repo)?), "changes": changes, "importRecovery": recovery}),
     )
 }
 
@@ -206,6 +235,7 @@ pub async fn coding_repository_attach(
         })?;
         let _lease = mivlet_windows_executor::repository_files::lease(&directory)?;
         if load(&directory)?.is_some_and(|repo| repo.operation.starts_with("publication")
+            || pull_requests::has_pending(&directory, &repo).unwrap_or(true)
             || directory.join(&repo.id).join("native-import.json").exists()) {
             return Err(
                 "Recover the current publication or command import before attaching another repository.".into(),
@@ -213,6 +243,7 @@ pub async fn coding_repository_attach(
         }
         let repository = git::attach(&directory, selected.path(), &ticket)?;
         ticket.commit(|| {
+            copy_manager::register(&directory, &repository, &workspace_id, &agent_id, selected.path())?;
             save(&directory, &repository)?;
             Ok(Some(repository))
         })
@@ -254,6 +285,13 @@ pub(crate) fn execute(
     arguments: Value,
     request_id: &str,
 ) -> Result<String, String> {
+    if tool == "repository-pr-watch" {
+        let request = serde_json::from_value(arguments).map_err(|_| "Invalid PR watch request.")?;
+        return Ok(
+            pull_requests::watch::configure(state, workspace, agent, generation, request)?
+                .to_string(),
+        );
+    }
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let directory = directory(state, workspace, agent)?;
     if tool == "repository-start" {
@@ -310,6 +348,9 @@ fn execute_observed(
     request_id: &str,
 ) -> Result<String, String> {
     ticket.check()?;
+    if tool.starts_with("repository-pr-") {
+        return pull_requests::execute(directory, ticket, tool, arguments);
+    }
     let input: Input =
         serde_json::from_value(arguments).map_err(|_| "Invalid repository tool arguments.")?;
     if tool == "repository-status" {
@@ -344,6 +385,9 @@ fn execute_observed(
         if tool != "repository-read" {
             return Err("Command import outcome is uncertain. Inspect status and use repository-recover before changing or publishing this checkout.".into());
         }
+    }
+    if pull_requests::has_pending(directory, &repo)? && tool != "repository-read" {
+        return Err("A PR action has an uncertain outcome. Use repository-pr-action recover; no mutation was replayed.".into());
     }
     if repo.operation.starts_with("publication")
         && !matches!(tool, "repository-read" | "repository-recover")

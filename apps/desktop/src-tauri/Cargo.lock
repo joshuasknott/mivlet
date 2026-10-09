@@ -2639,6 +2639,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rfd",
+ "ring",
  "rusqlite",
  "rustls",
  "ryu-js",
@@ -2655,6 +2656,7 @@ dependencies = [
  "webview2-com",
  "windows",
  "windows-sys 0.61.2",
+ "zeroize",
  "zip",
 ]
 

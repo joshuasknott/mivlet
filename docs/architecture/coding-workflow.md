@@ -11,8 +11,75 @@ actions through Mivlet's existing approval system.
 The native service copies the selected repository's committed HEAD into private
 workspace/agent storage on a new `mivlet/<id>` branch. Uncommitted source work is
 not included. The source repository, its index and its branches are untouched.
-Each agent has one selected repository; older copies remain on disk. This first
-version has no copy-management browser or automatic garbage collection.
+Each agent has one selected repository; older copies remain on disk. Library →
+Repository → Retained copies inventories copies across this account, including
+ownership, source repository, account-relative managed path, branch/HEAD, current
+dirty state, logical file bytes and linked Work. Choose the owning agent in the
+Repository selector to manage its copies. Copies left by removed agents are
+visible but protected. Use this copy restores a retained
+selection through the same native repository service; no source files are moved.
+Inventory does not claim filesystem allocation, compression or deduplication.
+
+Cleanup is deliberate; there is no automatic garbage collection. Review cleanup
+creates a native single-use preview valid for two minutes, bound to the account,
+workspace, agent, computer generation, copy identity and a hash of the exact tree.
+The user must explicitly confirm removal. Native code consumes the token and
+rechecks under the existing repository lock and canonical Work store connection.
+Dirty, untracked **and ignored** files protect the copy regardless of Git's
+`status.showUntrackedFiles` configuration. Unfinished Work, active repository
+operations, active or recoverable provider attempts without exact copy attribution,
+unknown ownership/metadata, interrupted command imports, publication
+recovery, published copies and commits beyond the imported HEAD also protect it.
+Git calls use process-local `core.longpaths=true`; no global Git settings change.
+The Git adapter converts canonical Windows verbatim paths to Git-compatible
+drive/UNC arguments without losing UTF-16 identity; native path validation
+continues to use canonical paths.
+Links, Windows reparse points and paths outside the managed scope fail closed.
+
+Per-copy `repository.json` and `ownership.json` records retain the native state;
+the existing top-level record remains the canonical selected repository. The
+source's canonical path stays native. A currently selected legacy copy can be
+registered from its verified scope; older unregistered copies are shown and
+protected instead of guessing ownership. Cleanup records an intent outside the
+copy, renames it to `deleting-<id>`, and removes only that managed tree. Crashes,
+Stop or file locks leave a discoverable cleanup receipt; a fresh explicit preview
+is required to retry. Cleanup never resumes automatically after restart.
+
+This baseline has no retained-copy checkpoint status service or detached-command
+supervisor. The inventory labels those limits; unknown per-copy metadata protects
+cleanup. Work records do not carry exact repository-copy IDs, so unfinished Work
+protects all of that agent's copies. Integrating checkpoint, PR or detached-job
+services must replace these conservative guards with their canonical status
+evidence under this same lock; do not remove guards based on missing evidence.
+Exact cleanup inspection is limited to 200,000 entries and 2 GiB of file bytes;
+larger copies remain protected. Inventory measures metadata without hashing file
+contents. No SQL migration, alternative Work queue or model-facing deletion tool
+is introduced.
+
+Read-only inventory and preview release the store connection before filesystem
+inspection, so browsing retained copies does not stall conversation persistence.
+Deletion retains the canonical connection through its final checks and cleanup.
+After entering cleanup, the renamed tree is hashed again before any content is
+removed. Conflicting retained and cleanup paths protect both copies.
+
+The behavior was informed by T3 Code at
+`a4c9494b0e3606775cc5fc929fc138399288bd43` (storage cleanup, Work settlement and
+worktree settings), plus [Windows long paths #14917](https://github.com/pingdotgg/t3code/pull/14917),
+[terminal Work states #15150](https://github.com/pingdotgg/t3code/pull/15150),
+[squash-merge evidence #14847](https://github.com/pingdotgg/t3code/pull/14847), and
+[hidden untracked files #15834](https://github.com/pingdotgg/t3code/pull/15834).
+The implementation uses Mivlet's native authority and independent Rust/React
+code; no T3 runtime, source, assets or product copy is transplanted.
+
+Retained-copy native acceptance uses disposable Git repositories and the pinned
+Windows executor. Run `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+native_copy_lifecycle_acceptance -- --ignored --nocapture --test-threads=1` after
+preparing the bundled runtime and native execution setup. It verifies imported
+command changes, dirty-copy protection, deliberate single-use cleanup, replay
+rejection and preservation of the source. This does not establish native UI,
+provider or installed-account acceptance. An isolated app data/WebView profile
+still shares the Windows Clerk session credential; authenticated app acceptance
+requires an isolated Windows test account, not merely a new portable profile.
 
 Commands require Windows x64 and native execution setup in Library. Git is
 required for attachment and review. Node 22.23.3/npm and Python 3.13.16/pip
@@ -194,12 +261,112 @@ or restart keeps it. `repository-recover` queries GitHub and reconciles a unique
 PR with the exact head/base; it never publishes. Until recovery, mutation,
 replacement attachment and publication are blocked. If no PR exists, the branch
 may already be pushed; a new publication needs a fresh explicit approval. An
-existing PR is shown as a link. Updating an already published PR from this copy
-is not supported in this first version.
+existing PR is shown as a link. Recovery reads every bounded result page and
+checks the source repository, branch, base and commit; failed or incomplete
+queries never establish absence.
+
+### Pull request review and updates
+
+Library → Repository → Pull requests lists GitHub PRs with explicit pagination.
+Select the linked PR or another PR in the attached origin to inspect its current
+head/base, changed files and text patches, checks, commit statuses, reviews,
+inline comments and discussion. File/review pages are bound to the inspected
+head and base; refresh after either changes. Search filters the current page.
+Missing or truncated text patches are labelled and cannot be marked viewed. Viewed marks
+belong to exact file revisions, so a later change becomes unread. Draft summaries
+and inline comments remain local until an agent submits an approved action.
+
+The native tools are available through the existing bridged provider routes:
+
+- `repository-pr-read`: list/detail, then files/checks/statuses/reviews/comments/
+  discussion. Follow `nextPage`; a `limitReached` response is not a complete list.
+- `repository-pr-local`: read local state, save/discard drafts or mark a file
+  revision viewed. Saved drafts remain readable without GitHub access.
+- `repository-pr-action`: update the managed linked branch, edit the PR title/
+  body, create a pending review or submit a comment, approval or request for
+  changes. It can submit/delete the native account's own pending review.
+  `recover` only reconciles an uncertain action and performs no remote write.
+- `repository-pr-watch`: explicitly start/stop the PR-specific monitor described
+  below. Stop names the exact `watchId` returned by local state.
+
+Remote actions use the ordinary single-use native approval, binding repository
+ID, canonical origin, PR number, head branch/SHA, base branch/SHA and full action
+payload. Native code checks these again immediately before mutation. Reviews
+name the reviewed commit, and inline comments must target lines on the selected
+side of its actual diff. Updating a branch additionally binds `nextHead` to the
+clean local committed tree and requires an ancestor relationship to the reviewed
+remote head. Git's exact reference lease rejects a concurrent head change; the
+native ancestry check forbids history rewrites. No merge or arbitrary Git/HTTP
+operation is exposed.
+
+Every mutation persists an intent journal before sending it. Stop, timeout or
+restart retains uncertainty and blocks subsequent repository writes and
+replacement attachment. Recovery requires exact positive evidence for edits,
+pushes and reviews; it never resubmits, and excludes reviews that predated the
+intent. Ambiguous/absent evidence leaves the operation locked for inspection.
+An explicit HTTP validation, permission or rate-limit rejection releases the
+intent without retrying; fixing it requires a fresh approved request. Transport
+failures, timeouts and server errors retain uncertainty.
+GitHub does not offer an atomic expected-head condition for PR metadata edits;
+their head/base validation is a preflight check, whereas pushes use an exact
+server-side reference lease and reviews explicitly name their commit.
+
+Native `gh` login supplies a token only through its private bounded pipe.
+GitHub API requests use the fixed `api.github.com` destination, disable redirects
+and retries, cap each response at 1 MiB, and expose no credential to the renderer,
+model or repository command. Public read pages hold at most 30 items; internal
+reconciliation/monitor collections cap at 300 and fail closed if incomplete.
+No extra SQL migration or replacement repository/conversation store is needed.
+
+### Optional PR watches
+
+A watch binds an existing root Work item and its generation to the selected
+repository and PR. It establishes a baseline without waking Work, then reports
+new check failures, all reported checks passing, new/edited reviews and comments
+from other accounts, or new merge conflicts. Own-account comments and duplicate
+facts stay quiet. “All reported checks” is not a branch-protection/merge claim.
+Remote text is untrusted evidence and grants no new authority.
+
+The monitor admits idempotent task messages into existing Work. Running turns
+finish before a new message is handled; waiting/completed Work receives a fresh
+queued turn. Approval, blockage, user decisions, existing turn/usage limits,
+account ownership and conversation generations remain enforced. The monitor
+does not invoke a provider or own execution. A persisted pending event and native
+message ID bridge the crash gap without duplicating a wake.
+Native admission emits a scoped update to the main renderer; its small bridge
+refreshes the existing workspace executor, which admits the queued turn under
+the same provider availability, permissions and capacity checks as other Work.
+
+Monitoring requires the open, authenticated desktop. It polls no faster than
+every two minutes, rotates at most two profiles per 30-second sweep, backs off
+failed reads to 30 minutes, and stops after eight failures or ten relevant wakes.
+Large workspaces poll less frequently. Closure, access/account changes, Work
+Stop and computer-generation changes stop the watch. Desktop restart requires
+explicit rearming. Stop PR watch writes a durable watch-specific cancellation
+marker independently of the repository lock; it does not cancel previously
+admitted Work or another repository operation. Generic webhooks and closed-app
+execution belong to their separate features.
 
 ## Source research
 
 These projects informed the boundaries; no source code or UI assets were copied:
+
+- [T3 Code at a4c9494](https://github.com/pingdotgg/t3code/tree/a4c9494b0e3606775cc5fc929fc138399288bd43):
+  inspected source-control documentation, `PullRequestWatchReactor`, watch
+  evaluation, GitHub PR API/provider tests, and viewed-file revision services and
+  tests. The concepts were adapted to Mivlet's existing authority and Work lane.
+  Related verified merge commits: #15057 `18b21325c3ab1ff4f0ee7b017d9c4eefc2b2d307`,
+  #16235 `3da82d5d384a5f45e3e4a9c5bdb8336eb54e49ff`, #14623
+  `14fe0158ede3d964f183e281f9fec225d30a6b32`, and #16319–#16322 respectively
+  `1564aaa5d29deb2520d1211f9f35dd6150b1512e`,
+  `adc3c9327abedda6a36694e2344e620fe0d62ae4`,
+  `649418f01fcb4ae5ebbc07739e0bfee8fae3aaec`,
+  `9ac8f33f1685d1d6e843b657829d0d7462a13813`. This source snapshot is ahead
+  of T3's stable installer; no installer-parity claim is made.
+- GitHub's current [PR API](https://docs.github.com/en/rest/pulls/pulls) and
+  [review API](https://docs.github.com/en/rest/pulls/reviews), checked on 8 October
+  2026, define commit-bound reviews, pending/submitted states and pagination.
+  Requests pin API version `2026-03-10`.
 
 - [T3 Code at aad7329](https://github.com/pingdotgg/t3code/tree/aad732901e4b7d485574eaef5a9c1fb388c4291a):
   separate terminal lifecycle, Git workflows, checkpoints, provider permissions
@@ -219,6 +386,15 @@ stale review rejection, exact commits, generation revocation and recovery locks.
 The permit test `repository_permits_bind_full_payload_scope_generation_and_consume_once`
 covers substitution and replay at the native approval boundary.
 
+PR-specific fixtures live in `coding/pull_requests/tests.rs` and
+`collaboration/pr_watch_tests.rs`. They cover stale targets, local state,
+pagination, updates against actual local Git commits, uncertainty across reload,
+read-only reconciliation, review positions, deduplication and Work Stop. The
+opt-in `native_github_pr_read_acceptance` test requires `gh auth login` and an
+explicit `MIVLET_PR_READ_ACCEPTANCE_REMOTE`; it only lists/views PRs and performs
+no remote mutation. Renderer fixtures establish UI behavior, not live approval,
+provider or publication acceptance. Remote mutation acceptance requires separate
+explicit authorization and a disposable GitHub target.
 Checkpoint coverage also includes `checkpoint_restore_permit_binds_every_hash_request_scope_and_is_single_use`
 and `local_computer::coding::checkpoints` in the desktop native suite. These use
 real disposable Git copies to cover new/modified/deleted files, file/directory

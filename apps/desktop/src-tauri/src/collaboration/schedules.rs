@@ -27,6 +27,30 @@ pub(crate) fn check_schedule(
         &occurrence.schedule_id,
     )?
     .ok_or_else(|| invalid("This automation schedule is unavailable."))?;
+    if schedule.trigger_kind == "event" {
+        let expiry = schedule.payload["trigger"]["validUntil"]
+            .as_str()
+            .ok_or_else(|| invalid("This event trigger expiry is unavailable."))?;
+        let expires = chrono::DateTime::parse_from_rfc3339(expiry)
+            .map_err(|_| invalid("This event trigger expiry is invalid."))?;
+        let current = chrono::DateTime::parse_from_rfc3339(time)
+            .map_err(|_| invalid("This event execution time is invalid."))?;
+        if schedule.revision != occurrence.schedule_revision || expires <= current {
+            return Err(invalid(
+                "This event trigger changed or expired. Review saved results before continuing.",
+            ));
+        }
+        let event_expiry = context
+            .event
+            .as_ref()
+            .and_then(|event| chrono::DateTime::parse_from_rfc3339(&event.expires_at).ok())
+            .ok_or_else(|| invalid("This event receipt expiry is unavailable."))?;
+        if event_expiry <= current {
+            return Err(invalid(
+                "This event receipt expired. Redeliver a fresh event before continuing.",
+            ));
+        }
+    }
     if occurrence.payload["workId"].as_str() != Some(root.id.as_str())
         || occurrence.lease_expires_at.as_str() <= time
         || schedule.status != "enabled"
@@ -114,6 +138,16 @@ pub(crate) fn stage_schedule(
         item.permission_mode = claim.permission_mode.clone();
     }
     item.schedule = Some(ScheduledWorkContext {
+        event: crate::store::repos::local_schedule::get_occurrence(
+            conn,
+            store,
+            &scope.private,
+            &claim.occurrence_id,
+        )?
+        .and_then(|row| row.payload.get("event").cloned())
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|_| invalid("The event provenance is invalid."))?,
         occurrence_id: claim.occurrence_id.clone(),
         reasoning_effort: claim.reasoning_effort.clone(),
     });

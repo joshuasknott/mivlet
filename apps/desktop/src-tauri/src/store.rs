@@ -89,6 +89,8 @@ pub type Result<T> = std::result::Result<T, StoreError>;
 /// The durable encrypted store. Cheap to share behind an `Arc`.
 pub struct Store {
     account_owned: bool,
+    #[cfg(test)]
+    account_check: Option<Box<dyn Fn() -> Result<()> + Send + Sync>>,
     conn: Mutex<Connection>,
     vault: Vault,
 }
@@ -108,6 +110,8 @@ impl Store {
         Self::initialize_schema(&conn)?;
         let store = Self {
             account_owned: false,
+            #[cfg(test)]
+            account_check: None,
             conn: Mutex::new(conn),
             vault,
         };
@@ -125,6 +129,7 @@ impl Store {
         Self::initialize_schema(&conn)?;
         let store = Self {
             account_owned: false,
+            account_check: None,
             conn: Mutex::new(conn),
             vault,
         };
@@ -229,6 +234,10 @@ impl Store {
             conn.execute_batch(crate::store::schema::SCHEMA_V43_TO_V44)?;
             conn.execute_batch(crate::store::schema::SCHEMA_V44_TO_V45)?;
             conn.execute_batch(crate::store::schema::RETIRED_ORCHESTRATION_STORAGE_CLEANUP)?;
+            // Base DDL includes PRAGMA foreign_keys=ON. Re-establish the
+            // maintenance fence before the event migration rebuilds a parent.
+            conn.pragma_update(None, "foreign_keys", "OFF")?;
+            migrations::local_events::apply(conn)?;
             conn.execute(
                 "INSERT OR IGNORE INTO workspace(id,name,created_at,updated_at)
                  VALUES('default','My Workspace','1970-01-01T00:00:00Z','1970-01-01T00:00:00Z');",
@@ -316,6 +325,10 @@ impl Store {
     /// pragmas, and ad-hoc reads).
     fn check_account(&self) -> Result<()> {
         if self.account_owned {
+            #[cfg(test)]
+            if let Some(check) = &self.account_check {
+                return check();
+            }
             crate::account_session::ensure_current().map_err(StoreError::Invalid)?;
         }
         Ok(())
@@ -337,11 +350,67 @@ impl Store {
     ) -> Result<R> {
         let mut conn = self.conn.lock().expect("store connection mutex poisoned");
         self.check_account()?;
-        let tx = conn.transaction().map_err(StoreError::from)?;
+        // The desktop and background owner have separate connections. Reserve
+        // the writer before reading state: upgrading a deferred WAL snapshot
+        // can fail immediately and bypass SQLite's busy timeout.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(StoreError::from)?;
         let out = f(&tx)?;
         self.check_account()?;
         tx.commit().map_err(StoreError::from)?;
         Ok(out)
+    }
+
+    /// SQL-only account update with an exact native identity fence at commit.
+    /// Scope and credential resolution must happen before this call. Holding
+    /// the identity guard around ordinary transaction() would deadlock its
+    /// account checks, which acquire that same identity mutex.
+    pub(crate) fn transaction_with_account_fence<R>(
+        &self,
+        fence: &crate::account_session::AccountDispatchFence,
+        f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<R>,
+    ) -> Result<R> {
+        fence.with_current(|| Ok(())).map_err(StoreError::Invalid)?;
+        let mut conn = self.conn.lock().expect("store connection mutex poisoned");
+        let tx = conn.transaction()?;
+        let out = f(&tx)?;
+        fence
+            .with_current(|| Ok(tx.commit().map_err(StoreError::from)))
+            .map_err(StoreError::Invalid)??;
+        Ok(out)
+    }
+
+    /// Prepare SQL under the account-owned Store lock, then fence only COMMIT.
+    /// The final callback must use cached authority checks and the supplied
+    /// transaction only: Store access or credential I/O would re-enter locks.
+    /// Any preparation, account-check or commit-fence error rolls back.
+    pub(crate) fn transaction_with_commit_fence<R, E>(
+        &self,
+        f: impl FnOnce(&rusqlite::Transaction<'_>) -> std::result::Result<R, E>,
+        commit: impl FnOnce(rusqlite::Transaction<'_>) -> std::result::Result<(), E>,
+    ) -> std::result::Result<R, E>
+    where
+        E: From<StoreError>,
+    {
+        let mut conn = self.conn.lock().expect("store connection mutex poisoned");
+        self.check_account()?;
+        let tx = conn.transaction().map_err(StoreError::from)?;
+        let out = f(&tx)?;
+        self.check_account()?;
+        commit(tx)?;
+        Ok(out)
+    }
+
+    /// Exercise account-owned storage with isolated, synthetic identity state.
+    #[cfg(test)]
+    pub(crate) fn with_test_account_check(
+        mut self,
+        check: impl Fn() -> Result<()> + Send + Sync + 'static,
+    ) -> Self {
+        self.account_owned = true;
+        self.account_check = Some(Box::new(check));
+        self
     }
 
     /// Shared connection-first transaction primitive for account-bound writes.
@@ -405,12 +474,13 @@ impl Store {
             .conn
             .lock()
             .map_err(|_| StoreError::Invalid("Account store unavailable.".into()))?;
-        let tx = conn.transaction()?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
         tx.execute(
             "UPDATE local_schedule SET status='paused',revision=revision+1 WHERE status='enabled'",
             [],
         )?;
         crate::collaboration::suspend_account(&tx, self, user, member)?;
+        crate::background_worker::revoke_at(&tx, self)?;
         let data = repos::scope::DataScope::legacy_default();
         let path = Path::new("execution-approvals.json");
         let (_, key) = scoped_document_location(path, &data).map_err(StoreError::Invalid)?;
@@ -456,6 +526,11 @@ pub fn initialize(app_data_dir: &Path) -> std::result::Result<(), String> {
     let db_path = app_data_dir.join(DB_FILENAME);
     let key_store = keys::NativeKeyStore::new()?;
     let pending_restore = app_data_dir.join(RESTORE_PENDING_FILENAME);
+    if pending_restore.exists()
+        && (crate::background_worker::is_worker() || crate::background_worker::owner_alive())
+    {
+        return Err("Stop the background worker before activating a pending local restore.".into());
+    }
     let key = match keys::resolve_for_database(
         &key_store,
         Store::database_exists(&db_path) || pending_restore.exists(),
@@ -1138,6 +1213,7 @@ pub fn prepare_local_data_restore(
     if confirmation != "restore local data" {
         return Err("Type \"restore local data\" to confirm the restore.".into());
     }
+    let _background_guard = crate::background_worker::maintenance_guard()?;
     let source = PathBuf::from(source);
     let canonical = crate::paths::strict_canonicalize(&source)
         .map_err(|_| "The selected backup is unavailable.".to_string())?;
@@ -1303,6 +1379,7 @@ pub fn delete_local_data(
     if confirmation != "delete local data" {
         return Err("Type \"delete local data\" to confirm local deletion.".to_string());
     }
+    let _background_guard = crate::background_worker::maintenance_guard()?;
     let store = GLOBAL_STORE
         .get()
         .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
@@ -1449,6 +1526,7 @@ mod tests {
                 id:"schedule".into(), agent_id:"agent".into(), status:"enabled".into(), trigger_kind:"once".into(), revision:1, prompt_revision:1,
                 next_run_at:Some("2026-09-14T00:00:00Z".into()), created_at:"now".into(), updated_at:"now".into(), payload:serde_json::json!({"prompt":"RETAIN_REQUEST"})
             })?;
+            repos::preferences::upsert(conn, &store, "nativeBackgroundExecution", &serde_json::json!({"version":1,"enabled":true,"generation":9}), "now")?;
             repos::preferences::upsert(conn, &store, "document:execution-approvals.json", &serde_json::json!([{"requestId":"permit","decision":"allow","consumedAt":null}]), "now")
         }).unwrap();
         store
@@ -1467,6 +1545,10 @@ mod tests {
                         .unwrap();
                 assert_eq!(permits[0]["requestId"], "permit");
                 assert!(permits[0]["invalidatedAt"].as_str().is_some());
+                let background =
+                    repos::preferences::get(conn, &store, "nativeBackgroundExecution")?.unwrap();
+                assert_eq!(background["enabled"], false);
+                assert_eq!(background["generation"], 10);
                 Ok(())
             })
             .unwrap();
@@ -2039,6 +2121,52 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 8);
+    }
+
+    #[test]
+    fn independent_connections_serialize_read_modify_write() {
+        let directory = TempDir::new().unwrap();
+        let key = vault::MasterKey::generate().unwrap();
+        let path = directory.path().join("parallel.sqlite");
+        let first = Store::open(&path, Vault::new(&key).unwrap()).unwrap();
+        let second = Store::open(&path, Vault::new(&key).unwrap()).unwrap();
+        let start = Arc::new(std::sync::Barrier::new(2));
+        let workers: Vec<_> = [first, second]
+            .into_iter()
+            .map(|store| {
+                let start = start.clone();
+                std::thread::spawn(move || {
+                    start.wait();
+                    for _ in 0..8 {
+                        store
+                            .transaction(|tx| {
+                                let count = repos::preferences::get(tx, &store, "counter")?
+                                    .and_then(|value| value.as_u64())
+                                    .unwrap_or(0);
+                                std::thread::sleep(std::time::Duration::from_millis(20));
+                                repos::preferences::upsert(
+                                    tx,
+                                    &store,
+                                    "counter",
+                                    &serde_json::json!(count + 1),
+                                    "t",
+                                )
+                            })
+                            .unwrap();
+                    }
+                })
+            })
+            .collect();
+        for worker in workers {
+            worker.join().unwrap();
+        }
+        let reopened = Store::open(&path, Vault::new(&key).unwrap()).unwrap();
+        assert_eq!(
+            reopened
+                .with_conn(|conn| repos::preferences::get(conn, &reopened, "counter"))
+                .unwrap(),
+            Some(serde_json::json!(16))
+        );
     }
 
     #[test]

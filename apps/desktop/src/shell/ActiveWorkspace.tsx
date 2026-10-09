@@ -17,10 +17,12 @@ import { OpenWebPreview } from "../components/navigation/PanelContent";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import { useLocalProjects } from "../hooks/useLocalProjects";
+import { usePullRequestWorkUpdates } from "../hooks/usePullRequestWorkUpdates";
 import {
   useLocalScheduleDispatcher,
   useLocalScheduleDispatchStatus,
 } from "../hooks/useLocalScheduleDispatcher";
+import { useEventIngress } from "../hooks/useEventIngress";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import { ExecutionApprovalRouter } from "../lib/execution-approvals";
 import {
@@ -29,13 +31,14 @@ import {
 } from "../lib/workspace-execution";
 import { hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 import {
-  listRuntimeExecutionAttempts,
   recoverRuntimeExecutionAttempts,
 } from "../runtime/domains/workspace";
 import { WorkspaceConversationChrome, buildConversationRenderer } from "./WorkspaceConversationChrome";
 import { WorkspaceContextPanel } from "./WorkspaceContextPanel";
 import { WorkspaceDialogs } from "./workspace-dialogs";
 import { ExecutionWorker } from "./workspace-lazy";
+import { useBackgroundWork } from "./useBackgroundWork";
+import { ProviderResetWorker } from "./ProviderResetWorker";
 import {
   agentSidebarPreviews,
   conversationIndicators,
@@ -79,6 +82,8 @@ export function ActiveWorkspace({
   );
   onService(service);
   useMcpWorkEvents(service);
+  useBackgroundWork(service);
+  usePullRequestWorkUpdates(workspaceId, service);
   const state = useSyncExternalStore(
     service.subscribe,
     service.getSnapshot,
@@ -106,9 +111,6 @@ export function ActiveWorkspace({
   const [accountDialog, setAccountDialog] = useState<
     "usage" | "sign-out" | null
   >(null);
-  const [usage, setUsage] = useState<
-    NonNullable<import("@mivlet/protocol").ExecutionAttempt["usage"]>[]
-  >([]);
   const nav = useWorkspaceNavigation({
     runtime,
     service,
@@ -190,19 +192,8 @@ export function ActiveWorkspace({
         latestRoomRunId(nav.activeRoom.id, state.data.work),
       );
   }, [nav.activeRoom?.id, state.data.work]);
-  useEffect(() => {
-    if (accountDialog === "usage")
-      void listRuntimeExecutionAttempts()
-        .then((attempts) =>
-          setUsage(
-            (attempts ?? []).flatMap((attempt) =>
-              attempt.usage ? [attempt.usage] : [],
-            ),
-          ),
-        )
-        .catch((error) => service.report(error));
-  }, [accountDialog]);
 
+  useEventIngress(workspaceId, runtime.runtimeSnapshotReady && !runtime.runtimeSnapshotError);
   useLocalScheduleDispatcher({
     workspaceId,
     agents: runtime.agents,
@@ -451,6 +442,7 @@ export function ActiveWorkspace({
           onProjectUpdate={updateProject}
         />
         <Suspense fallback={null}>
+          <ProviderResetWorker service={service} suspended={runtime.accountWorkspacePending} />
           {state.sessions.map((session) => (
             <ExecutionWorker
               key={session.key}
@@ -496,7 +488,6 @@ export function ActiveWorkspace({
           setSchedules={setSchedules}
           accountDialog={accountDialog}
           setAccountDialog={setAccountDialog}
-          usage={usage}
           createRoom={createRoom}
           updateProject={updateProject}
           selectAgent={selectAgent}

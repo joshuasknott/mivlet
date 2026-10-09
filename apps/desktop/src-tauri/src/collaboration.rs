@@ -1,5 +1,6 @@
 //! Account-private teammates and durable coordination. Membership and
 //! contributions never grant provider, connector, file or computer authority.
+pub(crate) mod background;
 mod capture_summary;
 mod chats;
 mod commands;
@@ -8,6 +9,10 @@ mod exchanges;
 pub(crate) mod external;
 pub(crate) mod models;
 mod output_revisions;
+pub(crate) mod pr_watches;
+pub(crate) mod provider_continuation;
+pub(crate) mod provider_continuation_read;
+mod provider_resets;
 mod schedules;
 pub(crate) mod ui;
 mod work;
@@ -475,7 +480,14 @@ pub fn collaboration_command(
                     refs,
                 )?;
             }
+            let new_work = match &request.command {
+                Command::StartWork { id, .. } => Some(id.clone()),
+                _ => None,
+            };
             commands::apply(&ctx, request.command)?;
+            if let Some(id) = new_work {
+                background::admit(&ctx, &id)?;
+            }
             ctx.snapshot()
         })
         .map_err(|e| e.to_string())
@@ -662,7 +674,10 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
         let time = now();
         let ctx = Context { conn, store, scope: &scope, profiles: &[], time: &time };
         for mut item in ctx.all_work()? {
-            if item.status.active() {
+            if provider_resets::require_restart_review(&mut item) { ctx.work(&item)?; }
+            if item.status.active()
+                && !(crate::background_worker::owns_work(&item) && crate::background_worker::owner_alive())
+            {
                 item.status = WorkStatus::AwaitingUser;
                 item.generation += 1;
                 item.updated_at = time.clone();
@@ -690,7 +705,10 @@ pub(crate) fn fence_orphaned_executing_work(
         time,
     };
     for mut item in ctx.all_work()? {
-        if item.status.executing() {
+        if item.status.executing()
+            && !(crate::background_worker::owns_work(&item)
+                && crate::background_worker::owner_alive())
+        {
             item.status = WorkStatus::AwaitingUser;
             item.generation += 1;
             item.current_run_id = None;

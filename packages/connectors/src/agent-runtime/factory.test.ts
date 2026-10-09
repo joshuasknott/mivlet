@@ -143,6 +143,13 @@ describe("resolveAgentBackend dispatch", () => {
 });
 
 describe("createCodexBackend", () => {
+  it("keeps native null usage unknown and preserves measured zero categories and SDK estimates", async () => {
+    const handle = new MockCodexAppServer({events:[{type:"usage",inputTokens:100,outputTokens:20,cachedInputTokens:null,cacheWriteTokens:null,reasoningTokens:null,costUsd:null},{type:"usage",inputTokens:100,outputTokens:20,cachedInputTokens:0,costUsd:0,costEstimated:true},{type:"done",finishReason:"stop"}]});
+    const backend = createCodexBackend(codexProvider(), codexDeps(handle))!;
+    const events = await collect(backend.run(baseRunRequest, {execute:async()=>""})!);
+    expect(events[0]).toMatchObject({type:"usage",costUnknown:true,cachedInputTokens:undefined,cacheWriteTokens:undefined,reasoningTokens:undefined});
+    expect(events[1]).toMatchObject({type:"usage",costUsd:0,costEstimated:true,costUnknown:false,cachedInputTokens:0});
+  });
   it("runs advertised connector reads with native-compatible approvals and returns their output", async () => {
     const args = '{"operation":"search","query":""}';
     const handle = new MockCodexAppServer({ events: [{ type: "approval-request", requestId: "rpc-1", callId: "drive-1",

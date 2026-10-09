@@ -36,8 +36,9 @@ export const MarketplacePage = lazy(() =>
     default: module.MarketplacePage,
   })),
 );
+// Share the deferred settings module without adding either surface to startup.
 export const LocalSchedules = lazy(() =>
-  import("../components/settings/LocalSchedules").then((module) => ({
+  import("../components/pages/SettingsPage").then((module) => ({
     default: module.LocalSchedules,
   })),
 );
@@ -47,7 +48,7 @@ export const WorkspaceLibrary = lazy(() =>
   })),
 );
 export const AccountDialog = lazy(() =>
-  import("../components/agents/AccountDialog").then((module) => ({
+  import("../components/pages/SettingsPage").then((module) => ({
     default: module.AccountDialog,
   })),
 );

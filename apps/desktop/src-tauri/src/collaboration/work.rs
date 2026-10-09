@@ -361,6 +361,9 @@ fn new_work_with_parent(
     }
     Ok(Work {
         external_client: None,
+        execution_owner: None,
+        reset_continuation: None,
+        continuation: None,
         schedule: None,
         steering: vec![],
         messages: vec![],
@@ -514,6 +517,11 @@ pub(super) fn bind(
 ) -> Result<()> {
     id(run)?;
     let mut item = current(ctx, key, generation, None)?;
+    if crate::background_worker::owns_work(&item) && !crate::background_worker::is_worker() {
+        return Err(invalid(
+            "This Work belongs to the native background owner. Reconnect to inspect or stop it.",
+        ));
+    }
     // An already-dispatched run keeps the exact inputs it captured. A repeated
     // bind is idempotent and never rewrites them.
     if item.current_run_id.as_deref() == Some(run) && item.status.executing() {
@@ -1002,6 +1010,12 @@ pub(super) fn invalidate_descendants(
             && item.status != WorkStatus::Cancelled
         {
             item.generation += 1;
+            if let Some(reset) = &mut item.reset_continuation {
+                if reset.state == "armed" {
+                    reset.state = "review-required".into();
+                    reset.reason = Some(reason.into());
+                }
+            }
             item.status = status.clone();
             item.reason = Some(reason.into());
             item.updated_at = ctx.time.into();

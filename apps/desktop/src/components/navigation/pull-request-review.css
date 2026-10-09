@@ -1,0 +1,102 @@
+.pr-review {
+  min-width: 0;
+  margin-block: 12px;
+}
+.pr-review > summary {
+  font-weight: 500;
+  padding-block: 8px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 8px;
+}
+.pr-review section,
+.pr-review section > details:not(.pr-review__file) {
+  border-top: 1px solid var(--line);
+}
+.pr-review section,
+.pr-review article {
+  min-width: 0;
+  padding-block: 8px;
+}
+.pr-review label {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  margin-block: 10px;
+}
+.pr-review label:has(input[type="checkbox"]) {
+  flex-direction: row;
+  align-items: center;
+}
+.pr-review select,
+.pr-review input,
+.pr-review textarea {
+  max-width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: inherit;
+  background: var(--surface, transparent);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+  padding: 8px;
+}
+.pr-review textarea {
+  min-height: 100px;
+  resize: vertical;
+}
+.pr-review__actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-block: 10px;
+}
+.pr-review button {
+  min-height: 36px;
+}
+.pr-review button[aria-pressed="true"] {
+  background: var(--surface-hover);
+  text-decoration: underline;
+  text-underline-offset: 4px;
+  font-weight: 600;
+}
+.pr-review__file {
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+  padding-inline: 10px;
+  margin-block: 8px;
+}
+.pr-review__file summary {
+  overflow-wrap: anywhere;
+}
+.pr-review pre {
+  max-height: 400px;
+  max-width: 100%;
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre;
+}
+.pr-review article pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.pr-review fieldset {
+  min-width: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-2);
+  margin-block: 10px;
+}
+.pr-review :focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 3px;
+}
+@media (max-width: 600px) {
+  .pr-review button,
+  .pr-review summary,
+  .pr-review label:has(input[type="checkbox"]),
+  .pr-review input:not([type="checkbox"]),
+  .pr-review select {
+    min-height: 44px;
+  }
+}

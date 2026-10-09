@@ -105,6 +105,27 @@ pub(crate) struct JobManager {
     scopes: Mutex<HashMap<PathBuf, Arc<ScopeJobs>>>,
 }
 impl JobManager {
+    pub(super) fn release_idle(&self) -> Result<(), String> {
+        let mut scopes = self
+            .scopes
+            .lock()
+            .map_err(|_| "Command jobs are unavailable.")?;
+        for scope in scopes.values() {
+            if Arc::strong_count(scope) != 1
+                || scope
+                    .inner
+                    .lock()
+                    .map_err(|_| "Command jobs are unavailable.")?
+                    .records
+                    .iter()
+                    .any(|record| record.status.active())
+            {
+                return Err("Finish or Stop foreground command jobs before enabling their background owner.".into());
+            }
+        }
+        scopes.clear();
+        Ok(())
+    }
     pub(super) fn scope(&self, directory: &Path) -> Result<Arc<ScopeJobs>, String> {
         let mut scopes = self
             .scopes
@@ -485,31 +506,37 @@ pub async fn native_command_jobs(
     if window.label() != "main" {
         return Err("Command output belongs to the main window.".into());
     }
-    state.validate_target(&workspace_id, &agent_id)?;
-    let ticket = state
-        .authority_for(&workspace_id, &agent_id)?
-        .begin_viewer(expected_generation)?;
-    let jobs = state.command_jobs(&workspace_id, &agent_id)?;
     let tool = if job_id.is_some() {
         "command-output"
     } else {
         "command-jobs"
     };
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = dispatch(
-            &jobs,
-            &ticket,
+    let handoff = crate::background_worker::commands::foreground_fence(tool)?;
+    if crate::background_worker::commands::should_route(tool)? {
+        drop(handoff);
+        return crate::background_worker::commands::view(
+            workspace_id,
+            agent_id,
+            expected_generation,
             tool,
-            JobInput {
-                job_id,
-                job_generation,
-                cursor: cursor.unwrap_or(0),
-            },
-        );
-        ticket.finish(result)
-    })
+            job_id,
+            job_generation,
+            cursor.unwrap_or(0),
+        )
+        .await;
+    }
+    let _handoff = handoff;
+    observe(
+        state.inner().clone(),
+        workspace_id,
+        agent_id,
+        expected_generation,
+        tool.into(),
+        job_id,
+        job_generation,
+        cursor.unwrap_or(0),
+    )
     .await
-    .map_err(|_| "Command inspection stopped.".to_owned())?
 }
 
 #[tauri::command]
@@ -526,6 +553,45 @@ pub async fn native_command_stop(
     if window.label() != "main" {
         return Err("Command controls belong to the main window.".into());
     }
+    let handoff = crate::background_worker::commands::foreground_fence("command-stop")?;
+    if crate::background_worker::commands::should_route("command-stop")? {
+        drop(handoff);
+        return crate::background_worker::commands::view(
+            workspace_id,
+            agent_id,
+            expected_generation,
+            "command-stop",
+            Some(job_id),
+            Some(job_generation),
+            0,
+        )
+        .await;
+    }
+    let _handoff = handoff;
+    observe(
+        state.inner().clone(),
+        workspace_id,
+        agent_id,
+        expected_generation,
+        "command-stop".into(),
+        Some(job_id),
+        Some(job_generation),
+        0,
+    )
+    .await
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) async fn observe(
+    state: Arc<LocalComputerState>,
+    workspace_id: String,
+    agent_id: String,
+    expected_generation: u64,
+    tool: String,
+    job_id: Option<String>,
+    job_generation: Option<u64>,
+    cursor: u64,
+) -> Result<Value, String> {
     state.validate_target(&workspace_id, &agent_id)?;
     let ticket = state
         .authority_for(&workspace_id, &agent_id)?
@@ -535,15 +601,15 @@ pub async fn native_command_stop(
         let result = dispatch(
             &jobs,
             &ticket,
-            "command-stop",
+            &tool,
             JobInput {
-                job_id: Some(job_id),
-                job_generation: Some(job_generation),
-                cursor: 0,
+                job_id,
+                job_generation,
+                cursor,
             },
         );
         ticket.finish(result)
     })
     .await
-    .map_err(|_| "Command stop inspection failed; inspect its current status.".to_owned())?
+    .map_err(|_| "Command inspection failed; inspect its current status.".to_owned())?
 }

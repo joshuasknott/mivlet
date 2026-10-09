@@ -127,6 +127,10 @@ until the executor confirms termination. Global Stop, revoked generation, plugin
 disable, native owner closure, timeout and kernel limits retain the existing
 descendant containment. Closing a panel leaves the native job alive; closing the
 native owner kills it. This feature does not provide detached Work scheduling.
+The opt-in [background owner](work-execution.md#opt-in-native-background-text-execution-on-windows)
+can retain approved commands after the desktop window closes. Library's Retry
+output rechecks the current generation and reads retained frames; it does not
+restart or replay the command.
 
 Native scope storage retains up to 128 nonsecret records (identity, command digest,
 repository identity, generation/operation, lifetime, network policy, status and

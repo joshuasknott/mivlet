@@ -1,6 +1,23 @@
 use super::super::authority::ComputerAuthority;
 use super::*;
 
+#[test]
+fn separate_repository_lock_instances_cannot_overlap() {
+    let root = tempfile::tempdir().unwrap();
+    let first = RepositoryLock {
+        directory: root.path().to_path_buf(),
+        local: Mutex::new(()),
+    };
+    let second = RepositoryLock {
+        directory: root.path().to_path_buf(),
+        local: Mutex::new(()),
+    };
+    let guard = first.try_lock().unwrap();
+    assert!(second.try_lock().is_err());
+    drop(guard);
+    assert!(second.try_lock().is_ok());
+}
+
 pub(super) fn fixture() -> (
     tempfile::TempDir,
     PathBuf,
@@ -269,7 +286,7 @@ fn recovery_and_repository_lock_are_visible() {
         .operation
         .starts_with("publication"));
     let mutex = lock(&directory).unwrap();
-    let _guard = mutex.lock().unwrap();
+    let _guard = mutex.try_lock().unwrap();
     assert_eq!(status(&directory, &ticket).unwrap()["busy"], true);
     assert!(execute_in(
         &directory,
