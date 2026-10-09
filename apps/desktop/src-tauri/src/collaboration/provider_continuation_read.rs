@@ -44,10 +44,27 @@ pub(super) fn read(
             "History is excluded from this conversation's context.",
         ));
     }
-    let rows: Vec<_> = message::list(ctx.conn, ctx.store, &ctx.scope.data, &item.conversation_id)?
-        .into_iter()
-        .filter(|r| r.sequence <= continuation.through_sequence)
-        .collect();
+    // The selected head may advance after admission. Resolve the frozen source
+    // head by its unique sequence, then traverse that branch, not today's
+    // selected branch or all alternative messages below the sequence bound.
+    let source_head = if continuation.through_sequence == 0 {
+        None
+    } else {
+        Some(
+            message::list(ctx.conn, ctx.store, &ctx.scope.data, &item.conversation_id)?
+                .into_iter()
+                .find(|row| row.sequence == continuation.through_sequence)
+                .ok_or_else(|| invalid("The continuation source head is unavailable."))?
+                .id,
+        )
+    };
+    let rows = message::list_branch(
+        ctx.conn,
+        ctx.store,
+        &ctx.scope.data,
+        &item.conversation_id,
+        source_head.as_deref(),
+    )?;
     if provider_continuation::history_digest(&rows) != continuation.source_history_digest {
         return Err(invalid(
             "The source history was edited or redacted. Review a fresh continuation.",

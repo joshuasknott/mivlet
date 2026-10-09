@@ -1,6 +1,29 @@
 # Memory and bounded conversation context
 
-The operator surface is **Settings → Memory**. There is no Knowledge settings
+The composer's Context control reads the same native capture used by Work
+admission. It distinguishes proposed next-turn context, frozen admitted context,
+and the actual bounded retrieval receipt saved for an execution attempt. Opening
+the inspector never invokes a model. Draft-dependent file retrieval uses the same
+scope/connection filtering, top-eight passage selection and 6,000-character
+budget as dispatch; dispatch refreshes connection availability before sending.
+
+History, confirmed project facts, individual memories and candidate file sources
+can be excluded per conversation and agent. Choices use encrypted native storage
+with compare-and-swap revisions. Work admission freezes the choices; subsequent
+edits affect only subsequent requests. Memory exclusions also remove derived
+summaries that cite those memories. Excluding memory cannot erase its words from
+raw history; exclude history as well when appropriate. Captured history follows
+the selected durable branch. The executor does not independently reload private
+memory or summaries over that frozen capture. Corrections and forget operations
+remain in the existing native Memories service.
+
+The conversation surface is **right panel → Memories**: users can search, add
+chat-scoped memories, correct or delete saved memories, and save or dismiss
+existing suggestions. Inherited project, agent, and account memories are labelled
+separately using the same inheritance boundaries below. New messages are not
+automatically promoted. Add, correction, approval, and forgetting use native
+persistence; an unavailable native store reports an error rather than a saved state.
+**Settings → Memory** retains account-wide management. There is no Knowledge settings
 tab. `packages/knowledge` is the ingest/retrieve library for sources and
 compaction; durable facts live as Memory records. Persisted sidebar ids
 `Knowledge`, `Plugins`, `Connectors`, `Automations`, and `Schedules` reopen
@@ -169,20 +192,12 @@ This is a Mivlet implementation of the behavior, not copied source. Official
 contracts were reviewed; their resumability does not override Mivlet's current
 ephemeral native session policy.
 
-Concurrent integration: this branch starts at `77f661c3`, independently of the
-conversation UI branch. Continuation consumes the context capture's
-`contextSelection.includeHistory` flag when present. When integrating that
-branch's selected-history repository, change the two continuation source reads
-to its canonical selected-branch reader alongside context capture; do not allow
-unselected alternative answers into continuation. Preserve the UI branch's
-native exclusion checks and its existing context control. Read-only review of
-`codex/conversation-upgrade` at `c5b90d0c` confirmed the compatible signature
-`message::list_selected(conn, store, scope, thread_id)`. Replace `message::list`
-in `provider_continuation::prepare` and `provider_continuation_read::read` with
-that function during integration. Preview fingerprints and retrieval digests
-must both cover the same selected path. Add an integration regression with two
-alternative answers and an excluded-history selection before merging; the
-standalone baseline has neither branch selection nor that control.
+Conversation-branch integration: continuation preview reads the canonical
+selected path. Paginated retrieval resolves the frozen source head from its
+unique sequence and reads that branch, even if the selected head later changes.
+The digest still rejects edits or redaction, and excluding history prevents
+retrieval. Unselected alternative answers never enter the continuation packet.
+The composer blocks continuation during branch navigation or an output revision.
 
 Local validation checkpoint (2026-10-08): desktop typecheck and production
 build, protocol parity/build, connector build and 79 distinct focused tests
@@ -222,6 +237,12 @@ The continuation control loads only when a conversation has saved history and
 an agent profile, using the conversation pane's existing lazy-component pattern.
 The complete control retains provider checks, generation fences, admission and
 focus ownership. All chunks remain counted by the existing common-bundle budget.
+Native Work captures and explicit live conversation shares read canonical
+string message revisions, with compatibility for older object-shaped text.
+Both use the selected branch; another answer branch cannot enter inherited
+context. The local transcript-extract fingerprint includes its reader version,
+so caches produced by an older reader rebuild from saved messages instead of
+retaining empty or stale extracts.
 
 Summarisation is deterministic and local. No provider is called by the
 compaction pipeline, so a conversation can never be summarised by a different

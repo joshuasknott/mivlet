@@ -2590,6 +2590,7 @@ dependencies = [
  "tokio",
  "ttf-parser",
  "url",
+ "webview2-com",
  "windows",
  "windows-sys 0.61.2",
  "zip",

@@ -2531,6 +2531,86 @@ mod dispatch_tests {
         assert!(try_identity_dispatch(&generation, 7, now_epoch() + 60, operation).is_ok());
         assert_eq!(called.get(), 1);
     }
+
+    #[test]
+    fn generation_guard_can_be_held_without_releasing_the_fence() {
+        let held = IDENTITY_GENERATION.lock().unwrap();
+        let _guard = NativeIdentityGenerationGuard { _guard: held };
+        assert!(IDENTITY_GENERATION.try_lock().is_err());
+    }
+
+    #[test]
+    fn generation_change_waits_until_fenced_commit_finishes() {
+        use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc, Barrier};
+        use std::thread;
+        use tempfile::tempdir;
+
+        let held = IDENTITY_GENERATION.lock().unwrap();
+        let before = *held;
+        let guard = NativeIdentityGenerationGuard { _guard: held };
+        let started = Arc::new(AtomicBool::new(false));
+        let changed = Arc::new(AtomicBool::new(false));
+        let committed = Arc::new(AtomicBool::new(false));
+        let barrier = Arc::new(Barrier::new(2));
+        let writer_started = Arc::clone(&started);
+        let writer_changed = Arc::clone(&changed);
+        let writer_barrier = Arc::clone(&barrier);
+        let directory = tempdir().unwrap();
+        let permit_path = directory.path().join("execution-approvals.json");
+        let writer = thread::spawn(move || {
+            writer_barrier.wait();
+            writer_started.store(true, Ordering::Release);
+            let mut generation = IDENTITY_GENERATION.lock().unwrap();
+            *generation = before.wrapping_add(1);
+            writer_changed.store(true, Ordering::Release);
+        });
+
+        barrier.wait();
+        for _ in 0..1_000 {
+            if started.load(Ordering::Acquire) {
+                break;
+            }
+            thread::yield_now();
+        }
+        assert!(!changed.load(Ordering::Acquire));
+
+        let request = crate::models::ApprovalRequest {
+            id: "fenced-approval".into(),
+            service: "test".into(),
+            action: "write".into(),
+            mode: "standard".into(),
+            risk_level: "low".into(),
+            data_used: vec!["path".into()],
+            consequence: "A bounded test write.".into(),
+            requested_at: "2026-10-08T12:00:00Z".into(),
+            decisions: vec!["once".into()],
+            confirmation_phrase: None,
+        };
+        let response = crate::models::ApprovalResolutionResponse {
+            persisted: true,
+            audit_entry: crate::models::ApprovalAuditEntry {
+                id: "fenced-audit".into(),
+                request_id: request.id.clone(),
+                decision: "once".into(),
+                decided_at: "2026-10-08T12:00:01Z".into(),
+                note: "fenced".into(),
+            },
+            effective_request: request,
+            dismissed: true,
+            grant: None,
+        };
+        crate::execution_approvals::record_execution_decision(&permit_path, &response).unwrap();
+        committed.store(true, Ordering::Release);
+        drop(guard);
+        writer.join().unwrap();
+        assert!(committed.load(Ordering::Acquire));
+        assert!(changed.load(Ordering::Acquire));
+        assert!(std::fs::read_to_string(permit_path)
+            .unwrap()
+            .contains("fenced-approval"));
+
+        *IDENTITY_GENERATION.lock().unwrap() = before;
+    }
 }
 
 pub(crate) fn lock_native_identity_generation(
@@ -2542,9 +2622,14 @@ pub(crate) fn lock_native_identity_generation(
     if *guard != expected.generation {
         return Err("Mivlet account changed during the request. Please try again.".into());
     }
-    let session = read_session(&NativeIdentitySecretStore).map_err(command_message)?;
+    let session = read_session(&NativeIdentitySecretStore)
+        .map_err(command_message)?
+        .ok_or_else(|| "Mivlet account session is unavailable; sign in again.".to_string())?;
+    if session.expires_at <= now_epoch() {
+        return Err("Mivlet account session expired or changed; sign in again.".into());
+    }
     let current_binding = session
-        .and_then(|session| session.authentication)
+        .authentication
         .map(|authentication| account_binding_for_authentication(&authentication));
     if current_binding.as_deref() != Some(expected.account_binding.as_str()) {
         return Err("Mivlet account changed during the request. Please try again.".into());

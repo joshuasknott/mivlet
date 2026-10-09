@@ -16,7 +16,7 @@ export interface ConversationParticipant {
   name: string;
 }
 
-export type ObjectReference = { workspaceId: string; kind: "agent" | "project" | "conversation" | "work" | "memory" | "file" | "message"; id: string };
+export type ObjectReference = { workspaceId: string; kind: "agent" | "project" | "conversation" | "work" | "decision" | "memory" | "file" | "message"; id: string };
 export interface ChatBinding { role: "main" | "side"; ownerKind: "agent" | "project"; ownerId: string }
 /** Explicit sharing never conveys authority. Snapshots retain selected bytes;
  * live references resolve again under the current account on each deliberate use. */
@@ -58,6 +58,10 @@ export interface ProjectTeam {
 export interface WorkOutput {
   runId: string;
   conversationId: string;
+  /** Exact saved assistant source used when reopening this result. */
+  branchId?: string;
+  messageId?: string;
+  sourceRevisionId?: string;
   text: string;
   /** An agent report is evidence of the report, not a verified external outcome. */
   evidence: "agent-report";
@@ -109,6 +113,8 @@ export interface CollaborationWorkItem {
   id: string;
   workspaceId: string;
   conversationId: string;
+  /** Canonical user message that owns an edited or regenerated branch. */
+  parentMessageId?: string;
   projectId?: string;
   rootId: string;
   parentId?: string;
@@ -155,6 +161,12 @@ export interface ProjectFact {
   status: "current" | "superseded" | "stale" | "forgotten";
   conversationId: string;
   runId?: string;
+  /** Exact conversation source for deep navigation; absent on legacy records. */
+  branchId?: string;
+  messageId?: string;
+  sourceRevisionId?: string;
+  /** User-pinned decisions remain discoverable without changing context authority. */
+  pinned?: boolean;
   source: string;
   supersedesId?: string;
   createdAt: string;
@@ -173,6 +185,9 @@ export type WorkspaceView =
       agentId: string;
       output: string;
       title: string;
+      /** Exact tool-message source for provenance and output editing. */
+      messageId?: string;
+      sourceRevisionId?: string;
     };
 
 export type ConversationLayoutNode =
@@ -268,6 +283,8 @@ export type CollaborationCommand =
       agentId: string;
       prompt: string;
       discussion: boolean;
+      /** Optional canonical message that owns an edited or regenerated branch. */
+      parentMessageId?: string;
       /** Explicit workspace recipients; IDs come from the composer, never model text. */
       recipientIds?: string[];
       /** Composer-level attachment references captured with the request. */
@@ -321,6 +338,12 @@ export type CollaborationCommand =
       id: string;
       projectId: string;
       status: "stale" | "forgotten";
+    }
+  | {
+      action: "pin-fact";
+      id: string;
+      projectId: string;
+      pinned: boolean;
     }
   | { action: "save-layout"; layout: ConversationLayout };
 

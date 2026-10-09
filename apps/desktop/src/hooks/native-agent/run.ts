@@ -448,6 +448,9 @@ export async function runNativeAgentTurn(
         await persistence.record({
           kind: "user",
           content: exchange.content,
+          ...(index === userExchanges.length - 1 && control?.parentMessageId
+            ? { parentMessageId: control.parentMessageId }
+            : {}),
           ...(index === userExchanges.length - 1 && control?.attachments?.length
             ? { attachments: control.attachments }
             : {}),

@@ -33,6 +33,8 @@ export interface McpUntrustedContent {
   uri?: string;
   name?: string;
   mimeType?: string;
+  /** Bounded, untrusted resource metadata. Never grants host capability. */
+  metadata?: Record<string, unknown>;
   truncated: boolean;
 }
 
@@ -43,12 +45,22 @@ export interface McpUntrustedToolResult {
   content: readonly McpUntrustedContent[];
   structuredJson?: string;
   structuredTruncated?: boolean;
+  /** Safe discovery metadata for reopening a UI resource after persistence. */
+  mcpApp?: {
+    connectorId: string;
+    toolName: string;
+    resourceUri: string;
+  };
 }
 
 const MAX_TOOL_RESULT_BYTES = 2 * 1024 * 1024;
 const MAX_TOOL_CONTENT_ITEMS = 64;
 const MAX_TOOL_TEXT_CHARACTERS = 64 * 1024;
 const MAX_STRUCTURED_CHARACTERS = 256 * 1024;
+const MAX_RESOURCE_METADATA_CHARACTERS = 16 * 1024;
+/** Interactive HTML is a separately bounded artifact, not model text. */
+const MAX_MCP_APP_HTML_BYTES = 5 * 1024 * 1024;
+const MAX_MCP_APP_RESULT_BYTES = MAX_MCP_APP_HTML_BYTES + 128 * 1024;
 
 function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -65,10 +77,56 @@ function boundedText(value: string, max = MAX_TOOL_TEXT_CHARACTERS): [string, bo
   return [value.slice(0, max), true];
 }
 
+function isMcpAppHtmlResource(uri: string, mimeType: string | undefined): boolean {
+  if (!uri.startsWith("ui://") || !mimeType) return false;
+  const parts = mimeType.toLowerCase().split(";").map((part) => part.trim());
+  return parts[0] === "text/html" && parts.includes("profile=mcp-app");
+}
+
+function normalizeEmbeddedResource(
+  resource: Record<string, unknown>,
+  allowMcpAppHtml = false,
+): McpUntrustedContent {
+  const uri = safeOptionalString(resource.uri, 2_048);
+  const mimeType = safeOptionalString(resource.mimeType, 200);
+  if (!uri || typeof resource.text !== "string") {
+    throw new Error("MCP tool returned an unsupported embedded resource.");
+  }
+  let text: string;
+  let truncated: boolean;
+  if (allowMcpAppHtml && isMcpAppHtmlResource(uri, mimeType)) {
+    const bytes = new TextEncoder().encode(resource.text).byteLength;
+    if (bytes > MAX_MCP_APP_HTML_BYTES) {
+      throw new Error("MCP App HTML resource exceeds the supported size.");
+    }
+    text = resource.text;
+    truncated = false;
+  } else {
+    [text, truncated] = boundedText(resource.text);
+  }
+  return {
+    trust: "untrusted",
+    instructionAuthority: "none",
+    kind: "embedded-text",
+    uri,
+    text,
+    mimeType,
+    metadata: boundedMetadata(resource._meta),
+    truncated,
+  };
+}
+
 function safeOptionalString(value: unknown, max: number): string | undefined {
   if (typeof value !== "string" || value.length === 0 || value.length > max || /[\u0000-\u001f\u007f]/u.test(value)) {
     return undefined;
   }
+  return value;
+}
+
+function boundedMetadata(value: unknown): Record<string, unknown> | undefined {
+  if (!isObject(value)) return undefined;
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined || encoded.length > MAX_RESOURCE_METADATA_CHARACTERS) return undefined;
   return value;
 }
 
@@ -77,9 +135,17 @@ function safeOptionalString(value: unknown, max: number): string | undefined {
  * contract. External text and structured JSON never acquire instruction
  * authority, and binary media payloads never cross into model context.
  */
-export function normalizeMcpToolResult(value: unknown): McpUntrustedToolResult {
+function normalizeMcpToolResultInternal(
+  value: unknown,
+  allowMcpAppHtml = false,
+): McpUntrustedToolResult {
   const encoded = JSON.stringify(value);
-  if (encoded === undefined || new TextEncoder().encode(encoded).byteLength > MAX_TOOL_RESULT_BYTES || !isObject(value)) {
+  if (
+    encoded === undefined ||
+    new TextEncoder().encode(encoded).byteLength >
+      (allowMcpAppHtml ? MAX_MCP_APP_RESULT_BYTES : MAX_TOOL_RESULT_BYTES) ||
+    !isObject(value)
+  ) {
     throw new Error("MCP tool returned an invalid or oversized result.");
   }
   if (!Array.isArray(value.content) || value.content.length > MAX_TOOL_CONTENT_ITEMS) {
@@ -110,20 +176,7 @@ export function normalizeMcpToolResult(value: unknown): McpUntrustedToolResult {
       };
     }
     if (item.type === "resource" && isObject(item.resource)) {
-      const uri = safeOptionalString(item.resource.uri, 2_048);
-      const text = item.resource.text;
-      if (!uri || typeof text !== "string") {
-        throw new Error("MCP tool returned an unsupported embedded resource.");
-      }
-      const [bounded, truncated] = boundedText(text);
-      return {
-        ...base,
-        kind: "embedded-text",
-        uri,
-        text: bounded,
-        mimeType: safeOptionalString(item.resource.mimeType, 200),
-        truncated
-      };
+      return normalizeEmbeddedResource(item.resource, allowMcpAppHtml);
     }
     if ((item.type === "image" || item.type === "audio") && typeof item.data === "string") {
       return {
@@ -155,11 +208,30 @@ export function normalizeMcpToolResult(value: unknown): McpUntrustedToolResult {
   return result;
 }
 
-/** Resources are evidence with the same bounds as tool results. Binary blobs
- * require a separate native artifact import; never return raw base64 to a model. */
+export function normalizeMcpToolResult(value: unknown): McpUntrustedToolResult {
+  return normalizeMcpToolResultInternal(value);
+}
+
+/** Resource evidence keeps ordinary text bounds while allowing the dedicated
+ * MCP App HTML artifact limit. Binary blobs require a separate native artifact
+ * import; never return raw base64 to a model. */
 export function normalizeMcpResourceResult(value: unknown): McpUntrustedToolResult {
   if (!isObject(value) || !Array.isArray(value.contents) || value.contents.length > MAX_TOOL_CONTENT_ITEMS) {
     throw new Error("MCP resource returned invalid content.");
   }
-  return normalizeMcpToolResult({ content: value.contents.map(resource => ({ type: "resource", resource })) });
+  const hasMcpAppHtml = value.contents.some(
+    (resource) =>
+      isObject(resource) &&
+      isMcpAppHtmlResource(
+        typeof resource.uri === "string" ? resource.uri : "",
+        typeof resource.mimeType === "string" ? resource.mimeType : undefined,
+      ),
+  );
+  if (value.contents.some((resource) => !isObject(resource))) {
+    throw new Error("MCP resource returned invalid content.");
+  }
+  return normalizeMcpToolResultInternal(
+    { content: value.contents.map((resource) => ({ type: "resource", resource })) },
+    hasMcpAppHtml,
+  );
 }

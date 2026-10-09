@@ -145,4 +145,6 @@ export interface NativeAgentRunControl {
   canonicalUserMessage?: "persist" | "suppress";
   /** Safe metadata for the exact attachments captured by this submitted turn. */
   attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[];
+  /** Existing canonical user message for an edited/regenerated branch. */
+  parentMessageId?: string;
 }

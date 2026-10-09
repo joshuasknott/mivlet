@@ -65,10 +65,10 @@ pub(crate) struct VerifiedUploadArtifact {
 #[derive(Clone, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct OpenArtifactRequest {
-    workspace_id: String,
-    agent_id: String,
-    artifact_id: String,
-    expected_generation: u64,
+    pub(crate) workspace_id: String,
+    pub(crate) agent_id: String,
+    pub(crate) artifact_id: String,
+    pub(crate) expected_generation: u64,
 }
 
 fn valid_id(id: &str) -> bool {
@@ -891,7 +891,7 @@ fn validate_receipt(
     Ok(())
 }
 
-fn verified_artifact(
+pub(crate) fn verified_artifact(
     computers: &LocalComputerState,
     request: &OpenArtifactRequest,
 ) -> Result<(ArtifactReceipt, Vec<u8>), String> {
@@ -1099,7 +1099,7 @@ fn preview_bytes(artifact: &LocalComputerArtifact, bytes: &[u8]) -> ArtifactPrev
     preview
 }
 
-fn stage_export(
+pub(crate) fn stage_export(
     destination: &Path,
     extension: &str,
     bytes: &[u8],
@@ -1122,7 +1122,10 @@ fn stage_export(
     Ok(staged)
 }
 
-fn commit_export(staged: tempfile::NamedTempFile, destination: &Path) -> Result<bool, String> {
+pub(crate) fn commit_export(
+    staged: tempfile::NamedTempFile,
+    destination: &Path,
+) -> Result<bool, String> {
     staged
         .persist_noclobber(destination)
         .map_err(|_| "Mivlet could not finish saving. Choose a new file name and try again.")?;

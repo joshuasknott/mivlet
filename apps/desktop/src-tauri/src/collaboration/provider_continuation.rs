@@ -180,7 +180,7 @@ pub(super) fn prepare(
         .and_then(Value::as_bool)
         .unwrap_or(true);
     let rows = if include_history {
-        message::list(ctx.conn, ctx.store, &ctx.scope.data, &room.id)?
+        message::list_selected(ctx.conn, ctx.store, &ctx.scope.data, &room.id)?
     } else {
         vec![]
     };

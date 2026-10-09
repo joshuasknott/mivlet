@@ -11,6 +11,119 @@ fn request(room: &str) -> Input {
     }
 }
 
+#[test]
+fn continuation_uses_only_the_reviewed_branch_after_selection_and_history_changes() {
+    fixture(&store(), |ctx| {
+        let room = chats::open_main(ctx, "lead")?;
+        append(
+            ctx,
+            &room.id,
+            "root",
+            "user",
+            "terminal",
+            json!({}),
+            "Original request",
+        )?;
+        append(
+            ctx,
+            &room.id,
+            "old-answer",
+            "assistant",
+            "terminal",
+            json!({}),
+            "UNSELECTED_CANARY",
+        )?;
+        thread::select_head(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            &room.id,
+            Some("root"),
+            TIME,
+        )?;
+        append(
+            ctx,
+            &room.id,
+            "selected-answer",
+            "assistant",
+            "terminal",
+            json!({}),
+            "Reviewed answer",
+        )?;
+        let input = request(&room.id);
+        let preview = continuation::prepare(ctx, &input)?.0;
+        assert_eq!(
+            preview
+                .messages
+                .iter()
+                .map(|m| m.message_id.as_str())
+                .collect::<Vec<_>>(),
+            ["root", "selected-answer"]
+        );
+        assert!(!serde_json::to_string(&preview)
+            .unwrap()
+            .contains("UNSELECTED_CANARY"));
+        continuation::start(
+            ctx,
+            "branch-continuation",
+            &input,
+            &preview.fingerprint,
+            true,
+        )?;
+        bind(ctx, "branch-continuation", "branch-run")?;
+        // A later selection must neither leak the alternate answer nor change
+        // the history source already admitted for this Work.
+        thread::select_head(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            &room.id,
+            Some("old-answer"),
+            TIME,
+        )?;
+        append(
+            ctx,
+            &room.id,
+            "later",
+            "assistant",
+            "terminal",
+            json!({}),
+            "LATER_CANARY",
+        )?;
+        let read = |sequence| {
+            super::super::provider_continuation_read::read(
+                ctx,
+                "branch-continuation",
+                1,
+                "branch-run",
+                sequence,
+                0,
+            )
+        };
+        let answer = read(2)?;
+        assert_eq!(answer["message"]["messageId"], "selected-answer");
+        assert_eq!(answer["message"]["text"], "Reviewed answer");
+        assert!(read(4)?["message"].is_null());
+        super::super::ui::apply(
+            ctx,
+            &room,
+            "lead",
+            super::super::ui::UiCommand::SetContext {
+                selection: super::super::ui::ContextSelection {
+                    include_history: false,
+                    ..Default::default()
+                },
+            },
+        )?;
+        assert!(read(1).is_err());
+        work::invalidate_descendants(ctx, "branch-continuation", "Stopped", WorkStatus::Cancelled)?;
+        let excluded = continuation::prepare(ctx, &input)?.0;
+        assert!(excluded.messages.is_empty());
+        assert_eq!(excluded.through_sequence, 0);
+        Ok(())
+    });
+}
+
 #[allow(clippy::too_many_arguments)]
 fn append(
     ctx: &Context<'_>,
