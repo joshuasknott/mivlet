@@ -1,7 +1,7 @@
 use crate::{
     files, runtime,
     security::{self, wide, Attributes, Capability, Handle, Profile},
-    setup, Binding, CompletedRun, Limits, Receipt,
+    setup, Binding, CompletedRun, ExecutionMode, Limits, OutputLog, Receipt,
 };
 use std::{
     collections::BTreeMap,
@@ -11,7 +11,6 @@ use std::{
     os::windows::io::FromRawHandle,
     path::{Path, PathBuf},
     ptr,
-    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use windows_sys::Win32::{
@@ -295,13 +294,12 @@ fn boundary(token: HANDLE, profile: &Profile) -> Result<(), String> {
     }
     security::verify_lpac(token, &profile.text)
 }
-fn readers(
-    handles: [Handle; 2],
-    output: Arc<Mutex<(Vec<u8>, bool)>>,
-) -> Vec<std::thread::JoinHandle<()>> {
+fn readers(handles: [Handle; 2], output: OutputLog) -> Vec<std::thread::JoinHandle<()>> {
+    use crate::output::OutputStream;
     handles
         .into_iter()
-        .map(|handle| {
+        .zip([OutputStream::Stdout, OutputStream::Stderr])
+        .map(|(handle, stream)| {
             // Move ownership into File; no handle is inherited by the reader thread.
             let file = unsafe { File::from_raw_handle(handle.0) };
             std::mem::forget(handle);
@@ -313,12 +311,9 @@ fn readers(
                     if size == 0 {
                         break;
                     }
-                    if let Ok(mut out) = output.lock() {
-                        let available = 65536usize.saturating_sub(out.0.len());
-                        out.0.extend_from_slice(&buffer[..size.min(available)]);
-                        out.1 |= size > available;
-                    }
+                    output.push(stream, &buffer[..size]);
                 }
+                output.end(stream);
             })
         })
         .collect()
@@ -340,6 +335,8 @@ pub(crate) fn run(
     seconds: u64,
     limits: Limits,
     binding: Binding,
+    mode: ExecutionMode,
+    output: OutputLog,
     current: impl Fn() -> bool,
     launch: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<CompletedRun, String> {
@@ -358,12 +355,24 @@ pub(crate) fn run(
     let command_id = {
         use sha2::{Digest, Sha256};
         hex::encode(Sha256::digest(
-            serde_json::to_vec(&(script, network, seconds, &binding))
-                .map_err(|_| "Invalid command identity.")?,
+            serde_json::to_vec(&(
+                script,
+                network,
+                seconds,
+                mode == ExecutionMode::Persistent,
+                &binding,
+            ))
+            .map_err(|_| "Invalid command identity.")?,
         ))
     };
-    let (directory, lease) =
-        crate::custody::prepare_run(&installation, &id, &binding, &command_id, network)?;
+    let (directory, lease) = crate::custody::prepare_run(
+        &installation,
+        &id,
+        &binding,
+        &command_id,
+        network,
+        mode == ExecutionMode::Persistent,
+    )?;
     let root = directory.path();
     setup::ready()?;
     let work = root.join("work");
@@ -512,7 +521,6 @@ pub(crate) fn run(
     drop(stdin);
     drop(stdout_write);
     drop(stderr_write);
-    let output = Arc::new(Mutex::new((Vec::new(), false)));
     let readers = readers([stdout, stderr], output.clone());
     let start = Instant::now();
     let mut resumed = false;
@@ -591,11 +599,9 @@ pub(crate) fn run(
             reason = Some(error);
         }
     }
-    let (bytes, truncated) = output
-        .lock()
-        .map_err(|_| "Command output is unavailable.")?
-        .clone();
-    let output_id = if reason.is_none() && code == Some(0) {
+    output.close();
+    let (text, truncated) = output.summary()?;
+    let output_id = if mode == ExecutionMode::Command && reason.is_none() && code == Some(0) {
         match files::tree_id_current(&work, limits, &|| control().is_ok()) {
             Ok(id) if control().is_ok() => Some(id),
             result => {
@@ -617,7 +623,7 @@ pub(crate) fn run(
         input_id,
         output_id,
         exit_code: code,
-        output: String::from_utf8_lossy(&bytes).into_owned(),
+        output: text,
         truncated,
         interrupted: reason.is_some(),
         reason,
@@ -625,6 +631,7 @@ pub(crate) fn run(
         network,
         command_id,
         binding,
+        persistent: mode == ExecutionMode::Persistent,
     };
     crate::custody::seal(&installation, &receipt)?;
     drop(token);

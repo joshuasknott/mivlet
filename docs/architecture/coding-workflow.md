@@ -56,12 +56,24 @@ without private-network capability or loopback exemption. Windows classifies
 network destinations; this is not an IP/domain allowlist. Network access can
 have external effects, including disclosure of selected project content.
 
-Each run has a 1–900 second timeout and a combined 64 KiB output limit. The result
-records its actual exit code, interruption and truncation. Output appears after
-completion; there is no interactive terminal or live output streaming. A command
+Each ordinary run has a 1–900 second timeout and a combined 64 KiB result limit.
+Live redacted output appears in Library's Commands section and through
+`command-jobs`/`command-output`, with bounded scrollback and explicit gap markers.
+The result records its actual exit code, interruption and truncation. A command
 receipt is associated with the resulting tree hash, and the UI identifies later
 edits as unverified. An exit code of zero does not prove that the command was an
 appropriate test; the agent and reviewer must choose the project's real checks.
+
+For a development server or other controlled long-lived process, approve
+`repository-start` with an explicit lifetime (up to 24 hours). Native ownership
+continues after the tool returns and the panel closes. The job uses a fixed
+isolated snapshot; all writes are discarded, including on success. The repository
+stays locked until the job and all descendants end. Use `command-stop` or the
+Commands panel's Stop job control, then approve a new start to pick up changes.
+Network remains off by default; approval does not add a loopback exemption or
+host-browser access. There is no interactive terminal. Closing the native owner
+ends its jobs; restart retains nonsecret status, reports uncertainty and never
+replays commands. See [the lifecycle contract](native-execution.md#live-output-and-controlled-jobs).
 
 Stop revokes the existing workspace/agent generation. Atomic kill-on-close job
 membership contains all descendants before the first instruction; Stop and

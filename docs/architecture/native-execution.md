@@ -43,7 +43,8 @@ permission, and kills all descendants on Stop, timeout, host death or parent exi
 Mivlet verifies that no job processes remain before inspecting outputs. Memory,
 process count and aggregate CPU time are kernel limits; wall time and storage
 are watchdogs. Analysis uses 1 GiB/32 processes/64 MiB storage; coding uses
-2 GiB/64 processes/2 GiB storage. Combined output is capped at 64 KiB. The disk
+2 GiB/64 processes/2 GiB storage. The command result and live scrollback are each
+bounded at 64 KiB; live scrollback also retains at most 512 frames. The disk
 watchdog is not a hard quota and cannot eliminate every resource exhaustion risk.
 Live storage enumeration polls generation and deadline before each directory
 entry and metadata visit, with a bound on queued entries under churn. Post-exit
@@ -84,6 +85,71 @@ host/user site discovery and permits work/.python-packages. Projects can use
 a reviewed pinned extension and currently fail as missing commands.
 
 ## Results and recovery
+
+### Live output and controlled jobs
+
+`repository-run` and `workspace-run` register native command jobs before launch.
+`repository-start` and `workspace-start` use the same restricted executor but
+return a job identity while Rust retains the operation ticket. They require an
+explicit 1–86400 second lifetime and the existing exact single-use approval over
+the full command, selected repository/files, network policy and timeout. Ordinary
+command timeouts remain unchanged. There is no interactive stdin or provider
+shell fallback.
+
+`command-jobs` lists this agent's bounded native history. `command-output` reads
+after a sequence cursor, returning at most 32 KiB with explicit dropped-history
+and closed markers. The Commands section in Library polls that same scoped
+authority. Native reads recheck account/workspace/agent membership and generation;
+they never broadcast output to all windows. A slow or disconnected reader neither
+blocks pipe drainage nor owns the job. Native scrollback evicts complete oldest
+frames and continues receiving fresh output; the client also bounds its history.
+Ordering is the order complete lines were observed from the two pipes, not a
+claimed Windows ordering between independent stdout and stderr handles.
+
+Lines are buffered before redaction so split secrets and UTF-8 cannot escape as
+partial chunks. Native shared redaction includes multiline PEM and split-header
+suppression. Oversized (over 8 KiB), invalid UTF-8 or control-bearing lines suppress
+the remainder of that stream. Partial final lines are emitted at EOF. This lane
+is plain build/test output, not an ANSI terminal. Redaction is defense in depth;
+arbitrary unmarked project secrets cannot be reliably identified.
+
+Persistent jobs own a fixed snapshot and **never import writes**, including after
+a zero exit code. A repository job retains the canonical repository operation
+lock through snapshot creation, execution, descendant termination and cleanup;
+file edits, another command, attachment and publication must wait or Stop it.
+Workspace jobs copy only selected inputs and accept no output import list.
+Changes require stopping the job and a freshly approved start. No live bind mount,
+host watcher, executable discovery on host PATH or loopback exemption is added.
+A server listening inside the job does not establish access from a host browser.
+
+`command-stop` binds the exact job identity and generation and reports `stopping`
+until the executor confirms termination. Global Stop, revoked generation, plugin
+disable, native owner closure, timeout and kernel limits retain the existing
+descendant containment. Closing a panel leaves the native job alive; closing the
+native owner kills it. This feature does not provide detached Work scheduling.
+
+Native scope storage retains up to 128 nonsecret records (identity, command digest,
+repository identity, generation/operation, lifetime, network policy, status and
+exit). Commands, paths, raw output and credentials are absent. An exclusive
+Windows owner-file lease prevents a second native process claiming the same job
+scope. Interrupted `preparing/running/stopping` records reconcile to uncertainty
+when that scope reopens; output is memory-only and unavailable after restart.
+Admission is flushed before launch. The live transition to `running` updates
+memory only, so the process supervisor never waits for metadata I/O while it
+must poll Stop and timeouts. Terminal state is flushed after process cleanup;
+an abrupt exit may therefore recover the earlier `preparing` admission record.
+No PID is reattached, no command is replayed, and no persistent snapshot is
+imported during recovery. Four active jobs per agent are admitted at a time.
+Scrollback is retained for at most 16 jobs per scope, with at most 64 open native
+job scopes per owner; older metadata can therefore exist without its log.
+
+Integration seams: the executor's `run_with_output`, `ExecutionMode` and
+`OutputLog` are provider-neutral; desktop `command_jobs` owns identity/status and
+native cancellation. A detached worker must call this authority and retain the
+same ticket/lease rather than starting another process service. Repository copy
+cleanup must acquire the existing `coding::lock` and preserve its repository
+identity; it cannot delete a copy while a persistent job owns that lock. No SQL
+migration or replacement Work/approval store is introduced.
 
 Fresh snapshots exclude Git custody and reject links, reparse paths, hardlinks,
 aliases and oversized entries. Originals are never changed. Successful commands
@@ -158,6 +224,18 @@ check actual results, not the absence of that warning. Installed-bundle,
 clean-machine and authenticated live provider-to-tool journeys remain unverified.
 
 References informed the design; no source was copied:
+
+- [T3 Code terminal manager, output window and tests at a4c9494](https://github.com/pingdotgg/t3code/tree/a4c9494b0e3606775cc5fc929fc138399288bd43/apps/server/src/terminal)
+  and [terminal history guidance](https://github.com/pingdotgg/t3code/blob/a4c9494b0e3606775cc5fc929fc138399288bd43/docs/user/terminal.md).
+  The October 8 reference informed native ownership, bounded history, reconnect
+  cursors and observation-before-exit tests. Its unrestricted terminal runtime,
+  provider environments, assets and product copy were not imported. The remote
+  main reference was rechecked at the same commit during implementation.
+  Recent source history also inspected passive observation commit
+  `cc41482df0232454af0cc5ac2f1afd984e342134` (PR #9791, October 7) and shared
+  keyed-lock commit `37de6cbde65c7cf9ba90a2557c232e63b7e16988` (PR #15577,
+  October 5). Mivlet keeps observation separate from process mutation and retains
+  its own repository lock and approval model.
 
 - [Microsoft AppContainer/LPAC launch and isolation](https://learn.microsoft.com/en-us/windows/win32/secauthz/implementing-an-appcontainer).
 - [Microsoft directory moves](https://learn.microsoft.com/en-us/windows/win32/fileio/moving-directories), [ACL updates and inheritance behavior](https://learn.microsoft.com/en-us/windows/win32/api/aclapi/nf-aclapi-setsecurityinfo), and the [non-propagating file-security setter](https://learn.microsoft.com/en-us/windows/win32/api/securitybaseapi/nf-securitybaseapi-setfilesecurityw). The older setter is intentional here because changing unvalidated children is outside privileged setup's authority; held handles prevent path replacement.

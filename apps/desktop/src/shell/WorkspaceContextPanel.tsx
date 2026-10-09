@@ -1,4 +1,3 @@
-import { WorkspaceLibrary } from "../components/navigation/WorkspaceLibrary";
 import { WorkspaceMemories } from "../components/navigation/WorkspaceMemories";
 import { WorkspaceFileUpload } from "../components/navigation/WorkspaceFileUpload";
 import { lazy, Suspense } from "react";
@@ -22,7 +21,7 @@ import type {
   WorkspaceExecution,
   WorkspaceExecutionState,
 } from "../lib/workspace-execution";
-import { ComputerInspector, LocalSchedules } from "./workspace-lazy";
+import { ComputerInspector, LocalSchedules, WorkspaceLibrary } from "./workspace-lazy";
 import type { RenderWorkspaceConversation } from "./WorkspaceConversationChrome";
 import type { WorkspaceNavigation } from "./useWorkspaceNavigation";
 
@@ -174,6 +173,7 @@ export function WorkspaceContextPanel({
         />
       }
       library={
+        <Suspense fallback={<p role="status">Loading Library…</p>}>
         <WorkspaceLibrary
           key={`${workspaceId}:${nav.activeRoom?.id ?? "empty"}`}
           workspaceId={workspaceId}
@@ -193,6 +193,7 @@ export function WorkspaceContextPanel({
           }
           onOpen={nav.setPanelRequest}
         />
+        </Suspense>
       }
       sideChats={
         navContext && navContext.kind !== "work" ? (
