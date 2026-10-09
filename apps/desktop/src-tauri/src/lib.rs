@@ -62,6 +62,7 @@ pub mod paths;
 mod permission_policy;
 #[cfg(test)]
 mod product_spine_parity;
+mod protected_secrets;
 mod provider_process;
 mod provider_usage;
 mod search;
@@ -133,6 +134,7 @@ pub fn run() {
                 let computers =
                     std::sync::Arc::new(local_computer::LocalComputerState::initialize(&handle)?);
                 computers.start_activity();
+                protected_secrets::start_maintenance(computers.clone());
                 app.manage(computers);
                 app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
             }

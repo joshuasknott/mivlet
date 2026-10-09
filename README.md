@@ -83,6 +83,12 @@ a deployed or production-validated service.
 - Encrypted SQLite persistence for conversations, attached files, memory,
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
+- Protected secret requests on supported Mivlet tool bridges: the human supplies
+  or declines a webhook signing secret in native Windows entry. Agents receive
+  an expiring, scoped, one-use reference; the value stays in account-keyed native
+  credential custody. A native webhook verifier consumes it, with local signature
+  checks, status and approved revocation. This does not deploy webhook ingress or
+  dispatch events. See [protected requests](docs/architecture/local-teammate-computer.md#protected-secret-requests).
 - Conversation controls use assistant-ui over Mivlet's canonical history. Earlier
   messages can be edited into durable branches, answers regenerated, and saved
   alternatives reopened without replaying completed actions. OpenUI renders a

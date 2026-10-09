@@ -75,6 +75,80 @@ the conversation to check persistence. Also test Stop while generating and a
 second request after Stop. Leave the OpenAI API disconnected to verify the
 subscription-only route. Merge only after the live image is visible and usable.
 
+### Protected secret requests
+
+`request-secret` opens a native Windows masked entry window after the existing
+exact tool approval. Agents supply a label, reason, fixed consumer/purpose and
+target identifier; there is no secret-value tool argument or WebView input.
+The human saves or declines. The dialog is excluded from supported Windows
+capture APIs, and Mivlet excludes its own windows from agent selection. It uses
+the exclusive native control reservation, so existing/pending app control must
+finish first and no other agent can select or act on a window during entry.
+The native Stop control and Ctrl+Alt+Esc revoke the generation and close entry;
+account changes, workspace pause and expiry also reject late results. Capture
+does not enable Computer Use or grant an application permission.
+
+Values of 16–512 UTF-8 bytes go directly from the masked native control to a
+zeroizing Rust value and the account-keyed OS credential vault. Only a random
+one-use reference reaches the agent. It binds account, workspace, saved agent,
+generation, original approved request, purpose, consumer, target and a ten-minute
+deadline. Unsupported platforms/custody, unknown/used/expired references and
+scope changes fail closed. Credential values are never serialized into IPC,
+history, audit events, errors, backups, files or model context. Windows capture
+exclusion is an additional privacy measure, not an isolation boundary against
+other software running as the same Windows user.
+
+The first consumer is `webhook-signing-install`, with consumer
+`webhook-signing-key` and purpose `verify-webhook-signature`. It atomically claims
+the reference in the canonical encrypted account store, then deletes the
+one-use credential before installing a separate native HMAC-SHA256 verification
+key. The final durable commit is fenced against Stop and account changes.
+OS credential I/O runs outside the authority locks. A crash during transfer
+leaves an interrupted tombstone; startup cleanup removes uncommitted entries,
+and the old reference never replays. Cleanup failures remain visible through
+`secret-request-status` and are retried. Committed signing keys survive restart.
+History is bounded and contains metadata only; no SQL migration is required.
+
+`webhook-signing-status`, `webhook-signing-verify` and
+`webhook-signing-remove` provide inspection, local synthetic-event verification
+and exact approved revocation. Verification accepts raw body text plus a
+`sha256=<hex>` header, returns a boolean, and neither dispatches Work nor sends a
+network request. Use only public or synthetic event bodies in agent tool calls.
+The native event-ingress integration point is
+`protected_secrets::runtime::verify_webhook_signature(workspace, agent, key_id,
+target_id, body_bytes, signature)`. It checks scope/custody and compares HMAC in
+constant time; the event-automation authority still owns authenticated ingress,
+timestamp/delivery deduplication and existing Work admission. This branch can be
+accepted locally without a webhook server or that workstream's unmerged code.
+
+Behavioral references inspected: T3 Code snapshot
+`a4c9494b0e3606775cc5fc929fc138399288bd43`,
+`apps/server/src/secrets/SecretRequests.ts` and its tests,
+`packages/contracts/src/secretRequest.ts`, and merged
+[PR #15907](https://github.com/pingdotgg/t3code/pull/15907)
+(`9f61ba674115f3ddb67a8a1fbe0a0ac8839551bf`).
+The Mivlet implementation is independently authored; T3's React entry and
+server credential store are not used. Native API references:
+[Windows capture affinity](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowdisplayaffinity),
+[zeroizing native values](https://docs.rs/zeroize/latest/zeroize/struct.Zeroizing.html),
+and [ring HMAC verification](https://docs.rs/ring/latest/ring/hmac/index.html).
+
+Protected writes prepare metadata under the account-owned Store connection and
+check execution pause through that transaction. Cached identity, expiry and
+agent-generation fences guard only SQL commit. Account checks never run inside
+the identity fence, and custody I/O stays outside authority locks. Regression
+tests exercise account-owned storage with synthetic identity checks, rejected
+commits after generation/sign-out changes, rollback and pause after preflight.
+
+Focused verification: `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+protected_request`. The opt-in `protected_secret_native_vault_acceptance` writes,
+reads and removes a random synthetic Windows vault entry. The opt-in
+`protected_secret_native_entry_acceptance` opens owned test dialogs, checks the
+real password control/capture affinity/control bounds and exercises Save,
+Decline and cancellation. Run either with `-- --ignored --nocapture` in an
+interactive Windows session. These are native local checks; they do not establish
+authenticated provider acceptance or live webhook delivery.
+
 ### Windows application control
 
 Computer Use follows the existing global approvals setting. Full Access still

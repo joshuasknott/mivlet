@@ -72,6 +72,12 @@
     "readLikeAllowed": "This read-like action is allowed by the active permission profile."
   },
   "toolEffects": {
+    "request-secret": "local-write",
+    "secret-request-status": "local-read",
+    "webhook-signing-install": "local-write",
+    "webhook-signing-status": "local-read",
+    "webhook-signing-verify": "local-read",
+    "webhook-signing-remove": "delete",
     "repository-status": "local-read",
     "repository-read": "local-read",
     "repository-checkpoint-list": "local-read",

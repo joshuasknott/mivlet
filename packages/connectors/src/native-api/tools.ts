@@ -12,6 +12,8 @@ import type { BackendTool, NativeToolSpec } from "@mivlet/protocol";
 import { OFFICE_TOOLS } from "./office-tools";
 import { PDF_TOOLS } from "./pdf-tools";
 import { REPOSITORY_TOOLS } from "./repository-tools";
+import { PROTECTED_SECRET_TOOLS } from "./protected-secret-tools";
+export { isProtectedSecretTool } from "./protected-secret-tools";
 import { WORKSPACE_TOOLS } from "./workspace-tools";
 import { COMMAND_TOOLS } from "./command-tools";
 import { COLLABORATION_TOOLS, isCollaborationTool } from "./collaboration-tools";
@@ -70,6 +72,7 @@ function appActionSchema(visual: boolean): string {
 
 const TOOL_DEFINITIONS: BackendTool[] = [
   ...Object.values(REPOSITORY_TOOLS),
+  ...PROTECTED_SECRET_TOOLS,
   ...Object.values(WORKSPACE_TOOLS),
   ...Object.values(COMMAND_TOOLS),
   ...Object.values(COLLABORATION_TOOLS),
