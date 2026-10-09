@@ -360,6 +360,7 @@ fn new_work_with_parent(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        external_client: None,
         schedule: None,
         steering: vec![],
         messages: vec![],
@@ -455,6 +456,14 @@ pub(super) fn current(
         }
     }
     let root = ctx.item(&item.root_id)?;
+    crate::mcp_server::repository::check_work(
+        ctx.conn,
+        ctx.store,
+        ctx.scope,
+        &root,
+        &item.agent_id,
+        &item.permission_mode,
+    )?;
     super::schedules::check_schedule(
         ctx.conn,
         ctx.store,
@@ -827,6 +836,14 @@ pub(super) fn agent_command(
                 "work-{:x}",
                 Sha256::digest(format!("{run}:{call}:{agent_id}"))
             );
+            crate::mcp_server::repository::check_work(
+                ctx.conn,
+                ctx.store,
+                ctx.scope,
+                &root,
+                agent_id,
+                &item.permission_mode,
+            )?;
             let child_room = if *focused {
                 if room.project_id.is_none() {
                     room
