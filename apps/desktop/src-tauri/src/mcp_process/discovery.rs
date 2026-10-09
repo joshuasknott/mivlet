@@ -823,15 +823,19 @@ fn commit_session_discovery_authority(
 
 fn approval_for_tool_proposal(
     proposal: &McpToolProposal,
-    fingerprint: &str,
+    context: &ToolProposalContext,
     id: String,
     requested_at: String,
 ) -> crate::models::ApprovalRequest {
-    let (argument_fields, external_destinations) = safe_mcp_argument_preview(&proposal.arguments);
-    let mut data_used = vec![format!("proposal fingerprint: {fingerprint}")];
+    let (argument_fields, external_destinations, argument_preview) =
+        safe_mcp_argument_preview(&proposal.arguments);
+    let mut data_used = vec![format!("MCP connection: {} ({})", context.connection_id, context.transport)];
+    data_used.push(format!("proposal fingerprint: {}", context.proposal_fingerprint));
+    data_used.push(format!("tool: {}", proposal.tool_name));
     if !argument_fields.is_empty() {
         data_used.push(format!("argument fields: {}", argument_fields.join(", ")));
     }
+    data_used.push(format!("validated arguments: {argument_preview}"));
     if !external_destinations.is_empty() {
         data_used.push(format!(
             "external destinations: {}",
@@ -852,8 +856,10 @@ fn approval_for_tool_proposal(
     }
 }
 
-fn safe_mcp_argument_preview(value: &Value) -> (Vec<String>, Vec<String>) {
-    const MAX_PREVIEW_ITEMS: usize = 16;
+const MAX_MCP_PREVIEW_ITEMS: usize = 16;
+const MAX_MCP_PREVIEW_CHARS: usize = 4_096;
+
+fn safe_mcp_argument_preview(value: &Value) -> (Vec<String>, Vec<String>, String) {
 
     fn safe_key_segment(value: &str) -> bool {
         !value.is_empty()
@@ -863,54 +869,123 @@ fn safe_mcp_argument_preview(value: &Value) -> (Vec<String>, Vec<String>) {
                 .all(|character| character.is_ascii_alphanumeric() || "_-".contains(character))
     }
 
-    fn walk(value: &Value, path: &str, fields: &mut Vec<String>, destinations: &mut Vec<String>) {
-        if fields.len() >= MAX_PREVIEW_ITEMS && destinations.len() >= MAX_PREVIEW_ITEMS {
-            return;
+    fn credential_key(value: &str) -> bool {
+        let lower = value.to_ascii_lowercase();
+        [
+            "authorization", "apikey", "api_key", "password", "secret", "token",
+            "credential", "cookie", "private",
+        ]
+        .iter()
+        .any(|marker| lower.contains(marker))
+    }
+
+    fn safe_url(text: &str, destinations: &mut Vec<String>) -> Option<String> {
+        let Ok(mut url) = Url::parse(text) else {
+            return None;
+        };
+        if !matches!(url.scheme(), "http" | "https")
+            || !url.username().is_empty()
+            || url.password().is_some()
+        {
+            return None;
+        }
+        let safe_query = url
+            .query_pairs()
+            .filter(|(key, _)| !credential_key(key.as_ref()))
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect::<Vec<_>>();
+        url.set_query(None);
+        url.set_fragment(None);
+        if !safe_query.is_empty() {
+            url.query_pairs_mut().extend_pairs(safe_query);
+        }
+        if destinations.len() < MAX_MCP_PREVIEW_ITEMS {
+            destinations.push(url.origin().ascii_serialization());
+        }
+        Some(url.to_string())
+    }
+
+    fn preview_value(
+        value: &Value,
+        key: Option<&str>,
+        depth: usize,
+        fields: &mut Vec<String>,
+        destinations: &mut Vec<String>,
+        nodes: &mut usize,
+    ) -> Value {
+        *nodes += 1;
+        if depth > 10 || *nodes > MAX_MCP_PREVIEW_ITEMS * 8 {
+            return Value::String("[truncated]".into());
+        }
+        if fields.len() >= MAX_MCP_PREVIEW_ITEMS && destinations.len() >= MAX_MCP_PREVIEW_ITEMS {
+            return Value::String("[truncated]".into());
+        }
+        if key.is_some_and(credential_key) {
+            return Value::String("[redacted]".into());
         }
         match value {
             Value::Object(object) => {
-                for (key, child) in object.iter().take(MAX_PREVIEW_ITEMS) {
-                    if !safe_key_segment(key) {
+                let mut preview = serde_json::Map::new();
+                for (child_key, child) in object.iter().take(MAX_MCP_PREVIEW_ITEMS) {
+                    if !safe_key_segment(child_key) {
                         continue;
                     }
-                    let child_path = if path.is_empty() {
-                        key.clone()
+                    let child_path = if let Some(path) = key {
+                        format!("{path}.{child_key}")
                     } else {
-                        format!("{path}.{key}")
+                        child_key.clone()
                     };
-                    if fields.len() < MAX_PREVIEW_ITEMS {
+                    if fields.len() < MAX_MCP_PREVIEW_ITEMS {
                         fields.push(child_path.clone());
                     }
-                    walk(child, &child_path, fields, destinations);
+                    preview.insert(
+                        child_key.clone(),
+                        preview_value(child, Some(&child_path), depth + 1, fields, destinations, nodes),
+                    );
                 }
+                if object.len() > MAX_MCP_PREVIEW_ITEMS {
+                    preview.insert("[additional fields omitted]".into(), Value::Bool(true));
+                }
+                Value::Object(preview)
             }
             Value::Array(values) => {
-                for child in values.iter().take(MAX_PREVIEW_ITEMS) {
-                    walk(child, path, fields, destinations);
+                let mut preview = values.iter().take(MAX_MCP_PREVIEW_ITEMS).map(|child| {
+                    preview_value(child, key, depth + 1, fields, destinations, nodes)
+                }).collect::<Vec<_>>();
+                if values.len() > MAX_MCP_PREVIEW_ITEMS {
+                    preview.push(Value::String("[additional items omitted]".into()));
+                }
+                Value::Array(preview)
+            }
+            Value::String(text) => {
+                if let Some(url) = safe_url(text, destinations) {
+                    return Value::String(url);
+                }
+                let bounded: String = text.chars().take(512).collect();
+                if text.chars().nth(512).is_some() {
+                    Value::String(format!("{bounded}…"))
+                } else {
+                    Value::String(bounded)
                 }
             }
-            Value::String(text) if destinations.len() < MAX_PREVIEW_ITEMS => {
-                if let Ok(url) = Url::parse(text) {
-                    if matches!(url.scheme(), "http" | "https")
-                        && url.username().is_empty()
-                        && url.password().is_none()
-                    {
-                        destinations.push(url.origin().ascii_serialization());
-                    }
-                }
-            }
-            _ => {}
+            _ => value.clone(),
         }
     }
 
     let mut fields = Vec::new();
     let mut destinations = Vec::new();
-    walk(value, "", &mut fields, &mut destinations);
+    let mut nodes = 0;
+    let preview = preview_value(value, None, 0, &mut fields, &mut destinations, &mut nodes);
     fields.sort();
     fields.dedup();
     destinations.sort();
     destinations.dedup();
-    (fields, destinations)
+    let mut rendered = serde_json::to_string(&preview).unwrap_or_else(|_| "{}".into());
+    if rendered.chars().count() > MAX_MCP_PREVIEW_CHARS {
+        rendered = rendered.chars().take(MAX_MCP_PREVIEW_CHARS).collect();
+        rendered.push('…');
+    }
+    (fields, destinations, rendered)
 }
 
 fn validate_mcp_tool_name(value: &str) -> Result<(), String> {

@@ -51,6 +51,8 @@ pub struct AppendMessage {
     pub expected_last_sequence: i64,
     pub sequence: i64,
     pub previous_message_id: Option<String>,
+    pub parent_message_id: Option<String>,
+    pub edit_source_message_id: Option<String>,
     pub idempotency_key: String,
     pub revision_id: String,
     pub state: String,
@@ -72,6 +74,21 @@ pub struct ReviseMessage {
     pub content: Value,
     pub run_id: Option<String>,
     pub checkpointed_at: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectBranch {
+    pub thread_id: String,
+    pub head_id: Option<String>,
+    pub expected_head_id: Option<String>,
+    pub expected_last_sequence: i64,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListMessagesPage {
+    pub thread_id: String,
+    pub limit: Option<i64>,
+    pub before_sequence: Option<i64>,
 }
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -164,6 +181,29 @@ pub fn conversation_update_thread(input: UpdateThread) -> Result<thread::ThreadR
         })
         .map_err(|e| e.to_string())
 }
+
+#[tauri::command]
+pub fn conversation_select_branch(
+    window: tauri::WebviewWindow,
+    input: SelectBranch,
+) -> Result<thread::ThreadRow, String> {
+    if window.label() != "main" {
+        return Err("Select conversations from the Mivlet window.".into());
+    }
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
+    let scope = scope()?;
+    store
+        .transaction(|tx| {
+            crate::collaboration::ensure_conversation_idle(tx, store, &input.thread_id)?;
+            let current = thread::get(tx, store, &scope, &input.thread_id)?.ok_or_else(|| crate::store::StoreError::Invalid("Conversation unavailable.".into()))?;
+            if current.last_sequence != input.expected_last_sequence || current.selected_head_id.as_ref().or(current.last_message_id.as_ref()) != input.expected_head_id.as_ref() {
+                return Err(crate::store::StoreError::Invalid("The selected conversation changed in another pane. Reload before switching alternatives.".into()));
+            }
+            thread::select_head(tx, store, &scope, &input.thread_id, input.head_id.as_deref(), &now())
+        })
+        .map_err(|e| e.to_string())
+}
 #[tauri::command]
 pub fn conversation_list_messages(thread_id: String) -> Result<Vec<message::MessageRow>, String> {
     let store = crate::store::try_global()
@@ -172,6 +212,58 @@ pub fn conversation_list_messages(thread_id: String) -> Result<Vec<message::Mess
     store
         .with_conn(|tx| message::list(tx, store, &scope, &thread_id))
         .map_err(|e| e.to_string())
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MessagePage {
+    pub messages: Vec<message::MessageRow>,
+    pub older_cursor: Option<String>,
+    pub has_older_messages: bool,
+    pub branch_heads: Vec<String>,
+}
+
+#[tauri::command]
+pub fn conversation_list_messages_page(input: ListMessagesPage) -> Result<MessagePage, String> {
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Mivlet's encrypted store is not initialized.".to_string())?;
+    let scope = scope()?;
+    let limit = input.limit.unwrap_or(80).clamp(1, 200);
+    store
+        .with_conn(|tx| {
+            let messages = crate::store::repos::message::list_before(
+                tx,
+                store,
+                &scope,
+                &input.thread_id,
+                limit + 1,
+                input.before_sequence,
+            )?;
+            let has_older_messages = messages.len() > limit as usize;
+            let mut messages = messages;
+            if has_older_messages {
+                messages.remove(0);
+            }
+            let older_cursor = messages
+                .first()
+                .filter(|_| has_older_messages)
+                .map(|message| message.sequence.to_string());
+            let mut branch_heads = message::list_branch_heads(tx, &scope, &input.thread_id, 512)?;
+            if let Some(thread) = thread::get(tx, store, &scope, &input.thread_id)? {
+                if let Some(selected) = thread.selected_head_id.or(thread.last_message_id) {
+                    if !branch_heads.iter().any(|head| head == &selected) {
+                        branch_heads.push(selected);
+                    }
+                }
+            }
+            Ok(MessagePage {
+                messages,
+                older_cursor,
+                has_older_messages,
+                branch_heads,
+            })
+        })
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -198,7 +290,19 @@ pub fn conversation_append_message(input: AppendMessage) -> Result<message::Mess
     store
         .transaction(|tx| {
             crate::collaboration::ensure_run_current(tx, store, input.run_id.as_deref())?;
-            message::append(
+            let edit_parent = input
+                .edit_source_message_id
+                .as_deref()
+                .map(|source| {
+                    if input.kind != "user" {
+                        return Err(crate::store::StoreError::Invalid(
+                            "Only user messages can be edited.".into(),
+                        ));
+                    }
+                    message::edit_parent(tx, store, &scope, &input.thread_id, source)
+                })
+                .transpose()?;
+            message::append_with_parent(
                 tx,
                 store,
                 &scope,
@@ -210,6 +314,10 @@ pub fn conversation_append_message(input: AppendMessage) -> Result<message::Mess
                 input.sequence,
                 input.expected_last_sequence,
                 input.previous_message_id.as_deref(),
+                edit_parent
+                    .as_ref()
+                    .map(|parent| parent.as_deref())
+                    .or_else(|| input.parent_message_id.as_deref().map(Some)),
                 &input.idempotency_key,
                 &input.revision_id,
                 &input.state,
