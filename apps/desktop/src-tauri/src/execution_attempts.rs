@@ -437,7 +437,15 @@ pub(crate) fn normalize_execution_attempt(
         return Err("Execution attempt state is incomplete or invalid.".to_string());
     }
     if let Some(usage) = &attempt.usage {
-        if !usage.cost_usd.is_finite() || usage.cost_usd < 0.0 {
+        if !usage.cost_usd.is_finite()
+            || usage.cost_usd < 0.0
+            || usage
+                .cached_input_tokens
+                .is_some_and(|n| n > usage.input_tokens)
+            || usage
+                .reasoning_tokens
+                .is_some_and(|n| n > usage.output_tokens)
+        {
             return Err("Execution attempt usage is invalid.".to_string());
         }
     }
@@ -945,6 +953,10 @@ mod tests {
                 output_tokens: 4,
                 cost_usd: 0.01,
                 cost_estimated: true,
+                cost_unknown: Some(false),
+                cached_input_tokens: None,
+                cache_write_tokens: None,
+                reasoning_tokens: None,
             }),
             thread_id: Some("thread-1".to_string()),
             exchanges: vec![crate::models::ExecutionExchange {

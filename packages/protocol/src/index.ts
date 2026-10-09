@@ -11,6 +11,7 @@ export * from "./domains/hosted-execution-capability.js";
 export * from "./env-compat.js";
 export * from "./domains/local-computer.js";
 export * from "./domains/coding.js";
+export * from "./domains/pull-requests.js";
 export * from "./domains/command-jobs.js";
 export * from "./domains/repository-checkpoints.js";
 export * from "./domains/local-projects.js";
@@ -1049,3 +1050,5 @@ export interface MivletAgentProfile {
   /** Local conversation references for this teammate, including earlier chats. */
   threadIds?: string[];
 }
+export type * from "./domains/provider-usage";
+export type { ProviderContinuationInput, ProviderContinuationMessage, ProviderContinuation } from "./domains/provider-continuation";

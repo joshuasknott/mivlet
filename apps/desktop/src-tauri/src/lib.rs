@@ -63,7 +63,9 @@ pub mod paths;
 mod permission_policy;
 #[cfg(test)]
 mod product_spine_parity;
+mod protected_secrets;
 mod provider_process;
+mod provider_usage;
 mod search;
 mod secret_redaction;
 mod snapshot;
@@ -137,8 +139,15 @@ pub fn run() {
                 let computers =
                     std::sync::Arc::new(local_computer::LocalComputerState::initialize(&handle)?);
                 computers.start_activity();
+                local_computer::coding::pull_requests::watch::start(
+                    handle.clone(),
+                    computers.clone(),
+                );
+                protected_secrets::start_maintenance(computers.clone());
                 app.manage(computers);
                 app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
+                app.manage(local_schedules::events::EventIngress::new());
+                local_schedules::events::start_maintenance();
             }
             account_session::start_watchdog(handle);
             Ok(())
@@ -159,6 +168,9 @@ pub fn run() {
                     .try_state::<std::sync::Arc<local_computer::LocalComputerState>>()
                     .map(|state| state.inner().clone());
                 let _ = window.hide();
+                if let Some(ingress) = app.try_state::<local_schedules::events::EventIngress>() {
+                    let _ = ingress.stop();
+                }
                 tauri::async_runtime::spawn(async move {
                     codex_app_server::shutdown_all_runs();
                     embedded_agent::shutdown_all();
@@ -171,6 +183,13 @@ pub fn run() {
             }
         })
         .invoke_handler(account_session::guard(tauri::generate_handler![
+            local_computer::coding::pull_requests::coding_pr_read,
+            local_computer::coding::pull_requests::coding_pr_local,
+            local_computer::coding::pull_requests::watch::coding_pr_watch,
+            provider_usage::provider_usage_report,
+            provider_usage::provider_allowance,
+            provider_usage::refresh_provider_allowance,
+            provider_usage::set_provider_usage_price,
             account_session::account_theme,
             local_computer::control::local_app_stop,
             local_computer::artifacts::local_computer_open_artifact,
@@ -202,8 +221,16 @@ pub fn run() {
             local_schedules::local_schedule_dispatch_renew,
             local_schedules::local_schedule_dispatch_finish,
             local_schedules::local_schedule_dispatch_abandon,
+            local_schedules::events::commands::event_trigger_save,
+            local_schedules::events::commands::event_template_preview,
+            local_schedules::events::commands::event_delivery_list,
+            local_schedules::events::ingress::event_ingress_status,
+            local_schedules::events::ingress::event_ingress_configure,
+            local_schedules::events::ingress::event_ingress_restore,
             local_projects::local_project_create,
             collaboration::collaboration_load,
+            collaboration::provider_continuation::provider_continuation_preview,
+            collaboration::provider_continuation_read::provider_continuation_read,
             collaboration::ui::collaboration_ui,
             collaboration::collaboration_command,
             local_projects::local_project_list,
@@ -362,6 +389,11 @@ pub fn run() {
             local_computer::repositories::local_computer_import_repository,
             local_computer::coding::coding_repository_attach,
             local_computer::coding::coding_repository_status,
+            local_computer::coding::copy_manager::coding_copy_inventory,
+            local_computer::coding::copy_manager::account::coding_copy_account_inventory,
+            local_computer::coding::copy_manager::coding_copy_preview,
+            local_computer::coding::copy_manager::coding_copy_select,
+            local_computer::coding::copy_manager::coding_copy_delete,
             local_computer::coding::checkpoints::coding_checkpoint_inspect,
             local_computer::execution_setup::native_execution_status,
             local_computer::command_jobs::native_command_jobs,

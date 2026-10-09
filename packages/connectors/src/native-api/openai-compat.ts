@@ -26,7 +26,7 @@ interface OpenAiChoiceDelta {
 }
 interface OpenAiChunk {
   choices?: Array<{ delta?: OpenAiChoiceDelta; finish_reason?: string | null }>;
-  usage?: { prompt_tokens?: number; completion_tokens?: number };
+  usage?: { prompt_tokens?: number; completion_tokens?: number; prompt_tokens_details?: { cached_tokens?: number; cache_write_tokens?: number }; completion_tokens_details?: { reasoning_tokens?: number }; cost?: number };
   error?: { message?: string };
 }
 
@@ -90,6 +90,20 @@ interface OpenAiStreamState {
   toolCalls: Map<number, { index: number; id?: string; name: string; arguments: string }>;
 }
 
+function usageEvent(providerId: string, usage: NonNullable<OpenAiChunk["usage"]>): BackendAgentEvent {
+  // OpenRouter includes cache writes in prompt_tokens; Mivlet stores writes
+  // separately, consistently with Anthropic and OpenCode accounting.
+  const write = providerId === "openrouter" ? usage.prompt_tokens_details?.cache_write_tokens : undefined;
+  const input = Math.max(0, (usage.prompt_tokens ?? 0) - (write ?? 0));
+  const output = usage.completion_tokens ?? 0;
+  const reported = providerId === "openrouter" && typeof usage.cost === "number" && Number.isFinite(usage.cost) && usage.cost >= 0;
+  return { type: "usage", inputTokens: input, outputTokens: output,
+    cachedInputTokens: usage.prompt_tokens_details?.cached_tokens,
+    cacheWriteTokens: write, reasoningTokens: usage.completion_tokens_details?.reasoning_tokens,
+    costUsd: reported ? usage.cost! : priceFor(providerId, input, output),
+    costEstimated: !reported, costUnknown: !reported && !hasKnownPrice(providerId) };
+}
+
 /** Create fresh per-stream state. */
 export function newOpenAiStreamState(): OpenAiStreamState {
   return { toolCalls: new Map() };
@@ -128,16 +142,7 @@ export function parseOpenAiStreamLine(
     state.toolCalls.set(fragment.index, buffered);
   }
   if (chunk.usage) {
-    const input = chunk.usage.prompt_tokens ?? 0;
-    const output = chunk.usage.completion_tokens ?? 0;
-    events.push({
-      type: "usage",
-      inputTokens: input,
-      outputTokens: output,
-      costUsd: priceFor(providerId, input, output),
-      costEstimated: true,
-      costUnknown: !hasKnownPrice(providerId)
-    });
+    events.push(usageEvent(providerId, chunk.usage));
   }
   if (choice?.finish_reason) {
     if (choice.finish_reason === "tool_calls") {
@@ -181,7 +186,8 @@ function toToolCallEvent(providerId: string, raw: OpenAiToolCallDelta): BackendA
 /** Parse a single OpenAI SSE line into zero or more normalized events. */
 export function parseOpenAiLine(
   providerId: string,
-  line: string
+  line: string,
+  usageOnly = false
 ): BackendAgentEvent[] {
   const payload = extractPayload(line);
   if (!payload) {
@@ -198,6 +204,7 @@ export function parseOpenAiLine(
   }
 
   const events: BackendAgentEvent[] = [];
+  if (usageOnly) return chunk.usage ? [usageEvent(providerId, chunk.usage)] : [];
   const choice = chunk.choices?.[0];
   if (choice?.delta?.content) {
     events.push({ type: "text-delta", text: choice.delta.content });
@@ -208,16 +215,7 @@ export function parseOpenAiLine(
     }
   }
   if (chunk.usage) {
-    const input = chunk.usage.prompt_tokens ?? 0;
-    const output = chunk.usage.completion_tokens ?? 0;
-    events.push({
-      type: "usage",
-      inputTokens: input,
-      outputTokens: output,
-      costUsd: priceFor(providerId, input, output),
-      costEstimated: true,
-      costUnknown: !hasKnownPrice(providerId)
-    });
+    events.push(usageEvent(providerId, chunk.usage));
   }
   if (choice?.finish_reason) {
     const finish =

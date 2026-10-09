@@ -6,6 +6,7 @@ import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass"
 import { Check } from "@phosphor-icons/react/dist/csr/Check";
 import type { ProviderModelOption } from "../lib/provider-models";
 import { ProviderIcon } from "./ProviderIcon";
+import { ProviderAllowanceIndicator } from "./usage/ProviderUsage";
 
 const EFFORT_LABELS: Record<string, string> = {
   none: "None", minimal: "Minimal", low: "Low", medium: "Medium",
@@ -167,6 +168,7 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
       {selected?.reasoning?.supportedEfforts.length ? <small className="composer-model__effort">{currentEffort ? effortLabel(currentEffort) : "Default"}</small> : null}
       <CaretDown size={13} />
     </button>
+    {!hideTrigger ? <ProviderAllowanceIndicator providerId={selected?.providerId} /> : null}
     {open ? <div ref={panel} id={panelId} className={`composer-menu model-picker${showEffort ? " model-picker--effort" : ""}${providers.length <= 1 ? " model-picker--single-provider" : ""}`} role="dialog" aria-label="Model and reasoning">
       {showEffort ? <div className="model-picker__effort-view">
         <div className="model-picker__summary">

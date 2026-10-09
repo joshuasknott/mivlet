@@ -10,6 +10,7 @@
 
 pub(crate) mod automation;
 pub(crate) mod background;
+pub(crate) mod events;
 
 use chrono::{
     DateTime, Datelike, Days, Duration, LocalResult, NaiveDateTime, NaiveTime, SecondsFormat,
@@ -75,6 +76,10 @@ impl LocalScheduleStatus {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum LocalScheduleTrigger {
+    Event {
+        #[serde(flatten)]
+        config: events::models::EventConfig,
+    },
     Once {
         #[serde(rename = "localDateTime")]
         local_date_time: String,
@@ -93,6 +98,7 @@ pub enum LocalScheduleTrigger {
 impl LocalScheduleTrigger {
     fn kind(&self) -> &'static str {
         match self {
+            Self::Event { .. } => "event",
             Self::Once { .. } => "once",
             Self::Daily { .. } => "daily",
             Self::Weekly { .. } => "weekly",
@@ -187,6 +193,8 @@ struct SchedulePayload {
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct OccurrencePayload {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    event: Option<events::models::EventWorkOrigin>,
     #[serde(default = "research_kind")]
     pub execution_kind: String,
     #[serde(default = "read_only_permission")]
@@ -383,6 +391,9 @@ pub fn local_schedule_preview(
 
 #[tauri::command]
 pub fn local_schedule_create(request: CreateLocalScheduleRequest) -> Result<LocalSchedule, String> {
+    if matches!(request.trigger, LocalScheduleTrigger::Event { .. }) {
+        return Err("Configure event triggers through protected signing-key setup.".into());
+    }
     let now = Utc::now();
     let store = global_store()?;
     let schedule = store
@@ -402,6 +413,9 @@ pub fn local_schedule_create(request: CreateLocalScheduleRequest) -> Result<Loca
 
 #[tauri::command]
 pub fn local_schedule_update(request: UpdateLocalScheduleRequest) -> Result<LocalSchedule, String> {
+    if matches!(request.trigger, LocalScheduleTrigger::Event { .. }) {
+        return Err("Edit event triggers through their scoped event configuration.".into());
+    }
     let now = Utc::now();
     let store = global_store()?;
     let schedule = store
@@ -527,6 +541,7 @@ pub fn local_schedule_dispatch_claim(
     *active = None;
     let store = global_store()?;
     let scope = resolve_private_scope(store, &request.workspace_id, ScopeAccess::Write)?;
+    events::require_schedule_key(store, &scope, &request.expected_schedule_id)?;
     let reservation = LocalScheduleCapacityReservation::new(
         random_token("capacity").map_err(|error| error.to_string())?,
     )?;
@@ -911,6 +926,13 @@ fn update_at(
         ));
     }
     let prior = decode_schedule_payload(&row)?;
+    if matches!(prior.trigger, LocalScheduleTrigger::Event { .. })
+        && !matches!(request.trigger, LocalScheduleTrigger::Event { .. })
+    {
+        return Err(StoreError::Invalid(
+            "An event trigger cannot become a clock schedule.".into(),
+        ));
+    }
     let timezone = parse_timezone(&request.timezone)?;
     let next = initial_slot(&request.trigger, timezone, now)?.map(|slot| timestamp(slot.instant));
     let prompt_changed = prior.prompt != request.prompt;
@@ -974,6 +996,19 @@ fn set_status_at(
         return schedule_from_row(row);
     }
     let payload = decode_schedule_payload(&row)?;
+    if matches!(payload.trigger, LocalScheduleTrigger::Event { .. }) {
+        crate::store::repos::local_event::retire_pending(
+            tx,
+            &scope.private,
+            &row.id,
+            if request.status == LocalScheduleStatus::Cancelled {
+                "removed"
+            } else {
+                "paused"
+            },
+        )?;
+        row.next_run_at = None;
+    }
     row.revision = checked_revision(row.revision)?;
     row.status = request.status.as_str().into();
     row.updated_at = timestamp(now);
@@ -1036,6 +1071,9 @@ fn claim_due_after_capacity_matching(
             ));
         }
         let schedule = schedule_from_row(schedule_row.clone())?;
+        if let LocalScheduleTrigger::Event { config } = &schedule.trigger {
+            return events::claim(tx, store, scope, schedule_row, config, &reservation, now);
+        }
         let timezone = parse_timezone(&schedule.timezone)?;
         let Some(slot) = latest_due_slot(&schedule.trigger, timezone, now)? else {
             return Err(StoreError::Invalid(
@@ -1057,6 +1095,7 @@ fn claim_due_after_capacity_matching(
         let occurrence_id = random_token("occurrence")?;
         let lease_expires_at = timestamp(now + Duration::minutes(CLAIM_LEASE_MINUTES));
         let occurrence_payload = OccurrencePayload {
+            event: None,
             execution_kind: schedule.execution_kind.clone(),
             permission_mode: schedule.permission_mode.clone(),
             work_id: None,
@@ -1363,6 +1402,16 @@ fn validate_catalog_id(value: &str, label: &str, max: usize) -> crate::store::Re
 
 fn validate_trigger(trigger: &LocalScheduleTrigger) -> crate::store::Result<()> {
     match trigger {
+        LocalScheduleTrigger::Event { config } => {
+            if config.route_id.len() != 64
+                || !config.route_id.bytes().all(|c| c.is_ascii_hexdigit())
+                || config.key_version == 0
+            {
+                return Err(StoreError::Invalid(
+                    "Event triggers require a native signing-key binding.".into(),
+                ));
+            }
+        }
         LocalScheduleTrigger::Once { local_date_time } => {
             parse_local_datetime(local_date_time)?;
         }
@@ -1423,6 +1472,7 @@ fn initial_slot(
     now: DateTime<Utc>,
 ) -> crate::store::Result<Option<CivilSlot>> {
     match trigger {
+        LocalScheduleTrigger::Event { .. } => Ok(None),
         LocalScheduleTrigger::Once { local_date_time } => {
             let intended = parse_local_datetime(local_date_time)?;
             let slot = resolve_civil_slot(timezone, intended)?;
@@ -1443,6 +1493,7 @@ fn next_slot_after(
     after: DateTime<Utc>,
 ) -> crate::store::Result<Option<CivilSlot>> {
     match trigger {
+        LocalScheduleTrigger::Event { .. } => Ok(None),
         LocalScheduleTrigger::Once { local_date_time } => {
             let slot = resolve_civil_slot(timezone, parse_local_datetime(local_date_time)?)?;
             Ok((slot.instant > after).then_some(slot))
@@ -1498,6 +1549,7 @@ fn latest_due_slot(
     now: DateTime<Utc>,
 ) -> crate::store::Result<Option<CivilSlot>> {
     match trigger {
+        LocalScheduleTrigger::Event { .. } => Ok(None),
         LocalScheduleTrigger::Once { local_date_time } => {
             let slot = resolve_civil_slot(timezone, parse_local_datetime(local_date_time)?)?;
             Ok((slot.instant <= now).then_some(slot))

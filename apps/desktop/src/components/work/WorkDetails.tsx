@@ -1,11 +1,12 @@
 import { useState } from "react";
-import type { CollaborationWorkItem, WorkOutput } from "@mivlet/protocol";
+import type { CollaborationCommand, CollaborationSnapshot, CollaborationWorkItem, WorkOutput } from "@mivlet/protocol";
 import { activeWork } from "../../lib/workspace-execution";
 import {
   MAX_PROMOTED_MEMORY_VALUE,
   memoryPromotionDestination,
 } from "../../lib/work-memory";
 import { WorkStatusBadge } from "./WorkStatusBadge";
+import { ProviderResetControl } from "../usage/ProviderResetControl";
 import "./work.css";
 
 const ATTACHMENT_KINDS: Record<string, string> = {
@@ -29,12 +30,14 @@ export function WorkDetails({
   onContinue,
   onSteer,
   onPromote,
+  onProviderReset,
 }: {
   item: CollaborationWorkItem;
   onOpen: (
     conversationId: string,
     source?: Pick<WorkOutput, "branchId" | "messageId" | "sourceRevisionId">,
   ) => void;
+  onProviderReset?: (command: CollaborationCommand) => Promise<CollaborationSnapshot>;
   onStop: (id: string) => void | Promise<void>;
   onContinue: (id: string, expectedGeneration: number) => void | Promise<void>;
   onSteer: (
@@ -123,6 +126,7 @@ export function WorkDetails({
         {item.reason ? (
           <p className="work-details-reason">{item.reason}</p>
         ) : null}
+        <ProviderResetControl key={`${item.id}:${item.generation}`} item={item} onCommand={onProviderReset} />
         {uncertain ? (
           <p className="work-details-notice">
             This request was interrupted or steered after provider activity

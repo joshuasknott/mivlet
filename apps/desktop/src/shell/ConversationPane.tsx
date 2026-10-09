@@ -70,6 +70,14 @@ import {
 } from "./useConversationOrigin";
 import type { ConversationOriginNavigation } from "./useWorkspaceNavigation";
 
+const ProviderContinuationControl = lazy(() =>
+  import("../components/conversation/ProviderContinuationControl").then(
+    (module) => ({
+      default: module.ProviderContinuationControl,
+    }),
+  ),
+);
+
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
     default: module.ApprovalPanel,
@@ -1115,6 +1123,52 @@ export function ConversationPane({
           </div>
         </div>
         <div className="conversation-pane-composer">
+          {history?.messages.length && profile ? (
+            <Suspense fallback={null}>
+              <ProviderContinuationControl
+                workspaceId={service.workspaceId}
+                conversationId={room.id}
+                agentId={profile.id}
+                ownerKey={`${owner?.internalUserId}:${owner?.memberId ?? ""}`}
+                model={model}
+                provider={runtime.backendProviders.find(
+                  (p) => p.id === model?.providerId,
+                )}
+                prompt={composer.text}
+                attachmentCount={composer.attachments.length}
+                disabled={
+                  branchSelectionPending ||
+                  originNavigation.pending ||
+                  Boolean(pendingOutputRevision) ||
+                  running.length > 0 ||
+                  pending ||
+                  Boolean(composer.replyWorkId) ||
+                  runtime.accountWorkspacePending
+                }
+                prepare={async () => {
+                  await runtime.flushSnapshot();
+                  await service.refresh();
+                }}
+                onContinue={async (input, fingerprint) => {
+                  if (!composer.beginSubmission())
+                    throw new Error("This draft is already being submitted.");
+                  try {
+                    await service.command({
+                      action: "start-provider-continuation",
+                      id: `work-${crypto.randomUUID()}`,
+                      input,
+                      fingerprint,
+                      reconcile: true,
+                    });
+                    await composer.consume(composer.revision);
+                    scroll.toLatest();
+                  } finally {
+                    composer.endSubmission();
+                  }
+                }}
+              />
+            </Suspense>
+          ) : null}
           {composer.replyWorkId ? (
             <p className="conversation-attention" role="status">
               Following up with{" "}

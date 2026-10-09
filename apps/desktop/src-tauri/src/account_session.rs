@@ -173,6 +173,9 @@ pub(crate) async fn restart(app: tauri::AppHandle) {
         return;
     }
     crate::background_worker::revoke().await;
+    if let Some(ingress) = app.try_state::<crate::local_schedules::events::EventIngress>() {
+        let _ = ingress.stop();
+    }
     // Hide and destroy the WebView before a different account may be admitted:
     // this drops microphones, audio, JS callbacks, query caches and drafts in RAM.
     if let Some(window) = app.get_webview_window("main") {

@@ -199,6 +199,9 @@ export interface ExecutionAttempt {
   usage?: {
     inputTokens: number;
     outputTokens: number;
+    cachedInputTokens?: number;
+    cacheWriteTokens?: number;
+    reasoningTokens?: number;
     costUsd: number;
     costEstimated?: boolean;
     costUnknown?: boolean;
@@ -609,6 +612,9 @@ export type BackendAgentEvent =
       type: "usage";
       inputTokens: number;
       outputTokens: number;
+      cachedInputTokens?: number;
+      cacheWriteTokens?: number;
+      reasoningTokens?: number;
       costUsd: number;
       costEstimated?: boolean;
       /** True when the provider supplied no cost and Mivlet has no trusted rate. */

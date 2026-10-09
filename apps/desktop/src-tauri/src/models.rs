@@ -332,6 +332,14 @@ pub struct ExecutionAttemptUsage {
     pub cost_usd: f64,
     #[serde(default)]
     pub cost_estimated: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cost_unknown: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cached_input_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cache_write_tokens: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]

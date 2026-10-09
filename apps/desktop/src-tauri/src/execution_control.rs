@@ -92,18 +92,24 @@ pub(crate) fn ensure_active_execution_allowed() -> Result<(), String> {
         #[cfg(not(test))]
         return Err("Mivlet's encrypted store is not initialized.".to_string());
     };
-    let paused = store
-        .with_conn(|conn| {
-            read_state(
-                conn,
-                store,
-                crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
-            )
-            .map(|state| state.paused)
-        })
-        .map_err(|error| error.to_string())?;
-    if paused {
-        Err("New execution is paused for this workspace. Resume it in Privacy settings before starting more work.".into())
+    store
+        .with_conn(|conn| ensure_active_execution_allowed_in(conn, store))
+        .map_err(|error| error.to_string())
+}
+
+/// Check pause inside an existing transaction without reacquiring the Store.
+pub(crate) fn ensure_active_execution_allowed_in(
+    conn: &rusqlite::Connection,
+    store: &Store,
+) -> crate::store::Result<()> {
+    if read_state(
+        conn,
+        store,
+        crate::store::repos::scope::DEFAULT_WORKSPACE_ID,
+    )?
+    .paused
+    {
+        Err(StoreError::Invalid("New execution is paused for this workspace. Resume it in Privacy settings before starting more work.".into()))
     } else {
         Ok(())
     }

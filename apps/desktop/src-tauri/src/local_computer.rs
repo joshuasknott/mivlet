@@ -373,6 +373,29 @@ impl LocalComputerState {
             .begin_agent(expected_generation)
     }
 
+    pub(crate) fn with_protected_input<T>(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        request: &str,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        if let Some(error) = self
+            .activity_error
+            .lock()
+            .map_err(|_| "Native Stop is unavailable.")?
+            .clone()
+        {
+            return Err(error);
+        }
+        let authority = self.authority_for(workspace, agent)?;
+        let _reservation = self
+            .native
+            .reserve_protected_input(workspace, agent, generation, request, authority)?;
+        operation()
+    }
+
     pub(crate) fn with_artifact_files<T>(
         &self,
         workspace_id: &str,
