@@ -28,7 +28,14 @@ fn snapshot(root: &Path) -> BTreeMap<PathBuf, (u64, std::time::SystemTime, Vec<u
     while let Some(path) = pending.pop() {
         let metadata = fs::symlink_metadata(&path).unwrap();
         let bytes = if metadata.is_file() {
-            fs::read(&path).unwrap()
+            // Windows denies reads of live native lease files. Their zero-byte
+            // length already establishes empty content; still compare all
+            // lengths and timestamps, and read every nonempty file normally.
+            if metadata.len() == 0 {
+                Vec::new()
+            } else {
+                fs::read(&path).unwrap()
+            }
         } else {
             pending.extend(fs::read_dir(&path).unwrap().map(|e| e.unwrap().path()));
             Vec::new()

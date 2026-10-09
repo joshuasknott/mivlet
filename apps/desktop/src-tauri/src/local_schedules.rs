@@ -9,6 +9,7 @@
 #![allow(dead_code)]
 
 pub(crate) mod automation;
+pub(crate) mod background;
 pub(crate) mod events;
 
 use chrono::{

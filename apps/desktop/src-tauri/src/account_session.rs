@@ -172,6 +172,7 @@ pub(crate) async fn restart(app: tauri::AppHandle) {
     if CLOSING.swap(true, Ordering::AcqRel) {
         return;
     }
+    crate::background_worker::revoke().await;
     if let Some(ingress) = app.try_state::<crate::local_schedules::events::EventIngress>() {
         let _ = ingress.stop();
     }

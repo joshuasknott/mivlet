@@ -96,6 +96,7 @@ export interface WorkAttachment {
   sha256?: string;
 }
 export interface CollaborationWorkItem {
+  executionOwner?: "native-background";
   continuation?: import("./provider-continuation").ProviderContinuation;
   /** Frozen occurrence metadata; carries no claim token or execution authority. */
   schedule?: {

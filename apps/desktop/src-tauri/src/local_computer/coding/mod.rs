@@ -15,7 +15,7 @@ use std::{
     fs,
     io::{Read, Write},
     path::{Path, PathBuf},
-    sync::{Arc, Mutex, OnceLock},
+    sync::{Arc, Mutex, MutexGuard, OnceLock},
 };
 use tauri::State;
 
@@ -38,14 +38,40 @@ pub struct Repository {
     pub publication: Option<String>,
 }
 
-fn lock(directory: &Path) -> Result<Arc<Mutex<()>>, String> {
-    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+struct RepositoryLock {
+    directory: PathBuf,
+    local: Mutex<()>,
+}
+struct RepositoryGuard<'a> {
+    _local: MutexGuard<'a, ()>,
+    _process: fs::File,
+}
+impl RepositoryLock {
+    fn try_lock(&self) -> Result<RepositoryGuard<'_>, String> {
+        let local = self.local.try_lock().map_err(|_| "Repository is busy.")?;
+        let process = super::leases::acquire(
+            &self.directory.join("repository-operation.lock"),
+            std::time::Duration::ZERO,
+        )?;
+        Ok(RepositoryGuard {
+            _local: local,
+            _process: process,
+        })
+    }
+}
+fn lock(directory: &Path) -> Result<Arc<RepositoryLock>, String> {
+    static LOCKS: OnceLock<Mutex<HashMap<PathBuf, Arc<RepositoryLock>>>> = OnceLock::new();
     Ok(LOCKS
         .get_or_init(Mutex::default)
         .lock()
         .map_err(|_| "Repository is unavailable.")?
         .entry(directory.to_owned())
-        .or_default()
+        .or_insert_with(|| {
+            Arc::new(RepositoryLock {
+                directory: directory.to_owned(),
+                local: Mutex::new(()),
+            })
+        })
         .clone())
 }
 fn directory(state: &LocalComputerState, workspace: &str, agent: &str) -> Result<PathBuf, String> {

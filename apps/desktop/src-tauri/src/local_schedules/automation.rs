@@ -13,7 +13,7 @@ pub struct StageRequest {
 #[serde(rename_all = "camelCase")]
 pub struct StagedWork {
     work_id: String,
-    thread_id: String,
+    pub(super) thread_id: String,
 }
 
 #[tauri::command]

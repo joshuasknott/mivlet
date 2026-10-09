@@ -2,6 +2,25 @@ use super::super::authority::ComputerAuthority;
 use super::*;
 
 #[test]
+fn ownership_handoff_refuses_active_jobs_and_releases_idle_scopes() {
+    let root = tempfile::tempdir().unwrap();
+    let auth = ComputerAuthority::load(root.path()).unwrap();
+    let ticket = auth.begin_agent(1).unwrap();
+    let manager = JobManager::default();
+    let scope = manager.scope(root.path()).unwrap();
+    let session = scope
+        .start(&ticket, None, "echo fixture", false, 60, true)
+        .unwrap();
+    assert!(manager.release_idle().is_err());
+    drop(session);
+    drop(scope);
+    drop(ticket);
+    manager.release_idle().unwrap();
+    let next_owner = JobManager::default();
+    assert!(next_owner.scope(root.path()).is_ok());
+}
+
+#[test]
 fn running_transition_does_not_block_the_supervisor_on_disk() {
     let root = tempfile::tempdir().unwrap();
     let auth = ComputerAuthority::load(root.path()).unwrap();

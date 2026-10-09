@@ -1265,6 +1265,7 @@ mod tests {
                 )
                 .is_err());
                 let delegated = Work {
+                    execution_owner: None,
                     reset_continuation: None,
                     continuation: None,
                     schedule: None,

@@ -223,7 +223,7 @@ fn active_work_lock_recovery_checkpoint_and_unknown_ownership_fail_closed() {
     );
     assert!(select(&directory, &repo.id, &owner, &active, &ticket).is_err());
     let mutex = lock(&directory).unwrap();
-    let guard = mutex.lock().unwrap();
+    let guard = mutex.try_lock().unwrap();
     assert!(
         inventory(&directory, &owner, &Evidence::default(), &ticket)
             .unwrap()
@@ -405,7 +405,7 @@ fn work_or_repository_activity_after_preview_consumes_authority_without_deleting
     .unwrap();
     let action = action(&target, preview);
     let mutex = lock(&directory).unwrap();
-    let guard = mutex.lock().unwrap();
+    let guard = mutex.try_lock().unwrap();
     assert!(delete(&directory, &owner, &action, &Evidence::default(), &ticket).is_err());
     drop(guard);
     assert!(delete(&directory, &owner, &action, &Evidence::default(), &ticket).is_err());

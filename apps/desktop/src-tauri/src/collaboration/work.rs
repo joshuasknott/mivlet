@@ -360,6 +360,7 @@ fn new_work_with_parent(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        execution_owner: None,
         reset_continuation: None,
         continuation: None,
         schedule: None,
@@ -507,6 +508,11 @@ pub(super) fn bind(
 ) -> Result<()> {
     id(run)?;
     let mut item = current(ctx, key, generation, None)?;
+    if crate::background_worker::owns_work(&item) && !crate::background_worker::is_worker() {
+        return Err(invalid(
+            "This Work belongs to the native background owner. Reconnect to inspect or stop it.",
+        ));
+    }
     // An already-dispatched run keeps the exact inputs it captured. A repeated
     // bind is idempotent and never rewrites them.
     if item.current_run_id.as_deref() == Some(run) && item.status.executing() {

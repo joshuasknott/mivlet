@@ -85,8 +85,9 @@ function renderTab(activeTab: React.ComponentProps<typeof SettingsPage>["activeT
 }
 
 describe("SettingsPage", () => {
-  it("keeps local workspace storage separate from account administration", () => {
+  it("keeps local workspace storage separate from account administration", async () => {
     const view = renderTab("general");
+    await screen.findByText("Requires the installed Windows app");
 
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByText("Joshua's workspace")).toBeInTheDocument();
@@ -167,15 +168,17 @@ describe("SettingsPage", () => {
     const runtime = stubRuntime();
     const view = renderTab("general", runtime);
     fireEvent.click(screen.getByRole("button", { name: "Light" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Light theme applied.");
+    expect(screen.getByRole("status", { name: "Settings update" })).toHaveTextContent("Light theme applied.");
+    expect(screen.getByRole("status", { name: "Background execution" })).toBeVisible();
     view.rerender(<SettingsPage runtime={runtime} theme="light" onThemeChange={() => {}} activeTab="providers" workspaceName="Joshua's workspace" />);
     expect(screen.queryByText("Light theme applied.")).not.toBeInTheDocument();
   });
 });
 
-it("keeps the existing custom policy until a preset is explicitly selected", () => {
+it("keeps the existing custom policy until a preset is explicitly selected", async () => {
   const runtime = stubRuntime({ permissionLabel: "Custom" });
   renderTab("general", runtime);
+  await screen.findByText("Requires the installed Windows app");
   const select = screen.getByRole("combobox", { name: "Approvals" });
   expect(select).toHaveValue("Custom");
   expect(runtime.selectPermissionLabel).not.toHaveBeenCalled();

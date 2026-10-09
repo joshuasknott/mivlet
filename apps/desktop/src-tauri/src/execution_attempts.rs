@@ -814,6 +814,9 @@ pub fn recover_interrupted_execution_attempts(
             )?;
             let mut pending = Vec::new();
             for id in ids {
+                if crate::background_worker::owns_attempt(tx, store, &id)? {
+                    continue;
+                }
                 let row =
                     execution_attempt::get_scoped(tx, store, &scope, &id)?.ok_or_else(|| {
                         crate::store::StoreError::Invalid(
@@ -862,6 +865,9 @@ pub(crate) fn recover_interrupted_attempts_in_store(
             )?;
             let mut out = Vec::new();
             for id in ids {
+                if crate::background_worker::owns_attempt(tx, store, &id)? {
+                    continue;
+                }
                 let row =
                     execution_attempt::get_scoped(tx, store, &scope, &id)?.ok_or_else(|| {
                         crate::store::StoreError::Invalid(

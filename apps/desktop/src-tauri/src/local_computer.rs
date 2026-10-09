@@ -9,6 +9,7 @@ pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;
 pub(crate) mod execution_setup;
+pub(crate) mod leases;
 pub(crate) mod office_authoring;
 pub(crate) mod office_drafts;
 pub(crate) mod office_editing;
@@ -177,6 +178,36 @@ pub struct LocalComputerCancelRequest {
 }
 
 impl LocalComputerState {
+    pub(crate) fn prepare_background_owner(&self) -> Result<(), String> {
+        self.ensure_open()?;
+        for authority in self
+            .authorities
+            .lock()
+            .map_err(|_| "Computer authority is unavailable.")?
+            .values()
+        {
+            if authority.has_local_operations()? {
+                return Err("Finish or Stop current computer operations before enabling background commands.".into());
+            }
+        }
+        self.jobs.release_idle()
+    }
+    pub(crate) fn refresh_background_plugins(&self) -> Result<(), String> {
+        let saved = plugins::PluginAuthority::load(&self.root.join("plugins.json"))?.snapshot();
+        let bits = if saved.computer { plugins::COMPUTER } else { 0 };
+        let previous = self.plugins.bits.swap(bits, Ordering::AcqRel);
+        if bits == 0 && previous != 0 {
+            for authority in self
+                .authorities
+                .lock()
+                .map_err(|_| "Computer authority is unavailable.")?
+                .values()
+            {
+                authority.revoke_and_drain_later();
+            }
+        }
+        Ok(())
+    }
     pub fn initialize(app: &AppHandle) -> Result<Self, String> {
         let root = crate::paths::app_data_dir(app)?.join("local-computers");
         std::fs::create_dir_all(&root)
@@ -948,6 +979,9 @@ pub async fn local_computer_status(
     state: State<'_, Arc<LocalComputerState>>,
 ) -> Result<LocalComputerSnapshot, String> {
     state.validate_target(&workspace_id, &agent_id)?;
+    if crate::background_worker::commands::enabled()? {
+        crate::background_worker::commands::prepare_scope(&workspace_id, &agent_id).await?;
+    }
     computer_snapshot(&state, workspace_id, agent_id)
 }
 #[tauri::command]
@@ -1049,7 +1083,14 @@ pub(crate) async fn shutdown_all(state: Arc<LocalComputerState>) {
     state.browsers.shutdown();
     if let Ok(authorities) = state.authorities.lock() {
         for authority in authorities.values() {
-            authority.revoke_and_drain_later();
+            if !crate::background_worker::is_worker()
+                && crate::background_worker::ready()
+                && crate::background_worker::commands::enabled().unwrap_or(false)
+            {
+                authority.cancel_local();
+            } else {
+                authority.revoke_and_drain_later();
+            }
         }
     }
 }
