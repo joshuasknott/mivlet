@@ -50,6 +50,95 @@ Local manifest tests:
 pnpm release:test
 ```
 
+## Candidate Node runtime backport
+
+The production execution runtime remains the checksum-pinned official Node
+22.23.3 archive. The isolated [candidate recipe](../../scripts/release/node-lpac/recipe.json)
+backports only `src/win/pipe.c` from [libuv PR 5181](https://github.com/libuv/libuv/pull/5181),
+commit `2cadaa40167050baf7c6905ac897e6fb57afb2c6`, into Node source commit
+`80dc632040e6bada37aac1220dde9c79581c9c22`. It selects the `LOCAL` pipe namespace
+when `TokenIsAppContainer` is true. The patch retains libuv's MIT notice.
+
+As checked on 9 October 2026, official Node 22.23.3, 24.21.0 and 26.11.1 omit
+this fix; libuv 1.53.0 includes it. Pinned libuv creates child stdio before
+`CreateProcessW`, uses a non-LOCAL pipe name and indefinitely retries access
+denial as a presumed name collision. This supports the observed synchronous
+piped-child stall, but the failing Win32 error/stack has not been captured.
+Microsoft documents the [AppContainer pipe namespace restriction](https://learn.microsoft.com/en-us/windows/win32/api/winbase/nf-winbase-createnamedpipea).
+Source reasoning is not a native acceptance result.
+
+The recipe verifies the official source/archive SHA-256, patch SHA-256, full
+`pipe.c` preimage and full patched after-image. It refuses fuzzy patches. The
+candidate retains every official Windows distribution file (including npm and
+licences) except `node.exe`; packaging verifies this against the inventory taken
+at preparation. It writes the source/recipe commits, toolchain observations,
+build flags, per-file hashes, modification notice and unsigned/unpublished state.
+The external `artifact-receipt.json` supplies the archive and executable hashes.
+`process.versions.uv` remains 1.51.0; identify the backport by candidate ID and
+hash, not the libuv version string. Toolchain versions are recorded, not supplied
+by this recipe; byte-for-byte build reproducibility remains unproved.
+
+Plan only (no download, preparation or compilation):
+
+```powershell
+pwsh -NoProfile -File scripts/release/node-lpac/build.ps1
+```
+
+After a separate native compilation grant, use an existing Windows x64 toolchain:
+PowerShell 7.2+, Node 22+, full Python 3, NASM, Git, Windows `tar.exe`, and Visual
+Studio 2022 17.6+ with C++ and Windows SDK. Follow the pinned
+[Node build requirements](https://github.com/nodejs/node/blob/v22.23.3/BUILDING.md#windows).
+Python's Windows Store alias is rejected. The recipe does not install tools,
+change OS settings, grant capabilities, add firewall/loopback exemptions, or run
+the upstream AppContainer harness. Do not disable OpenSSL assembly to evade the
+NASM prerequisite. Commit the reviewed recipe first.
+
+```powershell
+# The existing writable parent must have no junctions; the leaf must not exist.
+# Node requires a short ASCII build path without spaces, outside the checkout.
+pwsh -NoProfile -File scripts/release/node-lpac/build.ps1 -Build `
+  -Directory C:\MivletBuilds\node-lpac1-RECIPE_SHA `
+  -Python C:\BuildTools\Python\python.exe `
+  -Nasm C:\BuildTools\NASM\nasm.exe
+```
+
+Those paths are examples, not installed prerequisites. Queue approximately
+20–30 GiB additional disk and 6–10 GiB peak committed memory, with at least
+40 GiB free disk at admission; these are conservative estimates, not measured
+results. Use one isolated source/output root. The driver uses
+`vcbuild.bat x64 vs2022 ltcg nosign no-cctest`, BelowNormal priority and
+process-local `NUMBER_OF_PROCESSORS=1` (upstream MSBuild `/m:1` and compiler
+parallelism limit), with `/nr:false` to disable MSBuild node reuse. `vcbuild`
+defaults to Release; `ltcg` enables release optimization. Its explicit `release`
+argument also enables `cctest`, so this recipe uses the default Release mode to
+build only the runtime. It strips unrelated inherited environment variables, prints
+the owned compiler PID, saves stdout/stderr, and preserves failures for diagnosis.
+Track and stop only that process tree if the coordinator's resource limits are
+reached. No local compilation is implied by checking in or testing this recipe.
+
+The resulting ZIP is a validation candidate only. It is not consumed by
+`prepare-execution-runtime.mjs`, bundled by Tauri, or accepted by the native
+runtime inventory. Before promotion:
+
+1. Review the actual build log, selected compiler/SDK and artifact provenance;
+   the manifest records the default MSVC and installed SDKs, not a claim about
+   which SDK MSBuild selected. Verify the candidate hashes and retained licences.
+2. In a granted, existing non-elevated LPAC setup, capture a bounded same-token
+   current-versus-LOCAL Win32 pipe probe if direct causal evidence is needed.
+   Preserve the production token, approvals, fences, Stop and no-network policy.
+3. Prepare a separately reviewed candidate supplier/inventory update in an
+   isolated worktree and rebuild the native consumer of that inventory. Hashes
+   are embedded in Rust; substituting a binary alone must fail closed. Then run
+   the piped-child/default `node --test`, npm lifecycle and exact descendant
+   Stop/no-import acceptance against the candidate. Do not rerun unchanged failures.
+4. Complete the relevant native and packaged-app gates before an explicitly
+   authorized production promotion. Neither a host version smoke nor this
+   recipe's tests proves LPAC, installed-app, provider or live capability.
+
+The existing `network:false` development-server `listen EACCES` is a separate
+policy/feature gap. A pipe namespace correction does not authorize a loopback
+exemption or satisfy that positive server acceptance case.
+
 ## Disposable-machine installer rehearsal
 
 On a clean Windows VM or CI runner:

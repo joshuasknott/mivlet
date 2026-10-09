@@ -27,7 +27,7 @@
     "perf:check": "node scripts/perf/budget-check.mjs",
     "perf:test": "node --test scripts/perf/budget.test.mjs scripts/perf/profile.test.mjs",
     "perf:runtime": "pnpm --filter @mivlet/connectors exec vitest run src/performance-baseline.test.ts && pnpm --filter @mivlet/knowledge exec vitest run src/performance-baseline.test.ts && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml perf_",
-    "release:test": "node --test scripts/release/windows-manifest.test.mjs",
+    "release:test": "node --test --test-concurrency=1 scripts/release/windows-manifest.test.mjs scripts/release/node-lpac/candidate.test.mjs",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",
     "tauri:build": "node apps/desktop/scripts/tauri-build.mjs",
     "tauri:dev": "pnpm --filter @mivlet/desktop tauri:dev",
