@@ -7,5 +7,7 @@ export function latestAgentReply(work: readonly CollaborationWorkItem[]): string
   const latest = work.flatMap((item) => item.outputs)
     .filter((output) => output.text.trim() && !parseComputerArtifact(output.text))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
-  return latest ? String(redactSecrets(latest.text)).replace(/\s+/g, " ").trim() : "";
+  return latest ? String(redactSecrets(latest.text))
+    .replace(/```openui[\s\S]*?(?:```|$)/g, "Interactive response")
+    .replace(/\s+/g, " ").trim().slice(0, 240) : "";
 }

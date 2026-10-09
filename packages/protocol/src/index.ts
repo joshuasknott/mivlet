@@ -13,6 +13,7 @@ export * from "./domains/local-computer.js";
 export * from "./domains/coding.js";
 export * from "./domains/local-projects.js";
 export * from "./domains/collaboration.js";
+export * from "./domains/conversation-ui.js";
 export * from "./domains/search.js";
 export * from "./domains/voice.js";
 export {

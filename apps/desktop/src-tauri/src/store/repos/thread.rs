@@ -19,6 +19,7 @@ pub struct ThreadRow {
     pub lifecycle: String,
     pub last_sequence: i64,
     pub last_message_id: Option<String>,
+    pub selected_head_id: Option<String>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -63,11 +64,11 @@ pub fn get(
     id: &str,
 ) -> Result<Option<ThreadRow>> {
     scope.ensure_exists(tx)?;
-    tx.query_row("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL",rusqlite::params![scope.workspace_id(),id],|r| Ok(ThreadRow{id:r.get(0)?,project_id:r.get(1)?,title:r.get(2)?,lifecycle:r.get(3)?,last_sequence:r.get(4)?,last_message_id:r.get(5)?,created_at:r.get(6)?,updated_at:r.get(7)?})).optional().map_err(Into::into)
+    tx.query_row("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,selected_head_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL",rusqlite::params![scope.workspace_id(),id],|r| Ok(ThreadRow{id:r.get(0)?,project_id:r.get(1)?,title:r.get(2)?,lifecycle:r.get(3)?,last_sequence:r.get(4)?,last_message_id:r.get(5)?,selected_head_id:r.get(6)?,created_at:r.get(7)?,updated_at:r.get(8)?})).optional().map_err(Into::into)
 }
 pub fn list(tx: &Connection, _store: &Store, scope: &DataScope) -> Result<Vec<ThreadRow>> {
     scope.ensure_exists(tx)?;
-    let mut s=tx.prepare("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND deleted_at IS NULL ORDER BY updated_at DESC,id")?;
+    let mut s=tx.prepare("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,selected_head_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND deleted_at IS NULL ORDER BY updated_at DESC,id")?;
     let rows = s
         .query_map([scope.workspace_id()], |r| {
             Ok(ThreadRow {
@@ -77,8 +78,9 @@ pub fn list(tx: &Connection, _store: &Store, scope: &DataScope) -> Result<Vec<Th
                 lifecycle: r.get(3)?,
                 last_sequence: r.get(4)?,
                 last_message_id: r.get(5)?,
-                created_at: r.get(6)?,
-                updated_at: r.get(7)?,
+                selected_head_id: r.get(6)?,
+                created_at: r.get(7)?,
+                updated_at: r.get(8)?,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()
@@ -97,7 +99,7 @@ pub fn list_bounded(
     offset: usize,
 ) -> Result<(Vec<ThreadRow>, bool)> {
     scope.ensure_exists(tx)?;
-    let mut s=tx.prepare("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND deleted_at IS NULL AND owner_member_id IS ?3 ORDER BY updated_at DESC,id LIMIT ?2 OFFSET ?4")?;
+    let mut s=tx.prepare("SELECT id,project_id,title,lifecycle,last_sequence,last_message_id,selected_head_id,created_at,updated_at FROM thread WHERE workspace_id=?1 AND deleted_at IS NULL AND owner_member_id IS ?3 ORDER BY updated_at DESC,id LIMIT ?2 OFFSET ?4")?;
     let mut rows = s
         .query_map(
             rusqlite::params![
@@ -114,8 +116,9 @@ pub fn list_bounded(
                     lifecycle: r.get(3)?,
                     last_sequence: r.get(4)?,
                     last_message_id: r.get(5)?,
-                    created_at: r.get(6)?,
-                    updated_at: r.get(7)?,
+                    selected_head_id: r.get(6)?,
+                    created_at: r.get(7)?,
+                    updated_at: r.get(8)?,
                 })
             },
         )?
@@ -149,6 +152,38 @@ pub fn update(
         DataScope::new(scope.workspace_id(), Some(p.to_string()))?.ensure_exists(tx)?;
     }
     tx.execute("UPDATE thread SET title=?1,lifecycle=?2,project_id=?3,revision=revision+1,updated_at=?4 WHERE workspace_id=?5 AND id=?6",rusqlite::params![title.trim(),life,project,updated_at,scope.workspace_id(),id])?;
+    get(tx, store, scope, id)?.ok_or_else(|| StoreError::Invalid("Thread disappeared.".into()))
+}
+
+/// Persist the visible branch head after validating that it belongs to the
+/// same workspace/thread. Selecting a branch is presentation state and does
+/// not mutate messages or replay any execution effects.
+pub fn select_head(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    id: &str,
+    head_id: Option<&str>,
+    updated_at: &str,
+) -> Result<ThreadRow> {
+    get(tx, store, scope, id)?
+        .ok_or_else(|| StoreError::Invalid("Thread does not belong to this workspace.".into()))?;
+    if let Some(head) = head_id {
+        let belongs: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM message WHERE workspace_id=?1 AND thread_id=?2 AND id=?3 AND deleted_at IS NULL)",
+            rusqlite::params![scope.workspace_id(), id, head],
+            |r| r.get(0),
+        )?;
+        if !belongs {
+            return Err(StoreError::Invalid(
+                "Selected branch head does not belong to this conversation.".into(),
+            ));
+        }
+    }
+    tx.execute(
+        "UPDATE thread SET selected_head_id=?1,revision=revision+1,updated_at=?2 WHERE workspace_id=?3 AND id=?4",
+        rusqlite::params![head_id, updated_at, scope.workspace_id(), id],
+    )?;
     get(tx, store, scope, id)?.ok_or_else(|| StoreError::Invalid("Thread disappeared.".into()))
 }
 

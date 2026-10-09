@@ -25,7 +25,7 @@
     "audit:all": "pnpm audit:pnpm && pnpm audit:cargo",
     "perf:baseline": "node scripts/perf/baseline.mjs",
     "perf:check": "node scripts/perf/budget-check.mjs",
-    "perf:test": "node --test scripts/perf/budget.test.mjs",
+    "perf:test": "node --test scripts/perf/budget.test.mjs scripts/perf/profile.test.mjs",
     "perf:runtime": "pnpm --filter @mivlet/connectors exec vitest run src/performance-baseline.test.ts && pnpm --filter @mivlet/knowledge exec vitest run src/performance-baseline.test.ts && cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml perf_",
     "release:test": "node --test scripts/release/windows-manifest.test.mjs",
     "tauri:check": "cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml",

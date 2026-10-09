@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
+import type { ConversationLayout } from "@mivlet/protocol";
 import {
   ConversationGrid,
   PaneDivider,
@@ -61,6 +62,35 @@ function pointTo(element: Element) {
   });
 }
 describe("conversation pane interactions", () => {
+  it("preserves mounted panes, drafts, selection and scroll when resizing across the compact breakpoint", () => {
+    const split: ConversationLayout = { ...layout, activePane: 0, tree: {
+      kind: "split", axis: "row", ratio: 0.5,
+      children: [{ kind: "pane", pane: 0 }, { kind: "pane", pane: 1 }],
+    } };
+    const pane = (id: number) => <section data-testid={`pane-${id}`}>
+      <textarea aria-label={`Draft ${id}`} defaultValue="Unsaved draft" />
+      <iframe title={`Interactive result ${id}`} />
+    </section>;
+    const grid = (compact: boolean) => <ConversationGrid layout={split} compact={compact} onAction={vi.fn()} renderPane={pane} />;
+    const view = render(grid(false));
+    const draft = screen.getByRole("textbox", { name: "Draft 0" }) as HTMLTextAreaElement;
+    const guest = screen.getByTitle("Interactive result 0");
+    const content = screen.getByTestId("pane-0");
+    draft.focus();
+    draft.setSelectionRange(2, 7);
+    content.scrollTop = 120;
+    for (const compact of [true, false, true]) {
+      view.rerender(grid(compact));
+      expect(screen.getByRole("textbox", { name: "Draft 0" })).toBe(draft);
+      expect(screen.getByTitle("Interactive result 0")).toBe(guest);
+      expect(draft).toHaveFocus();
+      expect(draft).toHaveValue("Unsaved draft");
+      expect([draft.selectionStart, draft.selectionEnd]).toEqual([2, 7]);
+      expect(content.scrollTop).toBe(120);
+      expect(screen.queryByRole("textbox", { name: "Draft 1" }) !== null).toBe(!compact);
+      expect(screen.queryByRole("separator") !== null).toBe(!compact);
+    }
+  });
   it("docks at the final pointer position without depending on browser file-drop events", () => {
     const onAction = vi.fn();
     const result = render(<Harness onAction={onAction} />);
