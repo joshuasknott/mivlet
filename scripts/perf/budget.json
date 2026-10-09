@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "recordedAt": "2026-10-03",
   "recordedBaseline": {
     "totalJsCss": {
@@ -50,9 +50,9 @@
   },
   "ceilings": {
     "totalJsCss": {
-      "rawBytes": 3789931,
+      "rawBytes": 3861546,
       "gzipBytes": 1160449,
-      "marginNote": "Includes separately capped PDF-only and deferred conversation-upgrade graphs. Ordinary workspace growth cannot use either allowance."
+      "marginNote": "October 9 integration measured 3845162 raw; allow 16 KiB aggregate headroom. Retain the previous aggregate gzip ceiling and separate common, conversation and PDF ceilings."
     },
     "css": {
       "rawBytes": 187614,
@@ -64,8 +64,8 @@
     },
     "routeChunks": {
       "SettingsPage": {
-        "rawBytes": 60360,
-        "marginNote": "+10 KiB raw above the measured build"
+        "rawBytes": 67863,
+        "marginNote": "October 9 integrated Settings with provider usage, background ownership and MCP access measured 63767 raw. Allow 4 KiB headroom; module stays deferred."
       },
       "OnboardingPage": {
         "rawBytes": 14694,
@@ -77,14 +77,14 @@
       }
     },
     "commonJsCss": {
-      "marginNote": "Previous September total plus 16 KiB raw / 8 KiB gzip for merged coding, automation, Office and connector features; measured pre-PDF main recorded above.",
-      "gzipBytes": 349534,
-      "rawBytes": 1200949
+      "marginNote": "October 9 recovery integration measured 1307435 raw / 380994 gzip across repository controls, provider usage/continuation, secret requests, event automations, PR review, background ownership and MCP access. Allow 10 KiB raw / 4 KiB gzip additional headroom; startup remains independently capped.",
+      "gzipBytes": 385090,
+      "rawBytes": 1317675
     },
     "conversationUpgrade": {
-      "marginNote": "Measured assistant-ui/OpenUI/MCP Apps/conversation graph, output preview and history chunks plus 16 KiB raw / 8 KiB gzip headroom. This allowance is separate from common workspace growth and is guarded by the emitted startup graph.",
+      "marginNote": "October 9 integrated deferred conversation graph measured 692307 raw / 209624 gzip. Allow 4 KiB raw headroom; retain the previous gzip ceiling and deferred startup-graph guard.",
       "gzipBytes": 210915,
-      "rawBytes": 688982
+      "rawBytes": 696403
     },
     "pdfPreview": {
       "marginNote": "PDF.js 6.4.299 plus the viewer and its .mjs worker; loaded only when a PDF opens, enforced by the Vite static import graph.",
@@ -104,5 +104,28 @@
       "gzipBytes": 343303,
       "rawBytes": 1193907
     }
+  },
+  "integrationBaseline": {
+    "recordedAt": "2026-10-09",
+    "commit": "4876a5ec10fc46d51b0341fdb324db850d1d29a6",
+    "profileRun": "https://github.com/joshuasknott/mivlet/actions/runs/37932681194",
+    "note": "Combined recovery feature branches, before the budget-only adjustment. Existing startup, CSS, PDF, conversation gzip and aggregate gzip caps remain unchanged.",
+    "commonJsCss": {
+      "rawBytes": 1307435,
+      "gzipBytes": 380994
+    },
+    "conversationUpgrade": {
+      "rawBytes": 692307,
+      "gzipBytes": 209624
+    },
+    "totalJsCss": {
+      "rawBytes": 3845162,
+      "gzipBytes": 1150304
+    },
+    "initialEntryJs": {
+      "rawBytes": 441390,
+      "gzipBytes": 130502
+    },
+    "settingsRouteRawBytes": 63767
   }
 }
