@@ -191,6 +191,11 @@ the tab. A later disconnected transport displays recovery instead of leaving a
 blank frame. The session, resource and approval tests cover these separate
 lifetimes.
 
+The existing native discovery supervisor bounds an idle read to 300 seconds.
+If that channel expires, the app shows disconnected recovery; reopening
+rediscovers capabilities and requests fresh resource authority. This is a local
+connection lifetime limit, and never authorizes replaying a completed tool call.
+
 A separate controlled HTML probe was temporarily served by the already-enabled
 local reference server, using normal resource approval. In the actual native
 iframe it could not read the parent document or local storage. The host rejected

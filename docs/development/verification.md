@@ -251,9 +251,9 @@ selection references. These native tests do not establish a live provider-create
 Office document journey. Keep that evidence distinct from the Markdown output
 journey above.
 
-The final October 9 automated integration run (`final-full-check-v33.log` under
+The final October 9 automated integration run (`final-full-check-v36.log` under
 the ignored evidence directory) passed `pnpm check`: quality/dead-code/cycle
-checks, production builds, 1,420 desktop tests, 500 connector tests, 342 knowledge
+checks, production builds, 1,426 desktop tests across 201 files, 500 connector tests, 342 knowledge
 tests, 135 broker tests, 83 hosted-runner tests, 21 account tests, the Windows
 embedded-host fixtures (56 passed, 3 platform/capability skips), CI/release tests,
 bundle/runtime budgets, native checking and dependency audits. The separate
@@ -262,6 +262,13 @@ native pass recorded 906 passed and 16 explicitly ignored opt-in tests, plus
 Two pnpm advisories are source-verified local patches; Cargo reports two reviewed
 notification-only quick-xml findings expiring October 31 and nine informational
 maintenance/unsoundness warnings. These accepted findings remain visible.
+
+That final gate includes the shared production-CSS compaction fix and the
+responsive pane-lifetime regression. GitHub TypeScript and Windows validation
+also passed for implementation commit `7b084f65`. Native inspection of its
+production renderer covered dark appearance, compact resource approval, app
+docking/return/close, and resize across the compact breakpoint. The browser entry
+was separately checked and truthfully required the desktop provider route.
 
 The image-led refinement retains the catalogue's real data and established app
 assets. Its final native visual comparison is tracked in `design-qa.md`. Neither
