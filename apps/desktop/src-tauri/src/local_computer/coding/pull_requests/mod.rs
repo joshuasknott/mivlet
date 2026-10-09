@@ -199,23 +199,23 @@ pub(super) fn execute(
 }
 
 fn review_lock<'a>(
-    lock: &'a std::sync::Mutex<()>,
+    lock: &'a super::RepositoryLock,
     ticket: &OperationTicket,
-) -> Result<std::sync::MutexGuard<'a, ()>, String> {
+) -> Result<super::RepositoryGuard<'a>, String> {
     // The review screen requests independent projections concurrently. Serialize
     // their native reads instead of reporting a false failure on first open.
     let start = std::time::Instant::now();
     loop {
         ticket.check()?;
+        if lock.local.is_poisoned() {
+            return Err("Repository lock is unavailable.".into());
+        }
         match lock.try_lock() {
             Ok(guard) => return Ok(guard),
-            Err(std::sync::TryLockError::Poisoned(_)) => {
-                return Err("Repository lock is unavailable.".into())
+            Err(error) if start.elapsed() >= std::time::Duration::from_secs(60) => {
+                return Err(format!("Repository remained unavailable: {error} Refresh after the current operation finishes."));
             }
-            Err(std::sync::TryLockError::WouldBlock) => {}
-        }
-        if start.elapsed() >= std::time::Duration::from_secs(60) {
-            return Err("Repository remained busy. Refresh the review after the current operation finishes.".into());
+            Err(_) => {}
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
