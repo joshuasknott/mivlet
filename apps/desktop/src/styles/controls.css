@@ -45,18 +45,6 @@
   border-color: var(--accent-line);
 }
 
-.button--destructive {
-  color: var(--destructive);
-  background: var(--destructive-subtle);
-  border-color: var(--destructive-subtle);
-}
-
-.button--destructive:hover {
-  color: var(--surface);
-  background: var(--destructive);
-  border-color: var(--destructive);
-}
-
 .button:disabled {
   box-shadow: none;
 }
@@ -94,12 +82,10 @@ textarea:focus-visible {
   box-shadow: none;
 }
 
-.og-provider__key-panel input,
 .settings-field input {
   border-color: transparent;
 }
 
-.og-provider__key-panel input:focus,
 .settings-field input:focus {
   border-color: transparent;
   box-shadow: none;
