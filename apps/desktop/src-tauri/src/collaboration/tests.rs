@@ -879,6 +879,7 @@ fn reconciled_schedule_continuation_uses_fresh_user_work_authority() {
         let mut item = ctx.item("scheduled")?;
         item.status = WorkStatus::AwaitingUser;
         item.schedule = Some(ScheduledWorkContext {
+            event: None,
             occurrence_id: "closed-occurrence".into(),
             reasoning_effort: Some("low".into()),
         });

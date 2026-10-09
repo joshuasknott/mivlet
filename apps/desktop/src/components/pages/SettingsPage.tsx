@@ -18,6 +18,7 @@ import type { SettingsTab } from "./settings-tabs";
 
 export type { SettingsTab } from "./settings-tabs";
 export { tabs } from "./settings-tabs";
+export { LocalSchedules } from "../settings/LocalSchedules";
 // Account and usage share this deferred entry, avoiding separately compressed
 // settings chunks while retaining the existing SettingsPage download ceiling.
 export { ProviderUsageDetails };

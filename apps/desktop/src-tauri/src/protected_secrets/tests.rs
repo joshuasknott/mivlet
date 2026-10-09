@@ -242,6 +242,68 @@ fn protected_request_wrong_scope_and_consumer_do_not_burn_reference() {
 }
 
 #[test]
+fn event_text_sanitizer_keeps_key_custody_and_scrubs_plain_and_json_escaped_material() {
+    let store = store();
+    let custody = MemoryCustody::default();
+    let service = service(&store, &custody);
+    let record = save(&service);
+    let key = service
+        .install(
+            &scope(),
+            install(&record),
+            1002,
+            &TestFence(&custody.stopped),
+        )
+        .unwrap();
+    // An arbitrary signing value may not match credential heuristics. Its exact
+    // JSON spelling must also disappear from the produced request.
+    let material = "arbitrary-signing\"value\\with-newline\nand-extra-text";
+    custody
+        .put(&scope().account, &key.key_id, material)
+        .unwrap();
+    let quoted = serde_json::to_string(material).unwrap();
+    let texts = vec![
+        format!("Inspect {quoted}"),
+        format!("Event: {material}"),
+        "ordinary evidence".into(),
+    ];
+    let clean = service
+        .redact_event_texts(&scope(), &key.key_id, "releases", &texts)
+        .unwrap();
+    assert!(!clean.join(" ").contains(material));
+    assert!(!clean.join(" ").contains(&quoted[1..quoted.len() - 1]));
+    assert!(clean[0].contains("[REDACTED]"));
+    assert_eq!(clean[2], texts[2]);
+    assert!(service
+        .redact_event_texts(&scope(), &key.key_id, "wrong-target", &texts)
+        .is_err());
+    let other = Scope {
+        account: "other".into(),
+        ..scope()
+    };
+    assert!(service
+        .redact_event_texts(&other, &key.key_id, "releases", &texts)
+        .is_err());
+    assert!(service
+        .redact_event_texts(&scope(), &key.key_id, "releases", &vec!["value".into(); 14])
+        .is_err());
+    assert!(service
+        .redact_event_texts(&scope(), &key.key_id, "releases", &["x".repeat(32_001)])
+        .is_err());
+    service
+        .revoke_key(
+            &scope(),
+            &key.key_id,
+            "releases",
+            &TestFence(&custody.stopped),
+        )
+        .unwrap();
+    assert!(service
+        .redact_event_texts(&scope(), &key.key_id, "releases", &texts)
+        .is_err());
+}
+
+#[test]
 fn protected_request_concurrent_consumption_commits_exactly_one_key() {
     let store = store();
     let custody = MemoryCustody::default();

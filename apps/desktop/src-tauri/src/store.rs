@@ -234,6 +234,10 @@ impl Store {
             conn.execute_batch(crate::store::schema::SCHEMA_V43_TO_V44)?;
             conn.execute_batch(crate::store::schema::SCHEMA_V44_TO_V45)?;
             conn.execute_batch(crate::store::schema::RETIRED_ORCHESTRATION_STORAGE_CLEANUP)?;
+            // Base DDL includes PRAGMA foreign_keys=ON. Re-establish the
+            // maintenance fence before the event migration rebuilds a parent.
+            conn.pragma_update(None, "foreign_keys", "OFF")?;
+            migrations::local_events::apply(conn)?;
             conn.execute(
                 "INSERT OR IGNORE INTO workspace(id,name,created_at,updated_at)
                  VALUES('default','My Workspace','1970-01-01T00:00:00Z','1970-01-01T00:00:00Z');",
@@ -350,6 +354,25 @@ impl Store {
         let out = f(&tx)?;
         self.check_account()?;
         tx.commit().map_err(StoreError::from)?;
+        Ok(out)
+    }
+
+    /// SQL-only account update with an exact native identity fence at commit.
+    /// Scope and credential resolution must happen before this call. Holding
+    /// the identity guard around ordinary transaction() would deadlock its
+    /// account checks, which acquire that same identity mutex.
+    pub(crate) fn transaction_with_account_fence<R>(
+        &self,
+        fence: &crate::account_session::AccountDispatchFence,
+        f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<R>,
+    ) -> Result<R> {
+        fence.with_current(|| Ok(())).map_err(StoreError::Invalid)?;
+        let mut conn = self.conn.lock().expect("store connection mutex poisoned");
+        let tx = conn.transaction()?;
+        let out = f(&tx)?;
+        fence
+            .with_current(|| Ok(tx.commit().map_err(StoreError::from)))
+            .map_err(StoreError::Invalid)??;
         Ok(out)
     }
 
