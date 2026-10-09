@@ -31,7 +31,7 @@ describe("protected request presentation", () => {
   ])("retains actionable failure detail without offering reference replay: %s", (message) => {
     const view = render(<ConversationFeed {...props} state={{ ...initial, running: false, responseParts: [{ id: "call", kind: "tool", tool: "request-secret", state: "failed", content: message }] }} />);
     expect(screen.getByText(/1 failed attempt/)).toBeVisible();
-    fireEvent.click(screen.getByText("Worked"));
+    fireEvent.click(screen.getByText("Failed"));
     expect(screen.getByText(message)).toBeVisible();
     expect(screen.queryByRole("button", { name: /retry|replay/i })).toBeNull();
     expect(view.container.querySelector("input,textarea")).toBeNull();
@@ -57,6 +57,8 @@ describe("protected request presentation", () => {
     expect(screen.getByText(approval.action)).toBeVisible();
     // JSDOM does not model native summary tab order; the browser fixture does.
     screen.getByRole("button", { name: "Approve" }).focus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Modify" })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole("button", { name: "Deny" })).toHaveFocus();
     await user.keyboard("{Enter}");
