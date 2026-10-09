@@ -2737,11 +2737,6 @@ mod connector_authority_tests {
         assert!(verify_tool_authority(&path, &approved).is_err());
     }
 
-    fn decided_at_offset(seconds: i64) -> String {
-        (chrono::Utc::now() + chrono::Duration::seconds(seconds))
-            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-    }
-
     #[test]
     fn native_command_lifecycle_permits_bind_lifetime_target_and_generation() {
         for (tool, arguments, changes) in [

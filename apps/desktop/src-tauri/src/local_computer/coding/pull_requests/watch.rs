@@ -54,8 +54,10 @@ fn admit(
     ticket: &OperationTicket,
     wake: &Wake,
 ) -> Result<u32, String> {
-    let gate = super::super::lock(&directory.join(&repo.id).join("pr-watch-gate"))?;
-    let _guard = gate.lock().map_err(|_| "PR watch gate unavailable.")?;
+    let _guard = crate::local_computer::leases::acquire(
+        &directory.join(&repo.id).join("pr-watch-gate.lock"),
+        Duration::from_secs(1),
+    )?;
     if stopped(directory, repo, &watch.id) {
         return Err("PR watch stopped.".into());
     }
@@ -200,8 +202,10 @@ pub(crate) fn configure(
         if request.watch_id != watch.id {
             return Err("The watch changed. Refresh before stopping it.".into());
         }
-        let gate = super::super::lock(&directory.join(&repo.id).join("pr-watch-gate"))?;
-        let _guard = gate.lock().map_err(|_| "PR watch gate unavailable.")?;
+        let _guard = crate::local_computer::leases::acquire(
+            &directory.join(&repo.id).join("pr-watch-gate.lock"),
+            Duration::from_secs(1),
+        )?;
         ticket.with_current(|| {
             let parent = directory.join(&repo.id);
             let mut file = tempfile::NamedTempFile::new_in(&parent)

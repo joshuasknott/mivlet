@@ -299,11 +299,20 @@ fn apply_event(
             attempt.transcript.push_str(text);
         }
         Some("usage") => {
+            let cost = event["costUsd"]
+                .as_f64()
+                .filter(|cost| cost.is_finite() && *cost >= 0.0);
             attempt.usage = Some(ExecutionAttemptUsage {
                 input_tokens: event["inputTokens"].as_u64().unwrap_or(0),
                 output_tokens: event["outputTokens"].as_u64().unwrap_or(0),
-                cost_usd: 0.0,
-                cost_estimated: true,
+                cost_usd: cost.unwrap_or(0.0),
+                cost_estimated: event["costEstimated"].as_bool().unwrap_or(false),
+                cost_unknown: Some(
+                    cost.is_none() || event["costUnknown"].as_bool().unwrap_or(false),
+                ),
+                cached_input_tokens: event["cachedInputTokens"].as_u64(),
+                cache_write_tokens: event["cacheWriteTokens"].as_u64(),
+                reasoning_tokens: event["reasoningTokens"].as_u64(),
             });
         }
         Some("approval-request" | "tool-request") => {
@@ -339,6 +348,38 @@ mod tests {
         serde_json::from_value(json!({"id":"fixture-background","providerId":"codex","model":"fixture",
             "status":"streaming","transcript":"","turn":1,"usage":null,"pendingApprovalIds":[],
             "recoverable":false,"retryCount":0,"error":null,"createdAt":"2026-10-08T00:00:00Z","updatedAt":"2026-10-08T00:00:00Z"})).unwrap()
+    }
+    #[test]
+    fn usage_preserves_provider_cost_and_cache_receipts() {
+        let mut attempt = fixture();
+        apply_event(
+            &mut attempt,
+            &json!({"type":"usage", "inputTokens":120,
+            "outputTokens":30, "costUsd":0.04, "costEstimated":true,
+            "cachedInputTokens":80, "cacheWriteTokens":10, "reasoningTokens":5}),
+        )
+        .unwrap();
+        let usage = attempt.usage.unwrap();
+        assert_eq!(usage.input_tokens, 120);
+        assert_eq!(usage.output_tokens, 30);
+        assert_eq!(usage.cost_usd, 0.04);
+        assert!(usage.cost_estimated);
+        assert_eq!(usage.cost_unknown, Some(false));
+        assert_eq!(usage.cached_input_tokens, Some(80));
+        assert_eq!(usage.cache_write_tokens, Some(10));
+        assert_eq!(usage.reasoning_tokens, Some(5));
+    }
+    #[test]
+    fn absent_invalid_or_explicitly_unknown_cost_is_not_reported_as_free() {
+        for receipt in [
+            json!({"type":"usage"}),
+            json!({"type":"usage", "costUsd":-1}),
+            json!({"type":"usage", "costUsd":0, "costUnknown":true}),
+        ] {
+            let mut attempt = fixture();
+            apply_event(&mut attempt, &receipt).unwrap();
+            assert_eq!(attempt.usage.unwrap().cost_unknown, Some(true));
+        }
     }
     #[test]
     fn approval_requests_pause_without_executing_or_granting() {
