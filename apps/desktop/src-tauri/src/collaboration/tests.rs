@@ -11,10 +11,10 @@ use sha2::{Digest, Sha256};
 mod branch_tests;
 #[path = "exchange_regressions.rs"]
 mod exchange_regressions;
-#[path = "pr_watch_tests.rs"]
-mod pr_watch_tests;
 #[path = "output_revision_tests.rs"]
 mod output_revision_tests;
+#[path = "pr_watch_tests.rs"]
+mod pr_watch_tests;
 #[path = "scheduling_regressions.rs"]
 mod scheduling_regressions;
 #[path = "ui_tests.rs"]
