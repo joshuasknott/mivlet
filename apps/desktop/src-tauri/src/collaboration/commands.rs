@@ -105,6 +105,12 @@ pub(super) fn hydrate_fact_source(
 
 pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
     match command {
+        Command::StartProviderContinuation {
+            id,
+            input,
+            fingerprint,
+            reconcile,
+        } => provider_continuation::start(ctx, &id, &input, &fingerprint, reconcile)?,
         Command::SteerWork {
             id: key,
             expected_generation,

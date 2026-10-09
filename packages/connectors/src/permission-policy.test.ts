@@ -19,6 +19,24 @@ import {
 import vocabulary from "./permission-policy.json" with { type: "json" };
 
 describe("permission profile policy", () => {
+  it("permits scoped continuation reads without granting continuation actions or waiving risk approvals", () => {
+    const effect = effectForTool("continuation-read");
+    expect(effect).toBe("coordination");
+    if (!effect) throw new Error("Continuation read must have an explicit effect.");
+    for (const mode of ["read-only", "trusted-scope", "full-access"] as const) {
+      expect(evaluatePermissionPolicy({ mode, effect, riskLevel: "low" })).toMatchObject({
+        allowed: true, approvalRequired: false,
+      });
+      expect(evaluatePermissionPolicy({ mode, effect, riskLevel: "high" })).toMatchObject({
+        allowed: true, approvalRequired: true,
+      });
+    }
+    for (const action of ["start-provider-continuation", "continue-work", "provider_continuation_preview", "provider_continuation_read"]) {
+      expect(effectForTool(action), action).toBeNull();
+    }
+    expect(evaluatePermissionPolicy({ mode: "read-only", effect: "shell-execution" }).allowed).toBe(false);
+  });
+
   it("preserves public modes while exposing user-facing profiles", () => {
     expect(permissionProfileForMode("read-only")).toBe("read-only");
     expect(permissionProfileForMode("trusted-scope")).toBe("trusted");

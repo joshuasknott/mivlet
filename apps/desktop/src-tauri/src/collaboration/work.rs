@@ -360,6 +360,7 @@ fn new_work_with_parent(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        continuation: None,
         schedule: None,
         steering: vec![],
         messages: vec![],

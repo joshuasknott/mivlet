@@ -96,6 +96,7 @@ export interface WorkAttachment {
   sha256?: string;
 }
 export interface CollaborationWorkItem {
+  continuation?: import("./provider-continuation").ProviderContinuation;
   /** Frozen occurrence metadata; carries no claim token or execution authority. */
   schedule?: { occurrenceId: string; reasoningEffort?: string };
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
@@ -219,6 +220,7 @@ export interface CollaborationSnapshot {
 
 /** Exact native operation inputs. Agent operations additionally require a live bound attempt. */
 export type CollaborationCommand =
+  | { action: "start-provider-continuation"; id: string; input: import("./provider-continuation").ProviderContinuationInput; fingerprint: string; reconcile: true }
   | { action: "steer-work"; id: string; expectedGeneration: number; eventId: string; text: string }
   | { action: "reply-work"; id: string; expectedGeneration: number; eventId: string; text: string }
   | { action: "open-main-chat"; agentId: string }
