@@ -17,6 +17,7 @@ import type { SettingsTab } from "./settings-tabs";
 
 export type { SettingsTab } from "./settings-tabs";
 export { tabs } from "./settings-tabs";
+export { LocalSchedules } from "../settings/LocalSchedules";
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
   status: "unavailable",
