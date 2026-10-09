@@ -30,6 +30,10 @@ export interface ConversationTransport {
   getThread(threadId: string): Promise<ConversationThread | null>;
   updateThread(input: ConversationThreadUpdate): Promise<ConversationThread>;
   listMessages(threadId: string): Promise<ConversationMessageView[]>;
+  listMessagesPage?: (
+    threadId: string,
+    request: ConversationMessagePageRequest,
+  ) => Promise<ConversationMessagePage>;
   appendMessage(input: ConversationMessageAppend): Promise<ConversationMessageView>;
   reviseMessage(input: ConversationMessageRevision): Promise<ConversationMessageView>;
   loadDraft(draftKey: string): Promise<ConversationDraft | null>;
@@ -40,6 +44,23 @@ export interface ConversationTransport {
 export interface HydratedConversation {
   thread: ConversationThread;
   messages: ConversationMessageView[];
+  /** Opaque cursor for the next older page, when history is bounded. */
+  olderCursor?: string;
+  hasOlderMessages?: boolean;
+  /** Durable leaf IDs, including alternatives outside the loaded message window. */
+  branchHeads?: string[];
+}
+
+interface ConversationMessagePage {
+  messages: ConversationMessageView[];
+  olderCursor?: string;
+  hasOlderMessages: boolean;
+  branchHeads?: string[];
+}
+
+export interface ConversationMessagePageRequest {
+  limit?: number;
+  beforeSequence?: number;
 }
 
 const NEW_THREAD_DRAFT_PREFIX = "new-thread";
@@ -77,6 +98,50 @@ export function createConversationRuntime(transport: ConversationTransport) {
       }
       return { thread, messages };
     },
+    async hydratePage(
+      threadId: string,
+      request: ConversationMessagePageRequest,
+    ): Promise<HydratedConversation | null> {
+      const thread = await transport.getThread(threadId);
+      if (!thread) return null;
+      const page = transport.listMessagesPage
+        ? await transport.listMessagesPage(threadId, request)
+        : await transport.listMessages(threadId).then((views) => {
+            const before = request.beforeSequence ?? Number.POSITIVE_INFINITY;
+            const limit = Math.max(1, request.limit ?? (views.length || 1));
+            const candidates = [...views]
+              .filter((view) => view.message.sequence < before)
+              .sort((left, right) => left.message.sequence - right.message.sequence);
+            const messages = candidates.slice(Math.max(0, candidates.length - limit));
+            return {
+              messages,
+              olderCursor:
+                messages.length && candidates.length > messages.length
+                  ? String(messages[0]!.message.sequence)
+                  : undefined,
+              hasOlderMessages: candidates.length > messages.length,
+              branchHeads: undefined,
+            };
+          });
+      const messages = [...page.messages].sort(
+        (left, right) => left.message.sequence - right.message.sequence,
+      );
+      for (const view of messages) {
+        if (
+          view.message.threadId !== thread.id ||
+          view.currentRevision.threadId !== thread.id
+        ) {
+          throw new Error("Conversation response contains a message outside its thread.");
+        }
+      }
+      return {
+        thread,
+        messages,
+        olderCursor: page.olderCursor,
+        hasOlderMessages: page.hasOlderMessages,
+        branchHeads: page.branchHeads,
+      };
+    },
     appendMessage: (input: ConversationMessageAppend) => transport.appendMessage(input),
     reviseMessage: (input: ConversationMessageRevision) => transport.reviseMessage(input),
     loadDraft: (draftKey: string) => transport.loadDraft(draftKey),
@@ -86,7 +151,7 @@ export function createConversationRuntime(transport: ConversationTransport) {
 }
 
 export type DurableRunRecord =
-  | { kind: "user"; content: string; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[] }
+  | { kind: "user"; content: string; attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[]; parentMessageId?: string }
   | { kind: "assistant"; content: string; state?: "streaming" | "terminal" }
   | { kind: "tool-call"; content: string; callId: string; toolName: string }
   | { kind: "tool-result"; content: string; callId: string; toolName: string; ok: boolean }
@@ -114,6 +179,7 @@ export function createDurableRunWriter(
   let chain = Promise.resolve();
   let nextSequence = 0;
   let previousMessageId: string | undefined;
+  let branchParentId: string | undefined;
   let ordinal = 0;
   let assistant: ConversationMessageView | null = null;
   let transcriptOffset = 0;
@@ -125,6 +191,7 @@ export function createDurableRunWriter(
         if (!thread) throw new Error("The active conversation no longer exists in this workspace.");
         nextSequence = thread.messageHead.lastSequence;
         previousMessageId = thread.messageHead.lastMessageId;
+        branchParentId = thread.messageHead.selectedHeadId ?? thread.messageHead.lastMessageId;
         return thread;
       });
     }
@@ -159,13 +226,15 @@ export function createDurableRunWriter(
                 : record.kind === "user" && record.attachments?.length
                   ? { kind: "user" as const, detail: { attachments: record.attachments } }
                   : { kind: record.kind };
-    const view = await transport.appendMessage({
+      const view = await transport.appendMessage({
       ...kindDetail,
       threadId: thread.id,
       messageId,
       expectedLastSequence: nextSequence,
       sequence: nextSequence + 1,
-      previousMessageId: previousMessageId as never,
+        previousMessageId: previousMessageId as never,
+        parentMessageId: branchParentId as never,
+        ...(record.kind === "user" && record.parentMessageId ? { editSourceMessageId: record.parentMessageId as never } : {}),
       idempotencyKey,
       correlationKey: `${runId}:${currentOrdinal}`,
       runId: runId as never,
@@ -181,6 +250,7 @@ export function createDurableRunWriter(
     } as ConversationMessageAppend);
     nextSequence = view.message.sequence;
     previousMessageId = view.message.id;
+    branchParentId = view.message.id;
     if (record.kind === "assistant") assistant = view;
   };
 

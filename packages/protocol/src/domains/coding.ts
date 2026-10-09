@@ -16,6 +16,7 @@ export interface NativeExecutionReceipt {
   binding: { scopeId: string; generation: number; operationId: number };
   elapsedMs: number;
   network: boolean;
+  persistent?: boolean;
   reason: string | null;
 }
 export interface NativeExecutionStatus {

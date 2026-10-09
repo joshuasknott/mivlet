@@ -25,9 +25,9 @@ it("keeps delegated assignments in their conversation's history and opens detail
   expect(screen.getByText("Delegated task")).toBeVisible();
   expect(screen.queryByText("Unrelated request")).toBeNull();
   fireEvent.click(screen.getAllByRole("button", { name: "Details" })[1]);
-  expect(screen.getByRole("region", { name: "History details" })).toBeVisible();
+  expect(screen.getByRole("region", { name: "Activity details" })).toBeVisible();
   expect(screen.getByText("Details: Delegated task")).toBeVisible();
-  fireEvent.click(screen.getByRole("button", { name: "Back to history" }));
+  fireEvent.click(screen.getByRole("button", { name: "Back to activity" }));
   expect(screen.getByText("Delegated task")).toBeVisible();
 });
 

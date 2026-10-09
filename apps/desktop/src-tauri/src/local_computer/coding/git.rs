@@ -51,7 +51,7 @@ fn git(cwd: &Path) -> Result<Command, String> {
     ]);
     Ok(cmd)
 }
-fn repo_git(directory: &Path, repo: &Repository) -> Result<Command, String> {
+pub(super) fn repo_git(directory: &Path, repo: &Repository) -> Result<Command, String> {
     let storage = directory.join(&repo.id);
     crate::paths::strict_canonicalize(&storage.join("git"))
         .map_err(|_| "Git metadata failed validation.")?;

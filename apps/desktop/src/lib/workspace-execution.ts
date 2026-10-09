@@ -13,7 +13,10 @@ import {
   commandCollaboration,
   loadCollaboration,
 } from "../runtime/domains/collaboration";
-import { loadDesktopConversation } from "../hooks/useDurableConversation";
+import {
+  loadDesktopConversation,
+  loadDesktopConversationPage,
+} from "../hooks/useDurableConversation";
 import type { HydratedConversation } from "./conversation-runtime";
 import {
   resolveProviderModelOption,
@@ -185,6 +188,7 @@ export class WorkspaceExecution {
   private listeners = new Set<() => void>();
   private tail: Promise<unknown> = Promise.resolve();
   private reads = new Map<string, Promise<void>>();
+  private olderReads = new Map<string, Promise<boolean>>();
   private attachments = new Map<string, ComposerAttachment[]>();
   private effortAttachments = new Map<string, ComposerAttachment[]>();
   private stopping = new Set<string>();
@@ -394,8 +398,10 @@ export class WorkspaceExecution {
     discussion: boolean,
     attachments: ComposerAttachment[],
     recipientIds?: string[],
+    parentMessageId?: string,
+    requestId?: string,
   ) {
-    const id = `work-${crypto.randomUUID()}`;
+    const id = requestId ?? `work-${crypto.randomUUID()}`;
     this.attachments.set(id, [...attachments]);
     this.effortAttachments.set(id, [...attachments]);
     try {
@@ -406,6 +412,7 @@ export class WorkspaceExecution {
         agentId,
         prompt,
         discussion,
+        parentMessageId,
         recipientIds,
         attachments: composerAttachmentRefs(attachments),
       });
@@ -598,17 +605,124 @@ export class WorkspaceExecution {
   async loadHistory(conversationId: string, force = false): Promise<void> {
     if (this.reads.has(conversationId)) return this.reads.get(conversationId);
     if (!force && Object.hasOwn(this.state.histories, conversationId)) return;
-    const read = loadDesktopConversation(conversationId)
+    const read = (typeof loadDesktopConversationPage === "function"
+      ? loadDesktopConversationPage(conversationId, { limit: 80 })
+      : loadDesktopConversation(conversationId))
       .then((history) => {
         if (history && history.thread.id !== conversationId)
           throw new Error("Conversation history scope mismatch.");
+        if (!history || !force || !this.state.histories[conversationId]) {
+          this.emit({
+            histories: { ...this.state.histories, [conversationId]: history },
+          });
+          return;
+        }
+        // A forced refresh updates the tail and thread head without discarding
+        // pages the reader already loaded above it.
+        const current = this.state.histories[conversationId];
+        const byId = new Map(
+          [...current.messages, ...history.messages].map((view) => [
+            String(view.message.id),
+            view,
+          ]),
+        );
         this.emit({
-          histories: { ...this.state.histories, [conversationId]: history },
+          histories: {
+            ...this.state.histories,
+            [conversationId]: {
+              thread: history.thread,
+              messages: [...byId.values()].sort(
+                (left, right) => left.message.sequence - right.message.sequence,
+              ),
+              // Keep the paging knowledge of the already loaded range. A
+              // fresh bounded tail can report older rows even when an older
+              // page was previously loaded to completion; reviving that
+              // cursor would make the UI request the same page again.
+              olderCursor:
+                current.hasOlderMessages === false
+                  ? current.olderCursor
+                  : current.olderCursor ?? history.olderCursor,
+              hasOlderMessages:
+                current.hasOlderMessages ?? Boolean(history.hasOlderMessages),
+              // The native page owns the complete branch-head set. A forced
+              // refresh can advance a head past the currently loaded tail;
+              // unioning snapshots would keep obsolete heads visible forever
+              // (and make a linear multi-agent run look like alternatives).
+              branchHeads: history.branchHeads ?? current.branchHeads,
+            },
+          },
         });
       })
       .finally(() => this.reads.delete(conversationId));
     this.reads.set(conversationId, read);
     return read;
+  }
+  /** Merge one older bounded page into the canonical transcript by durable ID. */
+  async loadOlderHistory(conversationId: string): Promise<boolean> {
+    const inFlight = this.olderReads.get(conversationId);
+    if (inFlight) return inFlight;
+    const current = this.state.histories[conversationId];
+    if (!current?.hasOlderMessages || !current.olderCursor) return false;
+    const beforeSequence = Number(current.olderCursor);
+    if (!Number.isSafeInteger(beforeSequence) || beforeSequence <= 0) return false;
+    const read = (typeof loadDesktopConversationPage === "function"
+      ? loadDesktopConversationPage(conversationId, {
+          limit: 80,
+          beforeSequence,
+        })
+      : Promise.resolve(null));
+    const pending = read.then(async (older) => {
+      if (!older || this.disposed) return false;
+      if (older.thread.id !== conversationId)
+        throw new Error("Conversation history scope mismatch.");
+      if (
+        older.messages.some(
+          (view) =>
+            view.message.threadId !== conversationId ||
+            view.currentRevision.threadId !== conversationId,
+        )
+      )
+        throw new Error("Conversation response contains a message outside its thread.");
+      if (
+        older.hasOlderMessages &&
+        (!older.olderCursor || Number(older.olderCursor) >= beforeSequence)
+      )
+        return false;
+      // A page can resolve after a streaming checkpoint or branch refresh.
+      // Merge into the newest canonical snapshot and retain its thread head;
+      // the page's thread metadata is only a read-time cursor companion.
+      const latest = this.state.histories[conversationId];
+      if (!latest || latest.thread.id !== conversationId) return false;
+      if (latest.olderCursor !== current.olderCursor) return false;
+      const byId = new Map(
+        [...older.messages, ...latest.messages].map((view) => [
+          String(view.message.id),
+          view,
+        ]),
+      );
+      const messages = [...byId.values()].sort(
+        (left, right) => left.message.sequence - right.message.sequence,
+      );
+      if (this.disposed) return false;
+      this.emit({
+        histories: {
+          ...this.state.histories,
+          [conversationId]: {
+            thread: latest.thread,
+            messages,
+            olderCursor: older.olderCursor,
+            hasOlderMessages: older.hasOlderMessages,
+            // Branch-head metadata is complete for the conversation, not for
+            // the page window. Keep a newer refresh authoritative when an
+            // older request resolves after it.
+            branchHeads: latest.branchHeads ?? older.branchHeads,
+          },
+        },
+      });
+      return true;
+    }).finally(() => this.olderReads.delete(conversationId));
+    this.olderReads.set(conversationId, pending);
+    return pending;
   }
   async stop(id: string, project = false) {
     const affected = new Set(
