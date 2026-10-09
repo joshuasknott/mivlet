@@ -3,9 +3,15 @@ import { conversationTurns, appendResponseText, resolveResponseTool, toolActivit
 import type { ConversationMessageView } from "./conversation-runtime";
 
 function view(runId: string, kind: string, sequence: number, content: string, detail?: unknown): ConversationMessageView {
-  return { message: { id: `${runId}-${sequence}`, runId, kind, sequence, detail, createdAt: "2026-09-06T10:00:00Z" }, currentRevision: { state: "terminal", content, checkpointedAt: "2026-09-06T10:00:01Z" } } as ConversationMessageView;
+  return { message: { id: `${runId}-${sequence}`, currentRevisionId: `revision-${runId}-${sequence}`, runId, kind, sequence, detail, createdAt: "2026-09-06T10:00:00Z" }, currentRevision: { state: "terminal", content, checkpointedAt: "2026-09-06T10:00:01Z" } } as ConversationMessageView;
 }
 describe("conversation presentation", () => {
+  it("retains the exact terminal assistant source for interactive actions", () => {
+    const source = "Choose a route.\n```openui\nroot = Stack([choice])\n```  ";
+    const [turn] = conversationTurns([view("one", "assistant", 1, source)]);
+    expect(turn.responseSource).toBe(source);
+    expect(turn.responseMessageId).toBe("one-1");
+  });
   it("names native application and exact URL activity without exposing arguments", () => {
     expect(toolActivity("local-app-list", "running")).toBe("Listing open applications");
     expect(toolActivity("local-app-select", "succeeded")).toBe("Selected an application window");
@@ -22,6 +28,35 @@ describe("conversation presentation", () => {
     expect(turns).toHaveLength(2);
     expect(turns[0].parts).toEqual([{ id: "same", kind: "tool", tool: "read-file", content: "First result", state: "succeeded" }]);
     expect(turns[1].parts[0]).toMatchObject({ content: "Second result", state: "failed" });
+  });
+  it("preserves interrupted and cancelled tool outcomes after restoration", () => {
+    const turns = conversationTurns([
+      view("one", "user", 1, "Run it"),
+      view("one", "tool", 2, "Call", { phase: "call", toolCallId: "call", toolName: "read-file" }),
+      view("one", "tool", 3, "Action interrupted", { phase: "result", toolCallId: "call", toolName: "read-file", outcome: "interrupted" }),
+      view("two", "user", 4, "Run that"),
+      view("two", "tool", 5, "Call", { phase: "call", toolCallId: "cancel", toolName: "read-file" }),
+      view("two", "tool", 6, "Action cancelled", { phase: "result", toolCallId: "cancel", toolName: "read-file", outcome: "cancelled" }),
+    ]);
+    expect(turns[0].parts[0]).toMatchObject({ state: "failed", terminalStatus: "interrupted" });
+    expect(turns[1].parts[0]).toMatchObject({ state: "failed", terminalStatus: "cancelled" });
+  });
+  it("keeps a bounded MCP App descriptor on restored tool results", () => {
+    const turns = conversationTurns([
+      view("one", "user", 1, "Show the result"),
+      view("one", "tool", 2, "Call", { phase: "call", toolCallId: "app-call", toolName: "connector-call" }),
+      view("one", "tool", 3, JSON.stringify({ trust: "untrusted", content: [{ kind: "text", text: "result" }], mcpApp: { connectorId: "marketplace-example", toolName: "show_result", resourceUri: "ui://example/view" } }), { phase: "result", toolCallId: "app-call", toolName: "connector-call", outcome: "succeeded" }),
+    ]);
+    expect(turns[0].parts[0]).toMatchObject({ resultRevisionId: "revision-one-3", connectorId: "marketplace-example", mcpApp: { toolName: "show_result", resourceUri: "ui://example/view" } });
+  });
+  it("binds MCP interfaces to distinct saved revisions when provider call IDs repeat", () => {
+    const output = JSON.stringify({ mcpApp: { connectorId: "vercel", toolName: "show", resourceUri: "ui://app/view" } });
+    const turns = conversationTurns([
+      view("one", "tool", 1, output, { phase: "result", toolCallId: "same", outcome: "succeeded" }),
+      view("two", "tool", 2, output, { phase: "result", toolCallId: "same", outcome: "succeeded" }),
+    ]);
+    expect(turns[0].parts[0]).toMatchObject({ id: "same", resultRevisionId: "revision-one-1" });
+    expect(turns[1].parts[0]).toMatchObject({ id: "same", resultRevisionId: "revision-two-2" });
   });
   it("never reveals redacted tool output", () => {
     const item = view("one", "tool", 1, "secret", { phase: "result", toolCallId: "call", toolName: "read-file", outcome: "succeeded" });

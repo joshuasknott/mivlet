@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ConversationRoom } from "@mivlet/protocol";
+import type { ConversationRoom, WorkOutput } from "@mivlet/protocol";
 import { CoordinationActivity } from "../components/work/CoordinationActivity";
 import { WorkDetails } from "../components/work/WorkDetails";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
@@ -14,7 +14,10 @@ export function WorkspaceHistory({ room, runtime, service, state, selectedWorkId
   service: WorkspaceExecution;
   state: WorkspaceExecutionState;
   selectedWorkId: string | null;
-  onOpenConversation: (id: string) => void;
+  onOpenConversation: (
+    id: string,
+    source?: Pick<WorkOutput, "branchId" | "messageId" | "sourceRevisionId">,
+  ) => void;
 }) {
   const [selection, setSelection] = useState(selectedWorkId);
   useEffect(() => setSelection(selectedWorkId), [selectedWorkId]);
@@ -29,8 +32,8 @@ export function WorkspaceHistory({ room, runtime, service, state, selectedWorkId
   const roots = new Set(state.data.work.filter(item => item.conversationId === room?.id && !item.parentId).map(item => item.rootId));
   const work = state.data.work.filter(item => roots.has(item.rootId));
   const selected = work.find(item => item.id === selection);
-  return selected ? <section aria-label="History details">
-    <button type="button" onClick={() => setSelection(null)}>Back to history</button>
+  return selected ? <section aria-label="Activity details">
+    <button type="button" onClick={() => setSelection(null)}>Back to activity</button>
     <WorkDetails key={selected.id} item={selected} onOpen={onOpenConversation} onProviderReset={command => service.command(command)}
       onStop={id => service.stop(id)}
       onContinue={async (id, generation) => { await service.command({ action: "continue-work", id, expectedGeneration: generation, reconcile: true }); }}

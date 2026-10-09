@@ -7,12 +7,18 @@ use crate::store::vault::{MasterKey, Vault};
 use serde_json::json;
 use sha2::{Digest, Sha256};
 
+#[path = "branch_tests.rs"]
+mod branch_tests;
 #[path = "exchange_regressions.rs"]
 mod exchange_regressions;
 #[path = "provider_reset_regressions.rs"]
 mod provider_reset_regressions;
+#[path = "output_revision_tests.rs"]
+mod output_revision_tests;
 #[path = "scheduling_regressions.rs"]
 mod scheduling_regressions;
+#[path = "ui_tests.rs"]
+mod ui_tests;
 #[path = "workspace_tests.rs"]
 mod workspace_tests;
 
@@ -62,7 +68,35 @@ fn integration_chat_capture_compacts_old_text_and_never_adopts_later_chat() {
             .iter()
             .find(|agent| agent.id == "lead")
             .unwrap();
+        // A previous binary cached empty extracts for canonical string
+        // revisions. Its old fingerprint must not keep hiding saved text.
+        let rows = message::list_selected(ctx.conn, ctx.store, &ctx.scope.data, &room.id)?;
+        let mut old_hash = Sha256::new();
+        for row in rows.iter().take(8) {
+            old_hash.update(row.id.as_bytes());
+            old_hash.update([0]);
+            old_hash.update(row.current_revision_id.as_bytes());
+            old_hash.update([0]);
+        }
+        let path = format!(
+            "chat-fold-{}.json",
+            hex::encode(Sha256::digest(room.id.as_bytes()))
+        );
+        let (cache_scope, cache_key) = crate::store::private_document_location(
+            std::path::Path::new(&path),
+            &ctx.scope.private,
+        )
+        .map_err(StoreError::Invalid)?;
+        crate::store::repos::preferences::upsert_scoped(
+            ctx.conn,
+            ctx.store,
+            &cache_scope,
+            &cache_key,
+            &json!({"throughSequence":rows[7].sequence,"fingerprint":hex::encode(old_hash.finalize()),"text":"obsolete empty extract"}),
+            TIME,
+        )?;
         let first = context::capture(ctx, &room, agent)?;
+        assert!(!first.text.contains("obsolete empty extract"));
         let captured: serde_json::Value = serde_json::from_str(&first.text).unwrap();
         assert_eq!(captured["history"].as_array().unwrap().len(), 24);
         assert!(captured["transcriptSummary"]["text"]
@@ -247,7 +281,9 @@ fn output(ctx: &Context<'_>, room: &str, run: &str, text: &str) -> Result<()> {
         &format!("revision-{run}"),
         "terminal",
         "provider-completed",
-        &json!({"text":text}),
+        // The production conversation runtime stores revision content as a
+        // JSON string, not a fixture-only object envelope.
+        &json!(text),
         TIME,
     )?;
     journal(ctx, room, run, "completed", text)
@@ -454,6 +490,11 @@ fn collaboration_question_response_and_synthesis_use_distinct_real_attempt_bindi
         assert_eq!(root.turn_count, 3);
         assert_eq!(root.token_usage, 600);
         assert_eq!(root.outputs.len(), 2);
+        assert!(root.outputs.iter().all(|output| {
+            output.message_id.is_some()
+                && output.source_revision_id.is_some()
+                && output.branch_id.is_some()
+        }));
         complete(
             ctx,
             "root",
@@ -1067,6 +1108,32 @@ fn collaboration_project_correction_invalidates_work_and_never_reads_private_his
                 supersedes_id: None,
             },
         )?;
+        let saved: Fact = repo::get(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            Kind::Fact,
+            "decision",
+        )?
+        .unwrap();
+        assert!(!saved.pinned);
+        commands::apply(
+            ctx,
+            Command::PinFact {
+                project_id: "project".into(),
+                id: "decision".into(),
+                pinned: true,
+            },
+        )?;
+        let pinned: Fact = repo::get(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            Kind::Fact,
+            "decision",
+        )?
+        .unwrap();
+        assert!(pinned.pinned);
         assert_eq!(ctx.item("root")?.status, WorkStatus::AwaitingUser);
         assert_eq!(ctx.item("unrelated")?.status, WorkStatus::Queued);
         assert!(ensure_run_current(ctx.conn, ctx.store, Some("run")).is_err());
@@ -1787,6 +1854,7 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
                 agent_id: "lead".into(),
                 prompt: "Read the brief".into(),
                 discussion: false,
+                parent_message_id: None,
                 recipient_ids: None,
                 attachments: Some(preview.clone()),
             },
@@ -1986,6 +2054,7 @@ fn roadmap_attachment_refs_survive_restart_review_without_replay() {
                 agent_id: "lead".into(),
                 prompt: "Read the brief".into(),
                 discussion: false,
+                parent_message_id: None,
                 recipient_ids: None,
                 attachments: Some(refs.clone()),
             },

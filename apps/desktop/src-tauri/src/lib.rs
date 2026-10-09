@@ -49,6 +49,7 @@ mod local_computer;
 mod local_projects;
 mod local_schedules;
 mod managed_runtime;
+mod mcp_app_host;
 mod mcp_process;
 mod media_images;
 mod memory;
@@ -56,6 +57,7 @@ mod models;
 mod native_api;
 mod native_speech;
 mod oauth_loopback;
+mod outputs;
 pub mod paths;
 mod permission_policy;
 #[cfg(test)]
@@ -107,6 +109,18 @@ pub fn run() {
         .setup(|app| {
             let handle = app.handle().clone();
             if account_session::initialize(&handle)? {
+                // MCP App resources use a random loopback HTTP origin rather
+                // than a registered Tauri protocol. Tauri classifies the
+                // latter as local on Windows, which would allow child frames
+                // to reach the renderer's native IPC bridge.
+                mcp_app_host::start_http_server().map_err(std::io::Error::other)?;
+                #[cfg(windows)]
+                if let Some(main_window) = app.get_webview_window("main") {
+                    // Bind every child frame to the exact token URL before
+                    // any MCP resource can be registered. This prevents a
+                    // guest from navigating into the local renderer origin.
+                    mcp_app_host::install_navigation_guard(&main_window);
+                }
                 let app_data = paths::app_data_dir(&handle)?;
                 store::initialize(&app_data)?;
                 if let Some(store) = store::try_global() {
@@ -162,6 +176,11 @@ pub fn run() {
             local_computer::artifacts::local_computer_open_artifact,
             local_computer::artifacts::local_computer_save_artifact,
             local_computer::artifacts::local_computer_preview_artifact,
+            local_computer::office_drafts::office_draft_get,
+            local_computer::office_drafts::office_draft_selection,
+            local_computer::office_drafts::office_draft_save,
+            local_computer::office_drafts::office_draft_restore,
+            local_computer::office_drafts::office_draft_export,
             conversation_links::open_conversation_link,
             local_computer::local_computer_cancel,
             window_controls::control_main_window,
@@ -183,6 +202,7 @@ pub fn run() {
             local_schedules::local_schedule_dispatch_abandon,
             local_projects::local_project_create,
             collaboration::collaboration_load,
+            collaboration::ui::collaboration_ui,
             collaboration::collaboration_command,
             local_projects::local_project_list,
             local_projects::local_project_update,
@@ -197,13 +217,22 @@ pub fn run() {
             conversations::conversation_list_threads,
             conversations::conversation_get_thread,
             conversations::conversation_update_thread,
+            conversations::conversation_select_branch,
             conversations::conversation_list_messages,
+            conversations::conversation_list_messages_page,
             conversations::conversation_append_message,
             conversations::conversation_revise_message,
             conversations::conversation_load_draft,
             conversations::conversation_save_draft,
             conversations::conversation_delete_draft,
             conversations::conversation_delete_thread,
+            outputs::output_ensure,
+            outputs::output_get,
+            outputs::output_list,
+            outputs::output_append_revision,
+            outputs::output_restore_revision,
+            outputs::output_set_pin,
+            outputs::output_export,
             knowledge::import_local_text_file,
             knowledge::search_knowledge_sources,
             search::search_workspace,
@@ -358,6 +387,8 @@ pub fn run() {
             mcp_process::prepare_mcp_tool_call,
             mcp_process::authorize_mcp_tool_call,
             mcp_process::execute_approved_mcp_tool_call,
+            mcp_app_host::register_mcp_app_resource,
+            mcp_app_host::release_mcp_app_resource,
             capability_grants::prepare_capability_grant,
             capability_grants::commit_capability_grant,
             capability_grants::list_capability_grants,

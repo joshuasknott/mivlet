@@ -50,9 +50,9 @@
   },
   "ceilings": {
     "totalJsCss": {
-      "rawBytes": 3100949,
-      "gzipBytes": 949534,
-      "marginNote": "Includes a separately capped PDF-only viewer, engine and worker. Ordinary workspace growth cannot use that allowance."
+      "rawBytes": 3789931,
+      "gzipBytes": 1160449,
+      "marginNote": "Includes separately capped PDF-only and deferred conversation-upgrade graphs. Ordinary workspace growth cannot use either allowance."
     },
     "css": {
       "rawBytes": 187614,
@@ -81,6 +81,11 @@
       "gzipBytes": 349534,
       "rawBytes": 1200949
     },
+    "conversationUpgrade": {
+      "marginNote": "Measured assistant-ui/OpenUI/MCP Apps/conversation graph, output preview and history chunks plus 16 KiB raw / 8 KiB gzip headroom. This allowance is separate from common workspace growth and is guarded by the emitted startup graph.",
+      "gzipBytes": 210915,
+      "rawBytes": 688982
+    },
     "pdfPreview": {
       "marginNote": "PDF.js 6.4.299 plus the viewer and its .mjs worker; loaded only when a PDF opens, enforced by the Vite static import graph.",
       "gzipBytes": 600000,
@@ -88,6 +93,7 @@
     }
   },
   "requireDeferredPdf": true,
+  "requireDeferredConversationUpgrade": true,
   "featureBaseline": {
     "commit": "6e0cdc72c0fa135424dd577fc27e25c89eacdc93",
     "note": "Measured main before PDF support; previous September allowances were already exceeded by 9342 raw, 1961 gzip and 9025 entry bytes.",

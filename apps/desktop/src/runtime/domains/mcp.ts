@@ -72,6 +72,42 @@ export interface RuntimeMcpToolProposal {
   arguments: Record<string, unknown>;
 }
 
+export interface RuntimeMcpAppResourceRegistration {
+  workspaceId: string;
+  sessionId: string;
+  conversationId: string;
+  resultId: string;
+  uri: string;
+  html: string;
+  csp: string;
+}
+
+/** Native owns the dedicated opaque MCP App origin; HTML never becomes a
+ * renderer URL or a second execution authority. */
+export async function registerRuntimeMcpAppResource(
+  request: RuntimeMcpAppResourceRegistration,
+): Promise<string | null> {
+  if (!hasTauriRuntime()) return null;
+  return invokeNative<string>("register_mcp_app_resource", { request }).catch(
+    (error) => {
+      throw toRuntimeError(error);
+    },
+  );
+}
+
+export async function releaseRuntimeMcpAppResource(request: {
+  workspaceId: string;
+  sessionId: string;
+  resultId: string;
+}): Promise<void> {
+  if (!hasTauriRuntime()) return;
+  await invokeNative<null>("release_mcp_app_resource", { request }).catch(
+    (error) => {
+      throw toRuntimeError(error);
+    },
+  );
+}
+
 export interface RuntimePreparedMcpToolCall {
   proposalFingerprint: string;
   requiresApproval?: boolean;
