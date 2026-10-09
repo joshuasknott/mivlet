@@ -1,4 +1,11 @@
-import { useEffect, useId, useReducer, useRef, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useId,
+  useReducer,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import type {
   CollaborationWorkItem,
   ConversationRoom,
@@ -8,10 +15,10 @@ import type {
 import { ChatCircle } from "@phosphor-icons/react/dist/csr/ChatCircle";
 import { CalendarBlank } from "@phosphor-icons/react/dist/csr/CalendarBlank";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
-import { ClockCounterClockwise } from "@phosphor-icons/react/dist/csr/ClockCounterClockwise";
+import { Pulse } from "@phosphor-icons/react/dist/csr/Pulse";
+import { BookmarkSimple } from "@phosphor-icons/react/dist/csr/BookmarkSimple";
 import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
-import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
@@ -39,6 +46,7 @@ export function WorkspaceRightNav({
   sideChats,
   schedules,
   library,
+  memories,
   history,
   historyRequestId,
   onSchedules,
@@ -60,6 +68,7 @@ export function WorkspaceRightNav({
   sideChats?: ReactNode;
   schedules?: ReactNode;
   library?: ReactNode;
+  memories?: ReactNode;
   history?: ReactNode;
   historyRequestId?: string | null;
   onSchedules?: () => void;
@@ -86,6 +95,20 @@ export function WorkspaceRightNav({
   useEffect(() => {
     if (historyRequestId) dispatch({ type: "select", id: "history" });
   }, [historyRequestId]);
+  useEffect(() => {
+    const closeMcpAppTab = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      const id =
+        detail && typeof detail === "object"
+          ? (detail as Record<string, unknown>).id
+          : undefined;
+      if (typeof id === "string" && id.startsWith("mcp-app:"))
+        dispatch({ type: "close", id });
+    };
+    window.addEventListener("mivlet:mcp-app-panel-closed", closeMcpAppTab);
+    return () =>
+      window.removeEventListener("mivlet:mcp-app-panel-closed", closeMcpAppTab);
+  }, []);
   const lastUtility = useRef("library");
   const navigationOnly = !computerAgentId && state.selected === "navigation";
   const lastSelection = useRef(state.selected);
@@ -95,7 +118,11 @@ export function WorkspaceRightNav({
     if (open)
       (
         (panel.current?.querySelector('[role="tab"][aria-selected="true"]') ??
-          panel.current?.querySelector(navigationOnly ? `[data-utility="${lastUtility.current}"]` : '.right-panel__back')) as HTMLElement | null
+          panel.current?.querySelector(
+            navigationOnly
+              ? `[data-utility="${lastUtility.current}"]`
+              : ".right-panel__back",
+          )) as HTMLElement | null
       )?.focus();
   }, [state.selected, open, navigationOnly]);
   const agentId =
@@ -115,19 +142,39 @@ export function WorkspaceRightNav({
   );
   const selected = state.tabs.find((tab) => tab.id === state.selected);
   useEffect(() => {
+    if (!selected || selected.kind !== "mcp-app" || !open) return;
+    const target = Array.from(
+      panel.current?.querySelectorAll<HTMLElement>(
+        "[data-mcp-app-panel]",
+      ) ?? [],
+    ).find((candidate) => candidate.dataset.mcpAppPanel === selected.id);
+    if (!target) return;
+    window.dispatchEvent(
+      new CustomEvent("mivlet:mcp-app-panel-ready", {
+        detail: { id: selected.id, target },
+      }),
+    );
+  }, [selected?.id, selected?.kind, open]);
+  useEffect(() => {
     onChatActiveChange?.(open && !computerAgentId && selected?.kind === "chat");
   }, [selected?.id, open, computerAgentId, onChatActiveChange]);
   const select = (id: string) => {
     onCloseComputer?.();
     dispatch({ type: "select", id });
   };
-  const closeTab = (id: string) => dispatch({ type: "close", id });
+  const closeTab = (id: string) => {
+    dispatch({ type: "close", id });
+    window.dispatchEvent(
+      new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id } }),
+    );
+  };
   const utilities = [
-    { id: "library", label: "Library", Icon: FileText },
+    { id: "library", label: "Files", Icon: FileText },
+    { id: "memories", label: "Memories", Icon: BookmarkSimple },
     { id: "browser", label: "Browser", Icon: Globe },
     { id: "chats", label: "Side chat", Icon: ChatCircle },
     { id: "schedules", label: "Schedules", Icon: CalendarBlank },
-    { id: "history", label: "History", Icon: ClockCounterClockwise },
+    { id: "history", label: "Activity", Icon: Pulse },
   ];
   return (
     <aside
@@ -139,32 +186,62 @@ export function WorkspaceRightNav({
       aria-modal={(compact && open) || undefined}
       hidden={!open}
     >
-      <header className={navigationOnly ? "right-panel__navigation" : "right-panel__destination"}>
-        {navigationOnly ? <nav aria-label="Panel views">
-          {utilities.map(({ id, label, Icon }) => (
-            <button
-              key={id}
-              type="button"
-              data-utility={id}
-              onClick={() => {
-                lastUtility.current = id;
-                select(id);
-                if (id === "schedules" && !schedules) onSchedules?.();
-              }}
-            >
-              <Icon size={17} />
-              <span>{label}</span>
-              <CaretRight size={14} aria-hidden="true" />
-            </button>
-          ))}
-        </nav> : <button type="button" className="right-panel__back" onClick={() => select("navigation")}><ArrowLeft size={18} aria-hidden="true" />Back</button>}
+      <header
+        className={
+          navigationOnly
+            ? "right-panel__navigation"
+            : "right-panel__destination"
+        }
+      >
+        {navigationOnly ? (
+          <>
+            <h2 className="right-panel__title">Workspace</h2>
+            <nav aria-label="Panel views">
+              {utilities.map(({ id, label, Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  data-utility={id}
+                  onClick={() => {
+                    lastUtility.current = id;
+                    select(id);
+                    if (id === "schedules" && !schedules) onSchedules?.();
+                  }}
+                >
+                  <Icon size={17} />
+                  <span>{label}</span>
+                </button>
+              ))}
+            </nav>
+          </>
+        ) : (
+          <button
+            type="button"
+            className="right-panel__back"
+            onClick={() => select("navigation")}
+          >
+            <ArrowLeft size={18} aria-hidden="true" />
+            Back
+          </button>
+        )}
         <button
           type="button"
           className="right-panel__close"
           aria-label="Close workspace panel"
           onClick={onClose}
         >
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="1" /><path d="M9 4.5v15" /></svg>
+          <svg
+            width="19"
+            height="19"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            aria-hidden="true"
+          >
+            <rect x="3" y="4.5" width="18" height="15" rx="1" />
+            <path d="M9 4.5v15" />
+          </svg>
         </button>
       </header>
       {state.tabs.length && selected && !computerAgentId ? (
@@ -175,7 +252,10 @@ export function WorkspaceRightNav({
         >
           {state.tabs.map((tab, index) => {
             const Icon =
-              tab.kind === "artifact" || tab.kind === "file"
+              tab.kind === "artifact" ||
+              tab.kind === "file" ||
+              tab.kind === "output" ||
+              tab.kind === "mcp-app"
                 ? FileText
                 : tab.kind === "web"
                   ? Globe
@@ -253,14 +333,34 @@ export function WorkspaceRightNav({
       >
         {computerAgentId ? (
           computer
+        ) : selected?.kind === "mcp-app" ? (
+          <div
+            className="right-panel__mcp-app"
+            data-mcp-app-panel={selected.id}
+            aria-label={`${selected.title} interactive result`}
+          />
         ) : selected ? (
           renderTab?.(selected, () => closeTab(selected.id))
         ) : state.selected === "library" ? (
-          library ?? <p className="right-panel__empty">Saved files will appear here.</p>
+          (library ?? (
+            <p className="right-panel__empty">Saved files will appear here.</p>
+          ))
+        ) : state.selected === "memories" ? (
+          (memories ?? (
+            <p className="right-panel__empty">
+              Choose a conversation to manage its memories.
+            </p>
+          ))
         ) : state.selected === "history" ? (
           <div className="right-panel__library">
-            <div className="right-panel__section-heading"><h2>History</h2></div>
-            {history ?? <p className="right-panel__empty">No history for this conversation yet.</p>}
+            <div className="right-panel__section-heading">
+              <h2>Activity</h2>
+            </div>
+            {history ?? (
+              <p className="right-panel__empty">
+                No activity for this conversation yet.
+              </p>
+            )}
           </div>
         ) : state.selected === "chats" ? (
           <div className="right-panel__library">
@@ -301,20 +401,42 @@ export function WorkspaceRightNav({
             )}
           </div>
         ) : state.selected === "browser" ? (
-          <form className="right-panel__browser" onSubmit={(event) => {
-            event.preventDefault();
-            const value = address.trim();
-            const url = safeConversationLink(/^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`);
-            if (!url || !/^https?:/.test(url)) {
-              setAddressError("Enter a valid website address.");
-              return;
-            }
-            setAddressError("");
-            dispatch({ type: "open", tab: { id: `web:${url}`, kind: "web", title: new URL(url).hostname, url } });
-          }}>
+          <form
+            className="right-panel__browser"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const value = address.trim();
+              const url = safeConversationLink(
+                /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`,
+              );
+              if (!url || !/^https?:/.test(url)) {
+                setAddressError("Enter a valid website address.");
+                return;
+              }
+              setAddressError("");
+              dispatch({
+                type: "open",
+                tab: {
+                  id: `web:${url}`,
+                  kind: "web",
+                  title: new URL(url).hostname,
+                  url,
+                },
+              });
+            }}
+          >
             <label htmlFor={`${prefix}-address`}>Website address</label>
             <div>
-              <input id={`${prefix}-address`} type="text" inputMode="url" autoComplete="url" placeholder="https://example.com" value={address} onChange={(event) => setAddress(event.target.value)} required />
+              <input
+                id={`${prefix}-address`}
+                type="text"
+                inputMode="url"
+                autoComplete="url"
+                placeholder="https://example.com"
+                value={address}
+                onChange={(event) => setAddress(event.target.value)}
+                required
+              />
               <button type="submit">Open</button>
             </div>
             {addressError ? <p role="alert">{addressError}</p> : null}

@@ -92,6 +92,12 @@ pub struct Team {
 pub struct Output {
     pub run_id: String,
     pub conversation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_revision_id: Option<String>,
     pub text: String,
     pub evidence: String,
     pub created_at: String,
@@ -144,6 +150,9 @@ pub struct Work {
     pub id: String,
     pub workspace_id: String,
     pub conversation_id: String,
+    /// Canonical user message that owns an edited or regenerated branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub root_id: String,
@@ -256,6 +265,14 @@ pub struct Fact {
     pub conversation_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_revision_id: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes_id: Option<String>,
@@ -426,6 +443,8 @@ pub enum Command {
         agent_id: String,
         prompt: String,
         discussion: bool,
+        #[serde(default)]
+        parent_message_id: Option<String>,
         /// Stable workspace agent IDs explicitly addressed by this request.
         /// When present, each ID receives an isolated assignment in the same
         /// effort while conversation membership remains unchanged.
@@ -496,6 +515,11 @@ pub enum Command {
         id: String,
         project_id: String,
         status: String,
+    },
+    PinFact {
+        id: String,
+        project_id: String,
+        pinned: bool,
     },
     SaveLayout {
         layout: Layout,

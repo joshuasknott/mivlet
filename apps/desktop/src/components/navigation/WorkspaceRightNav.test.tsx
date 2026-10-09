@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CollaborationWorkItem,
@@ -125,31 +125,31 @@ const base = {
 const context = (value: NavContext) => ({ ...base, context: value });
 
 describe("multifunctional right panel", () => {
-  it("opens History from navigation and restores focus on Back", () => {
+  it("opens Activity from navigation and restores focus on Back", () => {
     render(<WorkspaceRightNav {...context(null)} history={<p>Conversation assignments</p>} />);
-    fireEvent.click(screen.getByRole("button", { name: "History" }));
-    expect(screen.getByRole("heading", { name: "History" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Activity" }));
+    expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
     expect(screen.getByText("Conversation assignments")).toBeVisible();
     expect(screen.queryByRole("navigation")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByRole("button", { name: "History" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Activity" })).toHaveFocus();
   });
 
-  it("opens History for a requested work item", () => {
+  it("opens Activity for a requested work item", () => {
     render(<WorkspaceRightNav {...context(null)} historyRequestId="work-1" history={<p>Selected assignment</p>} />);
-    expect(screen.getByRole("heading", { name: "History" })).toBeVisible();
+    expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
     expect(screen.getByText("Selected assignment")).toBeVisible();
   });
 
-  it("replaces navigation with Library and restores focus on Back", () => {
+  it("replaces navigation with Files and restores focus on Back", () => {
     render(<WorkspaceRightNav {...context(null)} library={<p>Saved files</p>} />);
-    expect(screen.getAllByRole("button").slice(0, 4).map(button => button.textContent)).toEqual(["Library", "Browser", "Side chat", "Schedules"]);
-    fireEvent.click(screen.getByRole("button", { name: "Library" }));
+    expect(screen.getAllByRole("button").slice(0, 5).map(button => button.textContent)).toEqual(["Files", "Memories", "Browser", "Side chat", "Schedules"]);
+    fireEvent.click(screen.getByRole("button", { name: "Files" }));
     expect(screen.queryByRole("navigation")).toBeNull();
     expect(screen.getByText("Saved files")).toBeVisible();
     expect(screen.getByRole("button", { name: "Back" })).toHaveFocus();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByRole("button", { name: "Library" })).toHaveFocus();
+    expect(screen.getByRole("button", { name: "Files" })).toHaveFocus();
     expect(screen.queryByText("Saved files")).toBeNull();
   });
   it("returns to navigation from a document and deduplicates repeated opens", () => {
@@ -168,7 +168,7 @@ describe("multifunctional right panel", () => {
     expect(screen.getByText("Document contents")).toBeInTheDocument();
     expect(screen.queryByRole("navigation")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    for (const name of ["Library", "Browser", "Side chat", "Schedules"])
+    for (const name of ["Files", "Memories", "Browser", "Side chat", "Schedules"])
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Browser" }));
     expect(screen.queryByText("Document contents")).toBeNull();
@@ -231,6 +231,42 @@ describe("multifunctional right panel", () => {
     expect(screen.getByText("Website contents")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Close Website" }));
     expect(screen.getByText("Ideas contents")).toBeInTheDocument();
+  });
+  it("provides a stable MCP App panel slot without recreating the tab", () => {
+    const ready = vi.fn();
+    window.addEventListener("mivlet:mcp-app-panel-ready", ready);
+    const request = {
+      id: "mcp-app:workspace:room:result:4",
+      kind: "mcp-app" as const,
+      title: "Time result",
+    };
+    const view = render(<WorkspaceRightNav {...context(null)} request={request} />);
+    const slot = document.querySelector("[data-mcp-app-panel]");
+    expect(slot).toBeInTheDocument();
+    expect(slot).toHaveAttribute("data-mcp-app-panel", request.id);
+    expect(ready).toHaveBeenCalledWith(
+      expect.objectContaining({ detail: expect.objectContaining({ id: request.id, target: slot }) }),
+    );
+    view.rerender(<WorkspaceRightNav {...context(null)} request={{ ...request }} />);
+    expect(document.querySelectorAll("[data-mcp-app-panel]")).toHaveLength(1);
+    window.removeEventListener("mivlet:mcp-app-panel-ready", ready);
+  });
+  it("closes an MCP App tab when its frame announces teardown", () => {
+    const request = {
+      id: "mcp-app:workspace:room:result:4",
+      kind: "mcp-app" as const,
+      title: "Time result",
+    };
+    render(<WorkspaceRightNav {...context(null)} request={request} />);
+    expect(screen.getByRole("tab", { name: "Time result" })).toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("mivlet:mcp-app-panel-closed", {
+          detail: { id: request.id },
+        }),
+      );
+    });
+    expect(screen.queryByRole("tab", { name: "Time result" })).toBeNull();
   });
   it("keeps background work untouched when the panel closes", () => {
     const onClose = vi.fn();

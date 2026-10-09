@@ -26,7 +26,7 @@ credential-store service and is never silently replaced if missing or invalid.
 
 ## Current schema
 
-Schema v42 retains the local conversation product:
+Schema v45 retains the local conversation product:
 
 - workspace, optional project context, threads, messages, and message revisions;
 - the minimal internal `run` execution attempt plus tool calls and approvals;
@@ -39,6 +39,50 @@ Schema v42 retains the local conversation product:
 - knowledge sources/chunks, pinned context, memory, and deletion tombstones;
 - optional account/sync cache and outbox state; and
 - schema, migration, backup, and recovery metadata.
+
+The v43 to v44 migration adds `output_record` and `output_revision`. Output
+titles, source provenance, and content are encrypted with owner-bound AAD;
+only opaque output ids, format/mime enums, source conversation ids, revision
+counters, pin state, and timestamps remain queryable. Revisions are append-only
+and optimistic writes require the exact current revision id and number, so a
+late agent response cannot overwrite a newer user edit. Outputs are explicitly
+adopted when opened from a conversation; old artifact receipts are not guessed
+into editable records. Output revisions are included in encrypted backups and
+local-data deletion, and are not added to plaintext exports.
+
+Pin metadata is sealed with the output identity and records an exact revision
+and its conversation/message/branch provenance. Later edits never move that
+pin. Agent revisions require a durable, explicitly staged request bound to the
+output base, prompt, agent, Work and generation; restoring history cannot
+invent a revision request. A completed result is applied once through a native
+transaction, and a newer direct edit causes a conflict.
+
+Office working drafts keep immutable, bounded DOCX/XLSX package revisions in
+the account-scoped encrypted conversation UI repository. Plain paragraphs and
+existing text, numeric and boolean cells can be edited. Formula cells, fields
+and rich text remain protected. The native package editor preserves unrelated
+entries and formula bytes. Agent changes first become an exact cell/paragraph
+proposal for explicit application. Export uses the existing native Save As
+boundary; working drafts never overwrite the original published artifact.
+Office draft access also verifies authenticated conversation ownership and the
+agent's persisted room role or delegated workspace-recipient assignment. Merely
+having a profile in the workspace does not grant access to another agent's draft.
+
+The v42 to v43 migration adds `message.parent_message_id` and
+`thread.selected_head_id`. Existing linear rows derive their parent from
+`previous_message_id`, so their visible transcript is unchanged. New edits
+and regenerations can append immutable messages under an earlier parent while
+keeping one monotonic sequence for replay-safe persistence. Selecting a head
+only changes presentation state; it never replays tool calls or approvals.
+
+The renderer loads history in bounded native pages (80 messages by default,
+200 maximum) with a sequence cursor and separate bounded branch-head metadata.
+Loading older history preserves already loaded records and the reading position.
+Tail refreshes replace branch-head metadata with the current native set while
+retaining loaded messages. An older page settling after that refresh cannot
+restore obsolete heads, and a completed history range stays complete.
+Branch leaves are determined by parent relationships, not the append-order
+predecessor, so creating an alternative does not hide the former answer.
 
 Fresh databases do not retain the retired orchestration stores. The v37 to v38
 migration deletes their pre-release data and tables in one forward-only cleanup,

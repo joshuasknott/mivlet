@@ -2,16 +2,73 @@ import { useState } from "react";
 import type { LocalComputerOfficePreview } from "@mivlet/protocol";
 import "./OfficePreview.css";
 
+export interface OfficeCellSelection {
+  section: string;
+  sourceEntry?: string;
+  sectionIndex?: number;
+  row: number;
+  column: number;
+  value: string;
+}
+
+export interface OfficeParagraphSelection {
+  section: string;
+  sectionIndex?: number;
+  sourceEntry?: string;
+  paragraph: number;
+  value: string;
+}
+
+export type OfficeSelection = OfficeCellSelection | OfficeParagraphSelection;
+export type OfficeSelectionAction = "quote" | "explain" | "refine" | "memory";
+
 export function OfficePreview({
   office,
   truncated,
-  notice = "Content preview · Open the file for full formatting and editing.",
+  notice = "Working draft · Edit plain DOCX paragraphs and existing text, numeric or boolean XLSX cells. Formulas and rich Office structures remain protected. Export creates a separate file.",
+  onRequestRevision,
+  onRequestAgentRevision,
+  onSelectionAction,
+  onEditCell,
+  onEditParagraph,
 }: {
   office: LocalComputerOfficePreview;
   truncated: boolean;
   notice?: string;
+  onRequestRevision?: (selection: OfficeCellSelection) => void;
+  onRequestAgentRevision?: (selection: OfficeParagraphSelection) => void;
+  onSelectionAction?: (
+    selection: OfficeSelection,
+    action: OfficeSelectionAction,
+  ) => Promise<void>;
+  onEditCell?: (
+    selection: OfficeCellSelection,
+    replacement: string,
+  ) => Promise<void>;
+  onEditParagraph?: (
+    selection: OfficeParagraphSelection,
+    replacement: string,
+  ) => Promise<void>;
 }) {
   const [selected, setSelected] = useState(0);
+  const [cellSelection, setCellSelection] =
+    useState<OfficeCellSelection | null>(null);
+  const [cellSourceEntry, setCellSourceEntry] = useState<string | undefined>();
+  const [editValue, setEditValue] = useState("");
+  const [editingCell, setEditingCell] = useState(false);
+  const [editState, setEditState] = useState<"idle" | "saving" | "error">(
+    "idle",
+  );
+  const [editError, setEditError] = useState("");
+  const [paragraphSelection, setParagraphSelection] =
+    useState<OfficeParagraphSelection | null>(null);
+  const [paragraphValue, setParagraphValue] = useState("");
+  const [paragraphState, setParagraphState] = useState<"idle" | "saving">(
+    "idle",
+  );
+  const [paragraphError, setParagraphError] = useState("");
+  const [selectionAction, setSelectionAction] = useState<OfficeSelectionAction | null>(null);
+  const [selectionActionError, setSelectionActionError] = useState("");
   const section =
     office.sections[Math.min(selected, office.sections.length - 1)];
   if (!section)
@@ -21,6 +78,23 @@ export function OfficePreview({
       </p>
     );
   const spreadsheet = office.kind === "spreadsheet";
+  const runSelectionAction = async (
+    selection: OfficeSelection,
+    action: OfficeSelectionAction,
+  ) => {
+    if (!onSelectionAction) return;
+    setSelectionAction(action);
+    setSelectionActionError("");
+    try {
+      await onSelectionAction(selection, action);
+    } catch (failure) {
+      setSelectionActionError(
+        failure instanceof Error ? failure.message : "This selection action could not be completed.",
+      );
+    } finally {
+      setSelectionAction(null);
+    }
+  };
   return (
     <div className={`office-preview office-preview--${office.kind}`}>
       <p className="office-preview__notice">{notice}</p>
@@ -35,7 +109,12 @@ export function OfficePreview({
               type="button"
               key={index}
               aria-pressed={selected === index}
-              onClick={() => setSelected(index)}
+              onClick={() => {
+                setSelected(index);
+                setCellSelection(null);
+                setCellSourceEntry(undefined);
+                setEditingCell(false);
+              }}
             >
               {item.name}
             </button>
@@ -46,13 +125,115 @@ export function OfficePreview({
         {office.kind !== "document" && <h3>{section.name}</h3>}
         {section.blocks.map((block, index) =>
           block.type === "paragraph" ? (
-            block.style === "title" || block.style === "heading" ? (
-              <h3 key={index} className={`office-preview__${block.style}`}>
-                {block.text}
-              </h3>
-            ) : (
-              <p key={index}>{block.text || "\u00a0"}</p>
-            )
+            <div key={index} className="office-preview__paragraph">
+              {block.style === "title" || block.style === "heading" ? (
+                <h3 className={`office-preview__${block.style}`}>
+                  {block.text}
+                </h3>
+              ) : (
+                <p>{block.text || "\u00a0"}</p>
+              )}
+              {onEditParagraph && selected === 0 ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                    const paragraph = section.blocks
+                      .slice(0, index)
+                      .filter((item) => item.type === "paragraph").length;
+                    const next = {
+                      section: section.name,
+                      sectionIndex: selected,
+                      sourceEntry: section.sourceEntry,
+                      paragraph,
+                      value: block.text,
+                    };
+                    setParagraphSelection(next);
+                    setParagraphValue(block.text);
+                    setParagraphError("");
+                    }}
+                  >
+                  {paragraphSelection?.section === section.name &&
+                    paragraphSelection.paragraph ===
+                      section.blocks
+                        .slice(0, index)
+                        .filter((item) => item.type === "paragraph").length
+                      ? "Editing paragraph"
+                      : "Edit paragraph"}
+                  </button>
+                  {paragraphSelection?.section === section.name &&
+                  paragraphSelection.paragraph ===
+                    section.blocks
+                      .slice(0, index)
+                      .filter((item) => item.type === "paragraph").length &&
+                  onSelectionAction ? (
+                    <OfficeSelectionActions
+                      disabled={selectionAction !== null}
+                      pending={selectionAction}
+                      onAction={(action) => void runSelectionAction(paragraphSelection, action)}
+                    />
+                  ) : null}
+                  {onRequestAgentRevision ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const paragraph = section.blocks
+                          .slice(0, index)
+                          .filter((item) => item.type === "paragraph").length;
+                        onRequestAgentRevision({
+                          section: section.name,
+                          sectionIndex: selected,
+                          sourceEntry: section.sourceEntry,
+                          paragraph,
+                          value: block.text,
+                        });
+                      }}
+                    >
+                      Request agent change
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
+              {paragraphSelection?.section === section.name &&
+              paragraphSelection.paragraph ===
+                section.blocks
+                  .slice(0, index)
+                  .filter((item) => item.type === "paragraph").length ? (
+                <div className="office-preview__paragraph-editor">
+                  <input
+                    value={paragraphValue}
+                    aria-label="Replacement paragraph text"
+                    onChange={(event) => setParagraphValue(event.target.value)}
+                    disabled={paragraphState === "saving"}
+                  />
+                  <button
+                    type="button"
+                    disabled={paragraphState === "saving"}
+                    onClick={() => {
+                      if (!onEditParagraph) return;
+                      setParagraphState("saving");
+                      setParagraphError("");
+                      void onEditParagraph(paragraphSelection, paragraphValue)
+                        .then(() => {
+                          setParagraphState("idle");
+                          setParagraphSelection(null);
+                        })
+                        .catch((failure: unknown) => {
+                          setParagraphState("idle");
+                          setParagraphError(
+                            failure instanceof Error
+                              ? failure.message
+                              : "The paragraph could not be saved.",
+                          );
+                        });
+                    }}
+                  >
+                    {paragraphState === "saving" ? "Saving…" : "Save edited copy"}
+                  </button>
+                  {paragraphError ? <span role="alert">{paragraphError}</span> : null}
+                </div>
+              ) : null}
+            </div>
           ) : block.type === "chart" ? (
             <PreviewChart key={index} chart={block} />
           ) : block.type === "image" ? (
@@ -63,10 +244,99 @@ export function OfficePreview({
               rows={block.rows}
               spreadsheet={spreadsheet}
               name={`${section.name} table ${index + 1}`}
+              sectionName={section.name}
+              selected={cellSelection}
+              onCellSelect={(selection) => {
+                setCellSourceEntry(section.sourceEntry);
+                setCellSelection(selection);
+                setEditValue(selection.value);
+                setEditingCell(false);
+                setEditState("idle");
+                setEditError("");
+              }}
             />
           ),
         )}
       </section>
+      {cellSelection && (onRequestRevision || onSelectionAction || onEditCell) ? (
+        <div className="office-preview__selection" role="status">
+          <span>
+            Selected cell {String.fromCharCode(65 + cellSelection.column)}
+            {cellSelection.row + 1}: {cellSelection.value || "(empty)"}
+          </span>
+          {onRequestRevision ? (
+            <button
+              type="button"
+              onClick={() => onRequestRevision({ ...cellSelection, sourceEntry: cellSourceEntry, sectionIndex: selected })}
+            >
+              Request agent change
+            </button>
+          ) : null}
+          {onSelectionAction ? (
+            <OfficeSelectionActions
+              disabled={selectionAction !== null}
+              pending={selectionAction}
+              onAction={(action) => void runSelectionAction({ ...cellSelection, sourceEntry: cellSourceEntry, sectionIndex: selected }, action)}
+            />
+          ) : null}
+          {onEditCell && cellSourceEntry ? (
+            editingCell ? (
+              <>
+                <input
+                  value={editValue}
+                  aria-label="Replacement cell value"
+                  onChange={(event) => setEditValue(event.target.value)}
+                  disabled={editState === "saving"}
+                />
+                <button
+                  type="button"
+                  disabled={editState === "saving"}
+                  onClick={() => {
+                    setEditState("saving");
+                    setEditError("");
+                      void onEditCell(
+                        cellSourceEntry
+                          ? { ...cellSelection, sourceEntry: cellSourceEntry }
+                          : cellSelection,
+                        editValue,
+                      )
+                      .then(() => {
+                        setEditState("idle");
+                        setEditingCell(false);
+                      })
+                      .catch((failure: unknown) => {
+                        setEditState("error");
+                        setEditError(
+                          failure instanceof Error
+                            ? failure.message
+                            : "The Office revision could not be saved.",
+                        );
+                      });
+                  }}
+                >
+                  {editState === "saving" ? "Saving…" : "Save edited copy"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setEditingCell(false)}
+                  disabled={editState === "saving"}
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setEditingCell(true)}
+              >
+                Edit cell
+              </button>
+            )
+          ) : null}
+          {editError ? <span role="alert">{editError}</span> : null}
+          {selectionActionError ? <span role="alert">{selectionActionError}</span> : null}
+        </div>
+      ) : null}
       {truncated && (
         <p className="office-preview__notice">
           This content preview is truncated. Save or open the file to see all
@@ -74,6 +344,25 @@ export function OfficePreview({
         </p>
       )}
     </div>
+  );
+}
+
+function OfficeSelectionActions({
+  disabled,
+  pending,
+  onAction,
+}: {
+  disabled: boolean;
+  pending: OfficeSelectionAction | null;
+  onAction: (action: OfficeSelectionAction) => void;
+}) {
+  return (
+    <span className="office-preview__selection-actions" role="toolbar" aria-label="Selected Office content actions">
+      <button type="button" disabled={disabled} onClick={() => onAction("quote")}>Quote / ask</button>
+      <button type="button" disabled={disabled} onClick={() => onAction("explain")}>Explain</button>
+      <button type="button" disabled={disabled} onClick={() => onAction("refine")}>{pending === "refine" ? "Requesting…" : "Rewrite / refine"}</button>
+      <button type="button" disabled={disabled} onClick={() => onAction("memory")}>Save to memory</button>
+    </span>
   );
 }
 
@@ -238,10 +527,16 @@ function PreviewTable({
   rows,
   spreadsheet,
   name,
+  sectionName = name,
+  selected,
+  onCellSelect,
 }: {
   rows: readonly (readonly string[])[];
   spreadsheet: boolean;
   name: string;
+  sectionName?: string;
+  selected?: OfficeCellSelection | null;
+  onCellSelect?: (selection: OfficeCellSelection) => void;
 }) {
   const columns = Math.max(0, ...rows.map((row) => row.length));
   return (
@@ -272,7 +567,32 @@ function PreviewTable({
               {Array.from(
                 { length: spreadsheet ? columns : row.length },
                 (_, column) => (
-                  <td key={column}>{row[column] ?? ""}</td>
+                  <td key={column}>
+                    {onCellSelect ? (
+                      <button
+                        type="button"
+                        className="office-preview__cell"
+                        aria-label={`Select ${sectionName} row ${rowIndex + 1} column ${column + 1}`}
+                        aria-pressed={
+                          selected?.section === sectionName &&
+                          selected?.row === rowIndex &&
+                          selected?.column === column
+                        }
+                        onClick={() =>
+                          onCellSelect({
+                            section: sectionName,
+                            row: rowIndex,
+                            column,
+                            value: row[column] ?? "",
+                          })
+                        }
+                      >
+                        {row[column] ?? ""}
+                      </button>
+                    ) : (
+                      (row[column] ?? "")
+                    )}
+                  </td>
                 ),
               )}
             </tr>

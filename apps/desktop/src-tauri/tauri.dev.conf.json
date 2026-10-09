@@ -4,7 +4,7 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "frame-src": "https:",
+        "frame-src": "https: http://127.0.0.1:*",
         "connect-src": "'self' ipc: http://ipc.localhost ws: ws://127.0.0.1:* http://127.0.0.1:1420",
         "font-src": "'self' data:",
         "img-src": "'self' data: blob:",

@@ -24,6 +24,10 @@ export function formatMs(ms) {
   return `${Math.round(ms)} ms`;
 }
 
+/** Assets introduced by the deferred conversational UI upgrade. */
+export const conversationUpgradeAssetPattern =
+  /^(assistant-ui-|openui-|mcp-apps-|mcp-semantic-execution-|mcp-transport-core-|connected-app-cancellation-|conversation-markdown-|conversation-branches-|ConversationPane-|ArtifactPreview-|WorkspaceHistory-|OutputCsvEditor-|generated-interface-|InterfaceRenderer-|MessageMarkdown-|CopyButton-|collaboration-mentions-)/;
+
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });
   const files = [];
@@ -100,6 +104,19 @@ export function summarizeBundle(assets) {
     rawBytes: sum(pdfAssets, "bytes"),
     gzipBytes: sum(pdfAssets, "gzipBytes"),
   };
+  const conversationUpgradeAssets = jsAssets
+    .concat(cssAssets)
+    .filter((asset) => conversationUpgradeAssetPattern.test(asset.fileName));
+  const conversationUpgrade = {
+    rawBytes: sum(conversationUpgradeAssets, "bytes"),
+    gzipBytes: sum(conversationUpgradeAssets, "gzipBytes"),
+  };
+  const conversationUpgradeCss = conversationUpgradeAssets
+    .filter((asset) => asset.type === "css")
+    .reduce((total, asset) => total + asset.bytes, 0);
+  const conversationUpgradeCssGzip = conversationUpgradeAssets
+    .filter((asset) => asset.type === "css")
+    .reduce((total, asset) => total + asset.gzipBytes, 0);
 
   const initialEntryJs = jsAssets.find(
     (asset) => logicalChunkId(asset.fileName) === "index",
@@ -127,16 +144,22 @@ export function summarizeBundle(assets) {
   return {
     pdfPreview,
     commonJsCss: {
-      rawBytes: totalJs + totalCss - pdfPreview.rawBytes,
-      gzipBytes: totalJsGzip + totalCssGzip - pdfPreview.gzipBytes,
+      rawBytes:
+        totalJs + totalCss - pdfPreview.rawBytes - conversationUpgrade.rawBytes,
+      gzipBytes:
+        totalJsGzip +
+        totalCssGzip -
+        pdfPreview.gzipBytes -
+        conversationUpgrade.gzipBytes,
     },
+    conversationUpgrade,
     totalJsCss: {
       rawBytes: totalJs + totalCss,
       gzipBytes: totalJsGzip + totalCssGzip,
     },
     css: {
-      rawBytes: totalCss,
-      gzipBytes: totalCssGzip,
+      rawBytes: totalCss - conversationUpgradeCss,
+      gzipBytes: totalCssGzip - conversationUpgradeCssGzip,
     },
     initialEntryJs: initialEntryJs
       ? {
