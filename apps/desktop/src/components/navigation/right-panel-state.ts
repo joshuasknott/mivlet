@@ -7,9 +7,13 @@ export type RightPanelTab =
       title: string;
       output: string;
       agentId: string;
+      conversationId?: string;
+      messageId?: string;
+      sourceRevisionId?: string;
     }
   | { id: string; kind: "chat"; title: string; roomId: string }
   | { id: string; kind: "web"; title: string; url: string }
+  | { id: string; kind: "mcp-app"; title: string }
   | {
       id: string;
       kind: "file";
@@ -19,7 +23,8 @@ export type RightPanelTab =
         { type: "artifact" | "knowledge-file" }
       >;
       text?: string;
-    };
+    }
+  | { id: string; kind: "output"; title: string; outputId: string };
 
 export type RightPanelState = { tabs: RightPanelTab[]; selected: string };
 export type RightPanelAction =

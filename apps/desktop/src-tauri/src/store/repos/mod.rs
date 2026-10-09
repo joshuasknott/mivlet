@@ -25,6 +25,7 @@ pub mod connection_selection;
 pub mod connector_account;
 pub mod connector_cache;
 pub mod connector_cache_settings;
+pub mod conversation_ui;
 pub mod draft;
 pub mod execution_attempt;
 pub mod knowledge_source;

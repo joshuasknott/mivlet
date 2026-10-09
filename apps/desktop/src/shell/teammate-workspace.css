@@ -927,6 +927,10 @@
     min-height: 48px;
     padding-left: 0;
   }
+  #root:has(.window-controls) .sidebar-create {
+    position: relative;
+    z-index: 1001;
+  }
   #root:has(.window-controls) .workspace-history-toggle {
     position: fixed;
     top: 5px;

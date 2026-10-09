@@ -476,7 +476,15 @@ export function useShellRuntime(
       }
       const connectionEntries = await Promise.all(
         manifests
-          .filter((manifest) => manifest.status === "connected")
+          // MCP manifests may describe a connected tool with its own account
+          // model. The account command is intentionally limited to Mivlet's
+          // built-in connector IDs, so never ask native to resolve an
+          // arbitrary custom MCP identifier.
+          .filter(
+            (manifest) =>
+              manifest.status === "connected" &&
+              isSupportedConnectorId(manifest.id),
+          )
           .map(
             async (manifest) =>
               [
@@ -641,6 +649,7 @@ export function useShellRuntime(
           isLiveSource(source) &&
           sourceIsAuthorized(source) &&
           sourceAllowedByConnections(source, context) &&
+          !context?.excludedKnowledgeSourceIds?.includes(source.id) &&
           (!context?.allowedConnectorIds ||
             source.connectorId === "local-files" ||
             context.allowedConnectorIds.includes(source.connectorId)) &&
@@ -682,7 +691,7 @@ export function useShellRuntime(
     // Durable derived summaries for this exact conversation. They are account-
     // scoped natively and only enter the prefix as untrusted prior evidence.
     const summaries =
-      hasTauriRuntime() && context?.threadId
+      hasTauriRuntime() && context?.threadId && !context.excludeDerivedSummaries
         ? ((await listRuntimeContextSummaries(context.threadId)) ?? [])
         : [];
     const result = await retrieve(
@@ -751,6 +760,37 @@ export function useShellRuntime(
             : "Mivlet could not save memory state.",
         );
       });
+  };
+
+  // Send only the changed record; the native transaction merges other memories
+  // and rejects stale revisions and forgotten-record resurrection.
+  const saveMemoryRecord = async (record: MemoryRecord) => {
+    const generation = connectorScopeRef.current;
+    const state = await saveRuntimeMemoryState({ disabled: memoryDisabled, records: [record] });
+    if (!state) throw new Error("Saving memories requires the desktop app.");
+    if (connectorScopeRef.current !== generation) return;
+    setMemoryDisabled(state.disabled);
+    setManagedMemoryRecords(state.records);
+    setMemoryStatus("Memory saved.");
+  };
+  const refreshMemories = useCallback(async () => {
+    const generation = connectorScopeRef.current;
+    const state = await loadRuntimeMemoryState();
+    if (state && connectorScopeRef.current === generation) {
+      setMemoryDisabled(state.disabled);
+      setManagedMemoryRecords(state.records);
+    }
+  }, []);
+  const addChatMemory = async (threadId: string, title: string, value: string) => {
+    if (!threadId || !title.trim() || !value.trim()) throw new Error("Enter a title and memory for this chat.");
+    if (title.trim().length > 120 || value.trim().length > 2000) throw new Error("Keep the title under 120 characters and memory under 2,000 characters.");
+    const now = new Date().toISOString();
+    await saveMemoryRecord({ id: `memory-${crypto.randomUUID()}`, kind: "fact", title: title.trim(), value: value.trim(), source: "Added by you", freshness: now, approved: true, approvalState: "approved", pinned: false, scope: { level: "thread", threadId }, provenance: { origin: "manual", note: "Saved explicitly in this chat" }, confidence: 1, createdAt: now, updatedAt: now });
+  };
+  const approveMemory = async (recordId: string) => {
+    const record = managedMemoryRecords.find(item => item.id === recordId && !item.forgottenAt && item.approvalState === "suggested");
+    if (!record) throw new Error("That suggestion is no longer available.");
+    await saveMemoryRecord({ ...record, approved: true, approvalState: "approved", confidence: 1 });
   };
 
   const changeMemory = async (
@@ -1213,6 +1253,9 @@ export function useShellRuntime(
     memoryStatus,
     toggleMemoryPin,
     forgetMemory,
+    addChatMemory,
+    approveMemory,
+    refreshMemories,
     correctMemory,
     toggleMemoryRecordDisabled,
     toggleMemoryDisabled,

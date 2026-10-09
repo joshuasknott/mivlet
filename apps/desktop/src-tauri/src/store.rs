@@ -231,6 +231,8 @@ impl Store {
         let schema_result = (|| -> Result<()> {
             conn.execute_batch(SCHEMA_V1)?;
             conn.execute_batch(crate::store::schema::SCHEMA_V41_TO_V42)?;
+            conn.execute_batch(crate::store::schema::SCHEMA_V43_TO_V44)?;
+            conn.execute_batch(crate::store::schema::SCHEMA_V44_TO_V45)?;
             conn.execute_batch(crate::store::schema::RETIRED_ORCHESTRATION_STORAGE_CLEANUP)?;
             // Base DDL includes PRAGMA foreign_keys=ON. Re-establish the
             // maintenance fence before the event migration rebuilds a parent.
@@ -404,6 +406,56 @@ impl Store {
         self.account_owned = true;
         self.account_check = Some(Box::new(check));
         self
+    }
+
+    /// Shared connection-first transaction primitive for account-bound writes.
+    /// The injected fence is production-backed by native identity; the narrow
+    /// seam also lets store tests exercise rollback and stale-generation
+    /// rejection without reading credentials.
+    fn transaction_with_identity_fence<R, G>(
+        &self,
+        expected: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+        acquire_identity: impl FnOnce() -> std::result::Result<G, String>,
+        ensure_current: impl Fn(
+            &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+        ) -> std::result::Result<(), String>,
+        f: impl FnOnce(&rusqlite::Transaction<'_>, &Store) -> std::result::Result<R, String>,
+    ) -> std::result::Result<R, String> {
+        let mut conn = self
+            .conn
+            .lock()
+            .map_err(|_| "Mivlet's local database is unavailable.".to_string())?;
+        let _identity_guard = acquire_identity()?;
+        ensure_current(expected)?;
+        let tx = conn.transaction().map_err(|error| error.to_string())?;
+        let out = f(&tx, self)?;
+        ensure_current(expected)?;
+        tx.commit().map_err(|error| error.to_string())?;
+        Ok(out)
+    }
+
+    /// Run one account-bound transaction with a consistent lock order:
+    /// connection first, then native identity. Approval resolution uses this
+    /// path so account generation cannot change between its durable writes and
+    /// commit, while ordinary store account checks remain deadlock-free.
+    pub(crate) fn transaction_with_native_identity<R>(
+        &self,
+        expected: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+        f: impl FnOnce(&rusqlite::Transaction<'_>, &Store) -> std::result::Result<R, String>,
+    ) -> std::result::Result<R, String> {
+        let account_owned = self.account_owned;
+        self.transaction_with_identity_fence(
+            expected,
+            || crate::clerk_identity::lock_native_identity_generation(expected),
+            move |expected| {
+                if account_owned {
+                    crate::account_session::ensure_current_with_identity_guard(expected)
+                } else {
+                    Ok(())
+                }
+            },
+            f,
+        )
     }
 
     /// Privileged outgoing-account cleanup; never accepts a caller-selected owner.
@@ -676,6 +728,34 @@ fn scoped_document_location(
             ))
         }
     }
+}
+
+pub(crate) fn read_document_in_transaction<T: serde::de::DeserializeOwned>(
+    tx: &rusqlite::Transaction<'_>,
+    store: &Store,
+    path: &Path,
+    scope: &repos::scope::DataScope,
+) -> std::result::Result<Option<T>, String> {
+    let (storage_scope, key) = scoped_document_location(path, scope)?;
+    repos::preferences::get_scoped(tx, store, &storage_scope, &key)
+        .map_err(|error| error.to_string())?
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|_| "Mivlet could not decode an encrypted local document.".to_string())
+}
+
+pub(crate) fn write_document_in_transaction<T: serde::Serialize>(
+    tx: &rusqlite::Transaction<'_>,
+    store: &Store,
+    path: &Path,
+    scope: &repos::scope::DataScope,
+    value: &T,
+) -> std::result::Result<(), String> {
+    let (storage_scope, key) = scoped_document_location(path, scope)?;
+    let value = serde_json::to_value(value)
+        .map_err(|_| "Mivlet could not encode an encrypted local document.".to_string())?;
+    repos::preferences::upsert_scoped(tx, store, &storage_scope, &key, &value, &timestamp())
+        .map_err(|error| error.to_string())
 }
 
 pub(crate) fn private_document_location(
@@ -1326,11 +1406,97 @@ pub fn write_schema_version(conn: &Connection, version: u32) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex, MutexGuard};
     use tempfile::TempDir;
+
+    static TEST_GENERATION: Mutex<u64> = Mutex::new(7);
+
+    struct TestIdentityFence {
+        _guard: MutexGuard<'static, u64>,
+    }
 
     fn vault() -> Vault {
         Vault::new(&vault::MasterKey::generate().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn identity_fenced_approval_transaction_rolls_back_and_rejects_stale_generation() {
+        let store = Store::open_in_memory(vault()).unwrap();
+        let expected = crate::clerk_identity::NativeIdentityGenerationSnapshot {
+            account_binding: "test-account".into(),
+            generation: 7,
+        };
+        let scope = repos::scope::DataScope::workspace(repos::scope::DEFAULT_WORKSPACE_ID).unwrap();
+        let audit_path = Path::new("approval-audit.json");
+        let rules_path = Path::new("approval-rules.json");
+        let execution_path = Path::new("execution-approvals.json");
+
+        let rollback = store.transaction_with_identity_fence(
+            &expected,
+            || {
+                let guard = TEST_GENERATION.lock().unwrap();
+                if *guard != expected.generation {
+                    return Err("stale test generation".to_string());
+                }
+                Ok(TestIdentityFence { _guard: guard })
+            },
+            |_| Ok(()),
+            |tx, store| {
+                write_document_in_transaction(
+                    tx,
+                    store,
+                    audit_path,
+                    &scope,
+                    &serde_json::json!([{"requestId":"approval"}]),
+                )?;
+                write_document_in_transaction(
+                    tx,
+                    store,
+                    rules_path,
+                    &scope,
+                    &serde_json::json!([{"requestId":"approval"}]),
+                )?;
+                write_document_in_transaction(
+                    tx,
+                    store,
+                    execution_path,
+                    &scope,
+                    &serde_json::json!([{"requestId":"approval","consumedAt":null}]),
+                )?;
+                Err::<(), String>("simulate failure after permit preparation".into())
+            },
+        );
+        assert!(rollback.is_err());
+        store
+            .with_conn(|conn| {
+                for path in [audit_path, rules_path, execution_path] {
+                    let (_, key) = scoped_document_location(path, &scope).unwrap();
+                    assert!(repos::preferences::get_scoped(conn, &store, &scope, &key)?.is_none());
+                }
+                Ok(())
+            })
+            .unwrap();
+
+        *TEST_GENERATION.lock().unwrap() = 8;
+        let mut closure_called = false;
+        let stale = store.transaction_with_identity_fence(
+            &expected,
+            || {
+                let guard = TEST_GENERATION.lock().unwrap();
+                if *guard != expected.generation {
+                    return Err("stale test generation".to_string());
+                }
+                Ok(TestIdentityFence { _guard: guard })
+            },
+            |_| Ok(()),
+            |_tx, _store| {
+                closure_called = true;
+                Ok(())
+            },
+        );
+        assert!(stale.is_err());
+        assert!(!closure_called);
+        *TEST_GENERATION.lock().unwrap() = expected.generation;
     }
 
     #[test]

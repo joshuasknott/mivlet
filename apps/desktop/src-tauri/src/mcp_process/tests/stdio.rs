@@ -307,8 +307,9 @@
             arguments: serde_json::json!({
                 "path": "safe.txt",
                 "request": {
-                    "callbackUrl": "https://api.example.com/hook?token=private-value",
-                    "body": "private-body"
+                    "callbackUrl": "https://api.example.com/hook?token=private-value&case=1#secret-fragment",
+                    "body": "private-body",
+                    "message": "Please send the report to the finance team."
                 }
             }),
         };
@@ -316,7 +317,13 @@
         validate_mcp_arguments(&proposal.arguments).unwrap();
         let approval = approval_for_tool_proposal(
             &proposal,
-            "fingerprint-only",
+            &ToolProposalContext {
+                connection_id: "connection-mcp".into(),
+                connection_revision: 4,
+                transport: "stdio".into(),
+                arguments_fingerprint: "arguments-fingerprint".into(),
+                proposal_fingerprint: "fingerprint-only".into(),
+            },
             "approval-1".into(),
             "2026-07-11T20:00:00Z".into(),
         );
@@ -325,17 +332,32 @@
         assert!(encoded.contains("argument fields"));
         assert!(encoded.contains("request.callbackUrl"));
         assert!(encoded.contains("request.body"));
+        assert!(encoded.contains("validated arguments"));
+        assert!(encoded.contains("safe.txt"));
         assert!(encoded.contains("https://api.example.com"));
-        assert!(!encoded.contains("safe.txt"));
+        assert!(encoded.contains("https://api.example.com/hook?case=1"));
+        assert!(encoded.contains("private-body"));
+        assert!(encoded.contains("Please send the report to the finance team."));
         assert!(!encoded.contains("private-value"));
-        assert!(!encoded.contains("/hook"));
-        assert!(!encoded.contains("private-body"));
+        assert!(!encoded.contains("secret-fragment"));
         assert!(validate_mcp_arguments(&serde_json::json!({ "apiKey": "secret" })).is_err());
         assert!(validate_mcp_arguments(
             &serde_json::json!({ "url": "https://user:pass@example.com/private" })
         )
         .is_err());
         assert!(validate_mcp_arguments(&serde_json::json!(["not-an-object"])).is_err());
+    }
+
+    #[test]
+    fn mcp_argument_preview_bounds_unicode_and_marks_omitted_content() {
+        let mut arguments = serde_json::Map::new();
+        arguments.insert("message".into(), Value::String("🙂".repeat(5_000)));
+        for index in 0..(MAX_MCP_PREVIEW_ITEMS + 2) {
+            arguments.insert(format!("field{index}"), Value::String(index.to_string()));
+        }
+        let (_, _, rendered) = safe_mcp_argument_preview(&Value::Object(arguments));
+        assert!(rendered.chars().count() <= MAX_MCP_PREVIEW_CHARS + 1);
+        assert!(rendered.contains("[additional fields omitted]") || rendered.ends_with('…'));
     }
 
     #[test]
@@ -347,7 +369,18 @@
         };
         assert_eq!(resource_uri_for_proposal(&proposal).unwrap(), Some("file:///server-owned/brief"));
         assert!(!routine_official_read(&proposal).unwrap());
-        let approval = approval_for_tool_proposal(&proposal, "exact-fingerprint", "approval-one".into(), "now".into());
+        let approval = approval_for_tool_proposal(
+            &proposal,
+            &ToolProposalContext {
+                connection_id: "connection-mcp".into(),
+                connection_revision: 4,
+                transport: "streamable-http".into(),
+                arguments_fingerprint: "arguments-fingerprint".into(),
+                proposal_fingerprint: "exact-fingerprint".into(),
+            },
+            "approval-one".into(),
+            "now".into(),
+        );
         assert_eq!(approval.mode, "read-only");
         assert_eq!(approval.service, "MCP resources");
         assert!(approval.confirmation_phrase.is_none());
