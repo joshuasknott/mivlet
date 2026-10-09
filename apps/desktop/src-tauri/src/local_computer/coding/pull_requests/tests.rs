@@ -404,7 +404,7 @@ fn native_github_pr_read_acceptance() {
 fn concurrent_review_reads_wait_for_the_lock_and_stop_cancels_the_wait() {
     let (_temp, directory, authority, _repo) = super::super::tests::fixture();
     let lock = super::super::lock(&directory).unwrap();
-    let guard = lock.lock().unwrap();
+    let guard = lock.try_lock().unwrap();
     let ready = std::sync::mpsc::channel();
     let queued_lock = lock.clone();
     let ticket = authority.begin_agent(1).unwrap();
@@ -415,7 +415,7 @@ fn concurrent_review_reads_wait_for_the_lock_and_stop_cancels_the_wait() {
     ready.1.recv().unwrap();
     drop(guard);
     worker.join().unwrap().unwrap();
-    let _guard = lock.lock().unwrap();
+    let _guard = lock.try_lock().unwrap();
     let ticket = authority.begin_agent(1).unwrap();
     authority.revoke(1).unwrap();
     assert!(review_lock(&lock, &ticket).is_err());
@@ -499,4 +499,31 @@ fn own_approval_and_a_head_that_moves_during_preparation_never_write() {
         .iter()
         .all(|(method, _, _)| method == "GET"));
     assert!(!has_pending(&directory, &repo).unwrap());
+}
+
+#[test]
+fn review_reads_respect_an_independent_process_lease_and_stop_the_wait() {
+    let (_temp, directory, authority, _repo) = super::super::tests::fixture();
+    let _owner = crate::local_computer::leases::acquire(
+        &directory.join("repository-operation.lock"),
+        std::time::Duration::ZERO,
+    )
+    .unwrap();
+    let lock = super::super::lock(&directory).unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    let (sender, receiver) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        sender
+            .send(review_lock(&lock, &ticket).map(|_| ()))
+            .unwrap();
+    });
+    let early = receiver.recv_timeout(std::time::Duration::from_millis(100));
+    authority.revoke(1).unwrap();
+    let stopped = receiver.recv_timeout(std::time::Duration::from_secs(5));
+    worker.join().unwrap();
+    assert!(matches!(
+        early,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout)
+    ));
+    assert!(stopped.unwrap().is_err());
 }
