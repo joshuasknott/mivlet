@@ -181,6 +181,28 @@ ceilings were retained; the feature raw limit has 1,094 bytes of headroom. The m
 feature chunk that becomes reachable through the entry's static imports. PDF assets
 remain independently classified and capped.
 
+The 2026-10-09 recovery integration adds repository commands/copy management,
+provider usage and continuation, protected requests, event automations, PR review,
+background ownership and inbound MCP access. The profile of `4876a5ec` records
+1,307,435 raw / 380,994 gzip bytes of common JS/CSS, 692,307 raw / 209,624 gzip
+for the deferred conversation graph, and 3,845,162 raw / 1,150,304 gzip overall.
+The Settings chunk is 63,767 raw bytes. See the
+[recorded profile run](https://github.com/joshuasknott/mivlet/actions/runs/37932681194).
+
+The growth is attributable to those feature modules: command status in the deferred
+library, separate lazy PR-review/copy-management/continuation chunks, usage controls,
+and MCP/background controls in deferred Settings. Startup is 441,390 raw bytes,
+below its unchanged 485,165-byte ceiling. No new framework or compression layer
+was introduced to offset these additions.
+
+Budget version 9 records that combined baseline and provides 10 KiB raw / 4 KiB
+gzip common headroom, 4 KiB raw conversation headroom, 4 KiB Settings headroom,
+and 16 KiB aggregate raw headroom. Initial-entry, CSS, PDF, conversation gzip and
+aggregate gzip ceilings are unchanged; static-graph deferral checks still apply.
+This is an explicit feature-integration allowance, not a waiver of functional
+checks or evidence of packaged/authenticated acceptance. Further growth still
+requires attribution and review rather than automatically resetting the baseline.
+
 Inspect production assets as well as the development renderer. Native inspection
 found that the style compactor ran before Vite expanded CSS imports, leaving
 imported selectors inconsistent with their JSX. The shared style fix is integrated
