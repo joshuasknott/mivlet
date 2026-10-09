@@ -46,7 +46,10 @@ export function ProjectContextPanel({
   data: CollaborationSnapshot;
   runtime: ShellRuntime;
   service: WorkspaceExecution;
-  onOpen: (id: string) => void;
+  onOpen: (
+    id: string,
+    source?: Pick<ProjectFact, "branchId" | "messageId" | "sourceRevisionId">,
+  ) => void;
   onEdit: () => void;
   onSchedules: () => void;
   onUpdate: (
@@ -426,9 +429,34 @@ export function ProjectContextPanel({
                 <div>
                   <button
                     type="button"
-                    onClick={() => onOpen(fact.conversationId)}
+                    onClick={() =>
+                      onOpen(fact.conversationId, {
+                        branchId: fact.branchId,
+                        messageId: fact.messageId,
+                        sourceRevisionId: fact.sourceRevisionId,
+                      })
+                    }
                   >
                     View source conversation
+                  </button>
+                  <button
+                    type="button"
+                    disabled={pending}
+                    aria-pressed={fact.pinned === true}
+                    onClick={() =>
+                      void perform(() =>
+                        service.command({
+                          action: "pin-fact",
+                          projectId: project.id,
+                          id: fact.id,
+                          pinned: fact.pinned !== true,
+                        }),
+                      )
+                    }
+                  >
+                    {fact.pinned
+                      ? `Unpin ${fact.kind}`
+                      : `Pin ${fact.kind}`}
                   </button>
                   {fact.status === "current" ? (
                     <button

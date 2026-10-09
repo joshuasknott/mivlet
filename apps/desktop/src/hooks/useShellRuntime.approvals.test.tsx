@@ -56,6 +56,88 @@ describe("approval queue workspace hydration", () => {
     expect(mocks.resolveApproval.mock.calls[0]?.[0]?.confirmationText).toBeUndefined();
     expect(result.current.pendingApprovalConfirmation).toBeNull();
   });
+
+  it("coalesces duplicate native approval decisions and exposes the pending state", async () => {
+    const gate = createApprovalGate();
+    const { result } = renderHook(() => useShellRuntime({ approvalGate: gate }), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.activeWorkspace.localWorkspaceId).toBe("local-default"));
+    await act(async () => {});
+    act(() => result.current.selectPermissionLabel("Ask Me"));
+
+    let finish!: (value: ApprovalResolutionResponse) => void;
+    mocks.resolveApproval.mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    const approval = buildToolApproval("Codex", "connector-action", "{}");
+    gate.register(approval);
+    const outcome = gate.waitForDecision(approval);
+    act(() => result.current.recordBackendToolCall({
+      callId: approval.id,
+      tool: "connector-action",
+      arguments: "{}",
+      approval,
+    }));
+
+    act(() => {
+      result.current.requestApprovalDecision(approval, "once");
+      result.current.requestApprovalDecision(approval, "once");
+    });
+
+    await waitFor(() => {
+      expect(mocks.resolveApproval).toHaveBeenCalledTimes(1);
+      expect(result.current.pendingNativeApprovalIds).toEqual(new Set([approval.id]));
+    });
+    finish(resolveApprovalFallback(mocks.resolveApproval.mock.calls[0]![0]!));
+    await waitFor(() => expect(result.current.pendingNativeApprovalIds).toEqual(new Set()));
+    await expect(outcome).resolves.toBe("granted");
+  });
+
+  it("cancels a pending native approval on Stop and rejects a late native response", async () => {
+    const gate = createApprovalGate();
+    const { result } = renderHook(() => useShellRuntime({ approvalGate: gate }), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.activeWorkspace.localWorkspaceId).toBe("local-default"));
+    await act(async () => {});
+    act(() => result.current.selectPermissionLabel("Ask Me"));
+
+    let finish!: (value: ApprovalResolutionResponse) => void;
+    mocks.resolveApproval.mockImplementationOnce(
+      () => new Promise((resolve) => { finish = resolve; }),
+    );
+    const approval = buildToolApproval("Codex", "connector-action", "{}");
+    gate.register(approval);
+    const outcome = gate.waitForDecision(approval).catch(() => "cancelled");
+    act(() => result.current.recordBackendToolCall({
+      callId: approval.id,
+      tool: "connector-action",
+      arguments: "{}",
+      approval,
+    }));
+    act(() => result.current.requestApprovalDecision(approval, "once"));
+    await waitFor(() => expect(result.current.pendingNativeApprovalIds).toEqual(new Set([approval.id])));
+
+    act(() => result.current.clearBackendToolApprovals([approval.id]));
+    await expect(outcome).resolves.toBe("denied");
+    expect(result.current.openApprovals).toEqual([]);
+
+    finish(resolveApprovalFallback(mocks.resolveApproval.mock.calls[0]![0]!));
+    await waitFor(() => expect(result.current.pendingNativeApprovalIds).toEqual(new Set()));
+    expect(result.current.approvalAudit).toEqual([]);
+    expect(result.current.sessionApprovalGrants).toEqual([]);
+
+    // A late native response must not seed the gate's early-settlement cache
+    // for a later approval that happens to reuse the same identifier.
+    expect(gate.register(approval)).toBe(true);
+    let reusedSettled = false;
+    const reused = gate.waitForDecision(approval).then((decision) => {
+      reusedSettled = true;
+      return decision;
+    });
+    await Promise.resolve();
+    expect(reusedSettled).toBe(false);
+    gate.resolveGrant(approval.id);
+    await expect(reused).resolves.toBe("granted");
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     clearActiveRuntimeDataScope();

@@ -50,25 +50,30 @@ describe("tauri csp config (production)", () => {
     expect(csp).not.toBeNull();
     expect(cspStr).not.toBe("null");
     // No wildcard or catch-all anywhere
-    expect(cspStr).not.toMatch(/\*/);
-    expect(cspStr).not.toMatch(/'\*'/);
+    const withoutMcpLoopbackPort = cspStr.replace(
+      /http:\/\/127\.0\.0\.1:\*/g,
+      "",
+    );
+    expect(withoutMcpLoopbackPort).not.toMatch(/\*/);
+    expect(withoutMcpLoopbackPort).not.toMatch(/'\*'/);
     // No unsafe-eval
     expect(cspStr).not.toMatch(/unsafe-eval/i);
     // No bare external http/https wild or non-ipc (robust against suffixes like ipc.localhost.evil)
     expect(cspStr).not.toMatch(/https?:\/\/\*/);
-    expect(cspStr).not.toMatch(/https?:\/\/(?!ipc\.localhost(?:[\s;"\']|$))/);
+    expect(cspStr).not.toMatch(
+      /https?:\/\/(?!ipc\.localhost|127\.0\.0\.1:\*(?:[\s;"\']|$))/,
+    );
     // Also reject any http/https not exactly the allowed ipc token (covers suffix attacks)
     expect(cspStr).not.toMatch(/https?:\/\/ipc\.localhost(?!\b|[\s;"\']|$)/);
     // No ws: or broad dev hosts in prod
     expect(cspStr).not.toMatch(/\bws:/);
-    expect(cspStr).not.toMatch(/127\.0\.0\.1:\*/);
     // No external services / providers
     expect(cspStr).not.toMatch(/convex|api\.|openai|anthropic|xai|googleapis|localhost:1420/i);
   });
 
-  it("allows HTTPS previews only in frames", () => {
+  it("allows HTTPS previews and only the dedicated MCP App origin in frames", () => {
     const { csp } = loadCsp(prodConfigPath);
-    expect(csp["frame-src"]).toBe("https:");
+    expect(csp["frame-src"]).toBe("https: http://127.0.0.1:*");
     expect(csp["script-src"]).toBe("'self'");
   });
 
@@ -77,7 +82,7 @@ describe("tauri csp config (production)", () => {
     const cspStr = typeof csp === "string" ? csp : JSON.stringify(csp);
     expect(typeof csp).toBe("object");
     // No wildcard host or catch-all
-    expect(cspStr).not.toMatch(/\*/);
+    expect(cspStr.replace(/http:\/\/127\.0\.0\.1:\*/g, "")).not.toMatch(/\*/);
     // No broad unsafe-eval in production
     expect(cspStr).not.toMatch(/unsafe-eval/i);
     // No bare http/https: * or external CDNs in webview policy

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::authorized_scope::{AuthorizedCommandScope, ScopeAccess};
-use crate::collaboration::models::{ObjectReference, Work, WorkStatus};
+use crate::collaboration::models::{Fact, ObjectReference, Work, WorkStatus};
 use crate::local_computer::artifacts::ArtifactReceipt;
 use crate::models::{LocalFileImport, MivletAgentProfile};
 use crate::store::repos::collaboration::{self as collaboration_repo, Kind};
@@ -66,6 +66,10 @@ pub struct SearchResultContext {
     #[serde(skip_serializing_if = "Option::is_none")]
     message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    branch_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_revision_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     message_sequence: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     work_id: Option<String>,
@@ -109,6 +113,8 @@ pub struct SearchScanSummary {
     projects_scanned: usize,
     agents_scanned: usize,
     files_scanned: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    decisions_scanned: Option<usize>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -129,6 +135,7 @@ pub(crate) struct SearchLimits {
     pub(crate) max_messages: usize,
     pub(crate) max_projects: usize,
     pub(crate) max_work: usize,
+    pub(crate) max_decisions: usize,
     pub(crate) max_files: usize,
 }
 
@@ -139,6 +146,7 @@ impl Default for SearchLimits {
             max_messages: 6_000,
             max_projects: 128,
             max_work: 512,
+            max_decisions: 512,
             max_files: 512,
         }
     }
@@ -150,15 +158,17 @@ enum Domain {
     Project,
     Conversation,
     Work,
+    Decision,
     File,
 }
 
 impl Domain {
-    const ALL: [Domain; 5] = [
+    const ALL: [Domain; 6] = [
         Domain::Agent,
         Domain::Project,
         Domain::Conversation,
         Domain::Work,
+        Domain::Decision,
         Domain::File,
     ];
 
@@ -168,6 +178,7 @@ impl Domain {
             "project" => Ok(Self::Project),
             "conversation" => Ok(Self::Conversation),
             "work" => Ok(Self::Work),
+            "decision" => Ok(Self::Decision),
             "file" => Ok(Self::File),
             _ => Err(StoreError::Invalid(format!(
                 "Unknown search scope: {value}"
@@ -295,6 +306,21 @@ pub(crate) fn run_bounded(
         scanned_truncated |= truncated;
         collected.append(&mut work);
     }
+    if selected.contains(&Domain::Decision) {
+        let (mut decisions, truncated) = scan_decisions(
+            conn,
+            store,
+            &scope.private,
+            &workspace_id,
+            request.include_archived,
+            &tokens,
+            limits,
+            &mut summary,
+            cursor.page,
+        )?;
+        scanned_truncated |= truncated;
+        collected.append(&mut decisions);
+    }
     if selected.contains(&Domain::Conversation) {
         let (mut results, truncated) = scan_conversations(
             conn,
@@ -326,7 +352,8 @@ pub(crate) fn run_bounded(
         collected.append(&mut results);
     }
 
-    collected.sort_by(compare_results);
+    let normalized_query = normalize_search_text(query);
+    collected.sort_by(|left, right| compare_results(left, right, &normalized_query));
     let offset = cursor.result;
     let limit = request
         .limit
@@ -595,6 +622,11 @@ fn scan_conversations(
                 updated_at: Some(thread.updated_at.clone()),
                 context: SearchResultContext {
                     message_id: Some(message.id.clone()),
+                    // Message IDs are valid branch anchors. Keeping the
+                    // matching row as the anchor lets the shell reopen an
+                    // alternate branch without guessing its head.
+                    branch_id: Some(message.id.clone()),
+                    source_revision_id: Some(message.current_revision_id.clone()),
                     message_sequence: Some(message.sequence),
                     ..conversation_context(&thread)
                 },
@@ -623,6 +655,141 @@ fn conversation_context(thread: &thread_repo::ThreadRow) -> SearchResultContext 
         project_id: thread.project_id.clone(),
         ..SearchResultContext::default()
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn scan_decisions(
+    conn: &Connection,
+    store: &Store,
+    scope: &PrivateDataScope,
+    workspace_id: &str,
+    include_archived: bool,
+    tokens: &[String],
+    limits: &SearchLimits,
+    summary: &mut SearchScanSummary,
+    page: usize,
+) -> Result<(Vec<SearchResult>, bool)> {
+    let (records, truncated) = collaboration_repo::list_bounded::<Fact>(
+        conn,
+        store,
+        scope,
+        Kind::Fact,
+        limits.max_decisions,
+        page * limits.max_decisions,
+    )?;
+    summary.decisions_scanned = Some(
+        summary
+            .decisions_scanned
+            .unwrap_or_default()
+            .saturating_add(records.len()),
+    );
+    let mut results = Vec::new();
+    for fact in records {
+        if fact.kind != "decision" {
+            continue;
+        }
+        // Collaboration records are owner-subject scoped by the repository;
+        // resolve the project before matching so archived/deleted projects do
+        // not leak a decision title or snippet.
+        let Some(project) = local_project::get_project(conn, store, scope, &fact.project_id)?
+        else {
+            continue;
+        };
+        let conversation_owned: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM thread WHERE workspace_id=?1 AND id=?2 AND owner_member_id IS ?3 AND deleted_at IS NULL)",
+            rusqlite::params![scope.workspace_id(), fact.conversation_id, scope.owner_member_id()],
+            |row| row.get(0),
+        )?;
+        if !conversation_owned {
+            continue;
+        }
+        let source_message_valid = fact
+            .message_id
+            .as_deref()
+            .map(|message_id| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM message WHERE workspace_id=?1 AND thread_id=?2 AND id=?3 AND deleted_at IS NULL)",
+                    rusqlite::params![scope.workspace_id(), fact.conversation_id, message_id],
+                    |row| row.get(0),
+                )
+            })
+            .transpose()?
+            .unwrap_or(true);
+        let source_revision_valid = fact
+            .source_revision_id
+            .as_deref()
+            .map(|revision_id| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM message_revision r JOIN message m ON m.id=r.message_id WHERE r.workspace_id=?1 AND r.thread_id=?2 AND r.id=?3 AND (?4 IS NULL OR r.message_id=?4) AND m.deleted_at IS NULL)",
+                    rusqlite::params![
+                        scope.workspace_id(),
+                        fact.conversation_id,
+                        revision_id,
+                        fact.message_id.as_deref(),
+                    ],
+                    |row| row.get(0),
+                )
+            })
+            .transpose()?
+            .unwrap_or(true);
+        if !source_message_valid || !source_revision_valid {
+            continue;
+        }
+        let branch_valid = fact
+            .branch_id
+            .as_deref()
+            .map(|branch_id| {
+                conn.query_row(
+                    "SELECT EXISTS(SELECT 1 FROM message WHERE workspace_id=?1 AND thread_id=?2 AND id=?3 AND deleted_at IS NULL)",
+                    rusqlite::params![scope.workspace_id(), fact.conversation_id, branch_id],
+                    |row| row.get(0),
+                )
+            })
+            .transpose()?
+            .unwrap_or(true);
+        if !branch_valid {
+            continue;
+        }
+        let archived = fact.status == "forgotten" || project.lifecycle == "archived";
+        if archived && !include_archived {
+            continue;
+        }
+        let text_score = weight(&fact.text, tokens, 3.0);
+        let source_score = weight(&fact.source, tokens, 0.75);
+        let score = text_score + source_score;
+        if score <= 0.0 {
+            continue;
+        }
+        let (matched_field, snippet_source) = if text_score > 0.0 {
+            ("content", fact.text.as_str())
+        } else {
+            ("metadata", fact.source.as_str())
+        };
+        results.push(SearchResult {
+            reference: reference(workspace_id, "decision", &fact.id),
+            object_kind: "decision".into(),
+            title: truncate(&collapse(&fact.text), 120),
+            snippet: match_snippet(snippet_source, tokens),
+            matched_field: matched_field.into(),
+            score,
+            archived,
+            updated_at: Some(fact.created_at.clone()),
+            context: SearchResultContext {
+                project_id: Some(fact.project_id.clone()),
+                project_name: project
+                    .payload
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                conversation_id: Some(fact.conversation_id.clone()),
+                message_id: fact.message_id.clone(),
+                branch_id: fact.branch_id.clone(),
+                source_revision_id: fact.source_revision_id.clone(),
+                ..SearchResultContext::default()
+            },
+        });
+    }
+    Ok((results, truncated))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -872,11 +1039,23 @@ fn reference(workspace_id: &str, kind: &str, id: &str) -> ObjectReference {
     }
 }
 
-fn compare_results(left: &SearchResult, right: &SearchResult) -> std::cmp::Ordering {
-    right
-        .score
-        .partial_cmp(&left.score)
-        .unwrap_or(std::cmp::Ordering::Equal)
+fn compare_results(
+    left: &SearchResult,
+    right: &SearchResult,
+    normalized_query: &str,
+) -> std::cmp::Ordering {
+    let right_exact =
+        !normalized_query.is_empty() && normalize_search_text(&right.title) == normalized_query;
+    let left_exact =
+        !normalized_query.is_empty() && normalize_search_text(&left.title) == normalized_query;
+    right_exact
+        .cmp(&left_exact)
+        .then_with(|| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .then_with(|| {
             right
                 .updated_at
@@ -887,6 +1066,23 @@ fn compare_results(left: &SearchResult, right: &SearchResult) -> std::cmp::Order
         .then_with(|| left.object_kind.cmp(&right.object_kind))
         .then_with(|| left.title.cmp(&right.title))
         .then_with(|| left.reference.id.cmp(&right.reference.id))
+}
+
+fn normalize_search_text(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut needs_space = false;
+    for character in value.chars() {
+        if character.is_alphanumeric() {
+            if needs_space && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            normalized.extend(character.to_lowercase());
+            needs_space = false;
+        } else if !normalized.is_empty() {
+            needs_space = true;
+        }
+    }
+    normalized
 }
 
 #[derive(Clone, Default)]
@@ -1052,7 +1248,7 @@ fn collect_text_into(value: &Value, out: &mut String, truncated: &mut bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::collaboration::models::Work;
+    use crate::collaboration::models::{Fact, Work};
     use crate::store::repos::scope::{DataScope, PrivateDataScope};
     use crate::store::repos::{collaboration::Kind, local_project::LocalProjectRow};
     use crate::store::vault::{MasterKey, Vault};
@@ -1271,6 +1467,47 @@ mod tests {
             .unwrap();
     }
 
+    fn seed_decision(
+        store: &Store,
+        scope: &AuthorizedCommandScope,
+        id: &str,
+        project_id: &str,
+        conversation_id: &str,
+        at: &str,
+    ) {
+        let decision = Fact {
+            id: id.into(),
+            project_id: project_id.into(),
+            kind: "decision".into(),
+            text: "Launch the Aurora review on Tuesday".into(),
+            confidence: "confirmed".into(),
+            status: "current".into(),
+            conversation_id: conversation_id.into(),
+            run_id: None,
+            branch_id: Some("decision-source-m0".into()),
+            message_id: Some("decision-source-m0".into()),
+            source_revision_id: Some("decision-source-r0".into()),
+            pinned: false,
+            source: "Confirmed by the project owner".into(),
+            supersedes_id: None,
+            created_at: at.into(),
+        };
+        store
+            .transaction(|tx| {
+                collaboration_repo::put(
+                    tx,
+                    store,
+                    &scope.private,
+                    Kind::Fact,
+                    id,
+                    None,
+                    Some(project_id),
+                    &decision,
+                )
+            })
+            .unwrap();
+    }
+
     fn seed_artifact(
         store: &Store,
         scope: &AuthorizedCommandScope,
@@ -1376,6 +1613,69 @@ mod tests {
                 run_bounded(conn, store, scope, &request(query), agents, files, limits)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn exact_normalized_title_match_precedes_a_higher_relevance_score() {
+        let mut results = [
+            SearchResult {
+                reference: reference("workspace", "conversation", "partial"),
+                object_kind: "conversation".into(),
+                title: "MCP acceptance notes".into(),
+                snippet: "Handoff and MCP acceptance".into(),
+                matched_field: "content".into(),
+                score: 99.0,
+                archived: false,
+                updated_at: None,
+                context: SearchResultContext::default(),
+            },
+            SearchResult {
+                reference: reference("workspace", "conversation", "owner"),
+                object_kind: "conversation".into(),
+                title: "Handoff — and MCP acceptance".into(),
+                snippet: "Conversation owner".into(),
+                matched_field: "title".into(),
+                score: 1.0,
+                archived: false,
+                updated_at: None,
+                context: SearchResultContext::default(),
+            },
+        ];
+
+        let query = normalize_search_text("Handoff and MCP acceptance");
+        results.sort_by(|left, right| compare_results(left, right, &query));
+
+        assert_eq!(results[0].reference.id, "owner");
+    }
+
+    #[test]
+    fn unicode_title_matches_and_empty_query_does_not_promote_empty_titles() {
+        let result = |id: &str, title: &str, score: f64| SearchResult {
+            reference: reference("workspace", "conversation", id),
+            object_kind: "conversation".into(),
+            title: title.into(),
+            snippet: String::new(),
+            matched_field: "title".into(),
+            score,
+            archived: false,
+            updated_at: None,
+            context: SearchResultContext::default(),
+        };
+
+        let mut unicode = [
+            result("partial-unicode", "東京会議 notes", 99.0),
+            result("exact-unicode", "Übernahme — 東京会議", 1.0),
+        ];
+        let unicode_query = normalize_search_text("ÜBERNAHME 東京会議");
+        unicode.sort_by(|left, right| compare_results(left, right, &unicode_query));
+        assert_eq!(unicode[0].reference.id, "exact-unicode");
+
+        let mut empty_query = [
+            result("empty-title", "", 1.0),
+            result("notes", "Notes", 10.0),
+        ];
+        empty_query.sort_by(|left, right| compare_results(left, right, ""));
+        assert_eq!(empty_query[0].reference.id, "notes");
     }
 
     #[test]
@@ -1903,6 +2203,7 @@ mod tests {
             max_messages: 16,
             max_projects: 4,
             max_work: 4,
+            max_decisions: 4,
             max_files: 4,
         };
         let response = search_bounded(&store, &scope, "limit", &[], &[], &limits);
@@ -2085,6 +2386,71 @@ mod tests {
 
         let empty = search(&store, &scope, "   ", &[], &[]);
         assert!(empty.results.is_empty());
+    }
+
+    #[test]
+    fn decision_search_returns_scoped_source_provenance() {
+        let store = store();
+        let scope = scope("member-a");
+        seed_thread(
+            &store,
+            &scope,
+            "decision-thread",
+            "Aurora decisions",
+            "active",
+            TIME,
+        );
+        seed_project(
+            &store,
+            &scope,
+            "decision-project",
+            "Aurora project",
+            "",
+            "active",
+            "decision-thread",
+            TIME,
+        );
+        seed_messages(
+            &store,
+            &scope,
+            "decision-thread",
+            "decision-source",
+            &["The project decision source"],
+            TIME,
+        );
+        seed_decision(
+            &store,
+            &scope,
+            "decision-aurora",
+            "decision-project",
+            "decision-thread",
+            TIME,
+        );
+
+        let mut query = request("tuesday");
+        query.kinds = Some(vec!["decision".into()]);
+        let response = store
+            .with_conn(|conn| run(conn, &store, &scope, &query, &[], &[]))
+            .unwrap();
+        assert_eq!(response.results.len(), 1);
+        let result = &response.results[0];
+        assert_eq!(result.object_kind, "decision");
+        assert_eq!(
+            result.context.conversation_id.as_deref(),
+            Some("decision-thread")
+        );
+        assert_eq!(
+            result.context.message_id.as_deref(),
+            Some("decision-source-m0")
+        );
+        assert_eq!(
+            result.context.branch_id.as_deref(),
+            Some("decision-source-m0")
+        );
+        assert_eq!(
+            result.context.source_revision_id.as_deref(),
+            Some("decision-source-r0")
+        );
     }
 
     fn find_result<'a>(

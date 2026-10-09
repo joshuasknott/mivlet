@@ -175,6 +175,14 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
             // run-author ledger. Legacy project rows are deliberately ignored.
             40 => conn.execute_batch(crate::store::schema::SCHEMA_V40_TO_V41)?,
             41 => conn.execute_batch(crate::store::schema::SCHEMA_V41_TO_V42)?,
+            // 42 -> 43: preserve the linear transcript while recording
+            // explicit branch parents and the selected visible head.
+            42 => apply_v42_to_v43(conn)?,
+            // 43 -> 44: add empty encrypted, account-owned output documents
+            // and immutable revision history. No output is inferred from old
+            // artifact receipts; outputs are adopted explicitly when opened.
+            43 => conn.execute_batch(crate::store::schema::SCHEMA_V43_TO_V44)?,
+            44 => conn.execute_batch(crate::store::schema::SCHEMA_V44_TO_V45)?,
             other => {
                 return Err(super::StoreError::Invalid(format!(
                     "No migration step registered from schema v{other}."
@@ -184,6 +192,24 @@ pub fn apply(conn: &Connection, from: u32, to: u32) -> super::Result<()> {
         current += 1;
     }
     let _ = (conn, to); // schema step closures land here in future versions
+    Ok(())
+}
+
+fn apply_v42_to_v43(conn: &Connection) -> super::Result<()> {
+    if !table_exists(conn, "thread")? || !table_exists(conn, "message")? {
+        return Ok(());
+    }
+    if !table_has_column(conn, "thread", "selected_head_id")? {
+        conn.execute_batch("ALTER TABLE thread ADD COLUMN selected_head_id TEXT;")?;
+    }
+    if !table_has_column(conn, "message", "parent_message_id")? {
+        conn.execute_batch("ALTER TABLE message ADD COLUMN parent_message_id TEXT;")?;
+    }
+    conn.execute_batch(
+        "UPDATE message SET parent_message_id=previous_message_id WHERE parent_message_id IS NULL;
+         UPDATE thread SET selected_head_id=last_message_id WHERE selected_head_id IS NULL;
+         CREATE INDEX IF NOT EXISTS idx_message_parent ON message(workspace_id,thread_id,parent_message_id,seq);",
+    )?;
     Ok(())
 }
 
@@ -1947,6 +1973,38 @@ mod tests {
                 .unwrap(),
             1
         );
+    }
+
+    #[test]
+    fn v43_to_v44_adds_encrypted_output_identity_and_revision_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "PRAGMA foreign_keys=ON;
+             CREATE TABLE workspace(id TEXT PRIMARY KEY);
+             INSERT INTO workspace VALUES('default');
+             CREATE TABLE thread(id TEXT PRIMARY KEY);",
+        )
+        .unwrap();
+        apply(&conn, 43, 44).unwrap();
+        assert!(table_exists(&conn, "output_record").unwrap());
+        assert!(table_exists(&conn, "output_revision").unwrap());
+        let title_column: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('output_record') WHERE name='title'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            title_column, 0,
+            "titles stay inside the encrypted metadata payload"
+        );
+        let foreign_keys: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_list('output_revision') WHERE \"table\"='output_record'",
+            [],
+            |row| row.get(0),
+        ).unwrap();
+        assert!(foreign_keys > 0);
     }
 
     #[test]

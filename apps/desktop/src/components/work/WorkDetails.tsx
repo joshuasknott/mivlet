@@ -31,7 +31,10 @@ export function WorkDetails({
   onPromote,
 }: {
   item: CollaborationWorkItem;
-  onOpen: (conversationId: string) => void;
+  onOpen: (
+    conversationId: string,
+    source?: Pick<WorkOutput, "branchId" | "messageId" | "sourceRevisionId">,
+  ) => void;
   onStop: (id: string) => void | Promise<void>;
   onContinue: (id: string, expectedGeneration: number) => void | Promise<void>;
   onSteer: (
@@ -213,11 +216,20 @@ export function WorkDetails({
               <small>
                 Agent report · {new Date(output.createdAt).toLocaleString()}.
                 External outcomes require their own evidence.
+                {output.messageId || output.branchId
+                  ? " Exact conversation source saved."
+                  : " Legacy result without exact source provenance."}
               </small>
               <div className="work-details-actions">
                 <button
                   type="button"
-                  onClick={() => onOpen(output.conversationId)}
+                  onClick={() =>
+                    onOpen(output.conversationId, {
+                      branchId: output.branchId,
+                      messageId: output.messageId,
+                      sourceRevisionId: output.sourceRevisionId,
+                    })
+                  }
                 >
                   Open result conversation
                 </button>
