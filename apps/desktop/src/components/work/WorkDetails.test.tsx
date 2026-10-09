@@ -12,7 +12,7 @@ const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem
   dependencies: [], waitingFor: [], prerequisites: [], awaitingUser: true, generation: 2,
   conversationGeneration: 1, contextRevision: 0, depth: 0, turnCount: 1, tokenUsage: 120,
   maxTurns: 12, maxTokens: 64000, runIds: ["run-one"], currentRunId: undefined, modelOptionId: "codex::fixture",
-  outputs: [{ runId: "run-one", conversationId: "room", text: "A saved report.", evidence: "agent-report", createdAt: "2026-09-12T10:10:00Z" }],
+  outputs: [{ runId: "run-one", conversationId: "room", branchId: "assistant-1", messageId: "assistant-1", sourceRevisionId: "revision-1", text: "A saved report.", evidence: "agent-report", createdAt: "2026-09-12T10:10:00Z" }],
   capturedContext: {
     mode: "snapshot",
     source: { workspaceId: "workspace", kind: "conversation", id: "room" },
@@ -31,6 +31,17 @@ const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem
 });
 
 describe("Work details", () => {
+  it("reopens a saved result at its exact conversation source", () => {
+    const onOpen = vi.fn();
+    render(<WorkDetails item={item()} onOpen={onOpen} onStop={vi.fn()} onContinue={vi.fn()} onSteer={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open result conversation" }));
+    expect(onOpen).toHaveBeenCalledWith("room", {
+      branchId: "assistant-1",
+      messageId: "assistant-1",
+      sourceRevisionId: "revision-1",
+    });
+  });
+
   it("keeps the original request visible and explains uncertain outcomes", async () => {
     render(<WorkDetails item={item()} onOpen={vi.fn()} onStop={vi.fn()} onContinue={vi.fn()} onSteer={vi.fn()} />);
     expect(screen.getByText("Summarize the brief for me")).toBeVisible();

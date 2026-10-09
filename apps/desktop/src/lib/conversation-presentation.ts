@@ -6,12 +6,88 @@ import type { Spine } from "@mivlet/protocol";
 
 export type ResponsePart =
   | { id: string; kind: "text"; content: string }
-  | { id: string; kind: "tool"; tool: string; connectorId?: string; state: "running" | "succeeded" | "failed"; content: string }
-  | { id: string; kind: "notice"; content: string; error: boolean };
+  | {
+      id: string;
+      kind: "tool";
+      tool: string;
+      connectorId?: string;
+      state: "running" | "succeeded" | "failed";
+      content: string;
+      /** Durable result outcome when execution stopped before a normal result. */
+      terminalStatus?: "interrupted" | "cancelled";
+      mcpApp?: McpAppDescriptor;
+      /** Exact persisted result revision; provider call IDs may be reused. */
+      resultRevisionId?: string;
+      toolInput?: Record<string, unknown>;
+    }
+  | {
+      id: string;
+      kind: "notice";
+      content: string;
+      error: boolean;
+      /** Durable terminal state represented by this notice. */
+      status?: "interrupted" | "cancelled" | "awaiting-user";
+    };
+
+/** Persisted, non-secret pointer to an MCP App resource. */
+export interface McpAppDescriptor {
+  connectorId: string;
+  toolName: string;
+  resourceUri: string;
+}
+
+function mcpAppDescriptor(value: unknown): McpAppDescriptor | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    return undefined;
+  const candidate = (value as Record<string, unknown>).mcpApp;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+    return undefined;
+  const record = candidate as Record<string, unknown>;
+  if (
+    typeof record.connectorId !== "string" ||
+    record.connectorId.length > 256 ||
+    typeof record.toolName !== "string" ||
+    record.toolName.length > 128 ||
+    typeof record.resourceUri !== "string" ||
+    !record.resourceUri.startsWith("ui://") ||
+    record.resourceUri.length > 2_048 ||
+    /[\u0000-\u001f\u007f]/u.test(record.resourceUri)
+  )
+    return undefined;
+  return {
+    connectorId: record.connectorId,
+    toolName: record.toolName,
+    resourceUri: record.resourceUri,
+  };
+}
+
+function parsedToolInput(content: string): Record<string, unknown> | undefined {
+  if (content.length > 256 * 1024) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
+    const value = parsed as Record<string, unknown>;
+    const args = value.arguments ?? value.input ?? value;
+    return args && typeof args === "object" && !Array.isArray(args) ? args as Record<string, unknown> : undefined;
+  } catch { return undefined; }
+}
+
+function resultMcpApp(content: string): McpAppDescriptor | undefined {
+  try {
+    return mcpAppDescriptor(JSON.parse(content));
+  } catch {
+    return undefined;
+  }
+}
 
 export interface ConversationTurn {
   id: string;
   prompt?: string;
+  promptMessageId?: string;
+  responseMessageId?: string;
+  responseRevisionId?: string;
+  /** Exact terminal assistant revision source used by native OpenUI actions. */
+  responseSource?: string;
   attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[];
   parts: ResponsePart[];
   startedAt?: string;
@@ -37,7 +113,10 @@ const toolLabels: Record<string, [string, string]> = {
   "linear-read": ["Reading Linear", "Read Linear"],
   "search-notion": ["Searching Notion", "Searched Notion"],
   "search-slack": ["Searching Slack", "Searched Slack"],
-  "connector-tools": ["Checking connected app tools", "Checked connected app tools"],
+  "connector-tools": [
+    "Checking connected app tools",
+    "Checked connected app tools",
+  ],
   "read-file": ["Reading a file", "Read a file"],
   "write-file": ["Writing a file", "Wrote a file"],
   "list-files": ["Looking through files", "Listed files"],
@@ -47,39 +126,80 @@ const toolLabels: Record<string, [string, string]> = {
   "web-fetch": ["Reading an exact web page", "Read an exact web page"],
   "local-app-list": ["Listing open applications", "Listed open applications"],
   "local-browser-tabs": ["Checking browser tabs", "Checked browser tabs"],
-  "local-browser-observe": ["Reading the browser page", "Read the browser page"],
-  "local-browser-navigate": ["Opening a browser page", "Navigation sent; awaiting observation"],
-  "local-browser-click": ["Using a browser control", "Click sent; awaiting observation"],
-  "local-browser-scroll": ["Scrolling the browser page", "Scroll sent; awaiting observation"],
-  "local-app-select": ["Selecting an application window", "Selected an application window"],
+  "local-browser-observe": [
+    "Reading the browser page",
+    "Read the browser page",
+  ],
+  "local-browser-navigate": [
+    "Opening a browser page",
+    "Navigation sent; awaiting observation",
+  ],
+  "local-browser-click": [
+    "Using a browser control",
+    "Click sent; awaiting observation",
+  ],
+  "local-browser-scroll": [
+    "Scrolling the browser page",
+    "Scroll sent; awaiting observation",
+  ],
+  "local-app-select": [
+    "Selecting an application window",
+    "Selected an application window",
+  ],
   "local-app-observe": ["Checking the application", "Observed the application"],
-  "local-app-action": ["Sending application input", "Input sent; awaiting observation"],
+  "local-app-action": [
+    "Sending application input",
+    "Input sent; awaiting observation",
+  ],
   "local-desktop-observe": ["Checking the computer", "Checked the computer"],
-  "local-desktop-action": ["Working on the computer", "Input sent; awaiting observation"],
+  "local-desktop-action": [
+    "Working on the computer",
+    "Input sent; awaiting observation",
+  ],
   "computer-artifact": ["Preparing a file", "Prepared a file"],
   "generate-image": ["Generating an image", "Generated an image"],
   "codex-image-generation": ["Generating an image", "Generated an image"],
   "edit-image": ["Editing an image", "Edited an image"],
   "web-search": ["Searching the web", "Searched the web"],
   "connector-search": ["Searching connected apps", "Searched connected apps"],
-  "connector-read": ["Reading from a connected app", "Read from a connected app"],
+  "connector-read": [
+    "Reading from a connected app",
+    "Read from a connected app",
+  ],
   "connector-call": ["Using a connected app", "Used a connected app"],
   "connector-action": ["Updating a connected app", "Updated a connected app"],
 };
 
-export function toolActivity(tool: string, state: "running" | "succeeded" | "failed", connectorId?: string) {
+export function toolActivity(
+  tool: string,
+  state: "running" | "succeeded" | "failed",
+  connectorId?: string,
+) {
   const connector = connectorId && findMarketplaceConnector(connectorId);
-  const labels = connector && tool.startsWith("connector-") ? [`Using ${connector.name}`, `Used ${connector.name}`] : toolLabels[tool] ?? ["Working with a tool", "Used a tool"];
-  return state === "failed" ? `${labels[0]} — failed` : labels[state === "running" ? 0 : 1];
+  const labels =
+    connector && tool.startsWith("connector-")
+      ? [`Using ${connector.name}`, `Used ${connector.name}`]
+      : (toolLabels[tool] ?? ["Working with a tool", "Used a tool"]);
+  return state === "failed"
+    ? `${labels[0]} — failed`
+    : labels[state === "running" ? 0 : 1];
 }
 
-export function toolConnectorId(tool: string, argumentsJson: string): string | undefined {
+export function toolConnectorId(
+  tool: string,
+  argumentsJson: string,
+): string | undefined {
   if (CONNECTOR_READ_TOOLS[tool]) return CONNECTOR_READ_TOOLS[tool];
-  if (!["connector-call", "connector-tools", "connector-action"].includes(tool)) return undefined;
+  if (!["connector-call", "connector-tools", "connector-action"].includes(tool))
+    return undefined;
   try {
     const value = JSON.parse(argumentsJson) as { connectorId?: string };
-    return value.connectorId && findMarketplaceConnector(value.connectorId) ? value.connectorId : undefined;
-  } catch { return undefined; }
+    return value.connectorId && findMarketplaceConnector(value.connectorId)
+      ? value.connectorId
+      : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export function toolFailureSummary(content: string): string {
@@ -88,37 +208,83 @@ export function toolFailureSummary(content: string): string {
     const value = JSON.parse(content);
     if (typeof value.message === "string") message = value.message;
     else if (typeof value.error === "string") message = value.error;
-    else if (typeof value.error?.message === "string") message = value.error.message;
-  } catch { /* Text errors are already a supported result. */ }
-  return connectorErrorMessage(new Error(message || "The app could not complete this step.")).slice(0, 500);
+    else if (typeof value.error?.message === "string")
+      message = value.error.message;
+  } catch {
+    /* Text errors are already a supported result. */
+  }
+  return connectorErrorMessage(
+    new Error(message || "The app could not complete this step."),
+  ).slice(0, 500);
 }
 
-export function appendResponseText(parts: ResponsePart[], text: string): ResponsePart[] {
+export function appendResponseText(
+  parts: ResponsePart[],
+  text: string,
+): ResponsePart[] {
   const last = parts.at(-1);
   return last?.kind === "text"
     ? [...parts.slice(0, -1), { ...last, content: last.content + text }]
     : [...parts, { id: `text-${parts.length}`, kind: "text", content: text }];
 }
 
-export function resolveResponseTool(parts: ResponsePart[], callId: string, output: string, ok: boolean): ResponsePart[] {
-  const found = parts.some((part) => part.kind === "tool" && part.id === callId);
-  const result = { id: callId, kind: "tool" as const, tool: "unknown-tool", content: output, state: ok ? "succeeded" as const : "failed" as const };
-  return found ? parts.map((part) => part.kind === "tool" && part.id === callId ? { ...part, content: output, state: result.state } : part) : [...parts, result];
+export function resolveResponseTool(
+  parts: ResponsePart[],
+  callId: string,
+  output: string,
+  ok: boolean,
+): ResponsePart[] {
+  const found = parts.some(
+    (part) => part.kind === "tool" && part.id === callId,
+  );
+  const app = ok ? resultMcpApp(output) : undefined;
+  const result = {
+    id: callId,
+    kind: "tool" as const,
+    tool: "unknown-tool",
+    content: output,
+    state: ok ? ("succeeded" as const) : ("failed" as const),
+    ...(app ? { mcpApp: app } : {}),
+  };
+  return found
+    ? parts.map((part) =>
+        part.kind === "tool" && part.id === callId
+          ? {
+              ...part,
+              content: output,
+              state: result.state,
+              ...(app ? { mcpApp: app } : {}),
+            }
+          : part,
+      )
+    : [...parts, result];
 }
 
 /** Pair call/result by run and call id, preserving conversational chronology. */
-export function conversationTurns(messages: ConversationMessageView[]): ConversationTurn[] {
+export function conversationTurns(
+  messages: ConversationMessageView[],
+): ConversationTurn[] {
   const turns: ConversationTurn[] = [];
   // These parts belong to this reconstruction, so results can update them
   // without scanning or copying the whole turn. Keep duplicate call IDs paired.
   type ToolPart = Extract<ResponsePart, { kind: "tool" }>;
   const toolsByCallId = new Map<string, ToolPart[]>();
+  const toolInputs = new WeakMap<ToolPart, Record<string, unknown>>();
   for (const { message, currentRevision: revision } of messages) {
-    const content = revision.state === "redacted" ? "This message was removed." : revision.content;
+    const content =
+      revision.state === "redacted"
+        ? "This message was removed."
+        : revision.content;
     const previous = turns.at(-1);
-    const id = message.runId ?? (message.kind === "user" ? message.id : previous?.id ?? message.id);
+    const id =
+      message.runId ??
+      (message.kind === "user" ? message.id : (previous?.id ?? message.id));
     let turn = previous;
-    if (!turn || turn.id !== id || (message.kind === "user" && turn.prompt !== undefined)) {
+    if (
+      !turn ||
+      turn.id !== id ||
+      (message.kind === "user" && turn.prompt !== undefined)
+    ) {
       turn = { id, parts: [], startedAt: message.createdAt };
       turns.push(turn);
       toolsByCallId.clear();
@@ -126,27 +292,66 @@ export function conversationTurns(messages: ConversationMessageView[]): Conversa
     turn.endedAt = revision.checkpointedAt;
     if (message.kind === "user") {
       turn.prompt = content;
+      turn.promptMessageId = String(message.id);
       const attachments = message.detail?.attachments;
-      if (Array.isArray(attachments) && attachments.length <= 12 && attachments.every((item) =>
-        item && typeof item.id === "string" && typeof item.name === "string"
-        && typeof item.mimeType === "string" && typeof item.sizeBytes === "number"
-        && ["image-input", "knowledge-context", "workspace-file", "project-file"].includes(item.availability)
-        && (item.relativePath === undefined || typeof item.relativePath === "string")
-      )) turn.attachments = attachments;
-    }
-    else if (revision.state === "redacted" || message.kind === "assistant") turn.parts.push({ id: message.id, kind: "text", content });
-    else if (message.kind === "tool") {
+      if (
+        Array.isArray(attachments) &&
+        attachments.length <= 12 &&
+        attachments.every(
+          (item) =>
+            item &&
+            typeof item.id === "string" &&
+            typeof item.name === "string" &&
+            typeof item.mimeType === "string" &&
+            typeof item.sizeBytes === "number" &&
+            [
+              "image-input",
+              "knowledge-context",
+              "workspace-file",
+              "project-file",
+            ].includes(item.availability) &&
+            (item.relativePath === undefined ||
+              typeof item.relativePath === "string"),
+        )
+      )
+        turn.attachments = attachments;
+    } else if (revision.state === "redacted" || message.kind === "assistant") {
+      turn.responseMessageId = String(message.id);
+      turn.responseRevisionId = String(message.currentRevisionId);
+      turn.responseSource = content;
+      turn.parts.push({ id: message.id, kind: "text", content });
+    } else if (message.kind === "tool") {
       const callId = message.detail.toolCallId;
       const matchingParts = toolsByCallId.get(callId);
       const isCall = message.detail.phase === "call";
-      const state = isCall ? "running" : message.detail.outcome === "succeeded" ? "succeeded" : "failed";
+      const outcome = String(message.detail.outcome ?? "");
+      const terminalStatus =
+        !isCall && (outcome === "interrupted" || outcome === "cancelled")
+          ? (outcome as "interrupted" | "cancelled")
+          : undefined;
+      const state = isCall
+        ? "running"
+        : outcome === "succeeded"
+          ? "succeeded"
+          : "failed";
       if (!isCall && matchingParts) {
+        const app = state === "succeeded" ? resultMcpApp(content) : undefined;
         for (const part of matchingParts) {
           part.content = content;
           part.state = state;
+          if (terminalStatus) part.terminalStatus = terminalStatus;
+          else delete part.terminalStatus;
+          if (app) {
+            part.mcpApp = app;
+            part.resultRevisionId = String(message.currentRevisionId);
+            part.connectorId = app.connectorId;
+            part.toolInput = toolInputs.get(part);
+          }
         }
       } else {
-        const connectorId = isCall ? toolConnectorId(message.detail.toolName, content) : undefined;
+        const connectorId = isCall
+          ? toolConnectorId(message.detail.toolName, content)
+          : undefined;
         const part: ToolPart = {
           id: callId,
           kind: "tool",
@@ -154,15 +359,42 @@ export function conversationTurns(messages: ConversationMessageView[]): Conversa
           ...(connectorId ? { connectorId } : {}),
           content: isCall ? "" : content,
           state,
+          ...(terminalStatus ? { terminalStatus } : {}),
+          ...(state === "succeeded" && !isCall && resultMcpApp(content)
+            ? {
+                mcpApp: resultMcpApp(content),
+                resultRevisionId: String(message.currentRevisionId),
+                connectorId: resultMcpApp(content)!.connectorId,
+              }
+            : {}),
         };
         turn.parts.push(part);
+        const input = isCall ? parsedToolInput(content) : undefined;
+        if (input) toolInputs.set(part, input);
         if (matchingParts) matchingParts.push(part);
         else toolsByCallId.set(callId, [part]);
       }
     } else if (message.kind === "error" || message.kind === "interruption") {
-      turn.parts.push({ id: message.id, kind: "notice", content, error: message.kind === "error" });
-    } else if (message.kind === "approval" && message.detail.phase === "decision" && message.detail.decision === "denied") {
-      turn.parts.push({ id: message.id, kind: "notice", content: "You declined this action.", error: false });
+      turn.parts.push({
+        id: message.id,
+        kind: "notice",
+        content,
+        error: message.kind === "error",
+        ...(message.kind === "interruption"
+          ? { status: message.detail.reason === "user-stop" ? "cancelled" as const : "interrupted" as const }
+          : {}),
+      });
+    } else if (
+      message.kind === "approval" &&
+      message.detail.phase === "decision" &&
+      message.detail.decision === "denied"
+    ) {
+      turn.parts.push({
+        id: message.id,
+        kind: "notice",
+        content: "You declined this action.",
+        error: false,
+      });
     }
   }
   return turns;

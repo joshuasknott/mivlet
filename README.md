@@ -80,6 +80,17 @@ a deployed or production-validated service.
   credential custody. A native webhook verifier consumes it, with local signature
   checks, status and approved revocation. This does not deploy webhook ingress or
   dispatch events. See [protected requests](docs/architecture/local-teammate-computer.md#protected-secret-requests).
+- Conversation controls use assistant-ui over Mivlet's canonical history. Earlier
+  messages can be edited into durable branches, answers regenerated, and saved
+  alternatives reopened without replaying completed actions. OpenUI renders a
+  bounded Mivlet catalogue in ordinary provider responses; selections and forms
+  stage reviewable replies. The context inspector distinguishes proposed context
+  from the native capture and retrieval receipt used by a completed request.
+- Outputs support immutable working revisions, comparison, restoration, pinning
+  and native export. Text, Markdown, JSON and CSV are editable; supported DOCX
+  paragraphs and XLSX cells retain their Office package structure and formulas.
+  Unsupported complex Office content remains explicitly read-only. Selected
+  passages offer source-bound questions, refinement and deliberate memory saving.
 - Published images appear directly in chat and open the existing file viewer;
   documents, spreadsheets and other published files use clickable file cards.
   Text, Markdown, JSON and bounded Office content render in the viewer, with sheet
@@ -95,6 +106,11 @@ a deployed or production-validated service.
   The official MCP SDK owns negotiation and discovery in the bundled
   native host over the existing transport. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
+  Compatible MCP Apps open beside their saved tool results and can expand into
+  the right panel. The isolated host renegotiates on reopen, keeps app requests
+  behind Mivlet authority, and retains readable ordinary results on failure.
+  See [MCP Apps](docs/architecture/mcp-apps.md) for supported capabilities and
+  [verification](docs/development/verification.md) for evidence and limitations.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.
@@ -114,9 +130,13 @@ a deployed or production-validated service.
   record recipient, owner and snapshot/live-reference semantics. Delegation uses
   the Codex, Claude SDK and native API routes that bridge Mivlet tools; provider-owned routes
   without that bridge cannot coordinate agents and show that prerequisite.
-- A collapsible right panel starts with centred Library, Browser, Side chat and
-  Schedules navigation. Each destination replaces the menu; Back returns to it.
-  Library lists saved agent workspace files with search and scoped previews.
+- A collapsible right panel starts with Files, Memories, Browser, Side chat and
+  Schedules navigation, with Activity separated below. Each destination replaces
+  the menu; Back returns to it. Files lists available chat attachments, published
+  work outputs, project files and scoped agent workspace files with search and previews.
+  Add places files in the current conversation draft for review before sending.
+  Memories supports explicit chat-scoped additions, corrections, deletion, and
+  existing suggestion review, with inherited context labelled separately.
   Open documents and side conversations retain closable content tabs. Collapsing it hides the entire panel except its window-bar
   toggle; the desktop agent sidebar stays expanded. Created files, search previews and side conversations
   open alongside the main chat. Text, Markdown, JSON, images, PDFs and bounded

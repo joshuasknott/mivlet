@@ -89,6 +89,12 @@ marker. The driver receives a bounded manifest and a cleared environment, and
 runs in an owned kill-on-close job. No shell, registry, arbitrary driver method,
 daemon or network endpoint is exposed by this integration.
 
+Native confirmation dialogs wait on a blocking worker, keeping the command
+thread available for Stop and account changes. A late answer is checked against
+the original account generation before a decision is persisted; consuming it
+still requires the current exact action, session and generation. The dialog
+shows bounded action details while the conversation retains the fuller preview.
+
 This shares the user's session and is not an application sandbox. A permitted
 app can use its own file and network access. Foreground focus loss, background
 target takeover, dialogs, closure,

@@ -18,10 +18,14 @@
     "tauri:dev": "node scripts/tauri-dev.mjs"
   },
   "dependencies": {
+    "@assistant-ui/react": "0.15.25",
+    "@fontsource/inter": "^5.2.8",
     "@mivlet/connectors": "workspace:*",
     "@mivlet/knowledge": "workspace:*",
     "@mivlet/protocol": "workspace:*",
-    "@fontsource/inter": "^5.2.8",
+    "@modelcontextprotocol/ext-apps": "1.7.5",
+    "@modelcontextprotocol/sdk": "1.31.0",
+    "@openuidev/react-lang": "0.3.2",
     "@phosphor-icons/react": "^2.1.10",
     "@tanstack/react-query": "^5.101.2",
     "@tauri-apps/api": "^2.9.0",
@@ -29,7 +33,8 @@
     "marked": "^18.0.11",
     "pdfjs-dist": "6.4.299",
     "react": "^19.1.1",
-    "react-dom": "^19.1.1"
+    "react-dom": "^19.1.1",
+    "zod": "4.3.6"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.9.3",

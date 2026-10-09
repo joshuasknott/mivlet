@@ -131,6 +131,21 @@ describe("approval-copy — card copy", () => {
     // asks before it runs.
     expect(write.toLowerCase()).toMatch(/ask|check/);
   });
+
+  it("describes MCP approval in terms of the connected server, tool, and arguments", () => {
+    const copy = whyApprovalIsNeeded(
+      approval({
+        service: "MCP tools",
+        action: "run MCP tool get-time",
+        riskLevel: "critical",
+        mode: "full-access",
+      }),
+    );
+    expect(copy).toMatch(/connected server/i);
+    expect(copy).toMatch(/tool/i);
+    expect(copy).toMatch(/validated arguments/i);
+    expect(copy).not.toMatch(/can't be undone|cannot be undone/i);
+  });
 });
 
 describe("approval-copy — modify preview", () => {

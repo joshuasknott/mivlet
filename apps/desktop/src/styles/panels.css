@@ -153,6 +153,17 @@
   color: var(--ink);
 }
 
+.approval-details__list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.approval-details__list li {
+  overflow-wrap: anywhere;
+}
+
 .approval-details dd small {
   display: block;
   margin-top: 2px;

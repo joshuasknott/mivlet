@@ -44,6 +44,24 @@ const lowRiskApproval: ApprovalRequest = {
   confirmationPhrase: undefined
 };
 
+const mcpApproval: ApprovalRequest = {
+  id: "approval-mcp",
+  service: "MCP tools",
+  action: "run MCP tool get-time",
+  mode: "full-access",
+  riskLevel: "critical",
+  dataUsed: [
+    "MCP connection: local-time (stdio)",
+    "proposal fingerprint: abc123",
+    "tool: get-time",
+    'validated arguments: {"timezone":"Europe/London"}'
+  ],
+  consequence: "Runs an enabled tool in a user-managed MCP server.",
+  requestedAt: "2026-06-30T00:00:00.000Z",
+  decisions: ["once", "deny"],
+  confirmationPhrase: "run get-time"
+};
+
 const baseDraft: ApprovalModificationDraft = {
   mode: "read-only",
   dataUsed: "",
@@ -56,6 +74,7 @@ function noop(): void {
 
 interface PanelProps {
   compact?: boolean;
+  previews?: Record<string, { summary: string; details: string }>;
   approvals?: ApprovalRequest[];
   audit?: ApprovalAuditEntry[];
   sessionGrants?: ApprovalGrant[];
@@ -64,6 +83,7 @@ interface PanelProps {
   modificationDraft?: ApprovalModificationDraft;
   pendingConfirmation?: PendingApprovalConfirmation | null;
   confirmationText?: string;
+  pendingNativeApprovalIds?: ReadonlySet<string>;
   onDecision?: (request: ApprovalRequest, decision: ApprovalDecision) => void;
   onStartModify?: (request: ApprovalRequest) => void;
   onUpdateModification?: (draft: ApprovalModificationDraft) => void;
@@ -99,6 +119,7 @@ function renderPanel(props: PanelProps = {}) {
   const view = render(
     <ApprovalPanel
       compact={props.compact}
+      previews={props.previews}
       approvals={props.approvals ?? [baseApproval]}
       audit={props.audit ?? []}
       sessionGrants={props.sessionGrants ?? []}
@@ -107,6 +128,7 @@ function renderPanel(props: PanelProps = {}) {
       modificationDraft={props.modificationDraft ?? baseDraft}
       pendingConfirmation={props.pendingConfirmation ?? null}
       confirmationText={props.confirmationText ?? ""}
+      pendingNativeApprovalIds={props.pendingNativeApprovalIds}
       onDecision={handlers.onDecision}
       onStartModify={handlers.onStartModify}
       onUpdateModification={handlers.onUpdateModification}
@@ -121,6 +143,26 @@ function renderPanel(props: PanelProps = {}) {
 }
 
 describe("ApprovalPanel — required card fields", () => {
+  it("shows native confirmation as pending while leaving only Deny available", () => {
+    const { handlers } = renderPanel({
+      pendingNativeApprovalIds: new Set([baseApproval.id]),
+    });
+
+    expect(screen.getByText("Waiting for native confirmation…")).toBeVisible();
+    expect(screen.getAllByRole("button")).toHaveLength(1);
+
+    fireEvent.click(screen.getByRole("button", { name: "Deny" }));
+    expect(handlers.onDecision).toHaveBeenCalledWith(baseApproval, "deny");
+  });
+
+  it("exposes exact action parameters and supported modification beside compact approval", () => {
+    const { handlers } = renderPanel({ compact: true, previews: { "approval-1": { summary: "Write a draft file", details: "Destination: workspace/draft.md\nContent: harmless sample" } } });
+    expect(screen.getByText("View action details").closest("details")).toHaveAttribute("open");
+    expect(screen.getByText(/Destination: workspace\/draft.md/)).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: /modify/i }));
+    expect(handlers.onStartModify).toHaveBeenCalledWith(baseApproval);
+    expect(handlers.onDecision).not.toHaveBeenCalled();
+  });
   it("keeps compact decisions visible and details collapsed without the sidebar heading", () => {
     const { handlers } = renderPanel({ compact: true });
     expect(screen.queryByRole("heading", { name: "Approvals" })).not.toBeInTheDocument();
@@ -143,6 +185,16 @@ describe("ApprovalPanel — required card fields", () => {
     expect(cardText).toContain("file: launch-plan.md"); // data used
     expect(cardText).toContain("Permanently deletes a Google Drive file."); // consequence
     expect(cardText).toMatch(/why/i); // why approval is needed label
+  });
+
+  it("shows the MCP connection, tool, and bounded validated arguments in the approval preview", () => {
+    renderPanel({ approvals: [mcpApproval] });
+    const card = screen.getByText("MCP tools · run MCP tool get-time").closest("article");
+    const cardText = (card as HTMLElement).textContent ?? "";
+    expect(cardText).toContain("MCP connection: local-time (stdio)");
+    expect(cardText).toContain("tool: get-time");
+    expect(cardText).toContain('{"timezone":"Europe/London"}');
+    expect(cardText).toContain("proposal fingerprint: abc123");
   });
 
   it("renders the plain approval choice (not the raw mode)", () => {

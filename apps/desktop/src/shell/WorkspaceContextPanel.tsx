@@ -1,7 +1,10 @@
 import { WorkspaceLibrary } from "../components/navigation/WorkspaceLibrary";
+import { WorkspaceMemories } from "../components/navigation/WorkspaceMemories";
+import { WorkspaceFileUpload } from "../components/navigation/WorkspaceFileUpload";
 import { lazy, Suspense } from "react";
 import {
   PanelArtifact,
+  PanelOutput,
   PanelWebPreview,
 } from "../components/navigation/PanelContent";
 import { WorkspaceRightNav } from "../components/navigation/WorkspaceRightNav";
@@ -77,6 +80,9 @@ export function WorkspaceContextPanel({
               output={tab.output}
               agentId={tab.agentId}
               workspaceId={workspaceId}
+              conversationId={tab.conversationId}
+              messageId={tab.messageId}
+              sourceRevisionId={tab.sourceRevisionId}
               onClose={close}
             />
           );
@@ -91,8 +97,33 @@ export function WorkspaceContextPanel({
               embedded
             />
           );
+        if (tab.kind === "output")
+          return (
+            <PanelOutput
+              key={tab.id}
+              outputId={tab.outputId}
+              workspaceId={workspaceId}
+              onOpenConversation={(conversationId, source) => {
+                nav.openConversation(conversationId, {
+                  branchId: source.branchId,
+                  messageId: source.messageId,
+                  sourceRevisionId: source.sourceRevisionId,
+                });
+              }}
+              onClose={close}
+            />
+          );
         if (tab.kind === "web")
           return <PanelWebPreview key={tab.id} url={tab.url} />;
+        if (tab.kind === "mcp-app")
+          return (
+            <div
+              key={tab.id}
+              className="right-panel__mcp-app"
+              data-mcp-app-panel={tab.id}
+              aria-label={`${tab.title} interactive result`}
+            />
+          );
         const room = state.data.conversations.find(
           (entry) => entry.id === tab.roomId,
         );
@@ -119,11 +150,50 @@ export function WorkspaceContextPanel({
       }}
       historyRequestId={nav.navWorkId}
       history={
-        <Suspense fallback={<p role="status">Loading history…</p>}>
-          <WorkspaceHistory key={nav.activeRoom?.id ?? "empty"} room={nav.activeRoom} runtime={runtime} service={service} state={state} selectedWorkId={nav.navWorkId} onOpenConversation={nav.open} />
+        <Suspense fallback={<p role="status">Loading activity…</p>}>
+          <WorkspaceHistory
+            key={nav.activeRoom?.id ?? "empty"}
+            room={nav.activeRoom}
+            runtime={runtime}
+            service={service}
+            state={state}
+            selectedWorkId={nav.navWorkId}
+            onOpenConversation={(conversationId, source) =>
+              source?.messageId || source?.branchId || source?.sourceRevisionId
+                ? nav.openConversation(conversationId, source)
+                : nav.open(conversationId)
+            }
+          />
         </Suspense>
       }
-      library={<WorkspaceLibrary key={workspaceId} workspaceId={workspaceId} agents={runtime.agents} onOpen={nav.setPanelRequest} />}
+      memories={
+        <WorkspaceMemories
+          key={`${workspaceId}:${nav.activeRoom?.id ?? "empty"}`}
+          room={nav.activeRoom}
+          runtime={runtime}
+        />
+      }
+      library={
+        <WorkspaceLibrary
+          key={`${workspaceId}:${nav.activeRoom?.id ?? "empty"}`}
+          workspaceId={workspaceId}
+          agents={runtime.agents.filter((agent) =>
+            navProject
+              ? navTeam?.participantIds.includes(agent.id)
+              : !navAgent || agent.id === navAgent.id,
+          )}
+          room={nav.activeRoom}
+          work={state.data.work}
+          project={navProject}
+          sources={runtime.workspaceKnowledgeSources}
+          addFiles={
+            nav.activeRoom ? (
+              <WorkspaceFileUpload room={nav.activeRoom} runtime={runtime} />
+            ) : undefined
+          }
+          onOpen={nav.setPanelRequest}
+        />
+      }
       sideChats={
         navContext && navContext.kind !== "work" ? (
           <SideChatList
