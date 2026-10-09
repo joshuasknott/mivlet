@@ -9,6 +9,7 @@ import {
   INTERRUPTED_CHECKPOINT_INSTRUCTION,
 } from "../../lib/agent-run";
 import { CONVERSATION_STYLE_INSTRUCTIONS } from "../../lib/conversation-presentation";
+import { GENERATED_UI_INSTRUCTIONS } from "../../lib/generated-interface";
 
 export function describeRetryBlock(
   attemptToRetry: ExecutionAttempt,
@@ -48,7 +49,7 @@ export function describeRetryBlock(
 export function buildRetryTurnRequest(
   attemptToRetry: ExecutionAttempt,
   tools: AgentTurnRequest["tools"],
-  instructions: string = CONVERSATION_STYLE_INSTRUCTIONS,
+  instructions: string = `${CONVERSATION_STYLE_INSTRUCTIONS}\n\n${GENERATED_UI_INSTRUCTIONS}`,
 ): AgentTurnRequest | null {
   const userExchange = attemptToRetry.exchanges
     ?.filter((exchange) => exchange.role === "user")
@@ -71,4 +72,3 @@ export function buildRetryTurnRequest(
     maxTokens: 2_048,
   };
 }
-

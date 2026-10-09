@@ -31,5 +31,5 @@ it("shows a Codex image outside collapsed activity and opens its preview", () =>
   const preview = screen.getByRole("button", { name: "Preview Generated image" });
   expect(preview).toBeVisible();
   fireEvent.click(preview);
-  expect(onPreviewArtifact).toHaveBeenCalledWith(output, agent.id);
+  expect(onPreviewArtifact).toHaveBeenCalledWith(output, agent.id, "image-1");
 });

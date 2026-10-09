@@ -1,6 +1,29 @@
 # Memory and bounded conversation context
 
-The operator surface is **Settings → Memory**. There is no Knowledge settings
+The composer's Context control reads the same native capture used by Work
+admission. It distinguishes proposed next-turn context, frozen admitted context,
+and the actual bounded retrieval receipt saved for an execution attempt. Opening
+the inspector never invokes a model. Draft-dependent file retrieval uses the same
+scope/connection filtering, top-eight passage selection and 6,000-character
+budget as dispatch; dispatch refreshes connection availability before sending.
+
+History, confirmed project facts, individual memories and candidate file sources
+can be excluded per conversation and agent. Choices use encrypted native storage
+with compare-and-swap revisions. Work admission freezes the choices; subsequent
+edits affect only subsequent requests. Memory exclusions also remove derived
+summaries that cite those memories. Excluding memory cannot erase its words from
+raw history; exclude history as well when appropriate. Captured history follows
+the selected durable branch. The executor does not independently reload private
+memory or summaries over that frozen capture. Corrections and forget operations
+remain in the existing native Memories service.
+
+The conversation surface is **right panel → Memories**: users can search, add
+chat-scoped memories, correct or delete saved memories, and save or dismiss
+existing suggestions. Inherited project, agent, and account memories are labelled
+separately using the same inheritance boundaries below. New messages are not
+automatically promoted. Add, correction, approval, and forgetting use native
+persistence; an unavailable native store reports an error rather than a saved state.
+**Settings → Memory** retains account-wide management. There is no Knowledge settings
 tab. `packages/knowledge` is the ingest/retrieve library for sources and
 compaction; durable facts live as Memory records. Persisted sidebar ids
 `Knowledge`, `Plugins`, `Connectors`, `Automations`, and `Schedules` reopen
@@ -113,6 +136,13 @@ P3/P4/P5 call from an explicit user action:
   it sends.
 
 ## Provider boundary
+
+Native Work captures and explicit live conversation shares read canonical
+string message revisions, with compatibility for older object-shaped text.
+Both use the selected branch; another answer branch cannot enter inherited
+context. The local transcript-extract fingerprint includes its reader version,
+so caches produced by an older reader rebuild from saved messages instead of
+retaining empty or stale extracts.
 
 Summarisation is deterministic and local. No provider is called by the
 compaction pipeline, so a conversation can never be summarised by a different

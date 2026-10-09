@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import { ArrowSquareOut } from "@phosphor-icons/react/dist/csr/ArrowSquareOut";
 import { useLocalComputer } from "../../hooks/useLocalComputer";
 import { safeConversationLink } from "../../lib/safe-output";
@@ -6,6 +6,11 @@ import {
   getRuntimeAdapter,
   hasNativeRuntimeAdapter,
 } from "../../runtime/adapters/select";
+import { getRuntimeOutput } from "../../runtime/domains/outputs";
+import type { OutputDocument } from "../../lib/output-revisions";
+import type { OutputSource } from "../../lib/output-revisions";
+import { subscribeOutputRevisionApplied } from "../../lib/output-revision-events";
+import { OutputEditor } from "../conversation/OutputEditor";
 
 export { OpenWebPreview } from "./open-web-preview";
 
@@ -19,11 +24,17 @@ export function PanelArtifact({
   output,
   workspaceId,
   agentId,
+  conversationId,
+  messageId,
+  sourceRevisionId,
   onClose,
 }: {
   output: string;
   workspaceId: string;
   agentId: string;
+  conversationId?: string;
+  messageId?: string;
+  sourceRevisionId?: string;
   onClose: () => void;
 }) {
   const computer = useLocalComputer({
@@ -52,8 +63,121 @@ export function PanelArtifact({
         generation={computer.node?.generation}
         onClose={onClose}
         embedded
+        conversationId={conversationId}
+        messageId={messageId}
+        sourceRevisionId={sourceRevisionId}
       />
     </Suspense>
+  );
+}
+
+export function PanelOutput({
+  outputId,
+  workspaceId,
+  onClose,
+  onOpenConversation,
+}: {
+  outputId: string;
+  workspaceId: string;
+  onClose: () => void;
+  onOpenConversation?: (conversationId: string, source: OutputSource) => void;
+}) {
+  const [output, setOutput] = useState<OutputDocument | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let active = true;
+    // Do not leave the previous tab visible while a newly selected output is
+    // being reloaded. A stale editor can otherwise look like the requested
+    // output and invite edits against the wrong durable identity.
+    setOutput(null);
+    setError("");
+    void getRuntimeOutput(outputId, workspaceId)
+      .then((value) => {
+        if (!active) return;
+        if (!value) {
+          setError("This saved output is no longer available.");
+          return;
+        }
+        setOutput(value);
+      })
+      .catch((failure: unknown) => {
+        if (active) {
+          setOutput(null);
+          setError(
+            failure instanceof Error
+              ? failure.message
+              : "This saved output could not be opened.",
+          );
+        }
+      });
+    return () => {
+      active = false;
+    };
+  }, [outputId, workspaceId]);
+  useEffect(() => {
+    if (!output) return;
+    return subscribeOutputRevisionApplied((event) => {
+      if (
+        event.outputId === output.id &&
+        event.conversationId === output.source.conversationId
+      ) {
+        // OutputEditor owns the local draft/CAS conflict decision. Updating
+        // the durable snapshot here lets a clean panel follow an agent
+        // revision while a dirty panel preserves its draft and shows reload.
+        setOutput(event.output);
+      }
+    });
+  }, [output]);
+  if (error) return <p role="alert">{error}</p>;
+  if (!output) return <p role="status">Loading saved output…</p>;
+  const origin = output.pin?.source ?? output.source;
+  const pinnedRevision = output.pin?.revisionId
+    ? output.revisions.find((revision) => revision.id === output.pin?.revisionId)
+    : undefined;
+  const editorSource = pinnedRevision?.provenance ?? output.source;
+  return (
+    <section
+      className="right-panel__output"
+      aria-label={`${output.title} output`}
+    >
+      <header>
+        <div>
+          <h2>{output.title}</h2>
+          <p>Saved output · revision {output.currentRevisionNumber}</p>
+        </div>
+        <button type="button" onClick={onClose} aria-label="Close saved output">
+          ×
+        </button>
+      </header>
+      {onOpenConversation ? (
+        <button
+          type="button"
+          className="right-panel__output-source"
+          onClick={() => {
+            onOpenConversation(origin.conversationId, origin);
+          }}
+        >
+          Open originating conversation
+        </button>
+      ) : null}
+      <details className="right-panel__output-source-details">
+        <summary>Source details</summary>
+        <p>
+          Conversation: {origin.conversationId}
+          {origin.messageId ? ` · message ${origin.messageId}` : ""}
+          {origin.sourceRevisionId
+            ? ` · message revision ${origin.sourceRevisionId}`
+            : ""}
+          {origin.branchId ? ` · branch ${origin.branchId}` : ""}
+        </p>
+      </details>
+      <OutputEditor
+        output={output}
+        source={editorSource}
+        workspaceId={workspaceId}
+        onChange={setOutput}
+      />
+    </section>
   );
 }
 

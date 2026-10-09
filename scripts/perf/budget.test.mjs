@@ -4,7 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { collectAssets, logicalChunkId, summarizeBundle } from "./assets.mjs";
-import { checkBudget, checkDeferredPdf, loadBudget } from "./budget-check.mjs";
+import {
+  checkBudget,
+  checkDeferredConversationUpgrade,
+  checkDeferredPdf,
+  loadBudget,
+} from "./budget-check.mjs";
 
 /**
  * Tests for deterministic performance budgets.
@@ -114,6 +119,120 @@ test("PDF engine, viewer and worker stay outside the actual static startup graph
     checkDeferredPdf(manifest).some((v) => v.label === "deferred.import"),
   );
   assert.ok(checkDeferredPdf({}).some((v) => v.label === "deferred.entry"));
+});
+
+test("conversation upgrade graph stays outside the actual static startup graph", () => {
+  const manifest = {
+    "index.html": {
+      isEntry: true,
+      file: "assets/index-a.js",
+      imports: ["shared"],
+      dynamicImports: ["conversation"],
+    },
+    shared: { file: "assets/shared-b.js" },
+    conversation: {
+      file: "assets/ConversationPane-c.js",
+      imports: ["assistant"],
+    },
+    assistant: { file: "assets/assistant-ui-d.js" },
+  };
+  assert.deepEqual(checkDeferredConversationUpgrade(manifest), []);
+  manifest.shared.imports = ["assistant"];
+  assert.ok(
+    checkDeferredConversationUpgrade(manifest).some(
+      (v) => v.label === "conversationUpgrade.eager",
+    ),
+  );
+  manifest.shared.imports = ["csvEditor"];
+  manifest.csvEditor = { file: "assets/OutputCsvEditor-e.js" };
+  assert.ok(
+    checkDeferredConversationUpgrade(manifest).some(
+      (v) => v.label === "conversationUpgrade.eager",
+    ),
+    "CSV editor and its parser must remain outside static startup imports",
+  );
+  manifest.shared.imports = ["branchHelpers"];
+  manifest.branchHelpers = { file: "assets/conversation-branches-f.js" };
+  assert.ok(
+    checkDeferredConversationUpgrade(manifest).some(
+      (v) => v.label === "conversationUpgrade.eager",
+    ),
+    "Preview branch helpers must not pull the conversation graph into startup",
+  );
+});
+
+test("conversation upgrade allowance has an exact ceiling and does not overlap PDF", async () => {
+  const budget = await loadBudget();
+  const base = {
+    totalJsCss: {
+      rawBytes: budget.ceilings.totalJsCss.rawBytes,
+      gzipBytes: budget.ceilings.totalJsCss.gzipBytes,
+    },
+    css: { rawBytes: budget.ceilings.css.rawBytes },
+    initialEntryJs: { rawBytes: budget.ceilings.initialEntryJs.rawBytes },
+    routeChunks: Object.fromEntries(
+      Object.entries(budget.ceilings.routeChunks).map(([id, value]) => [
+        id,
+        { rawBytes: value.rawBytes },
+      ]),
+    ),
+    commonJsCss: {
+      rawBytes: budget.ceilings.commonJsCss.rawBytes,
+      gzipBytes: budget.ceilings.commonJsCss.gzipBytes,
+    },
+    pdfPreview: {
+      rawBytes: budget.ceilings.pdfPreview.rawBytes,
+      gzipBytes: budget.ceilings.pdfPreview.gzipBytes,
+    },
+    conversationUpgrade: {
+      rawBytes: budget.ceilings.conversationUpgrade.rawBytes,
+      gzipBytes: budget.ceilings.conversationUpgrade.gzipBytes,
+    },
+  };
+  assert.deepEqual(checkBudget(base, budget), []);
+  const overFeature = {
+    ...base,
+    conversationUpgrade: {
+      ...base.conversationUpgrade,
+      rawBytes: base.conversationUpgrade.rawBytes + 1,
+    },
+  };
+  assert.ok(
+    checkBudget(overFeature, budget).some(
+      (v) => v.label === "conversationUpgrade.raw",
+    ),
+  );
+
+  const assets = [
+    {
+      fileName: "assistant-ui-a.js",
+      path: "x",
+      type: "js",
+      bytes: 100,
+      gzipBytes: 40,
+    },
+    {
+      fileName: "pdf-renderer-b.js",
+      path: "x",
+      type: "js",
+      bytes: 200,
+      gzipBytes: 80,
+    },
+    {
+      fileName: "index-c.js",
+      path: "x",
+      type: "js",
+      bytes: 300,
+      gzipBytes: 120,
+    },
+  ];
+  const summary = summarizeBundle(assets);
+  assert.deepEqual(summary.conversationUpgrade, {
+    rawBytes: 100,
+    gzipBytes: 40,
+  });
+  assert.deepEqual(summary.pdfPreview, { rawBytes: 200, gzipBytes: 80 });
+  assert.equal(summary.commonJsCss.rawBytes, 300);
 });
 
 test("checkBudget passes within ceilings", async () => {

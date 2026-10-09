@@ -1,6 +1,7 @@
 import type { ExecutionAttempt } from "@mivlet/protocol";
 import { describe, expect, it } from "vitest";
-import { describeRetryBlock } from "./retry";
+import { buildRetryTurnRequest, describeRetryBlock } from "./retry";
+import { GENERATED_UI_INSTRUCTIONS } from "../../lib/generated-interface";
 
 function attempt(
   patch: Partial<ExecutionAttempt> = {},
@@ -81,5 +82,16 @@ describe("describeRetryBlock", () => {
         backend: { providerId: "anthropic" } as never,
       }),
     ).toMatch(/original provider/);
+  });
+});
+
+describe("buildRetryTurnRequest", () => {
+  it("keeps the OpenUI response contract on the default recovery route", () => {
+    const request = buildRetryTurnRequest(attempt(), []);
+    expect(request?.messages[0]).toMatchObject({
+      role: "system",
+      content: expect.stringContaining("Mivlet supports an optional interactive response format"),
+    });
+    expect(request?.messages[0]?.content).toContain(GENERATED_UI_INSTRUCTIONS);
   });
 });
