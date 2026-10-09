@@ -477,6 +477,48 @@ describe("search open plans", () => {
     ).toEqual({ kind: "conversation", conversationId: "room" });
     expect(
       planSearchOpen({
+        result: search("conversation", "room", {
+          conversationId: "room",
+          messageId: "message-9",
+          branchId: "message-9",
+          sourceRevisionId: "revision-9",
+        }),
+        workspaceId: "ws",
+        conversations,
+        knowledgeSources: [],
+      }),
+    ).toEqual({
+      kind: "conversation",
+      conversationId: "room",
+      origin: {
+        branchId: "message-9",
+        messageId: "message-9",
+        sourceRevisionId: "revision-9",
+      },
+    });
+    expect(
+      planSearchOpen({
+        result: search("decision", "decision-1", {
+          conversationId: "room",
+          messageId: "message-9",
+          branchId: "message-9",
+          sourceRevisionId: "revision-9",
+        }),
+        workspaceId: "ws",
+        conversations,
+        knowledgeSources: [],
+      }),
+    ).toEqual({
+      kind: "conversation",
+      conversationId: "room",
+      origin: {
+        branchId: "message-9",
+        messageId: "message-9",
+        sourceRevisionId: "revision-9",
+      },
+    });
+    expect(
+      planSearchOpen({
         result: search("project", "project", {
           projectId: "project",
           threadId: "main",

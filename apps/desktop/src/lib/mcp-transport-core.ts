@@ -33,7 +33,7 @@ function requireRuntime<T>(value: T | null | undefined, purpose: string): T {
 }
 
 abstract class DesktopMcpBase {
-  private closePromise?: Promise<void>;
+  #closePromise?: Promise<void>;
   protected readonly frameHandlers = new Set<(frame: McpFrame) => void>();
   protected readonly closeHandlers = new Set<() => void>();
   protected closed = false;
@@ -51,7 +51,7 @@ abstract class DesktopMcpBase {
     this.frameHandlers.clear();
   }
   protected beginNativeClose(): Promise<void> {
-    return this.closePromise ??= this.nativeClose().catch(() => undefined).then(() => undefined);
+    return this.#closePromise ??= this.nativeClose().catch(() => undefined).then(() => undefined);
   }
   close(): Promise<void> { this.markClosed(); return this.beginNativeClose(); }
 
@@ -108,14 +108,18 @@ abstract class DesktopMcpBase {
 }
 
 class DesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportHandle {
-  private readonly pendingToolResponses = new Map<string, PendingToolResponse>();
-  private nextToolRequest = 1;
+  #pendingToolResponses = new Map<string, PendingToolResponse>();
+  #nextToolRequest = 1;
+  #unlisten: () => void;
 
   constructor(
     workspaceId: string,
     sessionId: string,
-    private readonly unlisten: () => void
-  ) { super(workspaceId, sessionId); }
+    unlisten: () => void
+  ) {
+    super(workspaceId, sessionId);
+    this.#unlisten = unlisten;
+  }
 
   handleLine(line: string): void {
     if (line === "[MCP-CLOSED]") {
@@ -127,9 +131,9 @@ class DesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportH
     const frame = parseMcpLine(line);
     if (!frame) return;
     if (isMcpResponse(frame) && typeof frame.id === "string") {
-      const pending = this.pendingToolResponses.get(frame.id);
+      const pending = this.#pendingToolResponses.get(frame.id);
       if (pending) {
-        this.pendingToolResponses.delete(frame.id);
+        this.#pendingToolResponses.delete(frame.id);
         clearTimeout(pending.timeout);
         if (frame.error) pending.reject(new Error(`MCP ${frame.error.code}: ${frame.error.message}`));
         else {
@@ -154,10 +158,10 @@ class DesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportH
     permitId: string
   ): Promise<unknown> {
     this.ensureOpen();
-    const requestId = `native-mcp-tool-${this.nextToolRequest++}`;
+    const requestId = `native-mcp-tool-${this.#nextToolRequest++}`;
     const response = new Promise<unknown>((resolve, reject) => {
       const timeout = setTimeout(() => {
-        this.pendingToolResponses.delete(requestId);
+        this.#pendingToolResponses.delete(requestId);
         reject(new Error("The approved MCP tool call timed out."));
         void writeRuntimeMcpFrame(
           this.workspaceId,
@@ -169,7 +173,7 @@ class DesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportH
           })
         ).catch(() => undefined);
       }, 30_000);
-      this.pendingToolResponses.set(requestId, { resolve, reject, timeout, resource: proposal.operation === "resource" });
+      this.#pendingToolResponses.set(requestId, { resolve, reject, timeout, resource: proposal.operation === "resource" });
     });
     try {
       const dispatch = executeRuntimeApprovedMcpToolCall(proposal, permitId, requestId).then(result => {
@@ -179,12 +183,12 @@ class DesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportH
       const [, result] = await Promise.all([dispatch, response]);
       return result;
     } catch (error) {
-      const pending = this.pendingToolResponses.get(requestId);
+      const pending = this.#pendingToolResponses.get(requestId);
       if (pending) {
         clearTimeout(pending.timeout);
         pending.reject(error instanceof Error ? error : new Error("MCP tool dispatch failed."));
       }
-      this.pendingToolResponses.delete(requestId);
+      this.#pendingToolResponses.delete(requestId);
       throw error;
     }
   }
@@ -192,12 +196,12 @@ class DesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportH
   protected nativeClose() { return closeRuntimeMcpProcess(this.workspaceId, this.sessionId); }
 
   protected onTransportClosed(): void {
-    this.unlisten();
-    for (const pending of this.pendingToolResponses.values()) {
+    this.#unlisten();
+    for (const pending of this.#pendingToolResponses.values()) {
       clearTimeout(pending.timeout);
       pending.reject(new Error("MCP transport is closed."));
     }
-    this.pendingToolResponses.clear();
+    this.#pendingToolResponses.clear();
   }
 }
 
@@ -224,8 +228,8 @@ export async function createDesktopMcpTransport(
 }
 
 class RemoteDesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTransportHandle {
-  private polling = false;
-  private nextToolRequest = 1;
+  #polling = false;
+  #nextToolRequest = 1;
 
   async send(frame: McpRequest | McpNotification): Promise<void> {
     this.ensureOpen();
@@ -241,7 +245,7 @@ class RemoteDesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTran
         for (const handler of this.frameHandlers) handler(received);
       }
     }
-    if ("id" in frame && frame.method === "initialize") this.beginPolling();
+    if ("id" in frame && frame.method === "initialize") this.#beginPolling();
   }
 
   async executeAuthorizedToolCall(
@@ -249,7 +253,7 @@ class RemoteDesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTran
     permitId: string
   ): Promise<unknown> {
     this.ensureOpen();
-    const requestId = `native-mcp-tool-${this.nextToolRequest++}`;
+    const requestId = `native-mcp-tool-${this.#nextToolRequest++}`;
     const lines = await executeRuntimeApprovedMcpToolCall(proposal, permitId, requestId);
     this.ensureOpen();
 
@@ -269,13 +273,13 @@ class RemoteDesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTran
 
   protected nativeClose() { return closeRuntimeRemoteMcpSession(this.workspaceId, this.sessionId); }
 
-  private beginPolling(): void {
-    if (this.polling || this.closed) return;
-    this.polling = true;
-    void this.pollLoop();
+  #beginPolling(): void {
+    if (this.#polling || this.closed) return;
+    this.#polling = true;
+    void this.#pollLoop();
   }
 
-  private async pollLoop(): Promise<void> {
+  async #pollLoop(): Promise<void> {
     try {
       while (!this.closed) {
         try {
@@ -291,7 +295,7 @@ class RemoteDesktopMcpTransport extends DesktopMcpBase implements DesktopMcpTran
         }
       }
     } finally {
-      this.polling = false;
+      this.#polling = false;
     }
   }
 }

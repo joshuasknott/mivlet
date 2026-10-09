@@ -357,6 +357,21 @@ describe("ExecutionWorker coordination reachability", () => {
     expect(JSON.stringify(context)).not.toContain("UNRELATED");
   });
 
+  it("sends the current assignment prompt instead of root request provenance", async () => {
+    const setup = makeHarness();
+    setup.session.work.prompt = "Verify the reviewer handoff and report concrete gaps.";
+    await act(async () => {
+      render(<ExecutionWorker session={setup.session as never} service={setup.service as never} runtime={runtime()} projects={[]} />);
+    });
+    await waitFor(() => expect(harness.run).toHaveBeenCalled());
+    expect(harness.run.mock.calls[0]?.[0]).toMatchObject({
+      prompt: "Verify the reviewer handoff and report concrete gaps.",
+    });
+    expect(harness.run.mock.calls[0]?.[0]).not.toMatchObject({
+      prompt: "Review the implementation",
+    });
+  });
+
   it("maps teammate-message to the durable task-scoped native command", async () => {
     const setup = await renderWorker();
     const execute = harness.options!.wrapExecutor(async () => "base");

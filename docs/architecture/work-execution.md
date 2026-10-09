@@ -28,6 +28,11 @@ record captures, in one native transaction:
 
 The expected result is the request: nothing in the record overwrites
 `userRequest`, and delegation children inherit it from their parent.
+The provider receives the current assignment's `prompt`. A child also receives
+the full native-bounded original request as an authority ceiling, so a handoff
+cannot drop the user's restrictions or reinterpret the lead's delegation as a
+new instruction to delegate again. Returning a response completes that child's
+contribution; it does not require a handoff back to the lead.
 
 ## Execution ownership
 
@@ -80,12 +85,12 @@ rejected (`ensure_run_current`, `work::current`).
 | `queued` | Queued | Waiting for an available execution slot |
 | `running` | Working | A bound provider attempt is executing |
 | `waiting` | Waiting | Delegated dependencies are not finished |
-| `blocked` | Waiting | A dependency is unresolved |
-| `awaiting-approval` | Working | Awaiting approval appears as secondary detail; the exact approval gate remains required |
-| `awaiting-user` | Waiting | Needs outcome review appears as secondary detail; saved evidence must be reviewed |
+| `blocked` | Blocked | A dependency is unresolved |
+| `awaiting-approval` | Awaiting approval | Review the exact proposed action |
+| `awaiting-user` | Waiting for you / Interrupted | Restart reasons show Interrupted; saved evidence must be reviewed before continuation |
 | `completed` | Completed | A saved provider result and assistant message exist |
 | `failed` | Failed | Terminal without a verified result; never authorizes retry alone |
-| `cancelled` | Stopped | Stopped by the user; completed external actions are not undone |
+| `cancelled` | Cancelled | Stopped by the user; completed external actions are not undone |
 
 Schedule-derived Work carries `origin: "schedule"` and is labelled Scheduled
 only while queued. Running and terminal occurrences show their actual state,
@@ -123,6 +128,15 @@ activity is explained as uncertain rather than presented as a failure.
   approval gate scoped to the request key and permission mode; approval
   requests keep their action, data-used and consequence, and are cleared when
   the session ends.
+
+Native confirmation runs off the command thread so Stop remains responsive while
+the operating-system dialog is open. On resolution, a connection-first SQLite
+transaction holds the native identity generation through commit. The audit,
+standing rule (when requested), and exact execution permit commit atomically;
+stale account generations or persistence errors cannot leave a usable partial
+approval. Action history is observation after that commit. Tool consumption still
+checks the exact request, target freshness and current execution generation, so a
+late dialog answer cannot revive stopped work.
 
 ## Restart recovery and attachments
 
@@ -164,11 +178,15 @@ this does not provide an offline or hosted worker. Existing schedules without an
 execution kind default to read-only research and retain their restricted Codex
 runner. Their project occurrences continue using `bind_schedule`/`finish_schedule`.
 
-Saved results can be promoted into Memory through the baseline Memory
-interface (`save_memory_state`) with explicit user-confirmed conclusion text,
-an owning Agent or Project scope and run provenance. Only the new record is
-submitted, preserving concurrent corrections and forget tombstones. P4 creates no separate outcome store; P6 owns
-Memory internals and capture inheritance.
+Saved results retain their originating conversation branch, assistant message,
+and immutable message revision when available. The Work history action uses
+that provenance to reopen the exact source; legacy results are resolved against
+their run's saved assistant message when the workspace is loaded. Results can
+be promoted into Memory through the baseline Memory interface
+(`save_memory_state`) with explicit user-confirmed conclusion text, an owning
+Agent or Project scope and run provenance. Only the new record is submitted,
+preserving concurrent corrections and forget tombstones. P4 creates no
+separate outcome store; P6 owns Memory internals and capture inheritance.
 
 ## Reusable Work components
 
@@ -182,12 +200,46 @@ Memory internals and capture inheritance.
   history, attachments with recovery notes, runs/budget, saved results with
   promote-to-memory, and continue-with-reconciliation.
 
-Components expose narrow callbacks (`onOpen`, `onStop`, `onContinue`,
+Components expose narrow callbacks (`onOpen` carries optional source branch,
+message and revision provenance; `onStop`, `onContinue`,
 `onSteer`, `onPromote`); the shell routes them. Chat shows compact Work cards;
 Work mode provides the scoped list and Right Nav opens the selected Work details.
 The obsolete History and Project WorkItems implementations have been removed.
 
 ## Verification
+
+### Interactive response presentation
+
+The conversation renders one optional `openui` block using OpenUI's language
+renderer and Mivlet's approved catalogue. The provider-neutral text profile is
+`mivlet-v1`: comparisons, options, validated clarification forms, searchable
+tables, labelled bar charts, checklists and draft previews. It uses existing
+provider connections and ordinary streamed assistant text; no provider-specific
+JSON mode, gateway or telemetry is required. Text-only clients retain the fenced
+source. Providers still need an available authenticated text route; the renderer
+does not provide one. Rich provider-native tool UI is handled separately by the
+MCP Apps host.
+
+The pre-parser rejects expressions, queries, mutations, unknown components,
+cycles and excessive expansion before OpenUI interprets the content. Limits are
+48,000 characters, 128 statements, 12 levels and 2,048 parsed/expanded nodes;
+individual catalogue components have stricter row, field and string limits.
+Incomplete streams remain display-only. Invalid source remains inspectable.
+Generated forms cannot request credentials. The OpenUI renderer receives no tool
+provider and observability publishing is disabled.
+
+Interactive answers belong to an exact saved terminal message revision and its
+native conversation/agent owner. The encrypted `conversation_ui` repository uses
+compare-and-swap revisions. A deliberate review checks current branch ownership,
+rejects duplicate selections and active-work races, then stages attributed text
+in the composer. It never dispatches a tool automatically. Reopening a response
+restores answers without generating another response or replaying actions.
+
+Selection actions validate the literal passage against the saved revision before
+staging Quote, Explain or Refine. Save to memory is an explicit call to the
+existing scoped memory service. Work states come from durable runtime events;
+restart-interrupted work requires review and reconciliation before continuation.
+Handoff detail identifies sender, recipient and the frozen shared snapshot.
 
 Native tests cover bounded attachment references, bind refresh, old-record
 decode, schedule origin, recovery retention without replay, steering fences,

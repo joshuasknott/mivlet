@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { appendRuntimeConversationMessage, createRuntimeConversationThread, deleteRuntimeConversationDraft, deleteRuntimeConversationThread, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimeConversationThreads, loadRuntimeConversationDraft, reviseRuntimeConversationMessage, saveRuntimeConversationDraft, updateRuntimeConversationThread, type RuntimeConversationDraft } from "../runtime/domains/conversations";
+import { appendRuntimeConversationMessage, createRuntimeConversationThread, deleteRuntimeConversationDraft, deleteRuntimeConversationThread, getRuntimeConversationThread, listRuntimeConversationMessages, listRuntimeConversationMessagesPage, listRuntimeConversationThreads, loadRuntimeConversationDraft, reviseRuntimeConversationMessage, saveRuntimeConversationDraft, updateRuntimeConversationThread, type RuntimeConversationDraft } from "../runtime/domains/conversations";
 import {
   createConversationRuntime,
   createDurableRunWriter,
@@ -33,6 +33,7 @@ const runtime = createConversationRuntime({
   getThread: getRuntimeConversationThread,
   updateThread: updateRuntimeConversationThread,
   listMessages: listRuntimeConversationMessages,
+  listMessagesPage: listRuntimeConversationMessagesPage,
   appendMessage: appendRuntimeConversationMessage,
   reviseMessage: reviseRuntimeConversationMessage,
   loadDraft: loadRuntimeConversationDraft,
@@ -42,6 +43,10 @@ const runtime = createConversationRuntime({
 
 /** Read a fresh, thread-validated history before a provider request. */
 export const loadDesktopConversation = (threadId: string) => runtime.hydrate(threadId);
+export const loadDesktopConversationPage = (
+  threadId: string,
+  request: { limit?: number; beforeSequence?: number } = {},
+) => runtime.hydratePage(threadId, request);
 
 /** Shared callback for the agent loop; UI callers use the hook below. */
 export function createDesktopDurableRunWriter(threadId: string, runId: string) {
@@ -52,6 +57,7 @@ export function createDesktopDurableRunWriter(threadId: string, runId: string) {
       getThread: getRuntimeConversationThread,
       updateThread: updateRuntimeConversationThread,
       listMessages: listRuntimeConversationMessages,
+      listMessagesPage: listRuntimeConversationMessagesPage,
       appendMessage: appendRuntimeConversationMessage,
       reviseMessage: reviseRuntimeConversationMessage,
       loadDraft: loadRuntimeConversationDraft,

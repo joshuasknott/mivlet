@@ -1044,7 +1044,7 @@ pub(crate) fn capture_shares(
                         })
                 }
                 "conversation" if thread_is_owned(tx, scope, &share.source.id)? => {
-                    let rows = message::list(tx, store, &scope.data, &share.source.id)?;
+                    let rows = message::list_selected(tx, store, &scope.data, &share.source.id)?;
                     let revision = rows
                         .last()
                         .map(|row| row.sequence.to_string())
@@ -1061,8 +1061,12 @@ pub(crate) fn capture_shares(
                             format!(
                                 "{}: {}",
                                 row.kind,
-                                row.content["text"]
+                                row.content
                                     .as_str()
+                                    .or_else(|| row
+                                        .content
+                                        .get("text")
+                                        .and_then(serde_json::Value::as_str))
                                     .unwrap_or("")
                                     .chars()
                                     .take(1_000)
