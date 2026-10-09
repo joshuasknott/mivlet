@@ -508,3 +508,68 @@ fn windows_junctions_are_protected_and_long_paths_are_accounted() {
         b"original"
     );
 }
+
+#[cfg(windows)]
+#[test]
+#[ignore = "Requires native execution setup and pinned runtime; disposable copy lifecycle through the real executor"]
+fn native_copy_lifecycle_acceptance() {
+    let (temp, directory, authority, repo, owner, target) = fixture();
+    let ticket = authority.begin_agent(1).unwrap();
+    let run = |command: &str| {
+        let output = super::super::execute_in(
+            &directory,
+            &ticket,
+            "repository-run",
+            serde_json::json!({"repositoryId": repo.id, "command": command, "network": false, "timeoutSeconds": 30}),
+        )
+        .unwrap();
+        let result: serde_json::Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(result["exitCode"], 0, "{result}");
+        assert_eq!(result["interrupted"], false, "{result}");
+    };
+    run("node -e \"require('fs').writeFileSync('generated.txt','native execution output')\"");
+    assert_eq!(
+        fs::read(directory.join(&repo.id).join("checkout/generated.txt")).unwrap(),
+        b"native execution output"
+    );
+    let protected = preview(
+        &directory,
+        &repo.id,
+        &owner,
+        &target,
+        &Evidence::default(),
+        &ticket,
+    )
+    .unwrap();
+    assert_eq!(protected.copy.dirty, Some(true));
+    assert!(protected.preview_token.is_none());
+    assert!(!temp.path().join("source/generated.txt").exists());
+
+    run("node -e \"require('fs').unlinkSync('generated.txt')\"");
+    let reviewed = preview(
+        &directory,
+        &repo.id,
+        &owner,
+        &target,
+        &Evidence::default(),
+        &ticket,
+    )
+    .unwrap();
+    assert_eq!(reviewed.copy.dirty, Some(false));
+    assert!(
+        reviewed.copy.blockers.is_empty(),
+        "{:?}",
+        reviewed.copy.blockers
+    );
+    assert!(reviewed.preview_token.is_some());
+    let action = action(&target, reviewed);
+    delete(&directory, &owner, &action, &Evidence::default(), &ticket).unwrap();
+    assert!(load(&directory).unwrap().is_none());
+    assert!(!directory.join(&repo.id).exists());
+    assert_eq!(
+        fs::read(temp.path().join("source/file.txt")).unwrap(),
+        b"original"
+    );
+    assert!(delete(&directory, &owner, &action, &Evidence::default(), &ticket).is_err());
+    println!("Native copy lifecycle: real executor writes imported into only the managed copy; dirty cleanup protected; clean single-use deletion preserves the source and rejects replay.");
+}

@@ -71,6 +71,16 @@ worktree settings), plus [Windows long paths #14917](https://github.com/pingdotg
 The implementation uses Mivlet's native authority and independent Rust/React
 code; no T3 runtime, source, assets or product copy is transplanted.
 
+Retained-copy native acceptance uses disposable Git repositories and the pinned
+Windows executor. Run `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+native_copy_lifecycle_acceptance -- --ignored --nocapture --test-threads=1` after
+preparing the bundled runtime and native execution setup. It verifies imported
+command changes, dirty-copy protection, deliberate single-use cleanup, replay
+rejection and preservation of the source. This does not establish native UI,
+provider or installed-account acceptance. An isolated app data/WebView profile
+still shares the Windows Clerk session credential; authenticated app acceptance
+requires an isolated Windows test account, not merely a new portable profile.
+
 Commands require Windows x64 and native execution setup in Library. Git is
 required for attachment and review. Node 22.23.3/npm and Python 3.13.16/pip
 26.2.1 are bundled, pinned and checked before execution. Run Mivlet unelevated.
