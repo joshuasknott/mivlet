@@ -84,7 +84,7 @@ function ScheduleResults({ workspaceId, scheduleId, onOpenResult }: { workspaceI
 }
 
 type EditorInput = Pick<LocalSchedule, "agentId" | "providerId" | "model" | "reasoningEffort" | "prompt" | "timezone" | "trigger" | "executionKind" | "permissionMode">;
-export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, initialAgentId }: { runtime: SettingsRuntime; project?: { id: string; name: string; participantIds: string[] }; initialAgentId?: string; schedule: LocalSchedule | null; pending: boolean; onSave: (input: EditorInput) => void; onCancel: () => void }) {
+function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, initialAgentId }: { runtime: SettingsRuntime; project?: { id: string; name: string; participantIds: string[] }; initialAgentId?: string; schedule: LocalSchedule | null; pending: boolean; onSave: (input: EditorInput) => void; onCancel: () => void }) {
   const [agentId, setAgentId] = useState(schedule?.agentId ?? initialAgentId ?? "");
   const [executionKind, setExecutionKind] = useState<"research" | "agent">(schedule ? schedule.executionKind ?? "research" : "agent");
   const [prompt, setPrompt] = useState(schedule?.prompt ?? "");

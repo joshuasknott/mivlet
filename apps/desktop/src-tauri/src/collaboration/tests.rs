@@ -13,6 +13,10 @@ mod branch_tests;
 mod exchange_regressions;
 #[path = "output_revision_tests.rs"]
 mod output_revision_tests;
+#[path = "provider_continuation_tests.rs"]
+mod provider_continuation_tests;
+#[path = "provider_reset_regressions.rs"]
+mod provider_reset_regressions;
 #[path = "scheduling_regressions.rs"]
 mod scheduling_regressions;
 #[path = "ui_tests.rs"]

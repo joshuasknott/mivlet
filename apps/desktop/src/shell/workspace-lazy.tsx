@@ -42,8 +42,13 @@ export const LocalSchedules = lazy(() =>
     default: module.LocalSchedules,
   })),
 );
+export const WorkspaceLibrary = lazy(() =>
+  import("../components/navigation/WorkspaceLibrary").then((module) => ({
+    default: module.WorkspaceLibrary,
+  })),
+);
 export const AccountDialog = lazy(() =>
-  import("../components/agents/AccountDialog").then((module) => ({
+  import("../components/pages/SettingsPage").then((module) => ({
     default: module.AccountDialog,
   })),
 );

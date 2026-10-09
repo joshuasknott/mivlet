@@ -83,13 +83,23 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 46] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 56] = [
     "request-secret",
     "secret-request-status",
     "webhook-signing-install",
     "webhook-signing-status",
     "webhook-signing-verify",
     "webhook-signing-remove",
+    "repository-start",
+    "workspace-start",
+    "command-jobs",
+    "command-output",
+    "command-stop",
+    "repository-checkpoint-list",
+    "repository-checkpoint-capture",
+    "repository-checkpoint-preview",
+    "repository-checkpoint-restore",
+    "repository-checkpoint-delete",
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -301,11 +311,20 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "secret-request-status" | "webhook-signing-status" | "webhook-signing-verify" => {
             Some(("read-only", "low"))
         }
-        "repository-status" | "repository-read" => Some(("read-only", "low")),
-        "repository-write" | "repository-commit" => Some(("full-access", "high")),
-        "repository-run" | "repository-publish" | "workspace-run" => {
+        "repository-checkpoint-list" | "repository-checkpoint-preview" => {
+            Some(("read-only", "low"))
+        }
+        "repository-checkpoint-capture" => Some(("full-access", "high")),
+        "repository-checkpoint-restore" | "repository-checkpoint-delete" => {
             Some(("full-access", "critical"))
         }
+        "repository-status" | "repository-read" | "command-jobs" | "command-output" => {
+            Some(("read-only", "low"))
+        }
+        "command-stop" => Some(("full-access", "high")),
+        "repository-write" | "repository-commit" => Some(("full-access", "high")),
+        "repository-run" | "repository-start" | "repository-publish" | "workspace-run"
+        | "workspace-start" => Some(("full-access", "critical")),
         "repository-recover" => Some(("full-access", "high")),
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
@@ -390,7 +409,8 @@ fn is_computer_tool(tool: &str) -> bool {
     if is_protected_secret_tool(tool) {
         return true;
     }
-    if tool.starts_with("repository-") {
+    if tool.starts_with("repository-") || tool.starts_with("command-") || tool == "workspace-start"
+    {
         return true;
     }
     matches!(
@@ -503,6 +523,8 @@ pub(crate) fn validate_tool_approval_binding(
             | "workspace-run"
     ) || tool.starts_with("repository-")
         || is_protected_secret_tool(tool)
+        || tool.starts_with("command-")
+        || tool == "workspace-start"
     {
         let digest_entries = approved
             .iter()
@@ -1463,7 +1485,10 @@ pub async fn execute_tool_call(
             output: output.to_string(),
         });
     }
-    if tool.starts_with("repository-") || tool == "workspace-run" {
+    if tool.starts_with("repository-")
+        || tool.starts_with("command-")
+        || matches!(tool.as_str(), "workspace-run" | "workspace-start")
+    {
         let workspace = request
             .workspace_id
             .clone()
@@ -1474,8 +1499,26 @@ pub async fn execute_tool_call(
             .ok_or("Code tools require a saved agent.")?;
         let computers = local_computers.inner().clone();
         let operation_tool = tool.clone();
+        let operation_request = request_id.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
-            if operation_tool == "workspace-run" {
+            if operation_tool.starts_with("command-") {
+                crate::local_computer::command_jobs::execute(
+                    &computers,
+                    &workspace,
+                    &agent,
+                    computer_generation,
+                    &operation_tool,
+                    arguments,
+                )
+            } else if operation_tool == "workspace-start" {
+                crate::local_computer::workspace_execution::start(
+                    &computers,
+                    &workspace,
+                    &agent,
+                    computer_generation,
+                    arguments,
+                )
+            } else if operation_tool == "workspace-run" {
                 crate::local_computer::workspace_execution::execute(
                     &computers,
                     &workspace,
@@ -1491,6 +1534,7 @@ pub async fn execute_tool_call(
                     computer_generation,
                     &operation_tool,
                     arguments,
+                    &operation_request,
                 )
             }
         })
@@ -2560,6 +2604,116 @@ mod connector_authority_tests {
         approved.agent_id = Some("different-agent".into());
         assert!(verify_tool_authority(&path, &approved).is_err());
         approved.agent_id = Some("agent".into());
+        verify_tool_authority(&path, &approved).unwrap();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+    }
+
+    #[test]
+    fn native_command_lifecycle_permits_bind_lifetime_target_and_generation() {
+        for (tool, arguments, changes) in [
+            (
+                "repository-start",
+                json!({"repositoryId":"repo", "command":"node server.js", "network":false, "timeoutSeconds":600}),
+                vec![
+                    ("command", json!("node other.js")),
+                    ("repositoryId", json!("other")),
+                    ("network", json!(true)),
+                    ("timeoutSeconds", json!(601)),
+                ],
+            ),
+            (
+                "workspace-start",
+                json!({"command":"node server.js", "inputs":["server.js"], "network":false, "timeoutSeconds":600}),
+                vec![
+                    ("inputs", json!(["other.js"])),
+                    ("timeoutSeconds", json!(601)),
+                ],
+            ),
+            (
+                "command-stop",
+                json!({"jobId":"job", "jobGeneration":7}),
+                vec![("jobId", json!("other")), ("jobGeneration", json!(8))],
+            ),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("permits.json");
+            let mut approved = request(tool);
+            approved.arguments = arguments.clone();
+            approved.workspace_id = Some("workspace".into());
+            approved.agent_id = Some("agent".into());
+            approved.computer_generation = Some(7);
+            approved.approval.request.data_used = approval_argument_previews(tool, &arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+            approved.approval.request.data_used.extend([
+                argument_digest(&arguments).unwrap(),
+                "Computer workspace: workspace".into(),
+                "Computer agent: agent".into(),
+                "Computer generation: 7".into(),
+            ]);
+            persist_permit(&path, &approved);
+            for (field, value) in changes {
+                approved.arguments = arguments.clone();
+                approved.arguments[field] = value;
+                assert!(
+                    verify_tool_authority(&path, &approved).is_err(),
+                    "{tool}/{field}"
+                );
+            }
+            approved.arguments = arguments;
+            verify_tool_authority(&path, &approved).unwrap();
+            assert!(
+                verify_tool_authority(&path, &approved).is_err(),
+                "single-use {tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn checkpoint_restore_permit_binds_every_hash_request_scope_and_is_single_use() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("checkpoint-permits.json");
+        let mut approved = request("repository-checkpoint-restore");
+        approved.arguments = json!({"repositoryId":"copy", "checkpointId":"saved", "expectedTree":"current", "expectedCheckpointTree":"checkpoint-tree", "expectedOutput":"output", "expectedHead":"head"});
+        approved.workspace_id = Some("workspace".into());
+        approved.agent_id = Some("agent".into());
+        approved.computer_generation = Some(7);
+        approved.approval.request.data_used =
+            approval_argument_previews(&approved.tool, &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved.approval.request.data_used.extend([
+            argument_digest(&approved.arguments).unwrap(),
+            "Computer workspace: workspace".into(),
+            "Computer agent: agent".into(),
+            "Computer generation: 7".into(),
+        ]);
+        persist_permit(&path, &approved);
+        for field in [
+            "repositoryId",
+            "checkpointId",
+            "expectedTree",
+            "expectedCheckpointTree",
+            "expectedOutput",
+            "expectedHead",
+        ] {
+            let original = approved.arguments[field].clone();
+            approved.arguments[field] = json!("substituted");
+            assert!(
+                verify_tool_authority(&path, &approved).is_err(),
+                "accepted substituted {field}"
+            );
+            approved.arguments[field] = original;
+        }
+        let id = approved.approval.request.id.clone();
+        approved.approval.request.id = "another-request".into();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.approval.request.id = id;
+        approved.workspace_id = Some("another-workspace".into());
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.workspace_id = Some("workspace".into());
         verify_tool_authority(&path, &approved).unwrap();
         assert!(verify_tool_authority(&path, &approved).is_err());
     }
