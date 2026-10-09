@@ -129,6 +129,28 @@ import transaction retains at most its staged and previous trees until recovery.
 Delete an old checkpoint explicitly to release saved storage. Checkpoints do not
 garbage-collect repository copies and do not introduce another SQL migration.
 
+Native retained-copy inventory must use
+`coding::checkpoints::retention::inspect(coding_directory, repository_id, execution_scope_id, current)`
+under the canonical copy lock and OS lease. It does not create checkpoint
+directories, retire saved data, load authority or reconcile import journals.
+The caller verifies the account/workspace/agent owner and derives the expected
+execution identity with `authority::execution_scope_id` from that owner's exact
+`state.scope(...).directory`, without loading a new authority. The actor's scope
+must not be substituted when inspecting another agent's copy. The callback
+rechecks account, cancellation and freshness throughout the bounded read.
+
+The projection reuses the checkpoint manifest parser, checks saved content and
+byte counts, and returns repository/scope identity, saved count, logical saved
+file bytes and recovery blockers. Missing checkpoint storage returns zero
+without creating it. Malformed/foreign/unknown checkpoint records return an
+error and must remain protected; callers must never substitute an empty result.
+Pending capture/deletion/preview trees and missing checkout remain blockers.
+Import remnants are explicitly unknown and are not parsed or recovered here.
+Counts exclude staging and metadata, so they are not total disk usage. An empty
+projection is not cleanup permission: ownership, Work/job/import/publication
+guards and a fresh single-use cleanup approval remain mandatory. Copy-manager
+consumption is a separate integration; its conservative guards stay in place.
+
 The source reference is [T3 Code at a4c9494](https://github.com/pingdotgg/t3code/tree/a4c9494b0e3606775cc5fc929fc138399288bd43):
 `CheckpointStore`, the Git driver's temporary-index capture and tests,
 `CheckpointCaptureService`, `CheckpointRollbackService`, and
@@ -195,6 +217,14 @@ includes a supervisor that kills a separate process after each restore rename;
 restart must retain or recover the previous tree without replaying the restore.
 Renderer tests in `RepositoryCheckpoints.test.tsx` and the checkpoint runtime
 domain verify the approval flow and scope binding with mocked native transport.
+The retention tests compare file/directory names, contents, lengths and last-write
+times before and after successful, failed and cancelled reads, including
+interrupted deletion, unknown import custody, missing checkout, malformed or
+foreign manifests, forged sizes, hardlinks and a Windows junction. The ignored
+`native_checkpoint_restore_acceptance` uses the pinned executor to import a real
+Node change, restore the original checkpoint, clear prior verification and restore
+the automatically retained undo. This is disposable native service evidence;
+it does not authenticate a GUI account or establish a live-provider journey.
 
 On a configured unelevated Windows machine, explicitly run
 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml native_coding_acceptance -- --ignored --nocapture`.

@@ -363,3 +363,73 @@ fn checkpoint_restores_file_directory_replacements_in_both_directions() {
         "directory version"
     );
 }
+
+#[test]
+#[cfg(windows)]
+#[ignore = "Requires pinned Windows native executor/runtime; disposable service acceptance, no GUI or provider"]
+fn native_checkpoint_restore_acceptance() {
+    let (temp, directory, authority, repo) = fixture();
+    let ticket = authority.begin_agent(1).unwrap();
+    let checkpoint = capture(&directory, &ticket, &repo);
+    let source = fs::read(temp.path().join("source/sum.js")).unwrap();
+    let run = |command: &str| {
+        call(
+            &directory,
+            &ticket,
+            "repository-run",
+            json!({
+                "repositoryId":repo.id, "command":command, "network":false,"timeoutSeconds":30
+            }),
+        )
+    };
+    // Real pinned executor output is imported before checkpoint restoration.
+    // Direct in-process Node avoids the separately diagnosed pipe-spawn issue.
+    let changed = run(
+        "node -e \"require('fs').writeFileSync('sum.js','module.exports = (a, b) => a + b;\\n')\"",
+    );
+    assert_eq!(changed["exitCode"], 0, "{changed}");
+    let verified = run("node test.js");
+    assert_eq!(verified["exitCode"], 0, "{verified}");
+    assert!(super::super::load(&directory)
+        .unwrap()
+        .unwrap()
+        .command_diff_id
+        .is_some());
+    let review = preview(&directory, &ticket, &repo, &checkpoint);
+    let restored = call(
+        &directory,
+        &ticket,
+        "repository-checkpoint-restore",
+        restore_args(&repo, &review),
+    );
+    assert_eq!(restored["verificationInvalidated"], true);
+    assert!(super::super::load(&directory)
+        .unwrap()
+        .unwrap()
+        .command_diff_id
+        .is_none());
+    assert_eq!(
+        git::run(&directory, &repo, &["rev-parse", "HEAD"], &ticket).unwrap(),
+        checkpoint["head"]
+    );
+    let restored_test = run("node test.js");
+    assert_ne!(restored_test["exitCode"], 0, "{restored_test}");
+    assert!(restored_test["output"]
+        .as_str()
+        .unwrap()
+        .contains("AssertionError"));
+    let undo = preview(&directory, &ticket, &repo, &restored["beforeRestore"]);
+    call(
+        &directory,
+        &ticket,
+        "repository-checkpoint-restore",
+        restore_args(&repo, &undo),
+    );
+    let passed_again = run("node test.js");
+    assert_eq!(passed_again["exitCode"], 0, "{passed_again}");
+    assert_eq!(fs::read(temp.path().join("source/sum.js")).unwrap(), source);
+    assert_eq!(
+        fs::read(temp.path().join("source/unrelated.txt")).unwrap(),
+        b"preserve me"
+    );
+}

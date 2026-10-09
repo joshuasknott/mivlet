@@ -1,6 +1,10 @@
 //! Immutable file checkpoints in a selected private repository. Conversation
 //! state, provider sessions and Git HEAD are deliberately outside restoration.
 mod preview;
+// Native service projection for the separately stacked copy inventory consumer.
+// It grants no action and must never be exposed as a cleanup authorization.
+#[allow(dead_code)]
+pub(crate) mod retention;
 mod storage;
 #[cfg(test)]
 mod tests;
@@ -150,8 +154,9 @@ pub(super) fn execute(
     }
 }
 
-/// Read-only native UI entry. Mutations always use execute_tool_call and the
-/// existing persisted one-use approval, shared with provider tool execution.
+/// Native UI list/preview entry; it can create preview storage or finish an
+/// already-approved retirement. Account-wide retention uses retention::inspect
+/// instead. Capture/restore/delete use the persisted one-use approval path.
 #[tauri::command]
 pub async fn coding_checkpoint_inspect(
     window: tauri::WebviewWindow,

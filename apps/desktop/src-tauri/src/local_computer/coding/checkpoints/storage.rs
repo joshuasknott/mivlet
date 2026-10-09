@@ -175,20 +175,44 @@ pub(super) fn load(
     repo: &Repository,
     ticket: &OperationTicket,
 ) -> Result<Manifest, String> {
+    read_manifest(
+        &home.join(checkpoint_id).join("manifest.json"),
+        checkpoint_id,
+        &repo.id,
+        &ticket.execution_binding().scope_id,
+        &|| ticket.check().is_ok(),
+    )
+}
+
+/// The single checkpoint parser, shared with non-mutating retention inspection.
+pub(super) fn read_manifest(
+    path: &Path,
+    checkpoint_id: &str,
+    repository_id: &str,
+    scope_id: &str,
+    current: &dyn Fn() -> bool,
+) -> Result<Manifest, String> {
     if !id(checkpoint_id, 48) {
         return Err("Invalid checkpoint identity.".into());
     }
-    let bytes = files::read(
-        &home.join(checkpoint_id).join("manifest.json"),
-        MANIFEST_LIMIT,
-        || ticket.check().is_ok(),
-    )?;
+    let bytes = files::read(path, MANIFEST_LIMIT, current)?;
     let manifest: Manifest =
         serde_json::from_slice(&bytes).map_err(|_| "Checkpoint metadata needs inspection.")?;
     if manifest.version != 1
         || manifest.checkpoint.id != checkpoint_id
-        || manifest.checkpoint.repository_id != repo.id
-        || manifest.scope_id != ticket.execution_binding().scope_id
+        || manifest.checkpoint.repository_id != repository_id
+        || manifest.scope_id != scope_id
+        || manifest.checkpoint.generation == 0
+        || manifest.checkpoint.request_id.trim().is_empty()
+        || manifest.checkpoint.label.trim().is_empty()
+        || manifest.checkpoint.label.len() > 160
+        || manifest.checkpoint.label.chars().any(char::is_control)
+        || !matches!(
+            manifest.checkpoint.reason.as_str(),
+            "manual" | "before-restore"
+        )
+        || !(id(&manifest.checkpoint.head, 40) || id(&manifest.checkpoint.head, 64))
+        || chrono::DateTime::parse_from_rfc3339(&manifest.checkpoint.created_at).is_err()
         || manifest.files.len() > LIMITS.file_count
         || manifest.checkpoint.file_count != manifest.files.len()
         || !id(&manifest.checkpoint.tree_id, 64)
