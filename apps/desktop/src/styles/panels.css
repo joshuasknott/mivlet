@@ -543,8 +543,7 @@
 }
 
 .connector-detail__status--syncing,
-.connector-detail__status--needs-auth,
-.connector-detail__status--fixture {
+.connector-detail__status--needs-auth {
   color: var(--ink-soft);
   background: var(--accent-subtle);
   border-color: var(--line);

@@ -44,7 +44,7 @@ function compareCeiling(label, actualBytes, ceilingBytes, baselineBytes) {
     actualBytes,
     ceilingBytes,
     overBytes,
-    message: `${label}: ${formatKiB(actualBytes)} raw > ceiling ${formatKiB(ceilingBytes)} (+${formatKiB(overBytes)})${baselineNote}`,
+    message: `${label}: ${formatKiB(actualBytes)} > ceiling ${formatKiB(ceilingBytes)} (+${formatKiB(overBytes)})${baselineNote}`,
   };
 }
 
@@ -265,7 +265,8 @@ export function checkDeferredConversationUpgrade(manifest) {
 }
 
 async function main() {
-  const { violations, budget } = await runBudgetCheck();
+  const { violations, budget, summary } = await runBudgetCheck();
+  process.stdout.write(`Measured bundle bytes: ${JSON.stringify(summary)}\n`);
   if (violations.length === 0) {
     process.stdout.write("Performance budget check passed.\n");
     return;

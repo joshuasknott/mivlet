@@ -1,5 +1,5 @@
 .conversation-turn { display: grid; gap: 22px; min-width: 0; }
-.conversation-response { display: grid; gap: 8px; min-width: 0; padding-bottom: 12px; }
+.conversation-response { display: grid; gap: 8px; min-width: 0; }
 .conversation-response__author { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--ink); }
 .conversation-response__author .agent-avatar { width: 28px; height: 28px; }
 .conversation-response__author strong { font-weight: 500; }
@@ -76,7 +76,7 @@
 @media (max-width: 900px) {
   .artifact-preview { position: fixed; inset: 0; z-index: 100; width: 100%; height: 100dvh; border: 0; }
 }
-.message-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 8px; color: var(--ink-muted); font-size: 10px; }
+.message-actions { display: flex; align-items: center; flex-wrap: wrap; margin-top: 8px; color: var(--ink-muted); font-size: 10px; }
 .message-actions button, .copy-control button { border: 0; background: transparent; color: var(--ink-muted); font: inherit; padding: 5px 0; cursor: pointer; }
 .message-actions button:hover, .copy-control button:hover { color: var(--ink); }
 .conversation-branch-picker { display: flex; align-items: center; gap: 6px; margin: 14px auto 4px; color: var(--ink-muted); font-size: 11px; }
@@ -98,8 +98,6 @@
 .message-code { min-width: 0; margin-block: 12px; }
 .message-code > header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 12px; border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; font-size: 11px; color: var(--ink-muted); }
 .message-code > pre { margin-top: 0; border-radius: 0 0 8px 8px; }
-.conversation-recovery { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; }
-.conversation-recovery > p, .conversation-recovery > details { flex: 1 1 100%; }
 .conversation-context-event { margin: 16px 0; padding: 10px 12px; border-left: 2px solid var(--line); color: var(--ink-muted); font-size: var(--text-12); }
 .conversation-context-event summary { cursor: pointer; }
 .conversation-context-event time { margin-left: 8px; }

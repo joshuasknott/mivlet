@@ -1,7 +1,6 @@
 :root:not([data-theme="dark"]) .teammates-workspace:not([data-theme="dark"]) {
   --surface: #fff;
   --shell: var(--surface);
-  --canvas: var(--surface);
 }
 
 .teammates-workspace {
@@ -227,11 +226,6 @@
   background: none;
   border: 0;
   text-decoration: underline;
-}
-.conversation-sidebar {
-  flex: 0 1 auto;
-  min-height: 0;
-  padding-top: 6px;
 }
 .conversation-sidebar__list {
   max-height: 27vh;
