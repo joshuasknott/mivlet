@@ -173,7 +173,7 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName.startsWith("repository-") || isProtectedSecretTool(toolName)) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || isProtectedSecretTool(toolName)) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 
@@ -184,10 +184,20 @@ export function buildToolApproval(
     ? "Consume this exact one-use reference to install the native webhook verification key for the specified target. The value never returns to the agent."
     : toolName === "webhook-signing-remove" && isRegistered
     ? "Revoke and delete the specified native webhook verification key. Further signature checks with that key will fail."
+    : (toolName === "repository-start" || toolName === "workspace-start") && isRegistered
+    ? `Start the exact persistent Windows command for ${parsed.timeoutSeconds} seconds in an isolated snapshot. All writes discarded; native ownership and repository locks last until all descendants stop. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Stop or app closure terminates it. No automatic restart.`
+    : toolName === "command-stop" && isRegistered
+    ? "Stop this exact native job and all descendants. Wait for its terminal status; discard its snapshot."
     : (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
     ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
     : toolName === "repository-publish" && isRegistered
     ? "Push reviewed code and create its pull request on the attached GitHub origin using your native GitHub CLI account."
+    : toolName === "repository-checkpoint-restore" && isRegistered
+    ? "Restore reviewed files in this agent's private copy. Save current code first and invalidate prior test verification. Preserve ignored files, original checkout, Git HEAD and chat history. External effects remain."
+    : toolName === "repository-checkpoint-delete" && isRegistered
+    ? "Permanently delete this exact checkpoint. Preserve current repository files."
+    : toolName === "repository-checkpoint-capture" && isRegistered
+    ? "Save an immutable checkpoint of this private copy. Exclude ignored files, credentials and Git metadata."
     : toolName === "repository-recover" && isRegistered
     ? "Reconcile command-import files and release retained staging/backup, or inspect uncertain GitHub publication. Keep uncertainty receipts; replay nothing."
     : toolName === "local-app-select" && isRegistered

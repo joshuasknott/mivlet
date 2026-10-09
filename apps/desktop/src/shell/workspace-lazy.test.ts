@@ -5,25 +5,35 @@ import { describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
+const routes = [
+  ["SearchOverlay", "../components/search/SearchOverlay"],
+  ["ProjectDetailsDialog", "../components/projects/ProjectDetailsDialog"],
+  ["ExecutionWorker", "./ExecutionWorker"],
+  ["AgentEditor", "../components/agents/AgentEditor"],
+  ["OnboardingPage", "../components/pages/OnboardingPage"],
+  ["SettingsPage", "../components/pages/SettingsPage"],
+  ["MarketplacePage", "../components/pages/MarketplacePage"],
+  ["LocalSchedules", "../components/settings/LocalSchedules"],
+  ["AccountDialog", "../components/pages/SettingsPage"],
+  ["ComputerInspector", "./ComputerInspector"],
+] as const;
 const islands = [
-  "../components/search/SearchOverlay",
-  "../components/projects/ProjectDetailsDialog",
-  "./ExecutionWorker",
-  "../components/agents/AgentEditor",
-  "../components/pages/OnboardingPage",
-  "../components/pages/SettingsPage",
-  "../components/pages/MarketplacePage",
-  "../components/settings/LocalSchedules",
+  ...routes.map(([, specifier]) => specifier),
+  "../components/navigation/WorkspaceLibrary",
   "../components/agents/AccountDialog",
-  "./ComputerInspector",
 ];
 
 describe("workspace lazy route islands", () => {
   it("keeps search, settings, marketplace and execution islands lazy", () => {
     const source = readFileSync(join(here, "workspace-lazy.tsx"), "utf8");
-    expect(source).toContain("import { lazy } from \"react\"");
-    for (const specifier of islands) {
-      expect(source, specifier).toContain(`import("${specifier}")`);
+    expect(source).toContain('import { lazy } from "react"');
+    for (const [name, specifier] of routes) {
+      const declaration = source
+        .split("export const ")
+        .find((part) => part.startsWith(`${name} = lazy(() =>`));
+      expect(declaration, name).toBeDefined();
+      expect(declaration, name).toContain(`import("${specifier}")`);
+      expect(declaration, name).toContain(`default: module.${name}`);
     }
   });
 

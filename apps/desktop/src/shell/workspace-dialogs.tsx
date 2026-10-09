@@ -1,6 +1,5 @@
 import type {
   CollaborationWorkItem,
-  ExecutionAttempt,
   LocalProject,
   SearchResult,
 } from "@mivlet/protocol";
@@ -56,7 +55,6 @@ export function WorkspaceDialogs({
   setSchedules,
   accountDialog,
   setAccountDialog,
-  usage,
   createRoom,
   updateProject,
   selectAgent,
@@ -85,7 +83,6 @@ export function WorkspaceDialogs({
   setSchedules: (value: { agentId?: string; projectId?: string } | null) => void;
   accountDialog: "usage" | "sign-out" | null;
   setAccountDialog: (value: "usage" | "sign-out" | null) => void;
-  usage: NonNullable<ExecutionAttempt["usage"]>[];
   createRoom: (
     draft: ConversationDraft,
     projectId?: string,
@@ -332,7 +329,13 @@ export function WorkspaceDialogs({
           <AccountDialog
             kind={accountDialog}
             name={profileName}
-            records={usage}
+            providers={runtime.backendProviders}
+            connectedProviderIds={runtime.connectedBackendIds}
+            onOpenBreakdowns={() => {
+              setAccountDialog(null);
+              setSettingsTab("usage");
+              setSettings(true);
+            }}
             onClose={() => setAccountDialog(null)}
             onSignOut={async () => {
               for (const work of service
