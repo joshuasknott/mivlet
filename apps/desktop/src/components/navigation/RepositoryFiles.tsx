@@ -12,16 +12,16 @@ import {
 import { RepositoryCheckpoints } from "./RepositoryCheckpoints";
 import "./repository-files.css";
 
-<<<<<<< HEAD
 const PullRequestReview = lazy(() =>
   import("./PullRequestReview").then((module) => ({
     default: module.PullRequestReview,
-=======
+  })),
+);
+
 // RepositoryDetails mounts only after the user opens Repository.
 const RepositoryCopies = lazy(() =>
   import("./RepositoryCopies").then((module) => ({
     default: module.RepositoryCopies,
->>>>>>> codex/event-automations
   })),
 );
 
@@ -259,7 +259,6 @@ function RepositoryDetails({
               </a>
             </p>
           )}
-<<<<<<< HEAD
           {repo.remote && (
             <Suspense fallback={<p role="status">Loading pull request review…</p>}>
               <PullRequestReview
@@ -271,7 +270,6 @@ function RepositoryDetails({
               />
             </Suspense>
           )}
-=======
           <RepositoryCheckpoints
             key={repo.id}
             workspaceId={workspaceId}
@@ -280,7 +278,6 @@ function RepositoryDetails({
             disabled={!!status.data?.busy || !!status.data?.recoveryRequired}
             onChanged={() => void status.refetch()}
           />
->>>>>>> codex/event-automations
         </>
       )}
     </div>

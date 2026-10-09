@@ -386,7 +386,6 @@ stale review rejection, exact commits, generation revocation and recovery locks.
 The permit test `repository_permits_bind_full_payload_scope_generation_and_consume_once`
 covers substitution and replay at the native approval boundary.
 
-<<<<<<< HEAD
 PR-specific fixtures live in `coding/pull_requests/tests.rs` and
 `collaboration/pr_watch_tests.rs`. They cover stale targets, local state,
 pagination, updates against actual local Git commits, uncertainty across reload,
@@ -396,7 +395,6 @@ explicit `MIVLET_PR_READ_ACCEPTANCE_REMOTE`; it only lists/views PRs and perform
 no remote mutation. Renderer fixtures establish UI behavior, not live approval,
 provider or publication acceptance. Remote mutation acceptance requires separate
 explicit authorization and a disposable GitHub target.
-=======
 Checkpoint coverage also includes `checkpoint_restore_permit_binds_every_hash_request_scope_and_is_single_use`
 and `local_computer::coding::checkpoints` in the desktop native suite. These use
 real disposable Git copies to cover new/modified/deleted files, file/directory
@@ -415,7 +413,6 @@ foreign manifests, forged sizes, hardlinks and a Windows junction. The ignored
 Node change, restore the original checkpoint, clear prior verification and restore
 the automatically retained undo. This is disposable native service evidence;
 it does not authenticate a GUI account or establish a live-provider journey.
->>>>>>> codex/event-automations
 
 On a configured unelevated Windows machine, explicitly run
 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml native_coding_acceptance -- --ignored --nocapture`.

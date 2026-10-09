@@ -83,14 +83,11 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-<<<<<<< HEAD
-pub(crate) const SUPPORTED_TOOLS: [&str; 44] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 60] = [
     "repository-pr-read",
     "repository-pr-local",
     "repository-pr-action",
     "repository-pr-watch",
-=======
-pub(crate) const SUPPORTED_TOOLS: [&str; 56] = [
     "request-secret",
     "secret-request-status",
     "webhook-signing-install",
@@ -107,7 +104,6 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 56] = [
     "repository-checkpoint-preview",
     "repository-checkpoint-restore",
     "repository-checkpoint-delete",
->>>>>>> codex/event-automations
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -313,14 +309,9 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
 
 pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
-<<<<<<< HEAD
         "repository-pr-read" => Some(("read-only", "low")),
         "repository-pr-local" | "repository-pr-watch" => Some(("full-access", "high")),
         "repository-pr-action" => Some(("full-access", "critical")),
-        "repository-status" | "repository-read" => Some(("read-only", "low")),
-        "repository-write" | "repository-commit" => Some(("full-access", "high")),
-        "repository-run" | "repository-publish" | "workspace-run" => {
-=======
         "request-secret" | "webhook-signing-install" | "webhook-signing-remove" => {
             Some(("full-access", "high"))
         }
@@ -332,7 +323,6 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         }
         "repository-checkpoint-capture" => Some(("full-access", "high")),
         "repository-checkpoint-restore" | "repository-checkpoint-delete" => {
->>>>>>> codex/event-automations
             Some(("full-access", "critical"))
         }
         "repository-status" | "repository-read" | "command-jobs" | "command-output" => {
@@ -2626,13 +2616,58 @@ mod connector_authority_tests {
     }
 
     #[test]
-<<<<<<< HEAD
     fn pull_request_permit_binds_target_payload_scope_and_consumes_once() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("permits.json");
         let mut approved = request("repository-pr-action");
         approved.arguments = json!({"repositoryId":"repo", "number":7, "action":"review", "remote":"https://github.com/example/repository.git", "expectedHead":"a".repeat(40), "headBranch":"mivlet/task", "baseSha":"b".repeat(40), "baseBranch":"main", "event":"COMMENT", "body":"long review ".repeat(80), "comments":[{"path":"sum.js", "line":2, "side":"RIGHT", "body":"Check overflow"}]});
-=======
+        approved.workspace_id = Some("workspace".into());
+        approved.agent_id = Some("agent".into());
+        approved.computer_generation = Some(7);
+        approved.approval.request.data_used =
+            approval_argument_previews("repository-pr-action", &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved.approval.request.data_used.extend([
+            argument_digest(&approved.arguments).unwrap(),
+            "Computer workspace: workspace".into(),
+            "Computer agent: agent".into(),
+            "Computer generation: 7".into(),
+        ]);
+        persist_permit(&path, &approved);
+        let original = approved.arguments.clone();
+        for (key, value) in original.as_object().unwrap() {
+            approved.arguments = original.clone();
+            approved.arguments[key] = if let Some(text) = value.as_str() {
+                json!(format!("{text}changed"))
+            } else if let Some(number) = value.as_u64() {
+                json!(number + 1)
+            } else {
+                json!([])
+            };
+            assert!(
+                verify_tool_authority(&path, &approved).is_err(),
+                "substituted {key}"
+            );
+        }
+        approved.arguments = original;
+        approved.workspace_id = Some("other-workspace".into());
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.workspace_id = Some("workspace".into());
+        approved.computer_generation = Some(8);
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.computer_generation = Some(7);
+        verify_tool_authority(&path, &approved).unwrap();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+    }
+
+    fn decided_at_offset(seconds: i64) -> String {
+        (chrono::Utc::now() + chrono::Duration::seconds(seconds))
+            .to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+    }
+
+    #[test]
     fn native_command_lifecycle_permits_bind_lifetime_target_and_generation() {
         for (tool, arguments, changes) in [
             (
@@ -2700,16 +2735,11 @@ mod connector_authority_tests {
         let path = temp.path().join("checkpoint-permits.json");
         let mut approved = request("repository-checkpoint-restore");
         approved.arguments = json!({"repositoryId":"copy", "checkpointId":"saved", "expectedTree":"current", "expectedCheckpointTree":"checkpoint-tree", "expectedOutput":"output", "expectedHead":"head"});
->>>>>>> codex/event-automations
         approved.workspace_id = Some("workspace".into());
         approved.agent_id = Some("agent".into());
         approved.computer_generation = Some(7);
         approved.approval.request.data_used =
-<<<<<<< HEAD
-            approval_argument_previews("repository-pr-action", &approved.arguments)
-=======
             approval_argument_previews(&approved.tool, &approved.arguments)
->>>>>>> codex/event-automations
                 .unwrap()
                 .into_iter()
                 .collect();
@@ -2720,30 +2750,6 @@ mod connector_authority_tests {
             "Computer generation: 7".into(),
         ]);
         persist_permit(&path, &approved);
-<<<<<<< HEAD
-        let original = approved.arguments.clone();
-        for (key, value) in original.as_object().unwrap() {
-            approved.arguments = original.clone();
-            approved.arguments[key] = if let Some(text) = value.as_str() {
-                json!(format!("{text}changed"))
-            } else if let Some(number) = value.as_u64() {
-                json!(number + 1)
-            } else {
-                json!([])
-            };
-            assert!(
-                verify_tool_authority(&path, &approved).is_err(),
-                "substituted {key}"
-            );
-        }
-        approved.arguments = original;
-        approved.workspace_id = Some("other-workspace".into());
-        assert!(verify_tool_authority(&path, &approved).is_err());
-        approved.workspace_id = Some("workspace".into());
-        approved.computer_generation = Some(8);
-        assert!(verify_tool_authority(&path, &approved).is_err());
-        approved.computer_generation = Some(7);
-=======
         for field in [
             "repositoryId",
             "checkpointId",
@@ -2767,7 +2773,6 @@ mod connector_authority_tests {
         approved.workspace_id = Some("another-workspace".into());
         assert!(verify_tool_authority(&path, &approved).is_err());
         approved.workspace_id = Some("workspace".into());
->>>>>>> codex/event-automations
         verify_tool_authority(&path, &approved).unwrap();
         assert!(verify_tool_authority(&path, &approved).is_err());
     }

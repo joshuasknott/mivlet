@@ -11,12 +11,9 @@ export * from "./domains/hosted-execution-capability.js";
 export * from "./env-compat.js";
 export * from "./domains/local-computer.js";
 export * from "./domains/coding.js";
-<<<<<<< HEAD
 export * from "./domains/pull-requests.js";
-=======
 export * from "./domains/command-jobs.js";
 export * from "./domains/repository-checkpoints.js";
->>>>>>> codex/event-automations
 export * from "./domains/local-projects.js";
 export * from "./domains/collaboration.js";
 export * from "./domains/conversation-ui.js";
