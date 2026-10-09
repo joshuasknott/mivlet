@@ -7,6 +7,7 @@ mod context;
 mod exchanges;
 pub(crate) mod models;
 mod output_revisions;
+pub(crate) mod pr_watches;
 pub(crate) mod provider_continuation;
 pub(crate) mod provider_continuation_read;
 mod provider_resets;

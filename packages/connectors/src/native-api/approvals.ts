@@ -190,6 +190,8 @@ export function buildToolApproval(
     ? "Stop this exact native job and all descendants. Wait for its terminal status; discard its snapshot."
     : (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
     ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
+    : toolName === "repository-pr-action" && isRegistered
+    ? "Apply only this exact GitHub action using native account credentials. Failure or interruption may leave an unknown outcome; recovery reads evidence and never retries the action."
     : toolName === "repository-publish" && isRegistered
     ? "Push reviewed code and create its pull request on the attached GitHub origin using your native GitHub CLI account."
     : toolName === "repository-checkpoint-restore" && isRegistered

@@ -4,6 +4,7 @@ pub(crate) mod copy_manager;
 mod git;
 mod jobs;
 pub(super) mod process;
+pub(crate) mod pull_requests;
 #[cfg(test)]
 mod tests;
 use super::{authority::OperationTicket, LocalComputerState};
@@ -152,7 +153,7 @@ fn status(directory: &Path, ticket: &OperationTicket) -> Result<Value, String> {
         git::changes(directory, &repo, ticket)?
     };
     Ok(
-        json!({"repository": repo, "busy": busy, "recoveryRequired": !busy && repo.operation != "idle", "changes": changes, "importRecovery": recovery}),
+        json!({"repository": repo, "busy": busy, "recoveryRequired": !busy && (repo.operation != "idle" || pull_requests::has_pending(directory, &repo)?), "changes": changes, "importRecovery": recovery}),
     )
 }
 
@@ -208,6 +209,7 @@ pub async fn coding_repository_attach(
         })?;
         let _lease = mivlet_windows_executor::repository_files::lease(&directory)?;
         if load(&directory)?.is_some_and(|repo| repo.operation.starts_with("publication")
+            || pull_requests::has_pending(&directory, &repo).unwrap_or(true)
             || directory.join(&repo.id).join("native-import.json").exists()) {
             return Err(
                 "Recover the current publication or command import before attaching another repository.".into(),
@@ -257,6 +259,13 @@ pub(crate) fn execute(
     arguments: Value,
     request_id: &str,
 ) -> Result<String, String> {
+    if tool == "repository-pr-watch" {
+        let request = serde_json::from_value(arguments).map_err(|_| "Invalid PR watch request.")?;
+        return Ok(
+            pull_requests::watch::configure(state, workspace, agent, generation, request)?
+                .to_string(),
+        );
+    }
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let directory = directory(state, workspace, agent)?;
     if tool == "repository-start" {
@@ -313,6 +322,9 @@ fn execute_observed(
     request_id: &str,
 ) -> Result<String, String> {
     ticket.check()?;
+    if tool.starts_with("repository-pr-") {
+        return pull_requests::execute(directory, ticket, tool, arguments);
+    }
     let input: Input =
         serde_json::from_value(arguments).map_err(|_| "Invalid repository tool arguments.")?;
     if tool == "repository-status" {
@@ -347,6 +359,9 @@ fn execute_observed(
         if tool != "repository-read" {
             return Err("Command import outcome is uncertain. Inspect status and use repository-recover before changing or publishing this checkout.".into());
         }
+    }
+    if pull_requests::has_pending(directory, &repo)? && tool != "repository-read" {
+        return Err("A PR action has an uncertain outcome. Use repository-pr-action recover; no mutation was replayed.".into());
     }
     if repo.operation.starts_with("publication")
         && !matches!(tool, "repository-read" | "repository-recover")

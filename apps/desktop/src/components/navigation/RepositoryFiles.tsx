@@ -12,6 +12,12 @@ import {
 import { RepositoryCheckpoints } from "./RepositoryCheckpoints";
 import "./repository-files.css";
 
+const PullRequestReview = lazy(() =>
+  import("./PullRequestReview").then((module) => ({
+    default: module.PullRequestReview,
+  })),
+);
+
 // RepositoryDetails mounts only after the user opens Repository.
 const RepositoryCopies = lazy(() =>
   import("./RepositoryCopies").then((module) => ({
@@ -252,6 +258,17 @@ function RepositoryDetails({
                 {repo.publication}
               </a>
             </p>
+          )}
+          {repo.remote && (
+            <Suspense fallback={<p role="status">Loading pull request review…</p>}>
+              <PullRequestReview
+                key={repo.id}
+                repository={repo}
+                epoch={epoch}
+                workspaceId={workspaceId}
+                agentId={agentId}
+              />
+            </Suspense>
           )}
           <RepositoryCheckpoints
             key={repo.id}

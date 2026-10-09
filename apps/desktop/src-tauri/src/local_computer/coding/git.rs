@@ -83,7 +83,7 @@ fn ref_name(name: &str) -> bool {
             .bytes()
             .all(|b| b.is_ascii_alphanumeric() || b"/._-".contains(&b))
 }
-fn github_remote(raw: &str) -> Option<String> {
+pub(super) fn github_remote(raw: &str) -> Option<String> {
     let value = raw
         .trim()
         .strip_prefix("https://github.com/")
@@ -308,7 +308,7 @@ pub(super) fn commit(
     Ok(json!({"commit": commit, "branch": repo.branch}))
 }
 
-fn gh(directory: &Path) -> Result<Command, String> {
+pub(super) fn gh(directory: &Path) -> Result<Command, String> {
     let mut cmd = process::command("gh", directory)?;
     // GitHub CLI reads only its native login store. Never pass this environment
     // to project commands, and never return the token to the renderer/model.
@@ -357,22 +357,7 @@ pub(super) fn recover(
         .strip_prefix("https://github.com/")
         .unwrap()
         .trim_end_matches(".git");
-    let mut inspect = gh(directory)?;
-    inspect.args([
-        "pr",
-        "list",
-        "--repo",
-        slug,
-        "--head",
-        &repo.branch,
-        "--state",
-        "all",
-        "--json",
-        "url,headRefOid,baseRefName",
-    ]);
-    let result = process::checked(inspect, ticket)?;
-    let prs: Vec<Value> =
-        serde_json::from_str(&result).map_err(|_| "GitHub recovery returned invalid data.")?;
+    let prs = super::pull_requests::published_candidates(directory, repo, ticket)?;
     let head = run(directory, repo, &["rev-parse", "HEAD"], ticket)?;
     repo.publication = recovered_publication(&prs, &head, &repo.base_branch, slug)?;
     repo.operation = "idle".into();
@@ -388,7 +373,7 @@ pub(super) fn publish(
     ticket: &OperationTicket,
 ) -> Result<Value, String> {
     if repo.publication.is_some() {
-        return Err("This checkout already has a PR. Review it on GitHub; repeated publication is not supported.".into());
+        return Err("This checkout already has a PR. Inspect it with repository-pr-read, then use an explicitly approved repository-pr-action push to update it.".into());
     }
     let remote = repo.remote.as_deref().ok_or("Publication requires an attached repository with a github.com origin and GitHub CLI login.")?;
     let remote = github_remote(remote).ok_or("Unsupported publication remote.")?;

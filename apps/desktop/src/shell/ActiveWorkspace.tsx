@@ -16,6 +16,7 @@ import { OpenWebPreview } from "../components/navigation/PanelContent";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
 import { useLocalProjects } from "../hooks/useLocalProjects";
+import { usePullRequestWorkUpdates } from "../hooks/usePullRequestWorkUpdates";
 import {
   useLocalScheduleDispatcher,
   useLocalScheduleDispatchStatus,
@@ -78,6 +79,7 @@ export function ActiveWorkspace({
     () => new WorkspaceExecution(workspaceId, undefined, approvals),
   );
   onService(service);
+  usePullRequestWorkUpdates(workspaceId, service);
   const state = useSyncExternalStore(
     service.subscribe,
     service.getSnapshot,

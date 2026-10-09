@@ -83,7 +83,11 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 56] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 60] = [
+    "repository-pr-read",
+    "repository-pr-local",
+    "repository-pr-action",
+    "repository-pr-watch",
     "request-secret",
     "secret-request-status",
     "webhook-signing-install",
@@ -305,6 +309,9 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
 
 pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
+        "repository-pr-read" => Some(("read-only", "low")),
+        "repository-pr-local" | "repository-pr-watch" => Some(("full-access", "high")),
+        "repository-pr-action" => Some(("full-access", "critical")),
         "request-secret" | "webhook-signing-install" | "webhook-signing-remove" => {
             Some(("full-access", "high"))
         }
@@ -2604,6 +2611,53 @@ mod connector_authority_tests {
         approved.agent_id = Some("different-agent".into());
         assert!(verify_tool_authority(&path, &approved).is_err());
         approved.agent_id = Some("agent".into());
+        verify_tool_authority(&path, &approved).unwrap();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+    }
+
+    #[test]
+    fn pull_request_permit_binds_target_payload_scope_and_consumes_once() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("permits.json");
+        let mut approved = request("repository-pr-action");
+        approved.arguments = json!({"repositoryId":"repo", "number":7, "action":"review", "remote":"https://github.com/example/repository.git", "expectedHead":"a".repeat(40), "headBranch":"mivlet/task", "baseSha":"b".repeat(40), "baseBranch":"main", "event":"COMMENT", "body":"long review ".repeat(80), "comments":[{"path":"sum.js", "line":2, "side":"RIGHT", "body":"Check overflow"}]});
+        approved.workspace_id = Some("workspace".into());
+        approved.agent_id = Some("agent".into());
+        approved.computer_generation = Some(7);
+        approved.approval.request.data_used =
+            approval_argument_previews("repository-pr-action", &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved.approval.request.data_used.extend([
+            argument_digest(&approved.arguments).unwrap(),
+            "Computer workspace: workspace".into(),
+            "Computer agent: agent".into(),
+            "Computer generation: 7".into(),
+        ]);
+        persist_permit(&path, &approved);
+        let original = approved.arguments.clone();
+        for (key, value) in original.as_object().unwrap() {
+            approved.arguments = original.clone();
+            approved.arguments[key] = if let Some(text) = value.as_str() {
+                json!(format!("{text}changed"))
+            } else if let Some(number) = value.as_u64() {
+                json!(number + 1)
+            } else {
+                json!([])
+            };
+            assert!(
+                verify_tool_authority(&path, &approved).is_err(),
+                "substituted {key}"
+            );
+        }
+        approved.arguments = original;
+        approved.workspace_id = Some("other-workspace".into());
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.workspace_id = Some("workspace".into());
+        approved.computer_generation = Some(8);
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.computer_generation = Some(7);
         verify_tool_authority(&path, &approved).unwrap();
         assert!(verify_tool_authority(&path, &approved).is_err());
     }

@@ -48,6 +48,12 @@ a deployed or production-validated service.
   Persistent jobs require an explicit lifetime, retain isolation and repository
   locks, and discard every file change. App closure ends jobs; restart never
   replays them. See the [native lifecycle](docs/architecture/native-execution.md#live-output-and-controlled-jobs).
+- GitHub PR review for attached repositories: paginated changes, checks and
+  comments, revision-aware viewed files, local review drafts, explicitly approved
+  managed-branch updates and review actions, and bounded optional PR watches
+  that wake existing Work while the desktop is open. Uncertain writes require
+  read-only reconciliation; credentials stay native. See the
+  [PR workflow](docs/architecture/coding-workflow.md#pull-request-review-and-updates).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens
