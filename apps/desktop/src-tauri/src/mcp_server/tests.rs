@@ -551,6 +551,7 @@ async fn production_http_rejects_bad_origins_hosts_tokens_sessions_and_large_req
     let origin = format!("http://{}", listener.local_addr().unwrap());
     let e = engine(&origin);
     let server = tokio::spawn(axum::serve(listener, http::router(e.clone())).into_future());
+    crate::ensure_rustls_provider();
     let client = reqwest::Client::new();
     let response = client.post(e.resource()).send().await.unwrap();
     assert_eq!(response.status(), 401);
