@@ -145,14 +145,22 @@ ConversationPane and WorkspaceHistory styles out of the base stylesheet. The per
 summary reports that graph under `conversationUpgrade` and subtracts it from
 `commonJsCss`; the existing common and initial-entry ceilings therefore remain
 unchanged. The initial 2026-10-08 feature measurement was 672,598 raw / 202,723
-gzip, with caps of 688,982 raw / 210,915 gzip. Final integration measured 688,961
-raw / 208,523 gzip after deferring the CSV parser, grid and styles until a CSV
+gzip, with caps of 688,982 raw / 210,915 gzip. Final integration measured 687,888
+raw / 208,345 gzip after deferring the CSV parser, grid and styles until a CSV
 output opens, and loading browser branch helpers only when history is requested.
-Base CSS measured 175,633 raw, common JS/CSS 1,200,763 raw /
-342,977 gzip, and the startup entry 435,683 raw. The original common and feature
-ceilings were retained; both raw limits have very little remaining headroom. The manifest check rejects any
+Base CSS measured 152,801 raw, common JS/CSS 1,177,945 raw /
+340,780 gzip, and the startup entry 435,768 raw. The original common and feature
+ceilings were retained; the feature raw limit has 1,094 bytes of headroom. The manifest check rejects any
 feature chunk that becomes reachable through the entry's static imports. PDF assets
 remain independently classified and capped.
+
+Inspect production assets as well as the development renderer. Native inspection
+found that the style compactor ran before Vite expanded CSS imports, leaving
+imported selectors inconsistent with their JSX. The shared style fix is integrated
+here: compaction follows import expansion and precedes emission/content hashing.
+Real Vite regressions cover nested imports, Windows source aliases, generated
+class/custom-property agreement, lazy CSS isolation and content hashes. The
+corrected production assets were then inspected in the actual native window.
 
 Inspect the actual application entry point when verifying UI. Use the native app
 for account-owned storage, conversation navigation, provider setup, approvals and

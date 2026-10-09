@@ -182,6 +182,15 @@ conversation approval surface until teardown cancels them. The right panel owns
 the focus trap while docked. Native rechecks covered loading, approval, ready,
 denial and closing in the narrow window.
 
+Responsive layout changes preserve the owning conversation's mounted pane and
+portal target. They do not renegotiate an unchanged app session. The production
+native check retained the official app while crossing the compact breakpoint
+in both directions. Explicit Return to conversation removes its panel tab and
+creates a fresh inline session; explicit Close tears down the result and removes
+the tab. A later disconnected transport displays recovery instead of leaving a
+blank frame. The session, resource and approval tests cover these separate
+lifetimes.
+
 A separate controlled HTML probe was temporarily served by the already-enabled
 local reference server, using normal resource approval. In the actual native
 iframe it could not read the parent document or local storage. The host rejected

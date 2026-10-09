@@ -51,6 +51,23 @@ owning drawer above the app (`native-mcp-docked-approval.png`); denial removes t
 proposal and leaves the saved result unchanged. Security probe and build evidence
 remain separate from this visual result.
 
+The final production-assets inspection caught an additional build-only defect:
+CSS imports were expanded after class-name compaction. The shared compactor fix
+now transforms the expanded stylesheet before emission. Native dark appearance,
+composer controls and table styling were rechecked using the production build,
+not Vite's development transforms (`native-production-mcp-inline.png`).
+
+The production MCP recheck covers its docked saved timestamp, fresh resource
+approval and Return to conversation without an orphaned tab. At 763 × 1026,
+`native-production-narrow-approval.png` and `native-production-narrow-app.png`
+show the actual modal drawer. Resizing originally remounted the conversation;
+the pane grid now retains its DOM across the breakpoint. The initialized app
+survived maximizing and restoring the window, and Close removed the app tab.
+The mounted-pane regression also checks draft text, focus, selection and scroll
+retention. A subsequent connector disconnect showed explicit Close and reconnect
+recovery (`native-production-app-recovery.png`); closing and Escape returned to
+the conversation (`native-production-app-closed.png`).
+
 Required comparison evidence:
 
 - Match the wide native window, selected Tea/Afternoon reading response and open
