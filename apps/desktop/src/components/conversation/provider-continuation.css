@@ -1,4 +1,4 @@
-.provider-continuation { font-size: var(--text-14); padding: 0 var(--space-2); }
+.provider-continuation { --space-1: 4px; font-size: var(--text-14); padding: 0 var(--space-2); }
 .provider-continuation-trigger { display: inline-flex; align-items: center; gap: var(--space-2); background: transparent; color: var(--ink-muted); border: 0; min-height: 44px; padding: var(--space-2) 0; text-align: left; }
 .provider-continuation-trigger:hover:not(:disabled) { color: var(--ink); }
 .provider-continuation button:disabled { opacity: 0.5; cursor: default; }
