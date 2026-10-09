@@ -95,6 +95,20 @@ export function WorkspaceRightNav({
   useEffect(() => {
     if (historyRequestId) dispatch({ type: "select", id: "history" });
   }, [historyRequestId]);
+  useEffect(() => {
+    const closeMcpAppTab = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      const id =
+        detail && typeof detail === "object"
+          ? (detail as Record<string, unknown>).id
+          : undefined;
+      if (typeof id === "string" && id.startsWith("mcp-app:"))
+        dispatch({ type: "close", id });
+    };
+    window.addEventListener("mivlet:mcp-app-panel-closed", closeMcpAppTab);
+    return () =>
+      window.removeEventListener("mivlet:mcp-app-panel-closed", closeMcpAppTab);
+  }, []);
   const lastUtility = useRef("library");
   const navigationOnly = !computerAgentId && state.selected === "navigation";
   const lastSelection = useRef(state.selected);

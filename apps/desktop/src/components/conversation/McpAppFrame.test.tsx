@@ -10,6 +10,9 @@ const mocks = vi.hoisted(() => ({
   result: vi.fn(),
   input: vi.fn(),
   constructorCount: vi.fn(),
+  attachCount: vi.fn(),
+  deferNextLoad: false,
+  resolveNextLoad: undefined as (() => void) | undefined,
   sessionOptions: [] as Array<{ onRequestTeardown?: () => void }>,
   stateListener: undefined as
     | ((snapshot: { status: string; error?: string }) => void)
@@ -17,12 +20,26 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock("../../lib/mcp-app-host", () => ({
   McpAppHostSession: class {
+    private loaded = false;
     constructor(options: { onRequestTeardown?: () => void }) {
       mocks.constructorCount();
       mocks.sessionOptions.push(options);
     }
-    loadResource = async () => ({ html: "<p>App</p>" });
-    attach = async () => undefined;
+    loadResource = async () => {
+      if (mocks.deferNextLoad) {
+        mocks.deferNextLoad = false;
+        await new Promise<void>((resolve) => {
+          mocks.resolveNextLoad = resolve;
+        });
+        mocks.resolveNextLoad = undefined;
+      }
+      this.loaded = true;
+      return { html: "<p>App</p>" };
+    };
+    attach = async () => {
+      if (!this.loaded) throw new Error("MCP App resource must load before attach.");
+      mocks.attachCount();
+    };
     snapshot = () => ({ status: "ready" });
     subscribeState = (
       listener: (snapshot: { status: string; error?: string }) => void,
@@ -44,6 +61,9 @@ beforeEach(() => {
   mocks.result.mockClear();
   mocks.input.mockReset().mockResolvedValue(undefined);
   mocks.constructorCount.mockClear();
+  mocks.attachCount.mockClear();
+  mocks.deferNextLoad = false;
+  mocks.resolveNextLoad = undefined;
   mocks.sessionOptions.length = 0;
   mocks.stateListener = undefined;
 });
@@ -114,6 +134,81 @@ it("preserves the guest when an already-mounted panel announces the same target"
   act(announce);
   expect(mocks.constructorCount).toHaveBeenCalledTimes(2);
   expect(mocks.dispose).toHaveBeenCalledOnce();
+  view.unmount();
+  target.remove();
+});
+
+it("waits for the replacement session resource before attaching after docking", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const view = render(<McpAppFrame
+    workspaceId="workspace" conversationId="conversation" resultId="result" generation={1}
+    transport={{} as DesktopMcpTransportHandle}
+    tool={{ name: "get-time", inputSchema: { type: "object" } }}
+    registerResource={async () => "http://127.0.0.1:40000/token/index.html"}
+  />);
+  await waitFor(() => expect(mocks.constructorCount).toHaveBeenCalledOnce());
+  await waitFor(() => expect(mocks.attachCount).toHaveBeenCalledOnce());
+  mocks.deferNextLoad = true;
+  fireEvent.click(screen.getByRole("button", { name: "Expand interactive result" }));
+  act(() => window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-ready", {
+    detail: { id: "mcp-app:workspace:conversation:result:1", target },
+  })));
+  await waitFor(() => expect(mocks.constructorCount).toHaveBeenCalledTimes(2));
+  expect(mocks.attachCount).toHaveBeenCalledOnce();
+  expect(mocks.resolveNextLoad).toBeDefined();
+  act(() => mocks.resolveNextLoad?.());
+  await waitFor(() => expect(mocks.attachCount).toHaveBeenCalledTimes(2));
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  view.unmount();
+  target.remove();
+});
+
+it("announces docked panel teardown when the interactive result closes", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const closed = vi.fn();
+  window.addEventListener("mivlet:mcp-app-panel-closed", closed);
+  const view = render(<McpAppFrame
+    workspaceId="workspace" conversationId="conversation" resultId="result" generation={1}
+    transport={{} as DesktopMcpTransportHandle}
+    tool={{ name: "get-time", inputSchema: { type: "object" } }}
+    registerResource={async () => "http://127.0.0.1:40000/token/index.html"}
+    onRequestTeardown={vi.fn()}
+  />);
+  await waitFor(() => expect(mocks.constructorCount).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Expand interactive result" }));
+  act(() => window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-ready", {
+    detail: { id: "mcp-app:workspace:conversation:result:1", target },
+  })));
+  await waitFor(() => expect(screen.getByRole("button", { name: "Close interactive result" })).toBeInTheDocument());
+  fireEvent.click(screen.getByRole("button", { name: "Close interactive result" }));
+  expect(closed).toHaveBeenCalledWith(expect.objectContaining({ detail: { id: "mcp-app:workspace:conversation:result:1" } }));
+  window.removeEventListener("mivlet:mcp-app-panel-closed", closed);
+  view.unmount();
+  target.remove();
+});
+
+it("reconnects the guest when returning a docked result to the conversation", async () => {
+  const target = document.createElement("div");
+  document.body.append(target);
+  const view = render(<McpAppFrame
+    workspaceId="workspace" conversationId="conversation" resultId="result" generation={1}
+    transport={{} as DesktopMcpTransportHandle}
+    tool={{ name: "get-time", inputSchema: { type: "object" } }}
+    registerResource={async () => "http://127.0.0.1:40000/token/index.html"}
+  />);
+  await waitFor(() => expect(mocks.attachCount).toHaveBeenCalledOnce());
+  fireEvent.click(screen.getByRole("button", { name: "Expand interactive result" }));
+  act(() => window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-ready", {
+    detail: { id: "mcp-app:workspace:conversation:result:1", target },
+  })));
+  await waitFor(() => expect(mocks.attachCount).toHaveBeenCalledTimes(2));
+  fireEvent.click(screen.getByRole("button", { name: "Return to conversation" }));
+  await waitFor(() => {
+    expect(mocks.constructorCount).toHaveBeenCalledTimes(3);
+    expect(mocks.attachCount).toHaveBeenCalledTimes(3);
+  });
   view.unmount();
   target.remove();
 });

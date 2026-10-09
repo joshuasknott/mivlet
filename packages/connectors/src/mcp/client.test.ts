@@ -50,6 +50,46 @@ describe("resource content evidence", () => {
     expect(result.content[0]).toMatchObject({ metadata: { ui: { csp: { connectDomains: ["https://api.example.test"] } } } });
     expect(Object.isFrozen(result.content[0]?.metadata)).toBe(true);
   });
+  it("preserves an official-sized MCP App HTML resource without applying the model text cap", () => {
+    const html = `<!doctype html><script type="module">${"x".repeat(240 * 1024)}</script><button id="get-time-btn">Get Server Time</button>`;
+    const result = normalizeMcpResourceResult({ contents: [{
+      uri: "ui://get-time/mcp-app.html",
+      mimeType: "text/html;profile=mcp-app",
+      text: html,
+    }] });
+    expect(result.content[0]).toMatchObject({
+      kind: "embedded-text",
+      uri: "ui://get-time/mcp-app.html",
+      text: html,
+      truncated: false,
+    });
+  });
+  it("keeps ordinary resource text on the existing bounded path", () => {
+    const text = "x".repeat(70 * 1024);
+    const result = normalizeMcpResourceResult({ contents: [{ uri: "note://brief", text }] });
+    expect(result.content[0]?.text).toHaveLength(64 * 1024);
+    expect(result.content[0]?.truncated).toBe(true);
+  });
+  it("does not widen model tool-result limits for UI-looking embedded content", () => {
+    const text = "x".repeat(70 * 1024);
+    const result = normalizeMcpToolResult({ content: [{
+      type: "resource",
+      resource: {
+        uri: "ui://get-time/mcp-app.html",
+        mimeType: "text/html;profile=mcp-app",
+        text,
+      },
+    }] });
+    expect(result.content[0]?.text).toHaveLength(64 * 1024);
+    expect(result.content[0]?.truncated).toBe(true);
+  });
+  it("rejects MCP App HTML beyond the dedicated artifact limit", () => {
+    expect(() => normalizeMcpResourceResult({ contents: [{
+      uri: "ui://get-time/mcp-app.html",
+      mimeType: "text/html;profile=mcp-app",
+      text: "x".repeat(5 * 1024 * 1024 + 1),
+    }] })).toThrow("MCP App HTML resource exceeds");
+  });
   it("rejects binary blobs, malformed content and oversized results", () => {
     expect(() => normalizeMcpResourceResult({ contents: [{ uri: "file:///image", blob: "secret-binary" }] })).toThrow("unsupported embedded");
     expect(() => normalizeMcpResourceResult({ contents: "wrong" })).toThrow("invalid content");

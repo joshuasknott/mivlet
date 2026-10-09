@@ -21,11 +21,13 @@ describe("conversation MCP App approval ownership", () => {
     let pending!: ReturnType<typeof hook.result.current.request>;
     act(() => { pending = hook.result.current.request(preview); });
     expect(hook.result.current.ids.has("app-approval")).toBe(true);
+    expect(hook.result.current.owners.get("app-approval")).toEqual(preview.owner);
     expect(requestMcpAppApproval).toHaveBeenCalledOnce();
     await act(async () => { hook.rerender({ enabled: false }); });
     expect(clearBackendToolApprovals).toHaveBeenCalledWith(["app-approval"]);
     expect(await pending).toBeNull();
     expect(hook.result.current.ids.size).toBe(0);
+    expect(hook.result.current.owners.size).toBe(0);
     expect(await hook.result.current.request(preview)).toBeNull();
     expect(requestMcpAppApproval).toHaveBeenCalledOnce();
   });

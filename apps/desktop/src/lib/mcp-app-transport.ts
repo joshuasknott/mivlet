@@ -12,27 +12,29 @@ export class McpAppTransport implements Transport {
   onmessage?: Transport["onmessage"];
   onclose?: () => void;
   onerror?: (error: Error) => void;
-  private started = false;
-  private readonly seenRequestIds = new Set<string>();
-  private readonly receive = (event: MessageEvent) => {
+  #started = false;
+  #seenRequestIds = new Set<string>();
+  #guest: Window;
+  #host: Window;
+  #receive = (event: MessageEvent) => {
     // The frame is deliberately sandboxed without allow-same-origin, so its
     // protocol origin is opaque (`null`). Source identity alone is insufficient
     // after a guest navigation because WindowProxy can survive navigation.
-    if (event.source !== this.guest || event.origin !== "null" || !boundedMessage(event.data)) return;
+    if (event.source !== this.#guest || event.origin !== "null" || !boundedMessage(event.data)) return;
     const result = JSONRPCMessageSchema.safeParse(event.data);
     if (result.success) {
       const message = result.data;
       if (isRequestWithId(message)) {
         const id = requestIdKey(message.id);
-        if (this.seenRequestIds.has(id)) {
-          this.fail(new Error("The MCP App reused a JSON-RPC request ID."));
+        if (this.#seenRequestIds.has(id)) {
+          this.#fail(new Error("The MCP App reused a JSON-RPC request ID."));
           return;
         }
-        if (this.seenRequestIds.size >= MAX_SEEN_REQUEST_IDS) {
-          this.fail(new Error("The MCP App exceeded the live request limit; reopen the result."));
+        if (this.#seenRequestIds.size >= MAX_SEEN_REQUEST_IDS) {
+          this.#fail(new Error("The MCP App exceeded the live request limit; reopen the result."));
           return;
         }
-        this.seenRequestIds.add(id);
+        this.#seenRequestIds.add(id);
       }
       this.onmessage?.(message);
     }
@@ -42,33 +44,36 @@ export class McpAppTransport implements Transport {
       );
   };
   constructor(
-    private readonly guest: Window,
-    private readonly host: Window = window,
-  ) {}
+    guest: Window,
+    host: Window = window,
+  ) {
+    this.#guest = guest;
+    this.#host = host;
+  }
   async start() {
-    if (!this.started) {
-      this.seenRequestIds.clear();
-      this.started = true;
-      this.host.addEventListener("message", this.receive);
+    if (!this.#started) {
+      this.#seenRequestIds.clear();
+      this.#started = true;
+      this.#host.addEventListener("message", this.#receive);
     }
   }
   async send(message: JSONRPCMessage) {
-    if (!this.started) throw new Error("The MCP App channel is closed.");
+    if (!this.#started) throw new Error("The MCP App channel is closed.");
     if (!boundedMessage(message))
       throw new Error("The MCP App message exceeds the supported limit.");
-    this.guest.postMessage(message, "*");
+    this.#guest.postMessage(message, "*");
   }
   async close() {
-    if (!this.started) return;
-    this.started = false;
-    this.host.removeEventListener("message", this.receive);
+    if (!this.#started) return;
+    this.#started = false;
+    this.#host.removeEventListener("message", this.#receive);
     this.onclose?.();
   }
 
-  private fail(error: Error) {
-    if (!this.started) return;
-    this.started = false;
-    this.host.removeEventListener("message", this.receive);
+  #fail(error: Error) {
+    if (!this.#started) return;
+    this.#started = false;
+    this.#host.removeEventListener("message", this.#receive);
     this.onerror?.(error);
     this.onclose?.();
   }

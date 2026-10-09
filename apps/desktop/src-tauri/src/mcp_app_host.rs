@@ -522,7 +522,7 @@ fn persisted_mcp_connector_route(connector_id: &str) -> Result<PersistedMcpConne
             return Err("The MCP App connector reference is invalid.".into());
         }
         let mut bytes = Vec::with_capacity(encoded.len() / 2);
-        for pair in encoded.as_bytes().chunks_exact(2) {
+        for pair in encoded.as_bytes().as_chunks::<2>().0 {
             let high = (pair[0] as char)
                 .to_digit(16)
                 .ok_or_else(|| "The MCP App connector reference is invalid.".to_string())?;

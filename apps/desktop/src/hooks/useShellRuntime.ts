@@ -476,7 +476,15 @@ export function useShellRuntime(
       }
       const connectionEntries = await Promise.all(
         manifests
-          .filter((manifest) => manifest.status === "connected")
+          // MCP manifests may describe a connected tool with its own account
+          // model. The account command is intentionally limited to Mivlet's
+          // built-in connector IDs, so never ask native to resolve an
+          // arbitrary custom MCP identifier.
+          .filter(
+            (manifest) =>
+              manifest.status === "connected" &&
+              isSupportedConnectorId(manifest.id),
+          )
           .map(
             async (manifest) =>
               [

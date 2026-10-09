@@ -64,6 +64,16 @@ function transportFor(result: unknown) {
   } as unknown as DesktopMcpTransportHandle;
 }
 
+async function attachForTest(session: McpAppHostSession) {
+  await session.loadResource();
+  const iframe = {
+    contentWindow: new EventTarget(),
+    src: "about:blank",
+  } as unknown as HTMLIFrameElement;
+  await session.attach(iframe, "mcp-app://localhost/token/index.html");
+  return bridgeInstances.at(-1)?.bridge as Record<string, unknown>;
+}
+
 describe("MCP Apps host", () => {
   it("normalizes standard MCP and JSON-RPC tool result envelopes", () => {
     expect(
@@ -100,6 +110,79 @@ describe("MCP Apps host", () => {
     const session = new McpAppHostSession({ workspaceId: "workspace-a", conversationId: "conversation-a", resultId: "result-a", generation: 3, transport, tool, isCurrent: () => false, requestApproval: vi.fn() });
     await expect(session.loadResource()).rejects.toThrow("stale");
     expect(transport.prepareResourceRead).not.toHaveBeenCalled();
+  });
+
+  it("selects the approved UI resource from a multi-resource response", async () => {
+    const transport = transportFor({
+      content: [
+        {
+          kind: "embedded-text",
+          uri: "ui://other/view.html",
+          mimeType: "text/html;profile=mcp-app",
+          text: "<p>wrong resource</p>",
+        },
+        {
+          kind: "embedded-text",
+          uri: "ui://sdk-fixture/view.html",
+          mimeType: "text/html;profile=mcp-app",
+          text: "<p>approved resource</p>",
+        },
+      ],
+    });
+    const session = new McpAppHostSession({
+      workspaceId: "workspace-a",
+      conversationId: "conversation-a",
+      resultId: "result-a",
+      generation: 3,
+      transport,
+      requestApproval: vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" }),
+      tool,
+    });
+    const resource = await session.loadResource();
+    expect(resource.html).toBe("<p>approved resource</p>");
+  });
+
+  it("rejects a resource response that omits the approved UI URI", async () => {
+    const transport = transportFor({
+      content: [{
+        kind: "embedded-text",
+        uri: "ui://other/view.html",
+        mimeType: "text/html;profile=mcp-app",
+        text: "<p>wrong resource</p>",
+      }],
+    });
+    const session = new McpAppHostSession({
+      workspaceId: "workspace-a",
+      conversationId: "conversation-a",
+      resultId: "result-a",
+      generation: 3,
+      transport,
+      requestApproval: vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" }),
+      tool,
+    });
+    await expect(session.loadResource()).rejects.toThrow("requested UI resource");
+  });
+
+  it("rejects truncated HTML instead of mounting an incomplete app", async () => {
+    const transport = transportFor({
+      content: [{
+        kind: "embedded-text",
+        uri: "ui://sdk-fixture/view.html",
+        mimeType: "text/html;profile=mcp-app",
+        text: "<script>incomplete",
+        truncated: true,
+      }],
+    });
+    const session = new McpAppHostSession({
+      workspaceId: "workspace-a",
+      conversationId: "conversation-a",
+      resultId: "result-a",
+      generation: 3,
+      transport,
+      requestApproval: vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" }),
+      tool,
+    });
+    await expect(session.loadResource()).rejects.toThrow("truncated");
   });
 
   it("rejects undeclared network origins from resource metadata", async () => {
@@ -142,11 +225,13 @@ describe("MCP Apps host", () => {
 
   it("routes app tool calls through the same explicit approval and permit boundary", async () => {
     const requestApproval = vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" });
-    const transport = transportFor({ content: [{ kind: "text", text: "saved" }] });
+    const transport = transportFor({ content: [{ kind: "embedded-text", uri: "ui://sdk-fixture/view.html", mimeType: "text/html", text: "<p>app</p>" }] });
     const session = new McpAppHostSession({ workspaceId: "workspace-a", conversationId: "conversation-a", resultId: "result-a", generation: 3, transport, tool, requestApproval });
-    (session as unknown as { initialized: boolean; bridge: object }).initialized = true;
-    (session as unknown as { initialized: boolean; bridge: object }).bridge = {};
-    await (session as unknown as { runAppTool(name: string, args: Record<string, unknown>): Promise<unknown> }).runAppTool("save_result", { value: "draft" });
+    const bridge = await attachForTest(session);
+    requestApproval.mockClear();
+    vi.mocked(transport.authorizeToolCall).mockClear();
+    vi.mocked(transport.executeAuthorizedToolCall).mockClear();
+    await (bridge.oncalltool as (params: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>)({ name: "save_result", arguments: { value: "draft" } });
     expect(requestApproval).toHaveBeenCalledWith(expect.objectContaining({ source: "mcp-app", toolName: "save_result", arguments: { value: "draft" } }));
     expect(transport.prepareToolCall).toHaveBeenCalledWith("save_result", { value: "draft" });
     expect(transport.authorizeToolCall).toHaveBeenCalledOnce();
@@ -154,10 +239,8 @@ describe("MCP Apps host", () => {
   });
 
   it("bounds concurrent app actions and returns an actionable busy result", async () => {
-    const transport = transportFor({ content: [{ kind: "text", text: "should not run" }] });
-    const requestApproval = vi.fn(
-      () => new Promise<ApprovalResolutionRequest | null>(() => undefined),
-    );
+    const transport = transportFor({ content: [{ kind: "embedded-text", uri: "ui://sdk-fixture/view.html", mimeType: "text/html", text: "<p>app</p>" }] });
+    const requestApproval = vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" });
     const session = new McpAppHostSession({
       workspaceId: "workspace-a",
       conversationId: "conversation-a",
@@ -167,14 +250,12 @@ describe("MCP Apps host", () => {
       tool,
       requestApproval,
     });
-    (session as unknown as { initialized: boolean; bridge: object }).initialized = true;
-    (session as unknown as { initialized: boolean; bridge: object }).bridge = {
-      teardownResource: vi.fn().mockResolvedValue(undefined),
-    };
-    const runAppTool = (session as unknown as {
-      runAppTool(name: string, args: Record<string, unknown>): Promise<{ isError?: boolean; content: Array<{ text?: string }> }>;
-    }).runAppTool.bind(session);
-    const actions = Array.from({ length: 9 }, () => runAppTool("save_result", { value: "draft" }));
+    const bridge = await attachForTest(session);
+    requestApproval.mockClear().mockImplementation(
+      () => new Promise<ApprovalResolutionRequest | null>(() => undefined),
+    );
+    const oncalltool = bridge.oncalltool as (params: { name: string; arguments: Record<string, unknown> }) => Promise<{ isError?: boolean; content: Array<{ text?: string }> }>;
+    const actions = Array.from({ length: 9 }, () => oncalltool({ name: "save_result", arguments: { value: "draft" } }));
     await vi.waitFor(() => expect(requestApproval).toHaveBeenCalledTimes(8));
     const overflow = await actions[8];
     expect(overflow.isError).toBe(true);
@@ -185,30 +266,23 @@ describe("MCP Apps host", () => {
 
   it("bounds concurrent external resource reads per app session", async () => {
     const resolutions: Array<(value: ApprovalResolutionRequest | null) => void> = [];
-    const requestApproval = vi.fn(
-      () =>
-        new Promise<ApprovalResolutionRequest | null>((resolve) => {
-          resolutions.push(resolve);
-        }),
-    );
+    const requestApproval = vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" });
     const session = new McpAppHostSession({
       workspaceId: "workspace-a",
       conversationId: "conversation-a",
       resultId: "result-a",
       generation: 3,
-      transport: transportFor({ content: [{ kind: "text", text: "resource" }] }),
+      transport: transportFor({ content: [{ kind: "embedded-text", uri: "ui://sdk-fixture/view.html", mimeType: "text/html", text: "<p>app</p>" }] }),
       tool,
       requestApproval,
     });
-    type ResourceBridge = {
-      onreadresource?: (params: { uri: string }) => Promise<unknown>;
-    };
-    const bridge: ResourceBridge = {};
-    (session as unknown as {
-      registerHandlers(bridge: ResourceBridge): void;
-    }).registerHandlers(bridge);
+    const bridge = await attachForTest(session);
+    resolutions.length = 0;
+    requestApproval.mockClear().mockImplementation(
+      () => new Promise<ApprovalResolutionRequest | null>((resolve) => resolutions.push(resolve)),
+    );
     const reads = Array.from({ length: 5 }, (_, index) =>
-      bridge.onreadresource!({ uri: `ui://external/resource-${index}` }),
+      (bridge.onreadresource as (params: { uri: string }) => Promise<unknown>)({ uri: `ui://external/resource-${index}` }),
     );
     await vi.waitFor(() => expect(requestApproval).toHaveBeenCalledTimes(4));
     const overflow = await reads[4];
@@ -221,11 +295,14 @@ describe("MCP Apps host", () => {
   });
 
   it("does not execute an app action when the host approval is denied", async () => {
-    const transport = transportFor({ content: [{ kind: "text", text: "should not run" }] });
-    const session = new McpAppHostSession({ workspaceId: "workspace-a", conversationId: "conversation-a", resultId: "result-a", generation: 3, transport, tool, requestApproval: vi.fn().mockResolvedValue(null) });
-    (session as unknown as { initialized: boolean; bridge: object }).initialized = true;
-    (session as unknown as { initialized: boolean; bridge: object }).bridge = {};
-    const result = await (session as unknown as { runAppTool(name: string, args: Record<string, unknown>): Promise<{ isError?: boolean; content: Array<{ text?: string }> }> }).runAppTool("save_result", { value: "draft" });
+    const transport = transportFor({ content: [{ kind: "embedded-text", uri: "ui://sdk-fixture/view.html", mimeType: "text/html", text: "<p>app</p>" }] });
+    const requestApproval = vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" });
+    const session = new McpAppHostSession({ workspaceId: "workspace-a", conversationId: "conversation-a", resultId: "result-a", generation: 3, transport, tool, requestApproval });
+    const bridge = await attachForTest(session);
+    requestApproval.mockClear().mockResolvedValue(null);
+    vi.mocked(transport.authorizeToolCall).mockClear();
+    vi.mocked(transport.executeAuthorizedToolCall).mockClear();
+    const result = await (bridge.oncalltool as (params: { name: string; arguments: Record<string, unknown> }) => Promise<{ isError?: boolean; content: Array<{ text?: string }> }> )({ name: "save_result", arguments: { value: "draft" } });
     expect(result.isError).toBe(true);
     expect(result.content[0]?.text).toContain("denied");
     expect(transport.authorizeToolCall).not.toHaveBeenCalled();
@@ -233,12 +310,12 @@ describe("MCP Apps host", () => {
   });
 
   it("does not authorize a pending app action after the result is disposed", async () => {
-    const transport = transportFor({ content: [{ kind: "text", text: "must not run" }] });
+    const transport = transportFor({ content: [{ kind: "embedded-text", uri: "ui://sdk-fixture/view.html", mimeType: "text/html", text: "<p>app</p>" }] });
     let resolveApproval: (value: ApprovalResolutionRequest | null) => void = () => undefined;
     const approvalPending = new Promise<ApprovalResolutionRequest | null>((resolve) => {
       resolveApproval = resolve;
     });
-    const requestApproval = vi.fn(() => approvalPending);
+    const requestApproval = vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" });
     const session = new McpAppHostSession({
       workspaceId: "workspace-a",
       conversationId: "conversation-a",
@@ -248,14 +325,11 @@ describe("MCP Apps host", () => {
       tool,
       requestApproval,
     });
-    (session as unknown as { initialized: boolean; bridge: object }).initialized = true;
-    (session as unknown as { initialized: boolean; bridge: object }).bridge = {
-      teardownResource: vi.fn().mockResolvedValue(undefined),
-    };
-
-    const running = (session as unknown as {
-      runAppTool(name: string, args: Record<string, unknown>): Promise<unknown>;
-    }).runAppTool("save_result", { value: "draft" });
+    const bridge = await attachForTest(session);
+    requestApproval.mockClear().mockReturnValue(approvalPending);
+    vi.mocked(transport.authorizeToolCall).mockClear();
+    vi.mocked(transport.executeAuthorizedToolCall).mockClear();
+    const running = (bridge.oncalltool as (params: { name: string; arguments: Record<string, unknown> }) => Promise<unknown>)({ name: "save_result", arguments: { value: "draft" } });
     await vi.waitFor(() => expect(requestApproval).toHaveBeenCalledOnce());
     await session.dispose("Stop requested");
     resolveApproval({ request: {}, decision: "once", decidedAt: "now" } as ApprovalResolutionRequest);
@@ -285,25 +359,21 @@ describe("MCP Apps host", () => {
 
   it("rejects a stale app teardown before touching the host callback", async () => {
     const onRequestTeardown = vi.fn();
+    let current = true;
     const session = new McpAppHostSession({
       workspaceId: "workspace-a",
       conversationId: "conversation-a",
       resultId: "result-a",
       generation: 3,
-      transport: transportFor({ content: [] }),
-      isCurrent: () => false,
+      transport: transportFor({ content: [{ kind: "embedded-text", uri: "ui://sdk-fixture/view.html", mimeType: "text/html", text: "<p>app</p>" }] }),
+      isCurrent: () => current,
       onRequestTeardown,
-      requestApproval: vi.fn(),
+      requestApproval: vi.fn().mockResolvedValue({ request: {}, decision: "once", decidedAt: "now" }),
       tool,
     });
-    type TeardownBridge = {
-      onrequestteardown?: () => void;
-    };
-    const bridge: TeardownBridge = {};
-    (session as unknown as {
-      registerHandlers(bridge: TeardownBridge): void;
-    }).registerHandlers(bridge);
-    expect(() => bridge.onrequestteardown?.()).toThrow("stale");
+    const bridge = await attachForTest(session);
+    current = false;
+    expect(() => (bridge.onrequestteardown as () => void)()).toThrow("stale");
     expect(onRequestTeardown).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,7 @@
 import { ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import type {
+  ApprovalRequest,
   ConversationRoom,
   MivletAgentProfile,
   LocalProject,
@@ -50,6 +51,11 @@ import {
 import { saveRuntimeResponseAsPinnedOutput } from "../runtime/domains/outputs";
 import { useOutputRevisions } from "../components/conversation/useOutputRevisions";
 import { useMcpAppApprovals } from "../components/conversation/useMcpAppApprovals";
+import {
+  McpAppApprovalPortal,
+  mcpAppPanelId,
+  useMcpAppApprovalTarget,
+} from "../components/conversation/McpAppApprovalPortal";
 import { conversationUi } from "../runtime/domains/conversation-ui";
 import type { OutputRevisionRequest } from "../lib/output-revisions";
 import type { OfficeCellSelection } from "../components/conversation/OfficePreview";
@@ -510,11 +516,17 @@ export function ConversationPane({
   );
   const model = models.find((model) => model.id === profile?.modelId);
   const appApprovals = useMcpAppApprovals(runtime, `${service.workspaceId}:${room.id}:${room.generation}`, active && !work.some(activeWork));
+  const mcpApprovalTarget = useMcpAppApprovalTarget(appApprovals.owners);
   const approvals = active
     ? runtime.openApprovals.filter((approval) =>
         appApprovals.ids.has(approval.id) || sessions.some((session) => session.approvalIds.has(approval.id)),
       )
     : [];
+  const dockedMcpApprovals = approvals.filter((approval) => {
+    const owner = appApprovals.owners.get(approval.id);
+    return owner !== undefined && mcpApprovalTarget?.dataset.mcpAppPanel === mcpAppPanelId(owner);
+  });
+  const inlineApprovals = approvals.filter((approval) => !dockedMcpApprovals.includes(approval));
   const authors: Record<string, MivletAgentProfile> = Object.fromEntries(
     state.data.authors
       .filter((author) => author.conversationId === room.id)
@@ -766,30 +778,25 @@ export function ConversationPane({
     !work.length &&
     !approvals.length &&
     !sideChat;
-  const approvalPanel = approvals.length ? (
+  const renderApprovalPanel = (items: ApprovalRequest[], label: string) => items.length ? (
     <Suspense fallback={null}>
-      <div
-        className="conversation-approvals"
-        aria-label={`Approvals for ${room.title}`}
-      >
+      <div className="conversation-approvals" aria-label={label}>
         <ApprovalPanel
           compact
           previews={runtime.approvalPreviews}
-          approvals={approvals}
+          approvals={items}
           audit={runtime.approvalAudit}
           sessionGrants={runtime.sessionApprovalGrants}
           approvalRules={runtime.approvalRules}
           editingApprovalId={
-            approvals.some(
-              (approval) => approval.id === runtime.editingApprovalId,
-            )
+            items.some((approval) => approval.id === runtime.editingApprovalId)
               ? runtime.editingApprovalId
               : null
           }
           modificationDraft={runtime.approvalModificationDraft}
           pendingConfirmation={
             runtime.pendingApprovalConfirmation &&
-            approvals.some(
+            items.some(
               (approval) =>
                 approval.id === runtime.pendingApprovalConfirmation?.request.id,
             )
@@ -810,6 +817,14 @@ export function ConversationPane({
       </div>
     </Suspense>
   ) : null;
+  const approvalPanel = renderApprovalPanel(inlineApprovals, `Approvals for ${room.title}`);
+  const dockedApprovalPanel = (
+    <McpAppApprovalPortal
+      target={mcpApprovalTarget}
+    >
+      {renderApprovalPanel(dockedMcpApprovals, `Approvals for ${room.title}`)}
+    </McpAppApprovalPortal>
+  );
   if (view.kind === "artifact")
     return (
       <Suspense fallback={<p role="status">Loading file…</p>}>
@@ -1065,6 +1080,7 @@ export function ConversationPane({
                 </p>
               ))}
             {approvalPanel}
+            {dockedApprovalPanel}
             {contextFailure && history ? (
               <ContextRecoveryPanel
                 failure={contextFailure}

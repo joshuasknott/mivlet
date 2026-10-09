@@ -1,6 +1,14 @@
 import { expect, it } from "vitest";
 import { compactStyleText, styleNameMap } from "./compact-style-names";
 const sources = (code: string) => [{ fileName: "component.tsx", code }];
+it("reserves the shortest names for frequent safe tokens", () => {
+  const map = styleNameMap(
+    ".a-card{} .z-card{} :root{--aaa:red;--zzz:blue} .z-card{color:var(--zzz);background:var(--zzz)}",
+    sources('<div className="a-card z-card" /><div className="z-card" />'),
+  );
+  expect(map.get("z-card")).toBe("_0");
+  expect(map.get("--zzz")).toBe("--_0");
+});
 it("compacts exclusively static class names consistently", () => {
   const map = styleNameMap(
     ".work-card__title {} .work-card__title--active {}",

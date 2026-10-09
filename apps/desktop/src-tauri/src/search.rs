@@ -352,7 +352,8 @@ pub(crate) fn run_bounded(
         collected.append(&mut results);
     }
 
-    collected.sort_by(compare_results);
+    let normalized_query = normalize_search_text(query);
+    collected.sort_by(|left, right| compare_results(left, right, &normalized_query));
     let offset = cursor.result;
     let limit = request
         .limit
@@ -1038,11 +1039,23 @@ fn reference(workspace_id: &str, kind: &str, id: &str) -> ObjectReference {
     }
 }
 
-fn compare_results(left: &SearchResult, right: &SearchResult) -> std::cmp::Ordering {
-    right
-        .score
-        .partial_cmp(&left.score)
-        .unwrap_or(std::cmp::Ordering::Equal)
+fn compare_results(
+    left: &SearchResult,
+    right: &SearchResult,
+    normalized_query: &str,
+) -> std::cmp::Ordering {
+    let right_exact =
+        !normalized_query.is_empty() && normalize_search_text(&right.title) == normalized_query;
+    let left_exact =
+        !normalized_query.is_empty() && normalize_search_text(&left.title) == normalized_query;
+    right_exact
+        .cmp(&left_exact)
+        .then_with(|| {
+            right
+                .score
+                .partial_cmp(&left.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .then_with(|| {
             right
                 .updated_at
@@ -1053,6 +1066,23 @@ fn compare_results(left: &SearchResult, right: &SearchResult) -> std::cmp::Order
         .then_with(|| left.object_kind.cmp(&right.object_kind))
         .then_with(|| left.title.cmp(&right.title))
         .then_with(|| left.reference.id.cmp(&right.reference.id))
+}
+
+fn normalize_search_text(value: &str) -> String {
+    let mut normalized = String::new();
+    let mut needs_space = false;
+    for character in value.chars() {
+        if character.is_alphanumeric() {
+            if needs_space && !normalized.is_empty() {
+                normalized.push(' ');
+            }
+            normalized.extend(character.to_lowercase());
+            needs_space = false;
+        } else if !normalized.is_empty() {
+            needs_space = true;
+        }
+    }
+    normalized
 }
 
 #[derive(Clone, Default)]
@@ -1583,6 +1613,69 @@ mod tests {
                 run_bounded(conn, store, scope, &request(query), agents, files, limits)
             })
             .unwrap()
+    }
+
+    #[test]
+    fn exact_normalized_title_match_precedes_a_higher_relevance_score() {
+        let mut results = [
+            SearchResult {
+                reference: reference("workspace", "conversation", "partial"),
+                object_kind: "conversation".into(),
+                title: "MCP acceptance notes".into(),
+                snippet: "Handoff and MCP acceptance".into(),
+                matched_field: "content".into(),
+                score: 99.0,
+                archived: false,
+                updated_at: None,
+                context: SearchResultContext::default(),
+            },
+            SearchResult {
+                reference: reference("workspace", "conversation", "owner"),
+                object_kind: "conversation".into(),
+                title: "Handoff — and MCP acceptance".into(),
+                snippet: "Conversation owner".into(),
+                matched_field: "title".into(),
+                score: 1.0,
+                archived: false,
+                updated_at: None,
+                context: SearchResultContext::default(),
+            },
+        ];
+
+        let query = normalize_search_text("Handoff and MCP acceptance");
+        results.sort_by(|left, right| compare_results(left, right, &query));
+
+        assert_eq!(results[0].reference.id, "owner");
+    }
+
+    #[test]
+    fn unicode_title_matches_and_empty_query_does_not_promote_empty_titles() {
+        let result = |id: &str, title: &str, score: f64| SearchResult {
+            reference: reference("workspace", "conversation", id),
+            object_kind: "conversation".into(),
+            title: title.into(),
+            snippet: String::new(),
+            matched_field: "title".into(),
+            score,
+            archived: false,
+            updated_at: None,
+            context: SearchResultContext::default(),
+        };
+
+        let mut unicode = [
+            result("partial-unicode", "東京会議 notes", 99.0),
+            result("exact-unicode", "Übernahme — 東京会議", 1.0),
+        ];
+        let unicode_query = normalize_search_text("ÜBERNAHME 東京会議");
+        unicode.sort_by(|left, right| compare_results(left, right, &unicode_query));
+        assert_eq!(unicode[0].reference.id, "exact-unicode");
+
+        let mut empty_query = [
+            result("empty-title", "", 1.0),
+            result("notes", "Notes", 10.0),
+        ];
+        empty_query.sort_by(|left, right| compare_results(left, right, ""));
+        assert_eq!(empty_query[0].reference.id, "notes");
     }
 
     #[test]

@@ -69,6 +69,12 @@ type ViewState = {
   message?: string;
 };
 
+function announceMcpAppPanelClosed(id: string) {
+  window.dispatchEvent(
+    new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id } }),
+  );
+}
+
 /**
  * Production conversation slot for one MCP App result. The host controls the
  * iframe lifecycle; the guest only receives the official AppBridge protocol.
@@ -79,15 +85,24 @@ export function McpAppFrame(props: McpAppFrameProps) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
   // Raw app HTML stays in the native ephemeral
   // resource registry and is never copied into renderer state or srcdoc.
-  const [resourceUrl, setResourceUrl] = useState<string>();
+  const [registeredResource, setRegisteredResource] = useState<{
+    url: string;
+    session: McpAppHostSession;
+  }>();
+  const resourceUrl = registeredResource?.url;
   const [height, setHeight] = useState(240);
   const [expanded, setExpanded] = useState(false);
   const panelId = `mcp-app:${props.workspaceId}:${props.conversationId}:${props.resultId}:${props.generation}`;
   const [panelTarget, setPanelTarget] = useState<HTMLElement | null>(null);
+  useEffect(() => () => announceMcpAppPanelClosed(panelId), [panelId]);
   const [sessionEpoch, setSessionEpoch] = useState(0);
   const frameRef = useRef<HTMLElement>(null);
   const expandRef = useRef<HTMLButtonElement>(null);
-  useModalFocusTrap({ active: expanded, containerRef: frameRef, initialFocusRef: expandRef, onClose: () => setExpanded(false) });
+  // The right panel owns focus while the result is docked. Keeping this
+  // nested trap active after the portal move would leave the original
+  // conversation branches inert and make panel controls (including approval
+  // recovery) unreachable on compact windows.
+  useModalFocusTrap({ active: expanded && !panelTarget, containerRef: frameRef, initialFocusRef: expandRef, onClose: () => setExpanded(false) });
   const [view, setView] = useState<ViewState>({ status: "loading" });
   const [snapshot, setSnapshot] = useState<McpAppSessionSnapshot>({
     status: "loading",
@@ -114,6 +129,7 @@ export function McpAppFrame(props: McpAppFrameProps) {
       const detail = (event as CustomEvent<unknown>).detail;
       if (!detail || typeof detail !== "object") return;
       if ((detail as Record<string, unknown>).id !== panelId) return;
+      if (panelTarget) setSessionEpoch((epoch) => epoch + 1);
       setPanelTarget(null);
       setExpanded(false);
     };
@@ -254,7 +270,7 @@ export function McpAppFrame(props: McpAppFrameProps) {
     const registerResource = props.registerResource;
     const releaseResource = props.releaseResource;
     setView({ status: "loading" });
-    setResourceUrl(undefined);
+    setRegisteredResource(undefined);
     void session
       .loadResource()
       .then(async (resource) => {
@@ -277,7 +293,7 @@ export function McpAppFrame(props: McpAppFrameProps) {
           await releaseResource?.();
           throw new Error("MCP App result is stale; reopen the current conversation result.");
         }
-        setResourceUrl(url);
+        setRegisteredResource({ url, session });
       })
       .catch((error: unknown) => {
         if (!active) return;
@@ -292,12 +308,13 @@ export function McpAppFrame(props: McpAppFrameProps) {
       });
     return () => {
       active = false;
+      setRegisteredResource((current) => current?.session === session ? undefined : current);
       void releaseResource?.();
     };
   }, [session]);
 
   useEffect(() => {
-    if (!session || !resourceUrl || !iframeRef.current) return;
+    if (!session || registeredResource?.session !== session || !resourceUrl || !iframeRef.current) return;
     let active = true;
     void session
       .attach(iframeRef.current, resourceUrl)
@@ -317,7 +334,7 @@ export function McpAppFrame(props: McpAppFrameProps) {
     return () => {
       active = false;
     };
-  }, [resourceUrl, session]);
+  }, [registeredResource, resourceUrl, session]);
 
   const inputKey = JSON.stringify(props.toolInput);
   const resultKey = JSON.stringify(props.toolResult);
@@ -330,6 +347,11 @@ export function McpAppFrame(props: McpAppFrameProps) {
     if (!session || view.status !== "ready" || !props.toolResult) return;
     void session.sendToolResult(props.toolResult).catch(() => undefined);
   }, [view.status, resultKey, session]);
+
+  const closeResult = () => {
+    if (panelTarget) announceMcpAppPanelClosed(panelId);
+    props.onRequestTeardown?.();
+  };
 
   const frame = (
     <section
@@ -345,13 +367,20 @@ export function McpAppFrame(props: McpAppFrameProps) {
         ref={expandRef}
         type="button"
         className="mcp-app-frame__expand"
-        onClick={() => setExpanded(!expanded)}
+        onClick={() => {
+          if (expanded && panelTarget) announceMcpAppPanelClosed(panelId);
+          setExpanded(!expanded);
+        }}
         aria-expanded={expanded}
       >
         {expanded ? "Return to conversation" : "Expand interactive result"}
       </button>
       {props.onRequestTeardown ? (
-        <button type="button" className="mcp-app-frame__expand" onClick={props.onRequestTeardown}>
+        <button
+          type="button"
+          className="mcp-app-frame__expand"
+          onClick={closeResult}
+        >
           Close interactive result
         </button>
       ) : null}
@@ -372,7 +401,14 @@ export function McpAppFrame(props: McpAppFrameProps) {
               : "Interactive result unavailable"}
           </strong>
           <span>{view.message}</span>
-          {props.onRequestTeardown ? <button type="button" onClick={props.onRequestTeardown}>Close and reconnect</button> : null}
+          {props.onRequestTeardown ? (
+            <button
+              type="button"
+              onClick={closeResult}
+            >
+              Close and reconnect
+            </button>
+          ) : null}
         </div>
       )}
       {resourceUrl &&

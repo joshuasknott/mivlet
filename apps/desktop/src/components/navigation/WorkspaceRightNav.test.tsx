@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import type {
   CollaborationWorkItem,
@@ -250,6 +250,23 @@ describe("multifunctional right panel", () => {
     view.rerender(<WorkspaceRightNav {...context(null)} request={{ ...request }} />);
     expect(document.querySelectorAll("[data-mcp-app-panel]")).toHaveLength(1);
     window.removeEventListener("mivlet:mcp-app-panel-ready", ready);
+  });
+  it("closes an MCP App tab when its frame announces teardown", () => {
+    const request = {
+      id: "mcp-app:workspace:room:result:4",
+      kind: "mcp-app" as const,
+      title: "Time result",
+    };
+    render(<WorkspaceRightNav {...context(null)} request={request} />);
+    expect(screen.getByRole("tab", { name: "Time result" })).toBeInTheDocument();
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("mivlet:mcp-app-panel-closed", {
+          detail: { id: request.id },
+        }),
+      );
+    });
+    expect(screen.queryByRole("tab", { name: "Time result" })).toBeNull();
   });
   it("keeps background work untouched when the panel closes", () => {
     const onClose = vi.fn();

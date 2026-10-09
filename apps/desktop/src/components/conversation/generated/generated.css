@@ -2,6 +2,7 @@
   --generated-sage: color-mix(in srgb, var(--positive) 10%, var(--surface-raised));
   --generated-violet: color-mix(in srgb, #9379cf 12%, var(--surface-raised));
   container-type: inline-size;
+  width: 100%;
   margin: 16px 0;
   padding: 20px;
   border: 1px solid var(--line);

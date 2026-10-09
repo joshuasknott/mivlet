@@ -5,17 +5,17 @@ import type { McpAppApprovalPreview } from "../../lib/mcp-app-host";
 /** App requests belong to the conversation, even after its provider session
  * has completed. Closing, switching or starting work revokes pending requests. */
 export function useMcpAppApprovals(runtime: ShellRuntime, identity: string, enabled: boolean) {
-  const [ids, setIds] = useState<ReadonlySet<string>>(new Set());
-  const pending = useRef(new Set<string>());
+  const [owners, setOwners] = useState<ReadonlyMap<string, McpAppApprovalPreview["owner"]>>(new Map());
+  const pendingOwners = useRef(new Map<string, McpAppApprovalPreview["owner"]>());
   const runtimeRef = useRef(runtime);
   runtimeRef.current = runtime;
   const current = useRef({ identity, enabled });
   current.current = { identity, enabled };
   useEffect(() => () => {
-    const owned = [...pending.current];
-    pending.current.clear();
+    const owned = [...pendingOwners.current.keys()];
+    pendingOwners.current.clear();
     if (owned.length) runtimeRef.current.clearBackendToolApprovals(owned);
-    setIds(new Set());
+    setOwners(new Map());
   }, [identity, enabled]);
   const request = async (preview: McpAppApprovalPreview) => {
     if (!current.current.enabled) return null;
@@ -30,11 +30,11 @@ export function useMcpAppApprovals(runtime: ShellRuntime, identity: string, enab
     if (scope !== expected)
       return null;
     const id = preview.request.id;
-    if (pending.current.has(id)) return null;
+    if (pendingOwners.current.has(id)) return null;
     const abortSignal = preview.abortSignal;
     if (abortSignal?.aborted) return null;
-    pending.current.add(id);
-    setIds(new Set(pending.current));
+    pendingOwners.current.set(id, preview.owner);
+    setOwners(new Map(pendingOwners.current));
     const clearOnAbort = () => runtimeRef.current.clearBackendToolApprovals([id]);
     abortSignal?.addEventListener("abort", clearOnAbort, { once: true });
     try {
@@ -47,9 +47,9 @@ export function useMcpAppApprovals(runtime: ShellRuntime, identity: string, enab
         : null;
     } finally {
       abortSignal?.removeEventListener("abort", clearOnAbort);
-      pending.current.delete(id);
-      setIds(new Set(pending.current));
+      pendingOwners.current.delete(id);
+      setOwners(new Map(pendingOwners.current));
     }
   };
-  return { ids, request };
+  return { ids: new Set(owners.keys()), owners, request };
 }

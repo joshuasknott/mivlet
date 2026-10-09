@@ -304,52 +304,52 @@ function owner(options: McpAppHostOptions): McpAppApprovalPreview["owner"] {
  * approval boundary.
  */
 export class McpAppHostSession {
-  private readonly options: McpAppHostOptions;
-  private readonly snapshotState: McpAppSessionSnapshot = { status: "loading" };
-  private bridge?: AppBridge;
-  private messageTransport?: McpAppTransport;
-  private iframe?: HTMLIFrameElement;
-  private unsubscribeTransportClose?: () => void;
-  private resource?: McpAppResource;
-  private disposed = false;
-  private initialized = false;
-  private cancelHandshake?: () => void;
-  private disposePromise?: Promise<void>;
-  private readonly approvalAbortController = new AbortController();
-  private inFlightAppActions = 0;
-  private inFlightAppResourceReads = 0;
-  private readonly stateListeners = new Set<McpAppStateListener>();
+  #options: McpAppHostOptions;
+  #snapshotState: McpAppSessionSnapshot = { status: "loading" };
+  #bridge?: AppBridge;
+  #messageTransport?: McpAppTransport;
+  #iframe?: HTMLIFrameElement;
+  #unsubscribeTransportClose?: () => void;
+  #resource?: McpAppResource;
+  #disposed = false;
+  #initialized = false;
+  #cancelHandshake?: () => void;
+  #disposePromise?: Promise<void>;
+  #approvalAbortController = new AbortController();
+  #inFlightAppActions = 0;
+  #inFlightAppResourceReads = 0;
+  #stateListeners = new Set<McpAppStateListener>();
 
   constructor(options: McpAppHostOptions) {
-    this.options = options;
-    this.snapshotState.resourceUri = getToolUiResourceUri(options.tool);
+    this.#options = options;
+    this.#snapshotState.resourceUri = getToolUiResourceUri(options.tool);
   }
 
   snapshot(): McpAppSessionSnapshot {
-    const resource = this.resource;
+    const resource = this.#resource;
     const safeResource = resource
       ? (({ html: _html, ...metadata }) => metadata)(resource)
       : undefined;
     return {
-      ...this.snapshotState,
+      ...this.#snapshotState,
       ...(safeResource ? { resource: safeResource } : {}),
     };
   }
 
   subscribeState(listener: McpAppStateListener): () => void {
-    this.stateListeners.add(listener);
+    this.#stateListeners.add(listener);
     listener(this.snapshot());
-    return () => this.stateListeners.delete(listener);
+    return () => this.#stateListeners.delete(listener);
   }
 
-  private publishState(): void {
+  #publishState(): void {
     const snapshot = this.snapshot();
-    for (const listener of this.stateListeners) listener(snapshot);
+    for (const listener of this.#stateListeners) listener(snapshot);
   }
 
   async loadResource(): Promise<McpAppResource> {
-    this.ensureCurrent();
-    const uri = this.snapshotState.resourceUri;
+    this.#ensureCurrent();
+    const uri = this.#snapshotState.resourceUri;
     if (!uri)
       throw new Error(
         "This MCP tool does not provide an interactive UI resource.",
@@ -362,24 +362,29 @@ export class McpAppHostSession {
       throw new Error("The MCP App resource URI is invalid.");
     }
     const { proposal, prepared } =
-      await this.options.transport.prepareResourceRead(uri);
-    this.ensureCurrent();
-    const resolution = await this.approve({
+      await this.#options.transport.prepareResourceRead(uri);
+    this.#ensureCurrent();
+    const resolution = await this.#approve({
       request: prepared.approval,
       toolName: "resources/read",
       arguments: { uri },
     });
     if (!resolution) throw new Error("MCP App resource access was denied.");
-    const result = await this.executeApproved(proposal, resolution);
+    const result = await this.#executeApproved(proposal, resolution);
     if (!isRecord(result) || !Array.isArray(result.content))
       throw new Error("MCP App resource returned invalid content.");
     const item = result.content.find(
       (candidate): candidate is Record<string, unknown> =>
         isRecord(candidate) &&
+        candidate.uri === uri &&
         (candidate.kind === "embedded-text" || candidate.kind === "text"),
     );
     if (!item || typeof item.text !== "string")
-      throw new Error("MCP App resource is not a text HTML document.");
+      throw new Error("MCP App resource response did not include the requested UI resource.");
+    if (item.truncated === true)
+      throw new Error(
+        "MCP App resource was truncated before loading; use the ordinary tool result or ask the server for a smaller UI.",
+      );
     if (item.text.length === 0 || item.text.length > MAX_HTML_CHARACTERS)
       throw new Error("MCP App resource exceeds the supported size.");
     const mimeType =
@@ -390,69 +395,69 @@ export class McpAppHostSession {
       throw new Error("MCP App resource is not HTML.");
     const metadata = extractResourceMetadata(item);
     const allow = buildAllowAttribute(
-      this.allowedPermissions(metadata.permissions),
+      this.#allowedPermissions(metadata.permissions),
     );
     const csp = resourceCsp(metadata);
-    this.resource = { uri, html: item.text, mimeType, metadata, allow, csp };
-    this.snapshotState.status = "loading";
-    this.snapshotState.error = undefined;
-    this.publishState();
-    return this.resource;
+    this.#resource = { uri, html: item.text, mimeType, metadata, allow, csp };
+    this.#snapshotState.status = "loading";
+    this.#snapshotState.error = undefined;
+    this.#publishState();
+    return this.#resource;
   }
 
   /** Sets the opaque sandbox iframe and performs the official ui/initialize handshake. */
   async attach(iframe: HTMLIFrameElement, resourceUrl?: string): Promise<void> {
-    this.ensureCurrent();
-    if (!this.resource)
+    this.#ensureCurrent();
+    if (!this.#resource)
       throw new Error("MCP App resource must load before attach.");
     if (!iframe.contentWindow)
       throw new Error("MCP App iframe is unavailable.");
-    this.iframe = iframe;
-    this.unsubscribeTransportClose = this.options.transport.subscribeClose(
+    this.#iframe = iframe;
+    this.#unsubscribeTransportClose = this.#options.transport.subscribeClose(
       () => {
-        if (this.disposed) return;
-        this.snapshotState.status = "error";
-        this.snapshotState.error =
+        if (this.#disposed) return;
+        this.#snapshotState.status = "error";
+        this.#snapshotState.error =
           "The MCP connection closed; reopen the result after reconnecting.";
-        this.publishState();
+        this.#publishState();
         void this.dispose("MCP connection closed");
       },
     );
-    this.messageTransport = new McpAppTransport(iframe.contentWindow);
-    this.bridge = new AppBridge(
+    this.#messageTransport = new McpAppTransport(iframe.contentWindow);
+    this.#bridge = new AppBridge(
       null,
       { name: "Mivlet", version: "0.1.0" } satisfies Implementation,
       {
         serverTools: {},
-        ...(this.options.listResources
+        ...(this.#options.listResources
           ? { serverResources: { listChanged: true } }
           : {}),
-        ...(this.options.onOpenLink ? { openLinks: {} } : {}),
-        ...(this.options.onMessage ? { message: { text: {} } } : {}),
-        ...(this.options.onContextUpdate
+        ...(this.#options.onOpenLink ? { openLinks: {} } : {}),
+        ...(this.#options.onMessage ? { message: { text: {} } } : {}),
+        ...(this.#options.onContextUpdate
           ? { updateModelContext: { text: {} } }
           : {}),
         logging: {},
         sandbox: {
-          permissions: this.allowedPermissions(
-            this.resource.metadata.permissions,
+          permissions: this.#allowedPermissions(
+            this.#resource.metadata.permissions,
           ),
-          csp: this.resource.metadata.csp,
+          csp: this.#resource.metadata.csp,
         },
       },
       {
         hostContext: {
           displayMode: "inline",
-          availableDisplayModes: this.options.onDisplayMode
+          availableDisplayModes: this.#options.onDisplayMode
             ? ["inline", "fullscreen"]
             : ["inline"],
           platform: "desktop",
           userAgent: "Mivlet",
-          ...this.options.hostContext,
+          ...this.#options.hostContext,
         },
       },
     );
-    this.registerHandlers(this.bridge);
+    this.#registerHandlers(this.#bridge);
     let handshakeTimer: ReturnType<typeof setTimeout> | undefined;
     const initialized = new Promise<void>((resolve, reject) => {
       handshakeTimer = setTimeout(
@@ -464,29 +469,29 @@ export class McpAppHostSession {
           ),
         15000,
       );
-      this.cancelHandshake = () =>
+      this.#cancelHandshake = () =>
         reject(new Error("MCP App closed during initialization."));
-      this.bridge!.oninitialized = () => resolve();
+      this.#bridge!.oninitialized = () => resolve();
     });
     // Start AppBridge's source-validated listener before releasing the
     // untrusted HTML. Otherwise a fast View can send ui/initialize before the
     // host is listening and leave the result stuck in Loading.
-    const connected = this.bridge.connect(this.messageTransport);
+    const connected = this.#bridge.connect(this.#messageTransport);
     const transportError = (error?: Error) => {
-      if (this.disposed) return;
-      this.snapshotState.status = "error";
-      this.snapshotState.error =
+      if (this.#disposed) return;
+      this.#snapshotState.status = "error";
+      this.#snapshotState.error =
         error?.message ?? "The MCP App channel closed; reopen the result.";
-      this.publishState();
-      void this.dispose(this.snapshotState.error);
+      this.#publishState();
+      void this.dispose(this.#snapshotState.error);
     };
-    const previousTransportError = this.messageTransport.onerror;
-    this.messageTransport.onerror = (error) => {
+    const previousTransportError = this.#messageTransport.onerror;
+    this.#messageTransport.onerror = (error) => {
       previousTransportError?.(error);
       transportError(error);
     };
-    const previousTransportClose = this.messageTransport.onclose;
-    this.messageTransport.onclose = () => {
+    const previousTransportClose = this.#messageTransport.onclose;
+    this.#messageTransport.onclose = () => {
       previousTransportClose?.();
       transportError();
     };
@@ -497,69 +502,69 @@ export class McpAppHostSession {
       await Promise.all([connected, initialized]);
     } finally {
       clearTimeout(handshakeTimer);
-      this.cancelHandshake = undefined;
+      this.#cancelHandshake = undefined;
     }
-    this.ensureCurrent();
-    this.initialized = true;
-    this.snapshotState.status = "ready";
-    this.snapshotState.appName = this.bridge.getAppVersion()?.name;
-    this.snapshotState.appVersion = this.bridge.getAppVersion()?.version;
-    this.publishState();
+    this.#ensureCurrent();
+    this.#initialized = true;
+    this.#snapshotState.status = "ready";
+    this.#snapshotState.appName = this.#bridge.getAppVersion()?.name;
+    this.#snapshotState.appVersion = this.#bridge.getAppVersion()?.version;
+    this.#publishState();
   }
 
   async sendToolInput(input: Record<string, unknown>): Promise<void> {
-    this.ensureReady();
-    await this.bridge?.sendToolInput({
+    this.#ensureReady();
+    await this.#bridge?.sendToolInput({
       arguments: boundedClone(input, "tool input") as Record<string, unknown>,
     });
   }
 
   async sendToolResult(result: CallToolResult): Promise<void> {
-    this.ensureReady();
-    await this.bridge?.sendToolResult(
+    this.#ensureReady();
+    await this.#bridge?.sendToolResult(
       boundedClone(result, "tool result") as CallToolResult,
     );
   }
 
   async sendToolCancelled(reason?: string): Promise<void> {
-    if (!this.bridge || this.disposed) return;
-    await this.bridge.sendToolCancelled({ reason });
+    if (!this.#bridge || this.#disposed) return;
+    await this.#bridge.sendToolCancelled({ reason });
   }
 
   async dispose(reason = "MCP App closed"): Promise<void> {
-    if (this.disposePromise) return this.disposePromise;
-    this.disposed = true;
-    this.approvalAbortController.abort();
-    this.cancelHandshake?.();
-    this.cancelHandshake = undefined;
-    if (this.iframe) this.iframe.src = "about:blank";
+    if (this.#disposePromise) return this.#disposePromise;
+    this.#disposed = true;
+    this.#approvalAbortController.abort();
+    this.#cancelHandshake?.();
+    this.#cancelHandshake = undefined;
+    if (this.#iframe) this.#iframe.src = "about:blank";
     const hadFailure =
-      this.snapshotState.status === "error" ||
-      this.snapshotState.status === "stale";
-    if (!hadFailure) this.snapshotState.status = "closed";
-    this.disposePromise = (async () => {
+      this.#snapshotState.status === "error" ||
+      this.#snapshotState.status === "stale";
+    if (!hadFailure) this.#snapshotState.status = "closed";
+    this.#disposePromise = (async () => {
       try {
         // Teardown is cooperative, but Stop and pane close must remain
         // immediate when an untrusted app has stopped answering.
-        if (this.bridge && this.initialized)
-          await this.bridge
+        if (this.#bridge && this.#initialized)
+          await this.#bridge
             .teardownResource({}, { timeout: 750 })
             .catch(() => undefined);
       } finally {
-        await this.messageTransport?.close().catch(() => undefined);
-        this.bridge = undefined;
-        this.messageTransport = undefined;
-        this.iframe = undefined;
-        this.unsubscribeTransportClose?.();
-        this.unsubscribeTransportClose = undefined;
-        if (reason !== "MCP App closed") this.snapshotState.error = reason;
-        this.publishState();
+        await this.#messageTransport?.close().catch(() => undefined);
+        this.#bridge = undefined;
+        this.#messageTransport = undefined;
+        this.#iframe = undefined;
+        this.#unsubscribeTransportClose?.();
+        this.#unsubscribeTransportClose = undefined;
+        if (reason !== "MCP App closed") this.#snapshotState.error = reason;
+        this.#publishState();
       }
     })();
-    return this.disposePromise;
+    return this.#disposePromise;
   }
 
-  private registerHandlers(bridge: AppBridge): void {
+  #registerHandlers(bridge: AppBridge): void {
     bridge.oncalltool = async (params) => {
       if (
         !params ||
@@ -567,13 +572,13 @@ export class McpAppHostSession {
         !isRecord(params.arguments)
       )
         return errorResult("MCP App requested an invalid tool call.");
-      return this.runAppTool(params.name, params.arguments);
+      return this.#runAppTool(params.name, params.arguments);
     };
-    if (this.options.listResources) {
+    if (this.#options.listResources) {
       bridge.onlistresources = async () => {
-        this.ensureCurrent();
-        const resources = (await this.options.listResources?.()) ?? [];
-        this.ensureCurrent();
+        this.#ensureCurrent();
+        const resources = (await this.#options.listResources?.()) ?? [];
+        this.#ensureCurrent();
         return {
           resources: resources.slice(0, 256).flatMap((resource) => {
             if (
@@ -602,7 +607,7 @@ export class McpAppHostSession {
       };
     }
     bridge.onreadresource = async (params) => {
-      this.ensureCurrent();
+      this.#ensureCurrent();
       const uri = params?.uri;
       if (
         typeof uri !== "string" ||
@@ -610,32 +615,32 @@ export class McpAppHostSession {
         /[\u0000-\u001f\u007f]/u.test(uri)
       )
         return { contents: [] };
-      if (uri === this.resource?.uri) {
+      if (uri === this.#resource?.uri) {
         return {
           contents: [
             {
               uri,
-              mimeType: this.resource.mimeType,
-              text: this.resource.html,
-              _meta: { ui: this.resource.metadata },
+              mimeType: this.#resource.mimeType,
+              text: this.#resource.html,
+              _meta: { ui: this.#resource.metadata },
             },
           ],
         };
       }
-      if (this.inFlightAppResourceReads >= MAX_IN_FLIGHT_APP_RESOURCE_READS) {
+      if (this.#inFlightAppResourceReads >= MAX_IN_FLIGHT_APP_RESOURCE_READS) {
         return { contents: [] };
       }
-      this.inFlightAppResourceReads += 1;
+      this.#inFlightAppResourceReads += 1;
       try {
         const { proposal, prepared } =
-          await this.options.transport.prepareResourceRead(uri);
-        const resolution = await this.approve({
+          await this.#options.transport.prepareResourceRead(uri);
+        const resolution = await this.#approve({
           request: prepared.approval,
           toolName: "resources/read",
           arguments: { uri },
         });
         if (!resolution) return { contents: [] };
-        const result = await this.executeApproved(proposal, resolution);
+        const result = await this.#executeApproved(proposal, resolution);
         const content =
           isRecord(result) && Array.isArray(result.content)
             ? result.content
@@ -658,30 +663,30 @@ export class McpAppHostSession {
       } catch {
         return { contents: [] };
       } finally {
-        this.inFlightAppResourceReads -= 1;
+        this.#inFlightAppResourceReads -= 1;
       }
     };
     bridge.onmessage = async (params) => {
-      this.ensureCurrent();
+      this.#ensureCurrent();
       if (!params?.content || !Array.isArray(params.content)) return {};
       const content = boundedClone(
         params.content,
         "message",
       ) as CallToolResult["content"];
-      if (!this.options.onMessage)
+      if (!this.#options.onMessage)
         throw new Error("Messages are unavailable in this host context.");
-      this.options.onMessage({ owner: owner(this.options), content });
+      this.#options.onMessage({ owner: owner(this.#options), content });
       return {};
     };
     bridge.onupdatemodelcontext = async (params) => {
-      this.ensureCurrent();
+      this.#ensureCurrent();
       if (!isRecord(params)) return {};
-      if (!this.options.onContextUpdate)
+      if (!this.#options.onContextUpdate)
         throw new Error(
           "Context updates are unavailable in this host context.",
         );
-      this.options.onContextUpdate({
-        owner: owner(this.options),
+      this.#options.onContextUpdate({
+        owner: owner(this.#options),
         update: boundedClone(params ?? {}, "context update") as Record<
           string,
           unknown
@@ -690,7 +695,7 @@ export class McpAppHostSession {
       return {};
     };
     bridge.onopenlink = async ({ url }) => {
-      this.ensureCurrent();
+      this.#ensureCurrent();
       if (typeof url !== "string") return { opened: false };
       let parsed: URL;
       try {
@@ -700,30 +705,30 @@ export class McpAppHostSession {
       }
       if (!SAFE_EXTERNAL_SCHEMES.has(parsed.protocol)) return { opened: false };
       const opened =
-        (await this.options.onOpenLink?.(parsed.href, owner(this.options))) ??
+        (await this.#options.onOpenLink?.(parsed.href, owner(this.#options))) ??
         false;
       return { isError: !opened };
     };
     bridge.onrequestdisplaymode = async ({ mode }) => {
-      this.ensureCurrent();
+      this.#ensureCurrent();
       const available =
-        this.options.hostContext?.availableDisplayModes ??
-        (this.options.onDisplayMode ? ["inline", "fullscreen"] : ["inline"]);
+        this.#options.hostContext?.availableDisplayModes ??
+        (this.#options.onDisplayMode ? ["inline", "fullscreen"] : ["inline"]);
       const granted =
         mode === "fullscreen" && available.includes("fullscreen")
           ? "fullscreen"
           : "inline";
-      this.options.onDisplayMode?.(granted);
+      this.#options.onDisplayMode?.(granted);
       return { mode: granted };
     };
     bridge.onrequestteardown = () => {
-      this.ensureCurrent();
-      this.options.onRequestTeardown?.();
+      this.#ensureCurrent();
+      this.#options.onRequestTeardown?.();
       void this.dispose("MCP App requested teardown");
     };
     bridge.onsizechange = (size) => {
-      this.ensureCurrent();
-      this.options.onResize?.({
+      this.#ensureCurrent();
+      this.#options.onResize?.({
         ...(Number.isFinite(size.width)
           ? { width: Math.min(1600, Math.max(112, size.width!)) }
           : {}),
@@ -735,17 +740,17 @@ export class McpAppHostSession {
     bridge.onloggingmessage = () => undefined;
   }
 
-  private async runAppTool(
+  async #runAppTool(
     toolName: string,
     argumentsValue: Record<string, unknown>,
   ): Promise<CallToolResult> {
-    if (this.inFlightAppActions >= MAX_IN_FLIGHT_APP_ACTIONS)
+    if (this.#inFlightAppActions >= MAX_IN_FLIGHT_APP_ACTIONS)
       return errorResult(
         "MCP App has too many actions in progress; wait for one to finish.",
       );
-    this.inFlightAppActions += 1;
+    this.#inFlightAppActions += 1;
     try {
-      this.ensureReady();
+      this.#ensureReady();
       if (!/^[a-zA-Z0-9_.-]{1,128}$/u.test(toolName))
         return errorResult("MCP App requested an invalid tool name.");
       const boundedArguments = boundedClone(
@@ -753,49 +758,49 @@ export class McpAppHostSession {
         "tool arguments",
       ) as Record<string, unknown>;
       const { proposal, prepared } =
-        await this.options.transport.prepareToolCall(
+        await this.#options.transport.prepareToolCall(
           toolName,
           boundedArguments,
         );
-      const resolution = await this.approve({
+      const resolution = await this.#approve({
         request: prepared.approval,
         toolName,
         arguments: boundedArguments,
       });
       if (!resolution) return errorResult("Mivlet denied this MCP App action.");
-      const result = await this.executeApproved(proposal, resolution);
+      const result = await this.#executeApproved(proposal, resolution);
       return toMcpAppCallToolResult(result);
     } catch (error) {
       return errorResult(
         error instanceof Error ? error.message : "MCP App action failed.",
       );
     } finally {
-      this.inFlightAppActions -= 1;
+      this.#inFlightAppActions -= 1;
     }
   }
 
   /** Every awaited authority transition rechecks the owning live session. */
-  private async executeApproved(
+  async #executeApproved(
     proposal: Parameters<DesktopMcpTransportHandle["authorizeToolCall"]>[0],
     resolution: ApprovalResolutionRequest,
   ): Promise<unknown> {
-    this.ensureCurrent();
-    const permit = await this.options.transport.authorizeToolCall(proposal, resolution);
-    this.ensureCurrent();
-    const result = await this.options.transport.executeAuthorizedToolCall(proposal, permit.permitId);
-    this.ensureCurrent();
+    this.#ensureCurrent();
+    const permit = await this.#options.transport.authorizeToolCall(proposal, resolution);
+    this.#ensureCurrent();
+    const result = await this.#options.transport.executeAuthorizedToolCall(proposal, permit.permitId);
+    this.#ensureCurrent();
     return result;
   }
 
-  private async approve(input: {
+  async #approve(input: {
     request: import("@mivlet/protocol").ApprovalRequest;
     toolName: string;
     arguments: Record<string, unknown>;
   }): Promise<ApprovalResolutionRequest | null> {
-    this.ensureCurrent();
-    if (!this.options.requestApproval) return null;
-    return this.options.requestApproval({
-      owner: owner(this.options),
+    this.#ensureCurrent();
+    if (!this.#options.requestApproval) return null;
+    return this.#options.requestApproval({
+      owner: owner(this.#options),
       request: input.request,
       toolName: input.toolName,
       arguments: JSON.parse(JSON.stringify(input.arguments)) as Record<
@@ -803,14 +808,14 @@ export class McpAppHostSession {
         unknown
       >,
       source: "mcp-app",
-      abortSignal: this.approvalAbortController.signal,
+      abortSignal: this.#approvalAbortController.signal,
     });
   }
 
-  private allowedPermissions(
+  #allowedPermissions(
     requested?: McpUiResourcePermissions,
   ): McpUiResourcePermissions {
-    const granted = this.options.grantedPermissions ?? {};
+    const granted = this.#options.grantedPermissions ?? {};
     if (!requested) return {};
     return Object.fromEntries(
       Object.keys(requested)
@@ -819,18 +824,18 @@ export class McpAppHostSession {
     ) as McpUiResourcePermissions;
   }
 
-  private ensureReady(): void {
-    this.ensureCurrent();
-    if (!this.initialized || !this.bridge)
+  #ensureReady(): void {
+    this.#ensureCurrent();
+    if (!this.#initialized || !this.#bridge)
       throw new Error("MCP App is not initialized.");
   }
 
-  private ensureCurrent(): void {
-    if (this.disposed) throw new Error("MCP App is closed.");
-    if (this.options.isCurrent && !this.options.isCurrent()) {
-      if (this.snapshotState.status !== "stale") {
-        this.snapshotState.status = "stale";
-        this.publishState();
+  #ensureCurrent(): void {
+    if (this.#disposed) throw new Error("MCP App is closed.");
+    if (this.#options.isCurrent && !this.#options.isCurrent()) {
+      if (this.#snapshotState.status !== "stale") {
+        this.#snapshotState.status = "stale";
+        this.#publishState();
       }
       throw new Error(
         "MCP App result is stale; reopen the current conversation result.",
