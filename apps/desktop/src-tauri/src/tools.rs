@@ -83,11 +83,31 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
+<<<<<<< HEAD
 pub(crate) const SUPPORTED_TOOLS: [&str; 44] = [
     "repository-pr-read",
     "repository-pr-local",
     "repository-pr-action",
     "repository-pr-watch",
+=======
+pub(crate) const SUPPORTED_TOOLS: [&str; 56] = [
+    "request-secret",
+    "secret-request-status",
+    "webhook-signing-install",
+    "webhook-signing-status",
+    "webhook-signing-verify",
+    "webhook-signing-remove",
+    "repository-start",
+    "workspace-start",
+    "command-jobs",
+    "command-output",
+    "command-stop",
+    "repository-checkpoint-list",
+    "repository-checkpoint-capture",
+    "repository-checkpoint-preview",
+    "repository-checkpoint-restore",
+    "repository-checkpoint-delete",
+>>>>>>> codex/event-automations
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -293,14 +313,35 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
 
 pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
+<<<<<<< HEAD
         "repository-pr-read" => Some(("read-only", "low")),
         "repository-pr-local" | "repository-pr-watch" => Some(("full-access", "high")),
         "repository-pr-action" => Some(("full-access", "critical")),
         "repository-status" | "repository-read" => Some(("read-only", "low")),
         "repository-write" | "repository-commit" => Some(("full-access", "high")),
         "repository-run" | "repository-publish" | "workspace-run" => {
+=======
+        "request-secret" | "webhook-signing-install" | "webhook-signing-remove" => {
+            Some(("full-access", "high"))
+        }
+        "secret-request-status" | "webhook-signing-status" | "webhook-signing-verify" => {
+            Some(("read-only", "low"))
+        }
+        "repository-checkpoint-list" | "repository-checkpoint-preview" => {
+            Some(("read-only", "low"))
+        }
+        "repository-checkpoint-capture" => Some(("full-access", "high")),
+        "repository-checkpoint-restore" | "repository-checkpoint-delete" => {
+>>>>>>> codex/event-automations
             Some(("full-access", "critical"))
         }
+        "repository-status" | "repository-read" | "command-jobs" | "command-output" => {
+            Some(("read-only", "low"))
+        }
+        "command-stop" => Some(("full-access", "high")),
+        "repository-write" | "repository-commit" => Some(("full-access", "high")),
+        "repository-run" | "repository-start" | "repository-publish" | "workspace-run"
+        | "workspace-start" => Some(("full-access", "critical")),
         "repository-recover" => Some(("full-access", "high")),
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
@@ -382,7 +423,11 @@ fn verify_tool_authority(path: &Path, request: &ToolExecutionRequest) -> Result<
 }
 
 fn is_computer_tool(tool: &str) -> bool {
-    if tool.starts_with("repository-") {
+    if is_protected_secret_tool(tool) {
+        return true;
+    }
+    if tool.starts_with("repository-") || tool.starts_with("command-") || tool == "workspace-start"
+    {
         return true;
     }
     matches!(
@@ -410,6 +455,18 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-app-action"
             | "local-desktop-observe"
             | "local-desktop-action"
+    )
+}
+
+fn is_protected_secret_tool(tool: &str) -> bool {
+    matches!(
+        tool,
+        "request-secret"
+            | "secret-request-status"
+            | "webhook-signing-install"
+            | "webhook-signing-status"
+            | "webhook-signing-verify"
+            | "webhook-signing-remove"
     )
 }
 
@@ -482,6 +539,9 @@ pub(crate) fn validate_tool_approval_binding(
             | "create-pdf"
             | "workspace-run"
     ) || tool.starts_with("repository-")
+        || is_protected_secret_tool(tool)
+        || tool.starts_with("command-")
+        || tool == "workspace-start"
     {
         let digest_entries = approved
             .iter()
@@ -1412,7 +1472,40 @@ pub async fn execute_tool_call(
     } else {
         0
     };
-    if tool.starts_with("repository-") || tool == "workspace-run" {
+    if is_protected_secret_tool(&tool) {
+        let workspace = request
+            .workspace_id
+            .clone()
+            .ok_or("Protected requests require a workspace.")?;
+        let agent = request
+            .agent_id
+            .clone()
+            .ok_or("Protected requests require a saved agent.")?;
+        let computers = local_computers.inner().clone();
+        let output = tauri::async_runtime::spawn_blocking(move || {
+            crate::protected_secrets::execute(
+                &computers,
+                &workspace,
+                &agent,
+                computer_generation,
+                &request_id,
+                &tool,
+                arguments,
+            )
+        })
+        .await
+        .map_err(|_| {
+            "Protected operation interrupted. Inspect status; do not replay the reference."
+        })??;
+        return Ok(ToolResult {
+            ok: true,
+            output: output.to_string(),
+        });
+    }
+    if tool.starts_with("repository-")
+        || tool.starts_with("command-")
+        || matches!(tool.as_str(), "workspace-run" | "workspace-start")
+    {
         let workspace = request
             .workspace_id
             .clone()
@@ -1423,8 +1516,26 @@ pub async fn execute_tool_call(
             .ok_or("Code tools require a saved agent.")?;
         let computers = local_computers.inner().clone();
         let operation_tool = tool.clone();
+        let operation_request = request_id.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
-            if operation_tool == "workspace-run" {
+            if operation_tool.starts_with("command-") {
+                crate::local_computer::command_jobs::execute(
+                    &computers,
+                    &workspace,
+                    &agent,
+                    computer_generation,
+                    &operation_tool,
+                    arguments,
+                )
+            } else if operation_tool == "workspace-start" {
+                crate::local_computer::workspace_execution::start(
+                    &computers,
+                    &workspace,
+                    &agent,
+                    computer_generation,
+                    arguments,
+                )
+            } else if operation_tool == "workspace-run" {
                 crate::local_computer::workspace_execution::execute(
                     &computers,
                     &workspace,
@@ -1440,6 +1551,7 @@ pub async fn execute_tool_call(
                     computer_generation,
                     &operation_tool,
                     arguments,
+                    &operation_request,
                 )
             }
         })
@@ -2514,16 +2626,90 @@ mod connector_authority_tests {
     }
 
     #[test]
+<<<<<<< HEAD
     fn pull_request_permit_binds_target_payload_scope_and_consumes_once() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("permits.json");
         let mut approved = request("repository-pr-action");
         approved.arguments = json!({"repositoryId":"repo", "number":7, "action":"review", "remote":"https://github.com/example/repository.git", "expectedHead":"a".repeat(40), "headBranch":"mivlet/task", "baseSha":"b".repeat(40), "baseBranch":"main", "event":"COMMENT", "body":"long review ".repeat(80), "comments":[{"path":"sum.js", "line":2, "side":"RIGHT", "body":"Check overflow"}]});
+=======
+    fn native_command_lifecycle_permits_bind_lifetime_target_and_generation() {
+        for (tool, arguments, changes) in [
+            (
+                "repository-start",
+                json!({"repositoryId":"repo", "command":"node server.js", "network":false, "timeoutSeconds":600}),
+                vec![
+                    ("command", json!("node other.js")),
+                    ("repositoryId", json!("other")),
+                    ("network", json!(true)),
+                    ("timeoutSeconds", json!(601)),
+                ],
+            ),
+            (
+                "workspace-start",
+                json!({"command":"node server.js", "inputs":["server.js"], "network":false, "timeoutSeconds":600}),
+                vec![
+                    ("inputs", json!(["other.js"])),
+                    ("timeoutSeconds", json!(601)),
+                ],
+            ),
+            (
+                "command-stop",
+                json!({"jobId":"job", "jobGeneration":7}),
+                vec![("jobId", json!("other")), ("jobGeneration", json!(8))],
+            ),
+        ] {
+            let temp = tempfile::tempdir().unwrap();
+            let path = temp.path().join("permits.json");
+            let mut approved = request(tool);
+            approved.arguments = arguments.clone();
+            approved.workspace_id = Some("workspace".into());
+            approved.agent_id = Some("agent".into());
+            approved.computer_generation = Some(7);
+            approved.approval.request.data_used = approval_argument_previews(tool, &arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+            approved.approval.request.data_used.extend([
+                argument_digest(&arguments).unwrap(),
+                "Computer workspace: workspace".into(),
+                "Computer agent: agent".into(),
+                "Computer generation: 7".into(),
+            ]);
+            persist_permit(&path, &approved);
+            for (field, value) in changes {
+                approved.arguments = arguments.clone();
+                approved.arguments[field] = value;
+                assert!(
+                    verify_tool_authority(&path, &approved).is_err(),
+                    "{tool}/{field}"
+                );
+            }
+            approved.arguments = arguments;
+            verify_tool_authority(&path, &approved).unwrap();
+            assert!(
+                verify_tool_authority(&path, &approved).is_err(),
+                "single-use {tool}"
+            );
+        }
+    }
+
+    #[test]
+    fn checkpoint_restore_permit_binds_every_hash_request_scope_and_is_single_use() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("checkpoint-permits.json");
+        let mut approved = request("repository-checkpoint-restore");
+        approved.arguments = json!({"repositoryId":"copy", "checkpointId":"saved", "expectedTree":"current", "expectedCheckpointTree":"checkpoint-tree", "expectedOutput":"output", "expectedHead":"head"});
+>>>>>>> codex/event-automations
         approved.workspace_id = Some("workspace".into());
         approved.agent_id = Some("agent".into());
         approved.computer_generation = Some(7);
         approved.approval.request.data_used =
+<<<<<<< HEAD
             approval_argument_previews("repository-pr-action", &approved.arguments)
+=======
+            approval_argument_previews(&approved.tool, &approved.arguments)
+>>>>>>> codex/event-automations
                 .unwrap()
                 .into_iter()
                 .collect();
@@ -2534,6 +2720,7 @@ mod connector_authority_tests {
             "Computer generation: 7".into(),
         ]);
         persist_permit(&path, &approved);
+<<<<<<< HEAD
         let original = approved.arguments.clone();
         for (key, value) in original.as_object().unwrap() {
             approved.arguments = original.clone();
@@ -2556,6 +2743,31 @@ mod connector_authority_tests {
         approved.computer_generation = Some(8);
         assert!(verify_tool_authority(&path, &approved).is_err());
         approved.computer_generation = Some(7);
+=======
+        for field in [
+            "repositoryId",
+            "checkpointId",
+            "expectedTree",
+            "expectedCheckpointTree",
+            "expectedOutput",
+            "expectedHead",
+        ] {
+            let original = approved.arguments[field].clone();
+            approved.arguments[field] = json!("substituted");
+            assert!(
+                verify_tool_authority(&path, &approved).is_err(),
+                "accepted substituted {field}"
+            );
+            approved.arguments[field] = original;
+        }
+        let id = approved.approval.request.id.clone();
+        approved.approval.request.id = "another-request".into();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.approval.request.id = id;
+        approved.workspace_id = Some("another-workspace".into());
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.workspace_id = Some("workspace".into());
+>>>>>>> codex/event-automations
         verify_tool_authority(&path, &approved).unwrap();
         assert!(verify_tool_authority(&path, &approved).is_err());
     }
@@ -2852,6 +3064,49 @@ mod connector_authority_tests {
         approved.arguments["model"] = json!("gpt-5");
         assert!(verify_tool_authority(&path, &approved).is_err());
         approved.arguments["model"] = json!("gpt-image-2");
+        verify_tool_authority(&path, &approved).unwrap();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+    }
+
+    #[test]
+    fn protected_secret_approval_is_exact_scoped_and_single_use() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("approvals.json");
+        let mut approved = request("request-secret");
+        approved.workspace_id = Some("workspace-one".into());
+        approved.agent_id = Some("agent-one".into());
+        approved.computer_generation = Some(9);
+        approved.arguments = json!({
+            "label": "Release webhook",
+            "reason": "Verify release notifications",
+            "consumer": "webhook-signing-key",
+            "purpose": "verify-webhook-signature",
+            "targetId": "releases"
+        });
+        approved.approval.request.data_used =
+            approval_argument_previews(&approved.tool, &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .chain([
+                    argument_digest(&approved.arguments).unwrap(),
+                    "Computer workspace: workspace-one".into(),
+                    "Computer agent: agent-one".into(),
+                    "Computer generation: 9".into(),
+                ])
+                .collect();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        persist_permit(&path, &approved);
+        for field in ["consumer", "purpose", "targetId", "label", "reason"] {
+            let original = approved.arguments[field].clone();
+            approved.arguments[field] = json!("changed");
+            assert!(verify_tool_authority(&path, &approved).is_err(), "{field}");
+            approved.arguments[field] = original;
+        }
+        approved.computer_generation = Some(10);
+        *approved.approval.request.data_used.last_mut().unwrap() = "Computer generation: 10".into();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.computer_generation = Some(9);
+        *approved.approval.request.data_used.last_mut().unwrap() = "Computer generation: 9".into();
         verify_tool_authority(&path, &approved).unwrap();
         assert!(verify_tool_authority(&path, &approved).is_err());
     }

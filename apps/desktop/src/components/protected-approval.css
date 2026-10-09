@@ -1,0 +1,21 @@
+.context-panel--inline-approval .approval-card.approval-card--protected-entry {
+  width: 100%; max-width: 720px; padding: 20px; gap: 0;
+  border: 1px solid var(--line); border-radius: 12px; background: var(--surface-raised);
+}
+.context-panel--inline-approval .approval-card--protected-entry .approval-card__header { align-items: flex-start; flex-wrap: nowrap; gap: 14px; }
+.protected-entry__icon { display: grid; place-items: center; flex: 0 0 40px; height: 40px; border-radius: 10px; background: var(--surface-hover); color: var(--ink); }
+.protected-entry__heading { display: grid; flex: 1; gap: 4px; min-width: 0; }
+.protected-entry__eyebrow, .protected-entry__provider { color: var(--ink-muted); font-size: 12px; line-height: 1.4; }
+.context-panel--inline-approval .approval-card--protected-entry .approval-card__summary { font-size: 16px; font-weight: 500; line-height: 1.4; }
+.approval-card--protected-entry .approval-card__context { margin: 18px 0 8px; color: var(--ink-muted); font-size: 13px; line-height: 1.65; }
+.context-panel--inline-approval .approval-card--protected-entry .approval-inspection > summary { display: list-item; min-height: 44px; padding: 12px 0; margin: 0; color: var(--ink); font-size: 13px; }
+.context-panel--inline-approval .approval-card--protected-entry .approval-actions { align-items: center; gap: 10px; border-top: 1px solid var(--line); margin-top: 8px; padding-top: 16px; }
+.context-panel--inline-approval .approval-card--protected-entry .approval-action { min-height: 44px; padding: 10px 20px; border-radius: 9px; font-size: 13px; font-weight: 500; border-color: var(--ink-soft); }
+.approval-card--protected-entry .approval-action:not(.approval-action--deny) { background: var(--ink); color: var(--surface-raised); border-color: var(--ink); }
+.approval-card--protected-entry .approval-action:not(.approval-action--deny):hover { background: var(--ink-muted); border-color: var(--ink-muted); }
+.approval-card--protected-entry .approval-action--deny { background: transparent; color: var(--ink); }
+.approval-card--protected-entry .approval-action--deny:hover { background: var(--surface-hover); }
+.protected-entry__scope { margin-left: auto; color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
+@media (max-width: 540px) {
+  .protected-entry__scope { flex-basis: 100%; margin-left: 0; }
+}

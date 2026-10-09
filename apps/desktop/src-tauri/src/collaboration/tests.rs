@@ -15,6 +15,10 @@ mod exchange_regressions;
 mod output_revision_tests;
 #[path = "pr_watch_tests.rs"]
 mod pr_watch_tests;
+#[path = "provider_continuation_tests.rs"]
+mod provider_continuation_tests;
+#[path = "provider_reset_regressions.rs"]
+mod provider_reset_regressions;
 #[path = "scheduling_regressions.rs"]
 mod scheduling_regressions;
 #[path = "ui_tests.rs"]
@@ -877,6 +881,7 @@ fn reconciled_schedule_continuation_uses_fresh_user_work_authority() {
         let mut item = ctx.item("scheduled")?;
         item.status = WorkStatus::AwaitingUser;
         item.schedule = Some(ScheduledWorkContext {
+            event: None,
             occurrence_id: "closed-occurrence".into(),
             reasoning_effort: Some("low".into()),
         });

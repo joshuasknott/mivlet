@@ -7,6 +7,7 @@ import type { SettingsRuntime } from "../settings/settings-runtime";
 import { MemoryRecords } from "../settings/MemoryRecords";
 import { ProviderCatalogue } from "../providers/ProviderCatalogue";
 import { ProviderModelSettings } from "../settings/ProviderModelSettings";
+import { ProviderUsageDetails } from "../usage/ProviderUsageDetails";
 import {
   AppearanceSettingsView,
   ApprovalsSettingsView,
@@ -17,6 +18,12 @@ import type { SettingsTab } from "./settings-tabs";
 
 export type { SettingsTab } from "./settings-tabs";
 export { tabs } from "./settings-tabs";
+export { LocalSchedules } from "../settings/LocalSchedules";
+// Account and usage share this deferred entry, avoiding separately compressed
+// settings chunks while retaining the existing SettingsPage download ceiling.
+export { ProviderUsageDetails };
+export { SubscriptionUsage } from "../usage/SubscriptionUsage";
+export { AccountDialog } from "../agents/AccountDialog";
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
   status: "unavailable",
@@ -72,7 +79,7 @@ export function SettingsPage({
         ) : activeTab === "models" ? (
           <ProviderModelSettings models={runtime.allModelOptions ?? []} hiddenModelIds={runtime.hiddenModelIds ?? []} onChange={runtime.setModelVisible} />
 
-        ) : (
+        ) : activeTab === "usage" ? <ProviderUsageDetails /> : (
           <MemorySettingsPage
             runtime={runtime}
             onStatus={reportStatus}

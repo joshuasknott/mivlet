@@ -8,6 +8,9 @@ mod exchanges;
 pub(crate) mod models;
 mod output_revisions;
 pub(crate) mod pr_watches;
+pub(crate) mod provider_continuation;
+pub(crate) mod provider_continuation_read;
+mod provider_resets;
 mod schedules;
 pub(crate) mod ui;
 mod work;
@@ -662,6 +665,7 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
         let time = now();
         let ctx = Context { conn, store, scope: &scope, profiles: &[], time: &time };
         for mut item in ctx.all_work()? {
+            if provider_resets::require_restart_review(&mut item) { ctx.work(&item)?; }
             if item.status.active() {
                 item.status = WorkStatus::AwaitingUser;
                 item.generation += 1;

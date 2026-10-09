@@ -2,6 +2,7 @@ import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 
 export type LocalScheduleTrigger =
+  | import("@mivlet/protocol/domains/event-automations").AutomationEventTrigger
   | { kind: "once"; localDateTime: string }
   | { kind: "daily"; localTime: string }
   | { kind: "weekly"; weekday: string; localTime: string };

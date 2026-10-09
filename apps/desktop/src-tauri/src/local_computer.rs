@@ -4,6 +4,7 @@ pub(crate) mod artifacts;
 pub(crate) mod authority;
 pub(crate) mod browser;
 pub(crate) mod coding;
+pub(crate) mod command_jobs;
 pub(crate) mod control;
 mod cua;
 pub(crate) mod desktop_tools;
@@ -47,6 +48,7 @@ const MAX_ATTACHMENT_BYTES: usize = 2 * 1024 * 1024;
 const MAX_SAFE_UI_BYTES: u64 = 9_007_199_254_740_991;
 
 pub struct LocalComputerState {
+    jobs: command_jobs::JobManager,
     native: control::NativeControl,
     browsers: browser::BrowserManager,
     driver_directory: PathBuf,
@@ -189,6 +191,7 @@ impl LocalComputerState {
             resources.join("resources/execution-runtime/runtime")
         })?;
         Ok(Self {
+            jobs: command_jobs::JobManager::default(),
             native: control::NativeControl::default(),
             browsers: browser::BrowserManager::default(),
             driver_directory: if cfg!(debug_assertions) {
@@ -207,6 +210,7 @@ impl LocalComputerState {
     #[cfg(test)]
     pub(crate) fn for_test(root: PathBuf) -> Self {
         Self {
+            jobs: command_jobs::JobManager::default(),
             native: control::NativeControl::default(),
             browsers: browser::BrowserManager::default(),
             driver_directory: PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -336,6 +340,29 @@ impl LocalComputerState {
         self.validate_target(workspace_id, agent_id)?;
         self.authority_for(workspace_id, agent_id)?
             .begin_agent(expected_generation)
+    }
+
+    pub(crate) fn with_protected_input<T>(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        request: &str,
+        operation: impl FnOnce() -> Result<T, String>,
+    ) -> Result<T, String> {
+        if let Some(error) = self
+            .activity_error
+            .lock()
+            .map_err(|_| "Native Stop is unavailable.")?
+            .clone()
+        {
+            return Err(error);
+        }
+        let authority = self.authority_for(workspace, agent)?;
+        let _reservation = self
+            .native
+            .reserve_protected_input(workspace, agent, generation, request, authority)?;
+        operation()
     }
 
     pub(crate) fn with_artifact_files<T>(

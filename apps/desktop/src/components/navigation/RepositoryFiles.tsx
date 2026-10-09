@@ -9,11 +9,19 @@ import {
   cancelRuntimeLocalComputer,
   loadRuntimeLocalComputer,
 } from "../../runtime/domains/local-computer";
+import { RepositoryCheckpoints } from "./RepositoryCheckpoints";
 import "./repository-files.css";
 
+<<<<<<< HEAD
 const PullRequestReview = lazy(() =>
   import("./PullRequestReview").then((module) => ({
     default: module.PullRequestReview,
+=======
+// RepositoryDetails mounts only after the user opens Repository.
+const RepositoryCopies = lazy(() =>
+  import("./RepositoryCopies").then((module) => ({
+    default: module.RepositoryCopies,
+>>>>>>> codex/event-automations
   })),
 );
 
@@ -156,6 +164,16 @@ function RepositoryDetails({
             : "Repository operation failed."}
         </p>
       )}
+      <Suspense fallback={<p role="status">Loading retained copies…</p>}>
+        <RepositoryCopies
+          workspaceId={workspaceId}
+          agentId={agentId}
+          name={name}
+          onSelectionChange={() => {
+            void status.refetch();
+          }}
+        />
+      </Suspense>
       {repo && (
         <>
           <p>
@@ -178,10 +196,10 @@ function RepositoryDetails({
               bridge Mivlet tools. Other account routes are unavailable.
             </p>
             <p>
-              Windows with WSL Ubuntu, Bubblewrap, Python 3 and your Linux build
-              tools under /usr. Commands run inside the copied repository,
-              without Windows files, home files or credentials. Network access
-              requires an exact approval. No Windows shell fallback.
+              Windows x64 with native execution setup and bundled Node/npm and
+              Python/pip. Commands run inside an isolated snapshot, without host
+              files, credentials or host PATH. Network access requires an exact
+              approval. Additional toolchains must be explicitly supported.
             </p>
             <p>
               Commit and GitHub publication use the existing approvals.
@@ -191,7 +209,7 @@ function RepositoryDetails({
           </details>
           {status.data?.busy && (
             <p role="status">
-              Repository operation running. Output appears when it finishes.
+              Repository operation running. Open Commands to inspect live logs.
             </p>
           )}
           {status.data?.recoveryRequired && (
@@ -241,6 +259,7 @@ function RepositoryDetails({
               </a>
             </p>
           )}
+<<<<<<< HEAD
           {repo.remote && (
             <Suspense fallback={<p role="status">Loading pull request review…</p>}>
               <PullRequestReview
@@ -252,6 +271,16 @@ function RepositoryDetails({
               />
             </Suspense>
           )}
+=======
+          <RepositoryCheckpoints
+            key={repo.id}
+            workspaceId={workspaceId}
+            agentId={agentId}
+            repositoryId={repo.id}
+            disabled={!!status.data?.busy || !!status.data?.recoveryRequired}
+            onChanged={() => void status.refetch()}
+          />
+>>>>>>> codex/event-automations
         </>
       )}
     </div>

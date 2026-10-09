@@ -67,10 +67,14 @@ export function createManagedRuntimeBackend(
               throw new Error("The tool ran but its response could not reach the provider. Review the current outcome before continuing.");
             }
           } else if (event.type === "usage") {
+            const measuredCost = typeof event.costUsd === "number" && Number.isFinite(event.costUsd) && event.costUsd >= 0;
             yield {
               ...event,
-              costUsd: event.costUsd ?? 0,
-              ...(event.costUsd === undefined ? { costUnknown: true } : {}),
+              cachedInputTokens: event.cachedInputTokens ?? undefined,
+              cacheWriteTokens: event.cacheWriteTokens ?? undefined,
+              reasoningTokens: event.reasoningTokens ?? undefined,
+              costUsd: measuredCost ? event.costUsd! : 0,
+              ...(!measuredCost ? { costUnknown: true } : {}),
             };
           } else if (
             event.type === "text-delta" ||

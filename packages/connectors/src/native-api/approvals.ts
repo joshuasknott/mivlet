@@ -11,6 +11,7 @@
 
 import type { ApprovalRequest } from "@mivlet/protocol";
 import { lookupTool } from "./tools";
+import { isProtectedSecretTool } from "./protected-secret-tools";
 
 const ARGUMENT_DIGEST_PREFIX = "Arguments SHA-256: ";
 const SHA256_CONSTANTS = new Uint32Array([
@@ -172,17 +173,33 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName.startsWith("repository-")) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || isProtectedSecretTool(toolName)) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 
   const actionCore = `${toolName} ${dataUsed.join(" ")}`.trim().slice(0, 80);
-  const consequence = (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
+  const consequence = toolName === "request-secret" && isRegistered
+    ? "Open protected Windows entry for this webhook signing secret. Only a one-use reference returns to the agent; you can decline in the native window."
+    : toolName === "webhook-signing-install" && isRegistered
+    ? "Consume this exact one-use reference to install the native webhook verification key for the specified target. The value never returns to the agent."
+    : toolName === "webhook-signing-remove" && isRegistered
+    ? "Revoke and delete the specified native webhook verification key. Further signature checks with that key will fail."
+    : (toolName === "repository-start" || toolName === "workspace-start") && isRegistered
+    ? `Start the exact persistent Windows command for ${parsed.timeoutSeconds} seconds in an isolated snapshot. All writes discarded; native ownership and repository locks last until all descendants stop. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Stop or app closure terminates it. No automatic restart.`
+    : toolName === "command-stop" && isRegistered
+    ? "Stop this exact native job and all descendants. Wait for its terminal status; discard its snapshot."
+    : (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
     ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
     : toolName === "repository-pr-action" && isRegistered
     ? "Apply only this exact GitHub action using native account credentials. Failure or interruption may leave an unknown outcome; recovery reads evidence and never retries the action."
     : toolName === "repository-publish" && isRegistered
     ? "Push reviewed code and create its pull request on the attached GitHub origin using your native GitHub CLI account."
+    : toolName === "repository-checkpoint-restore" && isRegistered
+    ? "Restore reviewed files in this agent's private copy. Save current code first and invalidate prior test verification. Preserve ignored files, original checkout, Git HEAD and chat history. External effects remain."
+    : toolName === "repository-checkpoint-delete" && isRegistered
+    ? "Permanently delete this exact checkpoint. Preserve current repository files."
+    : toolName === "repository-checkpoint-capture" && isRegistered
+    ? "Save an immutable checkpoint of this private copy. Exclude ignored files, credentials and Git metadata."
     : toolName === "repository-recover" && isRegistered
     ? "Reconcile command-import files and release retained staging/backup, or inspect uncertain GitHub publication. Keep uncertainty receipts; replay nothing."
     : toolName === "local-app-select" && isRegistered

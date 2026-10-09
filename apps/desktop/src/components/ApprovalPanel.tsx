@@ -1,6 +1,8 @@
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
 import { XCircle } from "@phosphor-icons/react/dist/csr/XCircle";
+import { LockKey } from "@phosphor-icons/react/dist/csr/LockKey";
+import "./protected-approval.css";
 import type {
   ApprovalAuditEntry,
   ApprovalDecision,
@@ -13,6 +15,7 @@ import type {
   PendingApprovalConfirmation
 } from "../lib/types";
 import {
+  actionLabel,
   actionSummary,
   decisionDescription,
   decisionLabel,
@@ -104,17 +107,25 @@ export function ApprovalPanel({
             const tone = riskTone(approval.riskLevel);
             const isEditing = editingApprovalId === approval.id;
             const isConfirming = pendingConfirmation?.request.id === approval.id;
+            const protectedEntry = compact && approval.action.split(" ", 1)[0] === "request-secret";
             const isNativePending = pendingNativeApprovalIds.has(approval.id);
             const approvalReferences = approval.dataUsed.filter(isApprovalReference);
             const visibleDataUsed = approval.dataUsed.filter((item) => !isApprovalReference(item));
             return (
               <article
-                className={`approval-card approval-card--${tone}`}
+                className={`approval-card approval-card--${tone}${protectedEntry ? " approval-card--protected-entry" : ""}`}
                 key={approval.id}
                 data-risk={tone}
               >
                 <header className="approval-card__header">
-                  <span className="approval-card__summary">{actionSummary(approval)}</span>
+                  {protectedEntry ? <>
+                    <span className="protected-entry__icon" aria-hidden="true"><LockKey size={24} /></span>
+                    <div className="protected-entry__heading">
+                      <span className="protected-entry__eyebrow">Protected secret</span>
+                      <span className="approval-card__summary">{actionLabel(approval)}</span>
+                      <span className="protected-entry__provider">{serviceLabel(approval.service)}</span>
+                    </div>
+                  </> : <span className="approval-card__summary">{actionSummary(approval)}</span>}
                   {!compact ? <span className={`approval-risk approval-risk--${tone}`}>
                     {isHighRisk(approval.mode, approval.riskLevel) ? (
                       <ShieldWarning size={14} aria-hidden="true" />
@@ -242,6 +253,7 @@ export function ApprovalPanel({
                         {compact && decision === "once" ? "Approve" : decisionLabel(decision)}
                       </button>
                     ))}
+                    {protectedEntry ? <small className="protected-entry__scope">One request only</small> : null}
                   </div>
                 )}
               </article>
