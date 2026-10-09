@@ -1,6 +1,7 @@
 //! Managed Git checkouts and isolated build execution. Never a desktop shell.
 pub(crate) mod checkpoints;
 mod git;
+mod jobs;
 pub(super) mod process;
 #[cfg(test)]
 mod tests;
@@ -255,7 +256,26 @@ pub(crate) fn execute(
 ) -> Result<String, String> {
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let directory = directory(state, workspace, agent)?;
-    execute_with_request(&directory, &ticket, tool, arguments, request_id)
+    if tool == "repository-start" {
+        return jobs::start(
+            directory,
+            ticket,
+            state.command_jobs(workspace, agent)?,
+            arguments,
+        );
+    }
+    // Repository inspection and recovery must not depend on command history.
+    let jobs = (tool == "repository-run")
+        .then(|| state.command_jobs(workspace, agent))
+        .transpose()?;
+    execute_observed(
+        &directory,
+        &ticket,
+        tool,
+        arguments,
+        jobs.as_ref(),
+        request_id,
+    )
 }
 #[cfg(test)]
 fn execute_in(
@@ -277,6 +297,16 @@ fn execute_with_request(
     ticket: &OperationTicket,
     tool: &str,
     arguments: Value,
+    request_id: &str,
+) -> Result<String, String> {
+    execute_observed(directory, ticket, tool, arguments, None, request_id)
+}
+fn execute_observed(
+    directory: &Path,
+    ticket: &OperationTicket,
+    tool: &str,
+    arguments: Value,
+    jobs: Option<&Arc<super::command_jobs::ScopeJobs>>,
     request_id: &str,
 ) -> Result<String, String> {
     ticket.check()?;
@@ -384,6 +414,18 @@ fn execute_with_request(
             repo.last_command = Some(script.to_owned());
             repo.command_diff_id = None;
             save(directory, &repo)?;
+            let mut session = jobs
+                .map(|jobs| {
+                    jobs.start(
+                        ticket,
+                        Some(&repo.id),
+                        script,
+                        input.network.unwrap_or(false),
+                        timeout,
+                        false,
+                    )
+                })
+                .transpose()?;
             let (result, completed) = match process::native_run(
                 &root,
                 script,
@@ -391,6 +433,7 @@ fn execute_with_request(
                 timeout,
                 false,
                 ticket,
+                session.as_mut(),
             ) {
                 Ok(value) => value,
                 Err(error) => {

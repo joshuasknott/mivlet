@@ -15,6 +15,7 @@ import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-compu
 import { listRuntimeOutputs } from "../../runtime/domains/outputs";
 import type { RightPanelTab } from "./right-panel-state";
 import { NativeExecutionSetup } from "./NativeExecutionSetup";
+import { NativeCommandJobs } from "./NativeCommandJobs";
 import { MessageAttachments } from "../conversation/MessageAttachments";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import { subscribeOutputPinned } from "../../lib/output-revision-events";
@@ -181,6 +182,7 @@ export function WorkspaceLibrary({
         )}
       </header>
       <NativeExecutionSetup />
+      <NativeCommandJobs workspaceId={workspaceId} agents={agents} />
       <Suspense fallback={<p role="status">Loading repository…</p>}>
         <RepositoryFiles workspaceId={workspaceId} agents={agents} />
       </Suspense>

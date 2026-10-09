@@ -1,5 +1,5 @@
 import type { BackendTool } from "@mivlet/protocol";
-import { NATIVE_EXECUTION_POLICY } from "./workspace-tools";
+import { NATIVE_EXECUTION_POLICY, PERSISTENT_EXECUTION_POLICY } from "./workspace-tools";
 
 const id = {
   repositoryId: {
@@ -29,6 +29,13 @@ function tool(
   };
 }
 export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
+  "repository-start": tool(
+    "start",
+    PERSISTENT_EXECUTION_POLICY + "Use a fixed isolated repository snapshot; hold its lock until all descendants end.",
+    { ...id, command: text, network: { type: "boolean" }, timeoutSeconds: { type: "integer", minimum: 1, maximum: 86400 } },
+    ["repositoryId", "command", "network", "timeoutSeconds"],
+    "critical",
+  ),
   "repository-checkpoint-list": tool(
     "checkpoint-list",
     "List private-copy file checkpoints, request provenance and SHA-256 trees.",
@@ -101,7 +108,7 @@ export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
   ),
   "repository-run": tool(
     "run",
-    NATIVE_EXECUTION_POLICY + "Search/build/test copies; project packages. Actual exit/bounded output/immutable receipt; failures fail. No Computer Use grants.",
+    NATIVE_EXECUTION_POLICY + "Search/build/test copies; project packages. Actual exit/bounded output/immutable receipt; failures fail. Live logs: command-jobs/command-output. No Computer Use grants.",
     {
       ...id,
       command: text,
