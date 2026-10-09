@@ -37,9 +37,11 @@ renderer, native, other loopback and external destinations. A DOM load event is
 not treated as evidence of navigation: the first handshake can finish before
 the initial document load. The native HTTP
 adapter accepts only the exact bound host, GET, token path and current account,
-with bounded headers and no directory or query access. A signed-in native run is still required to verify WebView2
-remote-origin ACL behavior and teardown; protocol tests cover the adapter and
-official AppBridge peer, while the packaged run is the acceptance evidence.
+with bounded headers and no directory or query access. The signed-in Windows
+run verified rendering, teardown and the DOM, storage and navigation boundaries.
+The IPC response probes timed out and remain inconclusive; source-level ACL
+evidence is recorded below. This is native development evidence, not acceptance
+of a signed installer.
 Nested guest frames are currently rejected: WebView2's supported frame event
 does not cover recursive descendants, so Mivlet requires guest `frame-src
 'none'` and refuses negotiated `frameDomains` with an actionable error.
@@ -76,6 +78,13 @@ with the native host; renderer snapshots expose metadata needed for layout,
 not the HTML document. The transient host session is disposed when the result
 closes, becomes stale or the MCP connection ends. The native host remains the
 authority for serving bytes and all consequential actions.
+
+Resource normalization keeps ordinary resource/tool text at 64 KiB. Only a
+`ui://` resource with the MCP Apps HTML MIME profile can use the separate 5 MiB
+artifact bound. The host rejects truncated HTML and requires the returned URI
+to exactly match the approved resource; a different document in a multi-resource
+response cannot replace it. Docking pairs each registered URL with the session
+that loaded it before creating a replacement bridge.
 
 MCP App approvals use the exact native proposal fingerprint and one-time
 permit. The current native MCP authorization boundary rejects a resolution
@@ -140,8 +149,11 @@ Explicitly enable `get-time`, then invoke it from a conversation. The action
 only returns a timestamp. The connector-library verification has observed the
 official stdio server's `get-time` tool and
 `ui://get-time/mcp-app.html` resource through Mivlet's production MCP
-transport. That is production connector discovery evidence, not proof that a
-native iframe rendered successfully.
+transport. In the signed-in Windows acceptance run, that original example also
+rendered in the production conversation iframe. Reopening retained the original
+saved timestamp without a tool replay. Its button created a fresh concrete
+`get-time {}` approval; denial displayed the host denial, and a later native
+approval returned a new timestamp (`2026-10-08T23:18:13.016Z`).
 
 The separate nested package at
 `apps/hosted-runner/prototypes/opencode` is named
@@ -156,9 +168,37 @@ Evidence boundaries remain separate:
 - The Vitest SDK peer test is protocol/example evidence using in-memory peers.
 - The quickstart build and stdio discovery are official-example and production
   connector-path evidence.
-- Native resource registration, WebView CSP/navigation behavior, AppBridge UI
-  rendering, approval interaction and teardown/reopen require a signed-in
-  native Mivlet run and are unverified until that run is recorded.
+- Native resource registration, AppBridge rendering, one-use approval denial
+  and success, and close/reopen were observed in the signed-in Windows run.
+  Native docking and adversarial iframe isolation checks are recorded separately;
+  they must not be inferred from successful rendering.
+
+The compact Windows panel was also exercised with the official example. Moving
+the iframe recreates its SDK session, pairs registration with that new session,
+and requests fresh resource authority. It does not repeat the original tool.
+Pending app approvals follow the exact workspace/conversation/result/generation
+owner into the visible panel; closing its DOM target returns them to the normal
+conversation approval surface until teardown cancels them. The right panel owns
+the focus trap while docked. Native rechecks covered loading, approval, ready,
+denial and closing in the narrow window.
+
+A separate controlled HTML probe was temporarily served by the already-enabled
+local reference server, using normal resource approval. In the actual native
+iframe it could not read the parent document or local storage. The host rejected
+its renderer navigation request, and a direct frame navigation attempt retained
+the original document. Its read-only `runtime_status` and
+`plugin:window|is_visible` calls timed out, so these observations do not establish
+an explicit native IPC rejection response. The original official resource was
+restored and its SHA-256 verified after the probe.
+
+The pinned native source supplies the independent IPC authority evidence:
+Wry 0.55.1 obtains the WebView2 message source URI; Tauri 2.11.5 classifies it as
+local or remote and rejects remote custom/plugin commands without matching
+remote ACL authority before dispatch. Mivlet's only capability grants the local
+main window and has no remote URL grant. Tauri's own regression covers remote
+custom-command rejection. An injected `window.ipc` object therefore does not
+constitute native command authority. Keep this source evidence distinct from
+the inconclusive live response probes.
 
 Unsupported resources remain readable as ordinary MCP results. Live
 interoperability requires an authenticated MCP connection and a real

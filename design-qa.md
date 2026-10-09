@@ -1,6 +1,6 @@
 # Conversational UI visual verification
 
-final result: blocked
+final result: passed for the inspected native layouts
 
 Source visual truth: `output/conversation-upgrade/openui-design-reference.png`.
 Generated from the real signed-in native Mivlet screenshot
@@ -18,10 +18,38 @@ from saved provider results. The reference's illustrative statistics, drink
 icons and historical revision rows are not invented in the production response.
 Revision history retains progressive disclosure and native persistence.
 
-The final reference/implementation comparison is pending. Automated checks take
-priority at the user's request; native interaction is paused until they finish.
-Earlier native screenshots establish the functional baseline, not acceptance of
-the latest visual refinement.
+The reference and the implemented 1442 × 1026 native window were inspected
+together. `native-openui-refined-wide.png` shows the saved Tea/Afternoon reading
+controls beside the fourth output revision. The typography, semantic card colors,
+form hierarchy and reading width follow the reference using real saved content.
+The catalogue's table/chart remain vertically stacked, and the revision selector
+retains progressive disclosure instead of inventing the reference's sample rows.
+This is a design comparison, not a claim of pixel-for-pixel reproduction.
+
+At 763 × 1026, `native-openui-refined-narrow.png` and
+`native-output-refined-narrow.png` show bounded generated controls and the output
+drawer. `native-openui-refined-dark.png` covers the dark palette. Native inspection
+found a fit-content/inline-size containment interaction that collapsed generated
+responses in the narrow side chat. The explicit bounded-width fix is verified
+in the main conversation at both sizes and in the separate 763-pixel side-chat
+drawer. `native-openui-sidechat-final.png` shows the saved Tea selection and
+Afternoon reading field at readable width. Escape closes the drawer and restores
+visible keyboard focus to the workspace-panel control.
+
+The 30-row, six-column table was inspected in both sizes. The captures
+`native-large-table-refined-wide.png` and
+`native-large-table-refined-narrow.png` show its internal scrolling, sticky
+headers and accessible composer. Narrow approval previews were also inspected.
+The user subsequently selected dark appearance; that latest preference is retained.
+
+The official MCP example renders and its one-use action was denied and then
+approved through the actual native host. Its dock transition exposed a session/
+resource race and competing focus traps, both corrected. The final native recheck
+shows the original saved timestamp in the panel without a tool replay
+(`native-mcp-docked-ready.png`). Its exact resource/action approval stays in the
+owning drawer above the app (`native-mcp-docked-approval.png`); denial removes the
+proposal and leaves the saved result unchanged. Security probe and build evidence
+remain separate from this visual result.
 
 Required comparison evidence:
 

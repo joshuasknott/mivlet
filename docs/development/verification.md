@@ -145,12 +145,12 @@ ConversationPane and WorkspaceHistory styles out of the base stylesheet. The per
 summary reports that graph under `conversationUpgrade` and subtracts it from
 `commonJsCss`; the existing common and initial-entry ceilings therefore remain
 unchanged. The initial 2026-10-08 feature measurement was 672,598 raw / 202,723
-gzip, with caps of 688,982 raw / 210,915 gzip. Final integration measured 688,948
-raw / 207,943 gzip after deferring the CSV parser, grid and styles until a CSV
+gzip, with caps of 688,982 raw / 210,915 gzip. Final integration measured 688,961
+raw / 208,523 gzip after deferring the CSV parser, grid and styles until a CSV
 output opens, and loading browser branch helpers only when history is requested.
-Base CSS measured 175,919 raw, common JS/CSS 1,200,828 raw /
-342,940 gzip, and the startup entry 435,405 raw. The original common and feature
-ceilings were retained; common raw size has little remaining headroom. The manifest check rejects any
+Base CSS measured 175,633 raw, common JS/CSS 1,200,763 raw /
+342,977 gzip, and the startup entry 435,683 raw. The original common and feature
+ceilings were retained; both raw limits have very little remaining headroom. The manifest check rejects any
 feature chunk that becomes reachable through the entry's static imports. PDF assets
 remain independently classified and capped.
 
@@ -179,7 +179,7 @@ separate evidence from a signed-in native/provider run.
 | Branches | Edit an earlier user turn, regenerate an alternative, switch back, then restart. Original IDs/attribution and completed external-effect records must remain; switching must not invoke a provider or replay tools. |
 | Outputs | Open beside chat, save a direct edit, request a targeted agent revision, compare/restore, reopen, and export. A stale revision response must conflict rather than overwrite a newer edit. |
 | Context | Inspect the draft retrieval, exclude a source/memory/history, then compare the admitted native capture and actual request receipt. A sibling private conversation must never appear. |
-| MCP Apps | The SDK 1.7.5 lifecycle peer test covers initialize, host messages, approval-gated tool calls and teardown; the official quickstart has also been discovered through Mivlet's production connector path. The desktop MCP host/typecheck and right-panel docking tests cover generation-fenced panel tabs and explicit renegotiation after portal moves. Native WebView2 resource rendering, IPC containment, origin/navigation fencing, approval interaction and teardown require the signed-in acceptance run; protocol/example evidence must not be presented as native acceptance. |
+| MCP Apps | The SDK 1.7.5 lifecycle peer covers initialize, host messages, approval-gated tool calls and teardown. The unmodified official quickstart was discovered and rendered through the signed-in Windows production host, including denial, approval, docking and close/reopen without tool replay. A separate controlled native probe verified parent DOM, storage and navigation isolation. Read-only IPC response probes timed out; the pinned Wry/Tauri source establishes remote ACL rejection, which is distinct from a live response observation. |
 | Coordination | Follow owner and handoff context through approval, Stop and restart. Recovery must describe uncertain effects and require explicit continuation. |
 
 Inspect wide and narrow native windows, a large table, open output, long response
@@ -207,8 +207,8 @@ summary-cache regression tests also cover the production string-shaped message
 envelope, legacy object envelopes, and selected-branch isolation. Screenshots and
 the harmless export are under the ignored `output/conversation-upgrade/` directory.
 These are native development/provider observations, not installer or hosted
-deployment evidence. MCP sandbox acceptance and final gates must be recorded
-separately rather than inferred from these results.
+deployment evidence. MCP sandbox acceptance and final gates are recorded
+separately below rather than inferred from these results.
 
 The same native run exercised interruption recovery for the harmless official
 `get-time` example. Restart retained the interrupted attempt; continuation stayed
@@ -243,13 +243,13 @@ selection references. These native tests do not establish a live provider-create
 Office document journey. Keep that evidence distinct from the Markdown output
 journey above.
 
-The final October 8 automated integration run (`final-full-check-v26.log` under
+The final October 9 automated integration run (`final-full-check-v33.log` under
 the ignored evidence directory) passed `pnpm check`: quality/dead-code/cycle
-checks, production builds, 1,410 desktop tests, 496 connector tests, 342 knowledge
+checks, production builds, 1,420 desktop tests, 500 connector tests, 342 knowledge
 tests, 135 broker tests, 83 hosted-runner tests, 21 account tests, the Windows
 embedded-host fixtures (56 passed, 3 platform/capability skips), CI/release tests,
 bundle/runtime budgets, native checking and dependency audits. The separate
-native pass recorded 904 passed and 16 explicitly ignored opt-in tests, plus
+native pass recorded 906 passed and 16 explicitly ignored opt-in tests, plus
 `cargo fmt --check` and all-target/all-feature Clippy with warnings denied.
 Two pnpm advisories are source-verified local patches; Cargo reports two reviewed
 notification-only quick-xml findings expiring October 31 and nine informational
@@ -258,4 +258,20 @@ maintenance/unsoundness warnings. These accepted findings remain visible.
 The image-led refinement retains the catalogue's real data and established app
 assets. Its final native visual comparison is tracked in `design-qa.md`. Neither
 that comparison nor native MCP iframe acceptance is inferred from the automated
-gate; the remaining native observations must be recorded explicitly.
+gate. Native docking retained the original official timestamp; app approvals
+followed the exact owner into the visible drawer. A controlled sandbox probe
+could not read the parent DOM or local storage and could not navigate to the
+renderer through either host requests or direct frame navigation. Its two
+read-only native IPC calls timed out, so they remain inconclusive. Pinned
+Wry/Tauri source review independently established the remote ACL dispatch
+boundary; see `docs/architecture/mcp-apps.md` for that evidence and supported
+capabilities. The unmodified official resource was restored after the probe.
+
+The existing Gmail connection did not advertise an MCP App resource. It is
+therefore evidence for ordinary connector fallback, not third-party MCP App
+interoperability. Windows is the supported interactive host; nested app frames,
+external navigation, sampling and ungranted browser permissions fail closed.
+Changing an MCP action requires denial and a fresh proposal because native
+modification of that proposal is not supported. Office package regression
+coverage and the live Markdown journey remain distinct. No signed installer,
+hosted deployment or additional provider route acceptance is implied.
