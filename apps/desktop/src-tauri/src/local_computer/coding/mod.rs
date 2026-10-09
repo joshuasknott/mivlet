@@ -1,5 +1,6 @@
 //! Managed Git checkouts and isolated build execution. Never a desktop shell.
 pub(crate) mod checkpoints;
+pub(crate) mod copy_manager;
 mod git;
 mod jobs;
 pub(super) mod process;
@@ -53,6 +54,7 @@ fn directory(state: &LocalComputerState, workspace: &str, agent: &str) -> Result
         .map_err(|_| "Repository storage failed validation.".into())
 }
 fn save(directory: &Path, repo: &Repository) -> Result<(), String> {
+    copy_manager::save_copy(directory, repo)?;
     let bytes = serde_json::to_vec(repo).map_err(|_| "Repository state could not be saved.")?;
     if bytes.len() > STATE_LIMIT {
         return Err("Repository state exceeds its storage limit.".into());
@@ -213,6 +215,7 @@ pub async fn coding_repository_attach(
         }
         let repository = git::attach(&directory, selected.path(), &ticket)?;
         ticket.commit(|| {
+            copy_manager::register(&directory, &repository, &workspace_id, &agent_id, selected.path())?;
             save(&directory, &repository)?;
             Ok(Some(repository))
         })

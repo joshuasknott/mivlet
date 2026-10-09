@@ -1,6 +1,37 @@
 use super::{checkout, process, save, Input, OperationTicket, Repository};
 use serde_json::{json, Value};
-use std::{fs, path::Path, process::Command};
+use std::{ffi::OsString, fs, path::Path, process::Command};
+
+// Keep canonical paths for native validation. Git's clone destination parser
+// rejects the Windows verbatim prefix; Git handles long paths itself with the
+// process-local core.longpaths setting. Preserve UTF-16 and UNC identity.
+fn git_path(path: &Path) -> OsString {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        let units: Vec<_> = path.as_os_str().encode_wide().collect();
+        let verbatim: Vec<_> = r"\\?\".encode_utf16().collect();
+        let unc: Vec<_> = r"\\?\UNC\".encode_utf16().collect();
+        let mut converted = if units.starts_with(&unc) {
+            let mut value = vec![b'/' as u16, b'/' as u16];
+            value.extend_from_slice(&units[unc.len()..]);
+            value
+        } else {
+            units
+                .strip_prefix(verbatim.as_slice())
+                .unwrap_or(&units)
+                .to_vec()
+        };
+        for unit in &mut converted {
+            if *unit == b'\\' as u16 {
+                *unit = b'/' as u16;
+            }
+        }
+        OsString::from_wide(&converted)
+    }
+    #[cfg(not(windows))]
+    path.as_os_str().to_os_string()
+}
 
 fn git(cwd: &Path) -> Result<Command, String> {
     let mut cmd = process::command("git", cwd)?;
@@ -11,6 +42,8 @@ fn git(cwd: &Path) -> Result<Command, String> {
         "core.fsmonitor=false",
         "-c",
         "core.autocrlf=false",
+        "-c",
+        "core.longpaths=true",
         "-c",
         "protocol.allow=never",
         "-c",
@@ -24,9 +57,9 @@ pub(super) fn repo_git(directory: &Path, repo: &Repository) -> Result<Command, S
         .map_err(|_| "Git metadata failed validation.")?;
     let mut cmd = git(&storage)?;
     cmd.arg("--git-dir")
-        .arg(storage.join("git"))
+        .arg(git_path(&storage.join("git")))
         .arg("--work-tree")
-        .arg(checkout(directory, repo)?);
+        .arg(git_path(&checkout(directory, repo)?));
     Ok(cmd)
 }
 pub(super) fn run(
@@ -76,13 +109,13 @@ pub(super) fn attach(
         .map_err(|_| "Choose a regular local Git repository.")?;
     let mut head = git(directory)?;
     head.arg("-C")
-        .arg(&source)
+        .arg(git_path(&source))
         .args(["rev-parse", "--verify", "HEAD"]);
     let base = process::checked(head, ticket)?;
     let mut branch = git(directory)?;
     branch
         .arg("-C")
-        .arg(&source)
+        .arg(git_path(&source))
         .args(["symbolic-ref", "--short", "HEAD"]);
     let base_branch = process::checked(branch, ticket)
         .map_err(|_| "Choose a repository on a named branch with at least one commit.")?;
@@ -92,7 +125,7 @@ pub(super) fn attach(
     let mut origin = git(directory)?;
     origin
         .arg("-C")
-        .arg(&source)
+        .arg(git_path(&source))
         .args(["config", "--get", "remote.origin.url"]);
     let remote = process::checked(origin, ticket)
         .ok()
@@ -114,14 +147,8 @@ pub(super) fn attach(
             "--no-checkout",
             "--",
         ])
-        .arg(
-            source
-                .to_string_lossy()
-                .strip_prefix("\\\\?\\")
-                .unwrap_or(&source.to_string_lossy())
-                .replace('\\', "/"),
-        )
-        .arg(&root);
+        .arg(git_path(&source))
+        .arg(git_path(&root));
     process::checked(clone, ticket)?;
     // A local source may itself borrow objects from another checkout. Reject
     // that coupling instead of retaining host paths in this managed copy.
@@ -167,11 +194,12 @@ pub(super) fn tree(
     let index = index_dir.path().join("index");
     for args in [&["read-tree", "HEAD"][..], &["add", "-A", "--", ":/"][..]] {
         let mut cmd = repo_git(directory, repo)?;
-        cmd.env("GIT_INDEX_FILE", &index).args(args);
+        cmd.env("GIT_INDEX_FILE", git_path(&index)).args(args);
         process::checked(cmd, ticket)?;
     }
     let mut cmd = repo_git(directory, repo)?;
-    cmd.env("GIT_INDEX_FILE", &index).arg("write-tree");
+    cmd.env("GIT_INDEX_FILE", git_path(&index))
+        .arg("write-tree");
     process::checked(cmd, ticket)
 }
 pub(super) fn changes(
@@ -455,6 +483,29 @@ pub(super) fn publish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(windows)]
+    #[test]
+    fn canonical_windows_paths_are_adapted_for_git_without_losing_identity() {
+        assert_eq!(
+            git_path(Path::new(r"\\?\C:\copy\checkout")),
+            OsString::from("C:/copy/checkout")
+        );
+        assert_eq!(
+            git_path(Path::new(r"\\?\UNC\server\share\copy")),
+            OsString::from("//server/share/copy")
+        );
+        use std::os::windows::ffi::{OsStrExt, OsStringExt};
+        let original: Vec<_> = r"\\?\C:\copy\".encode_utf16().chain([0xd800]).collect();
+        let path = OsString::from_wide(&original);
+        let converted: Vec<_> = git_path(Path::new(&path)).encode_wide().collect();
+        assert_eq!(
+            converted,
+            "C:/copy/"
+                .encode_utf16()
+                .chain([0xd800])
+                .collect::<Vec<_>>()
+        );
+    }
     #[test]
     fn publication_destinations_and_recovery_fail_closed() {
         assert_eq!(

@@ -11,8 +11,75 @@ actions through Mivlet's existing approval system.
 The native service copies the selected repository's committed HEAD into private
 workspace/agent storage on a new `mivlet/<id>` branch. Uncommitted source work is
 not included. The source repository, its index and its branches are untouched.
-Each agent has one selected repository; older copies remain on disk. This first
-version has no copy-management browser or automatic garbage collection.
+Each agent has one selected repository; older copies remain on disk. Library →
+Repository → Retained copies inventories copies across this account, including
+ownership, source repository, account-relative managed path, branch/HEAD, current
+dirty state, logical file bytes and linked Work. Choose the owning agent in the
+Repository selector to manage its copies. Copies left by removed agents are
+visible but protected. Use this copy restores a retained
+selection through the same native repository service; no source files are moved.
+Inventory does not claim filesystem allocation, compression or deduplication.
+
+Cleanup is deliberate; there is no automatic garbage collection. Review cleanup
+creates a native single-use preview valid for two minutes, bound to the account,
+workspace, agent, computer generation, copy identity and a hash of the exact tree.
+The user must explicitly confirm removal. Native code consumes the token and
+rechecks under the existing repository lock and canonical Work store connection.
+Dirty, untracked **and ignored** files protect the copy regardless of Git's
+`status.showUntrackedFiles` configuration. Unfinished Work, active repository
+operations, active or recoverable provider attempts without exact copy attribution,
+unknown ownership/metadata, interrupted command imports, publication
+recovery, published copies and commits beyond the imported HEAD also protect it.
+Git calls use process-local `core.longpaths=true`; no global Git settings change.
+The Git adapter converts canonical Windows verbatim paths to Git-compatible
+drive/UNC arguments without losing UTF-16 identity; native path validation
+continues to use canonical paths.
+Links, Windows reparse points and paths outside the managed scope fail closed.
+
+Per-copy `repository.json` and `ownership.json` records retain the native state;
+the existing top-level record remains the canonical selected repository. The
+source's canonical path stays native. A currently selected legacy copy can be
+registered from its verified scope; older unregistered copies are shown and
+protected instead of guessing ownership. Cleanup records an intent outside the
+copy, renames it to `deleting-<id>`, and removes only that managed tree. Crashes,
+Stop or file locks leave a discoverable cleanup receipt; a fresh explicit preview
+is required to retry. Cleanup never resumes automatically after restart.
+
+This baseline has no retained-copy checkpoint status service or detached-command
+supervisor. The inventory labels those limits; unknown per-copy metadata protects
+cleanup. Work records do not carry exact repository-copy IDs, so unfinished Work
+protects all of that agent's copies. Integrating checkpoint, PR or detached-job
+services must replace these conservative guards with their canonical status
+evidence under this same lock; do not remove guards based on missing evidence.
+Exact cleanup inspection is limited to 200,000 entries and 2 GiB of file bytes;
+larger copies remain protected. Inventory measures metadata without hashing file
+contents. No SQL migration, alternative Work queue or model-facing deletion tool
+is introduced.
+
+Read-only inventory and preview release the store connection before filesystem
+inspection, so browsing retained copies does not stall conversation persistence.
+Deletion retains the canonical connection through its final checks and cleanup.
+After entering cleanup, the renamed tree is hashed again before any content is
+removed. Conflicting retained and cleanup paths protect both copies.
+
+The behavior was informed by T3 Code at
+`a4c9494b0e3606775cc5fc929fc138399288bd43` (storage cleanup, Work settlement and
+worktree settings), plus [Windows long paths #14917](https://github.com/pingdotgg/t3code/pull/14917),
+[terminal Work states #15150](https://github.com/pingdotgg/t3code/pull/15150),
+[squash-merge evidence #14847](https://github.com/pingdotgg/t3code/pull/14847), and
+[hidden untracked files #15834](https://github.com/pingdotgg/t3code/pull/15834).
+The implementation uses Mivlet's native authority and independent Rust/React
+code; no T3 runtime, source, assets or product copy is transplanted.
+
+Retained-copy native acceptance uses disposable Git repositories and the pinned
+Windows executor. Run `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+native_copy_lifecycle_acceptance -- --ignored --nocapture --test-threads=1` after
+preparing the bundled runtime and native execution setup. It verifies imported
+command changes, dirty-copy protection, deliberate single-use cleanup, replay
+rejection and preservation of the source. This does not establish native UI,
+provider or installed-account acceptance. An isolated app data/WebView profile
+still shares the Windows Clerk session credential; authenticated app acceptance
+requires an isolated Windows test account, not merely a new portable profile.
 
 Commands require Windows x64 and native execution setup in Library. Git is
 required for attachment and review. Node 22.23.3/npm and Python 3.13.16/pip
