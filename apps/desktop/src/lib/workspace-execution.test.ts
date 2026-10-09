@@ -12,9 +12,13 @@ import {
 } from "./workspace-execution";
 import { providerModelOptions } from "./provider-models";
 
-const reads = vi.hoisted(() => ({ load: vi.fn(async () => null) }));
+const reads = vi.hoisted(() => ({
+  load: vi.fn(async () => null),
+  loadPage: vi.fn(async (_threadId: string, _request: { limit?: number; beforeSequence?: number } = {}) => null as any),
+}));
 vi.mock("../hooks/useDurableConversation", () => ({
   loadDesktopConversation: reads.load,
+  loadDesktopConversationPage: reads.loadPage,
 }));
 
 const fixtureWork = (
@@ -202,6 +206,17 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     service.admit(agents, models, [provider], "trusted-scope");
     expect(service.getSnapshot().sessions.find(session => session.work.id === "child")?.attachments).toEqual([attachment]);
     expect(service.getSnapshot().sessions.find(session => session.work.id === "other")?.attachments).toEqual([]);
+    await service.dispose();
+  });
+  it("sends an edited request with its durable branch parent", async () => {
+    const { service, command } = fixture([]);
+    await service.refresh();
+    await service.submit("ordinary", "a", "Updated request", false, [], undefined, "message-original");
+    expect(command).toHaveBeenCalledWith("fixture", expect.objectContaining({
+      action: "start-work",
+      conversationId: "ordinary",
+      parentMessageId: "message-original",
+    }));
     await service.dispose();
   });
   it("serializes the same agent across efforts while other participants work independently", async () => {
@@ -480,16 +495,206 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
   it("shares one history read between duplicate views without starting work", async () => {
     const { service, command } = fixture([]);
     reads.load.mockClear();
+    reads.loadPage.mockClear();
     await Promise.all([
       service.loadHistory("room"),
       service.loadHistory("room"),
     ]);
     await service.loadHistory("room");
-    expect(reads.load).toHaveBeenCalledTimes(1);
+    expect(reads.loadPage).toHaveBeenCalledTimes(1);
     expect(command).not.toHaveBeenCalled();
     expect(service.getSnapshot().sessions).toEqual([]);
     service.dispose();
   });
+  it("merges an older history page by message id without replacing the current tail", async () => {
+    const { service } = fixture([]);
+    const view = (id: string, sequence: number) => ({
+      message: { id, threadId: "room", sequence },
+      currentRevision: { threadId: "room" },
+    });
+    const thread = {
+      id: "room",
+      messageHead: { lastSequence: 3, lastMessageId: "m3" },
+    };
+    reads.loadPage.mockImplementation(async (_id: string, request: { limit?: number; beforeSequence?: number } = {}) =>
+      request.beforeSequence
+        ? { thread: { id: "room", messageHead: { lastSequence: 2, lastMessageId: "m2" } }, messages: [view("m1", 1), view("m2", 2)] as never[], hasOlderMessages: false }
+        : { thread, messages: [view("m3", 3)] as never[], olderCursor: "3", hasOlderMessages: true },
+    );
+    await service.loadHistory("room");
+    expect(service.getSnapshot().histories.room?.messages.map((item) => item.message.id)).toEqual(["m3"]);
+    await service.loadOlderHistory("room");
+    expect(service.getSnapshot().histories.room?.messages.map((item) => item.message.id)).toEqual(["m1", "m2", "m3"]);
+    expect(service.getSnapshot().histories.room?.hasOlderMessages).toBe(false);
+    expect(service.getSnapshot().histories.room?.thread.messageHead.lastMessageId).toBe("m3");
+    service.dispose();
+  });
+  it("replaces stale branch-head metadata when refreshing a conversation tail", async () => {
+    const { service } = fixture([]);
+    const view = (id: string, sequence: number) => ({
+      message: { id, threadId: "room", sequence },
+      currentRevision: { threadId: "room" },
+    });
+    const thread = {
+      id: "room",
+      messageHead: { lastSequence: 2, lastMessageId: "m2" },
+    };
+    reads.loadPage.mockImplementationOnce(async () => ({
+      thread,
+      messages: [view("m1", 1)] as never[],
+      branchHeads: ["old-head"],
+      olderCursor: "1",
+      hasOlderMessages: true,
+    }));
+    reads.loadPage.mockImplementationOnce(async () => ({
+      thread: { ...thread, messageHead: { lastSequence: 2, lastMessageId: "m2" } },
+      messages: [view("m2", 2)] as never[],
+      branchHeads: ["new-head"],
+      olderCursor: "1",
+      hasOlderMessages: true,
+    }));
+
+    await service.loadHistory("room");
+    await service.loadHistory("room", true);
+
+    expect(service.getSnapshot().histories.room?.branchHeads).toEqual(["new-head"]);
+    expect(service.getSnapshot().histories.room?.messages.map((item) => item.message.id)).toEqual([
+      "m1",
+      "m2",
+    ]);
+    service.dispose();
+  });
+  it("preserves a completed older range when a refreshed bounded tail reports older rows", async () => {
+    const { service } = fixture([]);
+    const view = (id: string, sequence: number) => ({
+      message: { id, threadId: "room", sequence },
+      currentRevision: { threadId: "room" },
+    });
+    const allMessages = Array.from({ length: 100 }, (_, index) =>
+      view(`m${index + 1}`, index + 1),
+    );
+    const thread = {
+      id: "room",
+      messageHead: { lastSequence: 100, lastMessageId: "m100" },
+    };
+    reads.loadPage.mockImplementationOnce(async () => ({
+      thread,
+      messages: allMessages as never[],
+      hasOlderMessages: false,
+    }));
+    reads.loadPage.mockImplementationOnce(async () => ({
+      thread,
+      messages: allMessages.slice(20) as never[],
+      olderCursor: "20",
+      hasOlderMessages: true,
+    }));
+
+    await service.loadHistory("room");
+    await service.loadHistory("room", true);
+
+    const history = service.getSnapshot().histories.room;
+    expect(history?.messages).toHaveLength(100);
+    expect(history?.hasOlderMessages).toBe(false);
+    expect(history?.olderCursor).toBeUndefined();
+    service.dispose();
+  });
+  it("keeps refreshed branch-head metadata when an older page resolves afterward", async () => {
+    const { service } = fixture([]);
+    const view = (id: string, sequence: number) => ({
+      message: { id, threadId: "room", sequence },
+      currentRevision: { threadId: "room" },
+    });
+    const thread = {
+      id: "room",
+      messageHead: { lastSequence: 3, lastMessageId: "m3" },
+    };
+    reads.loadPage.mockImplementationOnce(async () => ({
+      thread,
+      messages: [view("m3", 3)] as never[],
+      branchHeads: ["initial-head"],
+      olderCursor: "3",
+      hasOlderMessages: true,
+    }));
+    await service.loadHistory("room");
+
+    let resolveOlder!: (value: unknown) => void;
+    reads.loadPage.mockImplementationOnce(
+      () => new Promise((resolve) => { resolveOlder = resolve; }),
+    );
+    const olderPending = service.loadOlderHistory("room");
+    reads.loadPage.mockImplementationOnce(async () => ({
+      thread: { ...thread, messageHead: { lastSequence: 4, lastMessageId: "m4" } },
+      messages: [view("m4", 4)] as never[],
+      branchHeads: ["fresh-head"],
+      olderCursor: "3",
+      hasOlderMessages: true,
+    }));
+    await service.loadHistory("room", true);
+
+    resolveOlder({
+      thread: { id: "room", messageHead: { lastSequence: 2, lastMessageId: "m2" } },
+      messages: [view("m1", 1), view("m2", 2)] as never[],
+      branchHeads: ["stale-head"],
+      hasOlderMessages: false,
+    });
+    await expect(olderPending).resolves.toBe(true);
+    expect(service.getSnapshot().histories.room?.branchHeads).toEqual(["fresh-head"]);
+    service.dispose();
+  });
+  it("rejects an older page from another conversation scope", async () => {
+    const { service } = fixture([]);
+    const view = (id: string, sequence: number) => ({
+      message: { id, threadId: "room", sequence },
+      currentRevision: { threadId: "room" },
+    });
+    const thread = { id: "room", messageHead: { lastSequence: 2, lastMessageId: "m2" } };
+    reads.loadPage.mockResolvedValueOnce({
+      thread,
+      messages: [view("m2", 2)] as never[],
+      olderCursor: "2",
+      hasOlderMessages: true,
+    });
+    await service.loadHistory("room");
+    reads.loadPage.mockResolvedValueOnce({
+      thread: { id: "other", messageHead: { lastSequence: 1 } },
+      messages: [],
+      hasOlderMessages: false,
+    });
+    await expect(service.loadOlderHistory("room")).rejects.toThrow(
+      "Conversation history scope mismatch.",
+    );
+    service.dispose();
+  });
+
+  it("drops an older page that resolves after the execution owner is disposed", async () => {
+    const { service } = fixture([]);
+    const view = (id: string, sequence: number) => ({
+      message: { id, threadId: "room", sequence },
+      currentRevision: { threadId: "room" },
+    });
+    const thread = { id: "room", messageHead: { lastSequence: 2, lastMessageId: "m2" } };
+    reads.loadPage.mockResolvedValueOnce({
+      thread,
+      messages: [view("m2", 2)] as never[],
+      olderCursor: "2",
+      hasOlderMessages: true,
+    });
+    await service.loadHistory("room");
+    let resolvePage!: (value: unknown) => void;
+    reads.loadPage.mockImplementationOnce(
+      () => new Promise((resolve) => { resolvePage = resolve; }),
+    );
+    const pending = service.loadOlderHistory("room");
+    await service.dispose();
+    resolvePage({
+      thread,
+      messages: [view("m1", 1)] as never[],
+      hasOlderMessages: false,
+    });
+    await expect(pending).resolves.toBe(false);
+    expect(service.getSnapshot().histories.room?.messages).toHaveLength(1);
+  });
+
   it("caps queued work by the recipient's current permissions", async () => {
     const { service } = fixture([fixtureWork("a", "a", { permissionMode: "full-access" })]);
     await service.refresh();

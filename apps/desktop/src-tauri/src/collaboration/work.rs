@@ -1,5 +1,5 @@
 use super::*;
-use crate::store::repos::{execution_attempt, message};
+use crate::store::repos::{execution_attempt, message, thread};
 use sha2::{Digest, Sha256};
 
 fn permission_mode(agent: &MivletAgentProfile) -> &'static str {
@@ -47,7 +47,31 @@ pub(super) fn start(
     origin: Option<&str>,
     attachments: Option<&[WorkAttachment]>,
 ) -> Result<()> {
-    start_for_recipients(
+    start_with_parent(
+        ctx,
+        key,
+        room_id,
+        agent_id,
+        prompt,
+        discussion,
+        origin,
+        None,
+        attachments,
+    )
+}
+
+pub(super) fn start_with_parent(
+    ctx: &Context<'_>,
+    key: String,
+    room_id: String,
+    agent_id: String,
+    prompt: String,
+    discussion: bool,
+    origin: Option<&str>,
+    parent_message_id: Option<&str>,
+    attachments: Option<&[WorkAttachment]>,
+) -> Result<()> {
+    start_for_recipients_with_parent(
         ctx,
         key,
         room_id,
@@ -56,6 +80,7 @@ pub(super) fn start(
         prompt,
         discussion,
         origin,
+        parent_message_id,
         attachments,
     )
 }
@@ -63,6 +88,7 @@ pub(super) fn start(
 /// Admit explicit workspace recipients into one durable effort. Recipients
 /// remain outside the conversation membership; each receives only the frozen
 /// originating conversation snapshot.
+#[cfg(test)]
 pub(super) fn start_for_recipients(
     ctx: &Context<'_>,
     key: String,
@@ -74,12 +100,50 @@ pub(super) fn start_for_recipients(
     origin: Option<&str>,
     attachments: Option<&[WorkAttachment]>,
 ) -> Result<()> {
+    start_for_recipients_with_parent(
+        ctx,
+        key,
+        room_id,
+        recipient_ids,
+        explicit_recipients,
+        prompt,
+        discussion,
+        origin,
+        None,
+        attachments,
+    )
+}
+
+pub(super) fn start_for_recipients_with_parent(
+    ctx: &Context<'_>,
+    key: String,
+    room_id: String,
+    recipient_ids: Vec<String>,
+    explicit_recipients: bool,
+    prompt: String,
+    discussion: bool,
+    origin: Option<&str>,
+    parent_message_id: Option<&str>,
+    attachments: Option<&[WorkAttachment]>,
+) -> Result<()> {
     id(&key)?;
     let prompt = bounded(&prompt, 32_000, "Message")?;
     if recipient_ids.is_empty() || recipient_ids.len() > 8 {
         return Err(invalid("Choose one to eight workspace recipients."));
     }
     let mut seen = HashSet::new();
+    if let Some(parent_message_id) = parent_message_id {
+        id(parent_message_id)?;
+        let parent = message::list(ctx.conn, ctx.store, &ctx.scope.data, &room_id)?
+            .into_iter()
+            .find(|candidate| candidate.id == parent_message_id)
+            .ok_or_else(|| invalid("The edited conversation message is unavailable."))?;
+        if parent.kind != "user" || parent.current_revision_state == "redacted" {
+            return Err(invalid(
+                "Only an available user message can start a conversation branch.",
+            ));
+        }
+    }
     for agent_id in &recipient_ids {
         id(agent_id)?;
         if !seen.insert(agent_id) {
@@ -123,6 +187,7 @@ pub(super) fn start_for_recipients(
             && existing.conversation_id == room_id
             && existing.agent_id == recipient_ids[0]
             && existing.user_request == prompt
+            && existing.parent_message_id.as_deref() == parent_message_id
             && recipients_match
             && recipients_present
         {
@@ -139,7 +204,20 @@ pub(super) fn start_for_recipients(
         ));
     }
     let room = ctx.room(&room_id)?;
-    let mut work = new_work(
+    if parent_message_id.is_some()
+        && ctx.all_work()?.iter().any(|item| {
+            item.conversation_id == room_id
+                && (item.status.active()
+                    || (!item.run_ids.is_empty()
+                        && matches!(
+                            item.status,
+                            WorkStatus::Blocked | WorkStatus::Failed | WorkStatus::Cancelled
+                        )))
+        })
+    {
+        return Err(invalid("Review and reconcile interrupted or failed work before editing this conversation. Stop or finish active work first; earlier external actions cannot be undone by branching."));
+    }
+    let mut work = new_work_with_parent(
         ctx,
         key.clone(),
         &room,
@@ -149,6 +227,7 @@ pub(super) fn start_for_recipients(
         origin,
         attachments,
         explicit_recipients,
+        parent_message_id,
     )?;
     if discussion {
         work.prompt = format!("{}\n\nThe user requested a wider discussion. Ask relevant participants for distinct contributions, compare their answers, and report agreement or remaining disagreement. Do not make everyone reply without a reason.", work.prompt);
@@ -223,6 +302,32 @@ fn new_work(
     attachments: Option<&[WorkAttachment]>,
     workspace_recipient: bool,
 ) -> Result<Work> {
+    new_work_with_parent(
+        ctx,
+        key,
+        room,
+        agent_id,
+        prompt,
+        user_request,
+        origin,
+        attachments,
+        workspace_recipient,
+        None,
+    )
+}
+
+fn new_work_with_parent(
+    ctx: &Context<'_>,
+    key: String,
+    room: &Conversation,
+    agent_id: String,
+    prompt: String,
+    user_request: String,
+    origin: Option<&str>,
+    attachments: Option<&[WorkAttachment]>,
+    workspace_recipient: bool,
+    parent_message_id: Option<&str>,
+) -> Result<Work> {
     if !workspace_recipient && !room.participants.iter().any(|p| p.agent_id == agent_id) {
         return Err(invalid(
             "This agent is not a participant in this conversation.",
@@ -245,7 +350,12 @@ fn new_work(
         .map(|project| ctx.project_team(project).map(|team| team.revision))
         .transpose()?
         .unwrap_or(0);
-    let mut captured_context = Some(super::context::capture(ctx, room, agent)?);
+    let mut captured_context = Some(super::context::capture_for_edit(
+        ctx,
+        room,
+        agent,
+        parent_message_id,
+    )?);
     if workspace_recipient && outside_project_team {
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
@@ -264,6 +374,7 @@ fn new_work(
         root_id: key,
         workspace_id: ctx.scope.data.workspace_id().into(),
         conversation_id: room.id.clone(),
+        parent_message_id: parent_message_id.map(Into::into),
         project_id: room.project_id.clone(),
         parent_id: None,
         agent_id,
@@ -549,9 +660,24 @@ pub(super) fn finish(
                 "Completion needs a completed provider attempt and its saved result.",
             ));
         }
+        let source_message = actual
+            .iter()
+            .filter(|message| {
+                message.run_id.as_deref() == Some(run)
+                    && message.kind == "assistant"
+                    && message.current_revision_state != "redacted"
+            })
+            .max_by_key(|message| message.sequence)
+            .ok_or_else(|| invalid("The completed attempt has no saved assistant source."))?;
+        let source_branch =
+            thread::get(ctx.conn, ctx.store, &ctx.scope.data, &item.conversation_id)?
+                .and_then(|thread| thread.selected_head_id.or(thread.last_message_id));
         item.outputs.push(Output {
             run_id: run.into(),
             conversation_id: item.conversation_id.clone(),
+            branch_id: source_branch,
+            message_id: Some(source_message.id.clone()),
+            source_revision_id: Some(source_message.current_revision_id.clone()),
             text: attempt.transcript.chars().take(6000).collect(),
             evidence: "agent-report".into(),
             created_at: ctx.time.into(),
@@ -810,6 +936,10 @@ pub(super) fn agent_command(
                     status: "current".into(),
                     conversation_id: item.conversation_id.clone(),
                     run_id: Some(run.into()),
+                    branch_id: None,
+                    message_id: None,
+                    source_revision_id: None,
+                    pinned: false,
                     source: source.clone(),
                     supersedes_id: supersedes_id.clone(),
                     created_at: ctx.time.into(),

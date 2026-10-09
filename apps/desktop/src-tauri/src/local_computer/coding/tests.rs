@@ -18,7 +18,7 @@ fn separate_repository_lock_instances_cannot_overlap() {
     assert!(second.try_lock().is_ok());
 }
 
-fn fixture() -> (
+pub(super) fn fixture() -> (
     tempfile::TempDir,
     PathBuf,
     Arc<ComputerAuthority>,

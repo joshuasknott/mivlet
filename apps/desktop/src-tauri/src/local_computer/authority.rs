@@ -269,13 +269,22 @@ impl ComputerAuthority {
         }
     }
 }
+/// Derive the existing execution identity for a verified owner's scope without
+/// loading authority, creating files or advancing its persisted generation.
+#[allow(dead_code)] // Used by the separately stacked account-copy inventory API.
+pub(crate) fn execution_scope_id(scope_directory: &Path) -> String {
+    execution_scope_path(&scope_directory.join("native-control.json"))
+}
+
+fn execution_scope_path(control_path: &Path) -> String {
+    use sha2::{Digest, Sha256};
+    hex::encode(Sha256::digest(control_path.to_string_lossy().as_bytes()))
+}
+
 impl OperationTicket {
     pub(crate) fn execution_binding(&self) -> mivlet_windows_executor::Binding {
-        use sha2::{Digest, Sha256};
         mivlet_windows_executor::Binding {
-            scope_id: hex::encode(Sha256::digest(
-                self.authority.path.to_string_lossy().as_bytes(),
-            )),
+            scope_id: execution_scope_path(&self.authority.path),
             generation: self.generation,
             operation_id: self.id,
         }

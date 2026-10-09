@@ -89,6 +89,11 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 45] = [
     "command-jobs",
     "command-output",
     "command-stop",
+    "repository-checkpoint-list",
+    "repository-checkpoint-capture",
+    "repository-checkpoint-preview",
+    "repository-checkpoint-restore",
+    "repository-checkpoint-delete",
     "repository-recover",
     "repository-status",
     "repository-read",
@@ -294,6 +299,13 @@ fn validate_tool_name(tool: &str) -> Result<(), String> {
 
 pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
     match tool {
+        "repository-checkpoint-list" | "repository-checkpoint-preview" => {
+            Some(("read-only", "low"))
+        }
+        "repository-checkpoint-capture" => Some(("full-access", "high")),
+        "repository-checkpoint-restore" | "repository-checkpoint-delete" => {
+            Some(("full-access", "critical"))
+        }
         "repository-status" | "repository-read" | "command-jobs" | "command-output" => {
             Some(("read-only", "low"))
         }
@@ -1473,6 +1485,7 @@ async fn execute_native_tool(
             .ok_or("Code tools require a saved agent.")?;
         let computers = local_computers.inner().clone();
         let operation_tool = tool.clone();
+        let operation_request = request_id.clone();
         let result = tauri::async_runtime::spawn_blocking(move || {
             if operation_tool.starts_with("command-") {
                 crate::local_computer::command_jobs::execute(
@@ -1507,6 +1520,7 @@ async fn execute_native_tool(
                     computer_generation,
                     &operation_tool,
                     arguments,
+                    &operation_request,
                 )
             }
         })
@@ -2671,6 +2685,54 @@ mod connector_authority_tests {
                 "single-use {tool}"
             );
         }
+    }
+
+    #[test]
+    fn checkpoint_restore_permit_binds_every_hash_request_scope_and_is_single_use() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("checkpoint-permits.json");
+        let mut approved = request("repository-checkpoint-restore");
+        approved.arguments = json!({"repositoryId":"copy", "checkpointId":"saved", "expectedTree":"current", "expectedCheckpointTree":"checkpoint-tree", "expectedOutput":"output", "expectedHead":"head"});
+        approved.workspace_id = Some("workspace".into());
+        approved.agent_id = Some("agent".into());
+        approved.computer_generation = Some(7);
+        approved.approval.request.data_used =
+            approval_argument_previews(&approved.tool, &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved.approval.request.data_used.extend([
+            argument_digest(&approved.arguments).unwrap(),
+            "Computer workspace: workspace".into(),
+            "Computer agent: agent".into(),
+            "Computer generation: 7".into(),
+        ]);
+        persist_permit(&path, &approved);
+        for field in [
+            "repositoryId",
+            "checkpointId",
+            "expectedTree",
+            "expectedCheckpointTree",
+            "expectedOutput",
+            "expectedHead",
+        ] {
+            let original = approved.arguments[field].clone();
+            approved.arguments[field] = json!("substituted");
+            assert!(
+                verify_tool_authority(&path, &approved).is_err(),
+                "accepted substituted {field}"
+            );
+            approved.arguments[field] = original;
+        }
+        let id = approved.approval.request.id.clone();
+        approved.approval.request.id = "another-request".into();
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.approval.request.id = id;
+        approved.workspace_id = Some("another-workspace".into());
+        assert!(verify_tool_authority(&path, &approved).is_err());
+        approved.workspace_id = Some("workspace".into());
+        verify_tool_authority(&path, &approved).unwrap();
+        assert!(verify_tool_authority(&path, &approved).is_err());
     }
 
     fn decided_at_offset(seconds: i64) -> String {

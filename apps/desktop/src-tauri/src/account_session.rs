@@ -61,6 +61,19 @@ pub(crate) fn ensure_current() -> Result<(), String> {
     )
 }
 
+/// Validate the account binding while the native identity mutex is already
+/// held by a transaction-aware caller. This deliberately avoids reacquiring
+/// that mutex and is not a general renderer-facing authority check.
+pub(crate) fn ensure_current_with_identity_guard(
+    expected: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+) -> Result<(), String> {
+    check(
+        binding()?,
+        &expected.account_binding,
+        CLOSING.load(Ordering::Acquire),
+    )
+}
+
 pub(crate) struct AccountDispatchFence(crate::clerk_identity::NativeIdentityDispatch);
 impl AccountDispatchFence {
     pub(crate) fn capture() -> Result<Self, String> {

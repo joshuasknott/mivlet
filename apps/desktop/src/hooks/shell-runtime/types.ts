@@ -6,6 +6,7 @@ import type {
   ApprovalGrant,
   ApprovalModification,
   ApprovalRequest,
+  ApprovalResolutionRequest,
   BackendProvider,
   BackendVerifyResult,
   ConnectorAccountOption,
@@ -79,6 +80,7 @@ export interface ShellRuntime {
   approvalModificationDraft: ApprovalModificationDraft;
   pendingApprovalConfirmation: PendingApprovalConfirmation | null;
   approvalConfirmationText: string;
+  pendingNativeApprovalIds: ReadonlySet<string>;
   setApprovalModificationDraft: (draft: ApprovalModificationDraft) => void;
   setApprovalConfirmationText: (value: string) => void;
   requestApprovalDecision: (
@@ -86,6 +88,14 @@ export interface ShellRuntime {
     decision: ApprovalDecision,
     modification?: ApprovalModification
   ) => void;
+  /** Queue an MCP App request in the same visible approval panel and resolve
+   * only after native single-use authority has been recorded. */
+  requestMcpAppApproval: (preview: {
+    request: ApprovalRequest;
+    toolName: string;
+    arguments: Record<string, unknown>;
+    owner: { workspaceId: string; conversationId: string; resultId: string; generation: number };
+  }) => Promise<ApprovalResolutionRequest | null>;
   startApprovalModify: (approval: ApprovalRequest) => void;
   saveApprovalModify: (approval: ApprovalRequest) => void;
   confirmApprovalDecision: () => void;
@@ -101,6 +111,9 @@ export interface ShellRuntime {
   memoryStatus: string;
   toggleMemoryPin: (recordId: string) => void;
   forgetMemory: (recordId: string) => Promise<void>;
+  addChatMemory: (threadId: string, title: string, value: string) => Promise<void>;
+  approveMemory: (recordId: string) => Promise<void>;
+  refreshMemories: () => Promise<void>;
   correctMemory: (recordId: string, title: string, value: string, expectedUpdatedAt?: string) => Promise<void>;
   /** Soft-disable a single memory: excluded from retrieval/context/export, but stays in management views. */
   toggleMemoryRecordDisabled: (recordId: string) => Promise<void>;

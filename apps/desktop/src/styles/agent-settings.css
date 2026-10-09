@@ -27,7 +27,7 @@
 .agent-editor__notifications input::before { content: ""; display: block; width: 16px; height: 16px; border-radius: 50%; background: var(--ink-muted); }
 .agent-editor__notifications input:checked { background: var(--ink); border-color: var(--ink); }
 .agent-editor__notifications input:checked::before { transform: translateX(14px); background: var(--surface); }
-.agent-notifications { position: fixed; z-index: 90; bottom: 20px; right: 20px; display: grid; gap: 8px; width: min(380px, calc(100vw - 40px)); pointer-events: none; }
+.agent-notifications { position: fixed; z-index: 90; top: 56px; right: 20px; display: grid; gap: 8px; width: min(380px, calc(100vw - 40px)); max-height: calc(100dvh - 220px); overflow-y: auto; pointer-events: none; }
 .agent-notification { display: flex; align-items: center; gap: 10px; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 12px; color: var(--ink); background: var(--surface-raised); box-shadow: var(--shadow-2); pointer-events: auto; }
 .agent-notification > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .agent-notification button { background: transparent; border: 0; color: inherit; min-height: 36px; }

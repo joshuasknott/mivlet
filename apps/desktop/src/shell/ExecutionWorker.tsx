@@ -25,6 +25,8 @@ import {
   conversationToolsForModel,
 } from "../lib/computer-tools";
 import { COMPUTER_WORK_INSTRUCTIONS } from "../lib/computer-instructions";
+import { GENERATED_UI_INSTRUCTIONS } from "../lib/generated-interface";
+import { capturedFileExclusions } from "../lib/context-selection";
 import { builtinPluginInstructions } from "../lib/builtin-plugins";
 import { composerImageInputs } from "../lib/composer-images";
 import { modelsForProvider } from "../lib/provider-models";
@@ -305,6 +307,8 @@ export function ExecutionWorker({
               ]),
             ],
             excludePrivateMemory: Boolean(session.work.capturedContext) || room.kind === "group",
+            excludeDerivedSummaries: Boolean(session.work.capturedContext),
+            excludedKnowledgeSourceIds: capturedFileExclusions(session.work.capturedContext),
           },
         );
         if (!service.current(session)) return;
@@ -312,6 +316,7 @@ export function ExecutionWorker({
           agentExecutionInstructions(session.profile),
           session.work.capturedContext ? `Captured request context (${session.work.capturedContext.capturedAt}):\n${session.work.capturedContext.text}` : "",
           CONVERSATION_STYLE_INSTRUCTIONS,
+          GENERATED_UI_INSTRUCTIONS,
           tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
           tools.some(tool => tool.name === "local-browser-observe") ? "Owned browser: select sole window, list/observe exact origin, act once, verify. tabRefs 60s; input refs 30s/single-use. Blank: navigate only. Click fully visible buttons/HTTP links; scroll public center up/down <=600px. May submit/download/run handlers. No tab switching/forms/JS/file import. Unknown input: fresh request, never replay." : "",
           builtinPluginInstructions(
@@ -330,7 +335,10 @@ export function ExecutionWorker({
           buildAgentRequest({
             model: session.model.modelId,
             reasoningEffort: session.profile.reasoningEffort,
-            prompt: session.work.userRequest,
+            // userRequest is durable provenance for the root conversation.
+            // The provider must receive this assignment's prompt so a child
+            // cannot mistake the root request for a fresh delegation order.
+            prompt: session.work.prompt,
             images: images.images,
             instructions,
             tools,
@@ -349,6 +357,7 @@ export function ExecutionWorker({
               staged.attachments,
               Boolean(project),
             ),
+            parentMessageId: session.work.parentMessageId,
             afterAttemptQueued: async ({ attemptId, threadId }) => {
               if (
                 threadId !== session.work.conversationId ||

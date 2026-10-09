@@ -16,6 +16,7 @@ pub struct MessageRow {
     pub id: String,
     pub thread_id: String,
     pub sequence: i64,
+    pub parent_message_id: Option<String>,
     pub kind: String,
     pub run_id: Option<String>,
     pub detail: Value,
@@ -121,6 +122,80 @@ pub fn list(
     list_limited(tx, store, scope, thread_id, i64::MAX)
 }
 
+/// Return only the root-to-selected-head path for context assembly. Branch
+/// alternatives stay durable and inspectable, but a continuation never feeds
+/// an unselected branch back to the provider.
+pub fn list_selected(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+) -> Result<Vec<MessageRow>> {
+    let head: Option<String> = tx
+        .query_row(
+            "SELECT COALESCE(selected_head_id,last_message_id) FROM thread WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL",
+            rusqlite::params![scope.workspace_id(), thread_id],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()?
+        .flatten();
+    list_branch(tx, store, scope, thread_id, head.as_deref())
+}
+
+/// An explicit None means the root before the first message, not the selected head.
+pub fn list_branch(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+    head: Option<&str>,
+) -> Result<Vec<MessageRow>> {
+    let rows = list(tx, store, scope, thread_id)?;
+    let Some(head) = head else {
+        return Ok(Vec::new());
+    };
+    let mut current = head.to_string();
+    let by_id = rows
+        .iter()
+        .map(|row| (row.id.as_str(), row))
+        .collect::<std::collections::HashMap<_, _>>();
+    let mut selected = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    while seen.insert(current.clone()) {
+        let Some(row) = by_id.get(current.as_str()) else {
+            break;
+        };
+        selected.push((*row).clone());
+        let Some(parent) = row.parent_message_id.clone() else {
+            break;
+        };
+        current = parent;
+    }
+    selected.reverse();
+    Ok(selected)
+}
+
+pub fn edit_parent(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+    source: &str,
+) -> Result<Option<String>> {
+    let row = list(tx, store, scope, thread_id)?
+        .into_iter()
+        .find(|row| row.id == source)
+        .ok_or_else(|| {
+            StoreError::Invalid("The edited message is unavailable in this conversation.".into())
+        })?;
+    if row.kind != "user" || row.current_revision_state != "terminal" {
+        return Err(StoreError::Invalid(
+            "Only a saved user message can start an alternative.".into(),
+        ));
+    }
+    Ok(row.parent_message_id)
+}
+
 pub fn list_limited(
     tx: &Connection,
     store: &Store,
@@ -145,7 +220,7 @@ pub fn list_page(
             "Thread does not belong to this workspace.".into(),
         ));
     };
-    let mut s=tx.prepare("SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL ORDER BY m.seq LIMIT ?3 OFFSET ?4")?;
+    let mut s=tx.prepare("SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.parent_message_id,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL ORDER BY m.seq LIMIT ?3 OFFSET ?4")?;
     let rows = s.query_map(
         rusqlite::params![scope.workspace_id(), thread_id, limit.max(0), offset.max(0)],
         |r| {
@@ -156,24 +231,26 @@ pub fn list_page(
                 r.get::<_, String>(3)?,
                 r.get::<_, Option<String>>(4)?,
                 r.get::<_, String>(5)?,
-                r.get::<_, String>(6)?,
-                r.get::<_, i64>(7)?,
-                r.get::<_, String>(8)?,
+                r.get::<_, Option<String>>(6)?,
+                r.get::<_, String>(7)?,
+                r.get::<_, i64>(8)?,
                 r.get::<_, String>(9)?,
+                r.get::<_, String>(10)?,
                 crate::store::vault::Sealed {
-                    ciphertext: r.get(10)?,
-                    nonce: r.get(11)?,
+                    ciphertext: r.get(11)?,
+                    nonce: r.get(12)?,
                 },
             ))
         },
     )?;
     rows.map(|x| {
-        let (a, b, c, d, run_id, e, f, g, h, i, sealed) = x?;
+        let (a, b, c, d, run_id, e, parent, f, g, h, i, sealed) = x?;
         let content = open_json(store, &sealed, &raad(scope.workspace_id(), &f))?;
         Ok(MessageRow {
             id: a,
             thread_id: b,
             sequence: c,
+            parent_message_id: parent,
             kind: d,
             run_id,
             detail: serde_json::from_str(&e).unwrap_or(Value::Null),
@@ -186,6 +263,140 @@ pub fn list_page(
     })
     .collect()
 }
+
+/// Return the newest bounded window before an optional sequence cursor. The
+/// cursor is a durable sequence boundary rather than an offset, so appending
+/// a new message cannot shift an already visible older page.
+pub fn list_before(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+    limit: i64,
+    before_sequence: Option<i64>,
+) -> Result<Vec<MessageRow>> {
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM thread WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL)",
+        rusqlite::params![scope.workspace_id(), thread_id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Err(StoreError::Invalid(
+            "Thread does not belong to this workspace.".into(),
+        ));
+    }
+    let mut statement = tx.prepare(
+        "SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.parent_message_id,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL AND (?3 IS NULL OR m.seq < ?3) ORDER BY m.seq DESC LIMIT ?4",
+    )?;
+    let rows = statement.query_map(
+        rusqlite::params![
+            scope.workspace_id(),
+            thread_id,
+            before_sequence,
+            limit.max(1),
+        ],
+        |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, Option<String>>(6)?,
+                row.get::<_, String>(7)?,
+                row.get::<_, i64>(8)?,
+                row.get::<_, String>(9)?,
+                row.get::<_, String>(10)?,
+                crate::store::vault::Sealed {
+                    ciphertext: row.get(11)?,
+                    nonce: row.get(12)?,
+                },
+            ))
+        },
+    )?;
+    let mut decoded = rows
+        .map(|row| {
+            let (
+                id,
+                thread_id,
+                sequence,
+                kind,
+                run_id,
+                detail,
+                parent,
+                revision_id,
+                revision_number,
+                revision_state,
+                created_at,
+                sealed,
+            ) = row?;
+            let content = open_json(store, &sealed, &raad(scope.workspace_id(), &revision_id))?;
+            Ok(MessageRow {
+                id,
+                thread_id,
+                sequence,
+                parent_message_id: parent,
+                kind,
+                run_id,
+                detail: serde_json::from_str(&detail).unwrap_or(Value::Null),
+                current_revision_id: revision_id,
+                current_revision_number: revision_number,
+                current_revision_state: revision_state,
+                content,
+                created_at,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    decoded.reverse();
+    Ok(decoded)
+}
+
+/// Return bounded durable leaf IDs so a newest-page read can still expose
+/// alternatives whose content is outside the loaded message window.
+pub fn list_branch_heads(
+    tx: &Connection,
+    scope: &DataScope,
+    thread_id: &str,
+    limit: i64,
+) -> Result<Vec<String>> {
+    let exists: bool = tx.query_row(
+        "SELECT EXISTS(SELECT 1 FROM thread WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL)",
+        rusqlite::params![scope.workspace_id(), thread_id],
+        |row| row.get(0),
+    )?;
+    if !exists {
+        return Err(StoreError::Invalid(
+            "Thread does not belong to this workspace.".into(),
+        ));
+    }
+    let mut statement = tx.prepare(
+        r#"SELECT m.id
+           FROM message m
+           WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL
+             AND m.kind IN ('user','assistant')
+             AND NOT EXISTS (
+                 SELECT 1 FROM message child
+                 WHERE child.workspace_id=m.workspace_id AND child.thread_id=m.thread_id
+                   AND child.deleted_at IS NULL AND child.parent_message_id=m.id
+             )
+           ORDER BY m.seq DESC
+           LIMIT ?3"#,
+    )?;
+    let mut result = statement
+        .query_map(
+            rusqlite::params![scope.workspace_id(), thread_id, limit.max(1)],
+            |row| row.get::<_, String>(0),
+        )?
+        .map(|row| row.map_err(StoreError::from))
+        .collect::<Result<Vec<_>>>()?;
+    // The query is descending so the bounded window retains the newest
+    // alternatives. Return chronological order to keep picker and transport
+    // output stable for callers.
+    result.reverse();
+    Ok(result)
+}
+
 #[allow(clippy::too_many_arguments)]
 pub fn append(
     tx: &Connection,
@@ -199,6 +410,49 @@ pub fn append(
     sequence: i64,
     expected: i64,
     previous: Option<&str>,
+    idempotency: &str,
+    revision_id: &str,
+    state: &str,
+    reason: &str,
+    content: &Value,
+    checkpointed_at: &str,
+) -> Result<MessageRow> {
+    append_with_parent(
+        tx,
+        store,
+        scope,
+        thread_id,
+        id,
+        kind,
+        detail,
+        run_id,
+        sequence,
+        expected,
+        previous,
+        None,
+        idempotency,
+        revision_id,
+        state,
+        reason,
+        content,
+        checkpointed_at,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn append_with_parent(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+    id: &str,
+    kind: &str,
+    detail: &Value,
+    run_id: Option<&str>,
+    sequence: i64,
+    expected: i64,
+    previous: Option<&str>,
+    parent: Option<Option<&str>>,
     idempotency: &str,
     revision_id: &str,
     state: &str,
@@ -223,8 +477,8 @@ pub fn append(
             "Conversation message vocabulary is invalid.".into(),
         ));
     };
-    let head:Option<(i64,Option<String>)>=tx.query_row("SELECT last_sequence,last_message_id FROM thread WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL",rusqlite::params![scope.workspace_id(),thread_id],|r|Ok((r.get(0)?,r.get(1)?))).optional()?;
-    let Some((last, last_id)) = head else {
+    let head:Option<(i64,Option<String>,Option<String>)>=tx.query_row("SELECT last_sequence,last_message_id,selected_head_id FROM thread WHERE workspace_id=?1 AND id=?2 AND deleted_at IS NULL",rusqlite::params![scope.workspace_id(),thread_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).optional()?;
+    let Some((last, last_id, selected_head)) = head else {
         return Err(StoreError::Invalid(
             "Thread does not belong to this workspace.".into(),
         ));
@@ -256,9 +510,22 @@ pub fn append(
     let r = seal_json(store, &content, &raad(scope.workspace_id(), &revision_id))?;
     let detail_text = serde_json::to_string(&detail)
         .map_err(|_| StoreError::Invalid("Message detail cannot be encoded.".into()))?;
-    tx.execute("INSERT INTO message (id,workspace_id,thread_id,kind,run_id,detail_kind,seq,previous_message_id,idempotency_key,current_revision_id,current_revision_number,current_revision_state,created_at,payload,payload_nonce) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,1,?11,?12,?13,?14)",rusqlite::params![id,scope.workspace_id(),thread_id,kind,run_id,detail_text,sequence,previous,idempotency,revision_id,state,checkpointed_at,m.ciphertext,m.nonce])?;
+    let parent = parent.unwrap_or(selected_head.as_deref().or(previous));
+    if let Some(parent_id) = parent {
+        let belongs: bool = tx.query_row(
+            "SELECT EXISTS(SELECT 1 FROM message WHERE workspace_id=?1 AND thread_id=?2 AND id=?3 AND deleted_at IS NULL)",
+            rusqlite::params![scope.workspace_id(), thread_id, parent_id],
+            |r| r.get(0),
+        )?;
+        if !belongs {
+            return Err(StoreError::Invalid(
+                "Message branch parent does not belong to this conversation.".into(),
+            ));
+        }
+    }
+    tx.execute("INSERT INTO message (id,workspace_id,thread_id,kind,run_id,detail_kind,seq,previous_message_id,parent_message_id,idempotency_key,current_revision_id,current_revision_number,current_revision_state,created_at,payload,payload_nonce) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?13,?14,?15)",rusqlite::params![id,scope.workspace_id(),thread_id,kind,run_id,detail_text,sequence,previous,parent,idempotency,revision_id,state,checkpointed_at,m.ciphertext,m.nonce])?;
     tx.execute("INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,state,reason,idempotency_key,checkpointed_at,created_at,run_id,payload,payload_nonce) VALUES (?1,?2,?3,?4,1,0,?5,?6,?7,?8,?8,?9,?10,?11)",rusqlite::params![revision_id,scope.workspace_id(),thread_id,id,state,reason,idempotency,checkpointed_at,run_id,r.ciphertext,r.nonce])?;
-    tx.execute("UPDATE thread SET last_sequence=?1,last_message_id=?2,updated_at=?3 WHERE workspace_id=?4 AND id=?5",rusqlite::params![sequence,id,checkpointed_at,scope.workspace_id(),thread_id])?;
+    tx.execute("UPDATE thread SET last_sequence=?1,last_message_id=?2,selected_head_id=?2,updated_at=?3 WHERE workspace_id=?4 AND id=?5",rusqlite::params![sequence,id,checkpointed_at,scope.workspace_id(),thread_id])?;
     list(tx, store, scope, thread_id).map(|v| v.into_iter().find(|m| m.id == id).unwrap())
 }
 pub fn revise(
@@ -499,6 +766,115 @@ mod tests {
         assert!(!text.contains(GITHUB_PAT));
         assert_eq!(revised.current_revision_id, "revision-2");
         assert_eq!(revised.current_revision_number, 2);
+    }
+
+    #[test]
+    fn bounded_older_window_uses_sequence_cursor_and_keeps_order() {
+        let store = store();
+        let scope = seed_thread(&store, "alpha", "thread-one");
+        for sequence in 1..=4 {
+            let previous = (sequence > 1).then(|| format!("message-{}", sequence - 1));
+            append_row(
+                &store,
+                &scope,
+                "thread-one",
+                &format!("message-{sequence}"),
+                "assistant",
+                &Value::Null,
+                sequence,
+                sequence - 1,
+                previous.as_deref(),
+                &Value::String(format!("message {sequence}")),
+            )
+            .unwrap();
+        }
+        let newest = store
+            .with_conn(|tx| list_before(tx, &store, &scope, "thread-one", 3, None))
+            .unwrap();
+        assert_eq!(
+            newest.iter().map(|row| row.sequence).collect::<Vec<_>>(),
+            vec![2, 3, 4]
+        );
+        let older = store
+            .with_conn(|tx| list_before(tx, &store, &scope, "thread-one", 3, Some(2)))
+            .unwrap();
+        assert_eq!(
+            older.iter().map(|row| row.sequence).collect::<Vec<_>>(),
+            vec![1]
+        );
+    }
+
+    #[test]
+    fn branch_heads_follow_parent_not_append_predecessor_and_keep_newest_window() {
+        let store = store();
+        let scope = seed_thread(&store, "alpha", "thread-one");
+        append_row(
+            &store,
+            &scope,
+            "thread-one",
+            "user-1",
+            "user",
+            &Value::Null,
+            1,
+            0,
+            None,
+            &Value::String("Question".into()),
+        )
+        .unwrap();
+        append_row(
+            &store,
+            &scope,
+            "thread-one",
+            "answer-1",
+            "assistant",
+            &Value::Null,
+            2,
+            1,
+            Some("user-1"),
+            &Value::String("First answer".into()),
+        )
+        .unwrap();
+
+        // This alternative is appended after answer-1 for monotonic storage,
+        // but both answers belong to the same user turn. A predecessor link
+        // must not make answer-1 disappear from the branch picker.
+        store
+            .transaction(|tx| {
+                append_with_parent(
+                    tx,
+                    &store,
+                    &scope,
+                    "thread-one",
+                    "answer-2",
+                    "assistant",
+                    &Value::Null,
+                    None,
+                    3,
+                    2,
+                    Some("answer-1"),
+                    Some(Some("user-1")),
+                    "idempotency-answer-2",
+                    "revision-answer-2",
+                    "terminal",
+                    "test",
+                    &Value::String("Alternative answer".into()),
+                    TIME,
+                )
+            })
+            .unwrap();
+
+        let heads = store
+            .with_conn(|tx| list_branch_heads(tx, &scope, "thread-one", 2))
+            .unwrap();
+        assert_eq!(heads, vec!["answer-1", "answer-2"]);
+
+        // A smaller bounded window keeps the newest head rather than the
+        // oldest row, while callers separately add the selected head when it
+        // falls outside this window.
+        let newest = store
+            .with_conn(|tx| list_branch_heads(tx, &scope, "thread-one", 1))
+            .unwrap();
+        assert_eq!(newest, vec!["answer-2"]);
     }
 
     #[test]
