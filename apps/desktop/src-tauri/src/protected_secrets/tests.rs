@@ -621,7 +621,10 @@ fn protected_secret_native_vault_acceptance() {
     let read = custody.get(&account, &id);
     let removed = custody.remove(&account, &id);
     assert!(removed.is_ok());
-    assert_eq!(read.unwrap().unwrap().as_str(), CANARY);
+    assert!(
+        read.unwrap().unwrap().as_str() == CANARY,
+        "Synthetic vault round trip returned different material"
+    );
     assert!(custody.get(&account, &id).unwrap().is_none());
 }
 
@@ -629,8 +632,15 @@ fn protected_secret_native_vault_acceptance() {
 #[test]
 #[ignore = "Opens only owned native test dialogs; uses synthetic input and no provider/account data"]
 fn protected_secret_native_entry_acceptance() {
+    use std::time::{Duration, Instant};
     use windows_sys::Win32::{
-        Foundation::*, Graphics::Gdi::ScreenToClient, UI::WindowsAndMessaging::*,
+        Foundation::*,
+        Graphics::Gdi::ScreenToClient,
+        UI::{
+            Controls::EM_GETPASSWORDCHAR,
+            Input::KeyboardAndMouse::{VK_ESCAPE, VK_RETURN},
+            WindowsAndMessaging::*,
+        },
     };
     fn wide(s: &str) -> Vec<u16> {
         s.encode_utf16().chain(Some(0)).collect()
@@ -665,16 +675,36 @@ fn protected_secret_native_entry_acceptance() {
             std::thread::sleep(std::time::Duration::from_millis(30));
         }
     }
-    for action in ["save", "decline", "stop"] {
+    assert!(matches!(
+        capture::prompt(&input(), &|| false),
+        Err(Failure::Stopped)
+    ));
+    for action in [
+        "save",
+        "enter",
+        "decline",
+        "escape",
+        "close",
+        "validation",
+        "stale-save",
+        "stop",
+        "expiry",
+    ] {
         let stopped = AtomicBool::new(false);
+        let deadline = Mutex::new(None::<Instant>);
         std::thread::scope(|threads| {
             // An assertion failure must still close the owned window before
             // scoped-thread cleanup joins the prompt thread.
             let _cancel = CancelOnDrop(&stopped);
             let request = input();
             let stop = &stopped;
-            let prompt =
-                threads.spawn(move || capture::prompt(&request, &|| !stop.load(Ordering::SeqCst)));
+            let expires = &deadline;
+            let prompt = threads.spawn(move || {
+                capture::prompt(&request, &|| {
+                    !stop.load(Ordering::SeqCst)
+                        && expires.lock().unwrap().is_none_or(|at| Instant::now() < at)
+                })
+            });
             let h = window();
             unsafe {
                 let mut affinity = 0;
@@ -685,36 +715,95 @@ fn protected_secret_native_entry_acceptance() {
                     GetWindowLongW(edit, GWL_STYLE) as u32 & ES_PASSWORD as u32,
                     0
                 );
+                assert_ne!(SendMessageW(edit, EM_GETPASSWORDCHAR, 0, 0), 0);
                 let mut client: RECT = std::mem::zeroed();
-                GetClientRect(h, &mut client);
+                assert_ne!(GetClientRect(h, &mut client), 0);
                 for id in [1, 2, 3, 4, 10, 11, 12, 13, 14] {
                     let child = GetDlgItem(h, id);
                     assert!(!child.is_null());
                     let mut bounds: RECT = std::mem::zeroed();
-                    GetWindowRect(child, &mut bounds);
+                    assert_ne!(GetWindowRect(child, &mut bounds), 0);
+                    let mut origin = POINT {
+                        x: bounds.left,
+                        y: bounds.top,
+                    };
                     let mut corner = POINT {
                         x: bounds.right,
                         y: bounds.bottom,
                     };
+                    ScreenToClient(h, &mut origin);
                     ScreenToClient(h, &mut corner);
                     assert!(
-                        corner.x <= client.right && corner.y <= client.bottom,
-                        "Native control is clipped"
+                        origin.x >= client.left
+                            && origin.y >= client.top
+                            && corner.x <= client.right
+                            && corner.y <= client.bottom
+                            && corner.x > origin.x
+                            && corner.y > origin.y,
+                        "Native control {id} is clipped or empty"
                     );
                 }
-                if action == "save" {
-                    SetWindowTextW(edit, wide(CANARY).as_ptr());
-                    SendMessageW(h, WM_COMMAND, 1, 0);
-                } else if action == "decline" {
-                    SendMessageW(h, WM_COMMAND, 2, 0);
-                } else {
-                    stopped.store(true, Ordering::SeqCst);
+                match action {
+                    "save" | "enter" | "validation" | "stale-save" => {
+                        if action == "validation" {
+                            SendMessageW(h, WM_COMMAND, 1, 0);
+                            assert_ne!(IsWindow(h), 0, "Empty input closed native entry");
+                            let short = CANARY.chars().take(1).collect::<String>();
+                            assert_ne!(SetWindowTextW(edit, wide(&short).as_ptr()), 0);
+                            SendMessageW(h, WM_COMMAND, 1, 0);
+                            assert_ne!(IsWindow(h), 0, "Short input closed native entry");
+                            let mut error = [0u16; 128];
+                            let length = GetWindowTextW(GetDlgItem(h, 4), error.as_mut_ptr(), 128);
+                            assert!(
+                                String::from_utf16_lossy(&error[..length as usize])
+                                    == "Use a signing secret of 16 to 512 bytes.",
+                                "Native input validation must use a nonsecret error"
+                            );
+                        }
+                        assert_ne!(SetWindowTextW(edit, wide(CANARY).as_ptr()), 0);
+                        if action == "stale-save" {
+                            stopped.store(true, Ordering::SeqCst);
+                        }
+                        if action == "enter" {
+                            assert_ne!(PostMessageW(edit, WM_KEYDOWN, VK_RETURN as usize, 0), 0);
+                        } else {
+                            // Closing actions must arrive through GetMessage, as
+                            // real input does. Cross-thread SendMessage can close
+                            // the window while leaving GetMessage asleep.
+                            assert_ne!(PostMessageW(h, WM_COMMAND, 1, 0), 0);
+                        }
+                    }
+                    "decline" => {
+                        assert_ne!(PostMessageW(h, WM_COMMAND, 2, 0), 0);
+                    }
+                    "escape" => {
+                        assert_ne!(PostMessageW(edit, WM_KEYDOWN, VK_ESCAPE as usize, 0), 0);
+                    }
+                    "close" => {
+                        assert_ne!(PostMessageW(h, WM_CLOSE, 0, 0), 0);
+                    }
+                    "stop" => stopped.store(true, Ordering::SeqCst),
+                    // Exercise the native timer using a short synthetic deadline;
+                    // service expiry classification has separate lifecycle tests.
+                    "expiry" => {
+                        *deadline.lock().unwrap() =
+                            Some(Instant::now() + Duration::from_millis(150))
+                    }
+                    _ => unreachable!(),
                 }
             }
             let result = prompt.join().unwrap();
+            assert_eq!(
+                unsafe { IsWindow(h) },
+                0,
+                "Owned native entry did not close"
+            );
             match action {
-                "save" => assert_eq!(result.unwrap().unwrap().as_str(), CANARY),
-                "decline" => assert!(result.unwrap().is_none()),
+                "save" | "enter" | "validation" => assert!(
+                    result.unwrap().unwrap().as_str() == CANARY,
+                    "Synthetic native entry returned different material"
+                ),
+                "decline" | "escape" | "close" => assert!(result.unwrap().is_none()),
                 _ => assert!(matches!(result, Err(Failure::Stopped))),
             }
         });
