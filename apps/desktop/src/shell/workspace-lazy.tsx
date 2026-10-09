@@ -47,7 +47,7 @@ export const WorkspaceLibrary = lazy(() =>
   })),
 );
 export const AccountDialog = lazy(() =>
-  import("../components/agents/AccountDialog").then((module) => ({
+  import("../components/pages/SettingsPage").then((module) => ({
     default: module.AccountDialog,
   })),
 );

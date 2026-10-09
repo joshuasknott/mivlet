@@ -101,6 +101,7 @@ export interface CollaborationWorkItem {
   schedule?: { occurrenceId: string; reasoningEffort?: string };
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
   capturedContext?: CapturedWorkContext;
+  resetContinuation?: import("./provider-usage").ProviderResetContinuation;
   steering?: WorkSteering[];
   messages?: TaskMessage[];
   deliveredMessageCount?: number;
@@ -308,6 +309,9 @@ export type CollaborationCommand =
       expectedGeneration: number;
       reconcile: true;
     }
+  | { action: "arm-provider-reset"; id: string; expectedGeneration: number; opportunityId: string; reconcile: true }
+  | { action: "cancel-provider-reset"; id: string; expectedGeneration: number }
+  | { action: "dispatch-provider-resets" }
   | {
       action: "work-status";
       id: string;

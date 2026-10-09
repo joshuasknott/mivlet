@@ -115,19 +115,19 @@ export function PanelOutput({
     };
   }, [outputId, workspaceId]);
   useEffect(() => {
-    if (!output) return;
     return subscribeOutputRevisionApplied((event) => {
-      if (
-        event.outputId === output.id &&
-        event.conversationId === output.source.conversationId
-      ) {
-        // OutputEditor owns the local draft/CAS conflict decision. Updating
-        // the durable snapshot here lets a clean panel follow an agent
-        // revision while a dirty panel preserves its draft and shows reload.
-        setOutput(event.output);
-      }
+      // Subscribe while the initial read is pending and retain the listener
+      // across revisions so an update cannot fall between passive effects.
+      setOutput((current) =>
+        current &&
+        event.outputId === outputId &&
+        event.outputId === current.id &&
+        event.conversationId === current.source.conversationId
+          ? event.output
+          : current,
+      );
     });
-  }, [output]);
+  }, [outputId, workspaceId]);
   if (error) return <p role="alert">{error}</p>;
   if (!output) return <p role="status">Loading saved output…</p>;
   const origin = output.pin?.source ?? output.source;

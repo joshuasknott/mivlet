@@ -50,6 +50,16 @@ function fixture(events: ManagedRuntimeEvent[]) {
 }
 
 describe("managed provider runtime backend", () => {
+  it("preserves measured categories and treats native null cost as unavailable", async () => {
+    const setup=fixture([{type:"usage",inputTokens:100,outputTokens:20,cachedInputTokens:40,cacheWriteTokens:10,reasoningTokens:5,costUsd:null,costEstimated:true},{type:"usage",inputTokens:100,outputTokens:20,cachedInputTokens:null,cacheWriteTokens:null,reasoningTokens:null,costUsd:0,costEstimated:true},{type:"done",finishReason:"stop"}]);
+    const backend=createManagedRuntimeBackend(provider,setup.deps)!;
+    const events=[];
+    for await (const event of backend.run({model:"auto",messages:[],tools:[],maxTokens:100},{execute:async()=>""})!) events.push(event);
+    expect(events[0]).toMatchObject({type:"usage",cachedInputTokens:40,cacheWriteTokens:10,reasoningTokens:5,costUsd:0,costUnknown:true,costEstimated:true});
+    expect(events[1]).toMatchObject({type:"usage",costUsd:0,costEstimated:true});
+    expect(events[1]).not.toHaveProperty("costUnknown",true);
+    expect(events[1]).toMatchObject({cachedInputTokens:undefined,cacheWriteTokens:undefined,reasoningTokens:undefined});
+  });
   it("executes shared tools through Mivlet and returns the actual result to Claude", async () => {
     const call = { type: "tool-request", requestId: "rpc-1", callId: "call-1",
       approvalId: "native-opaque", tool: "read-file", arguments: '{"path":"report.md"}' } as const;
