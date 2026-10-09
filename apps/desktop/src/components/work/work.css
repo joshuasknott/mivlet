@@ -1,11 +1,3 @@
-.work-list {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .coordination-activity { margin: 12px 0; font-size: 12px; color: var(--text-secondary); }
 .coordination-activity summary { cursor: pointer; padding: 10px 2px; }
 .coordination-runtime-note { line-height: 1.5; }
@@ -19,31 +11,12 @@
 .coordination-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .coordination-effort button { color: inherit; border: 1px solid var(--border); border-radius: 6px; background: transparent; min-height: 32px; padding: 4px 8px; cursor: pointer; }
 .coordination-activity :focus-visible { outline: 2px solid var(--accent, #477ac9); outline-offset: 2px; }
-.work-empty {
-  color: var(--text-secondary, #777);
-  font-size: 13px;
-}
-.work-card,
 .work-details {
   border: 1px solid var(--border, #ddd);
   border-radius: 10px;
   padding: 12px;
   background: var(--surface, #fff);
 }
-.work-card[data-status="running"],
-.work-card[data-status="awaiting-approval"],
-.work-card[data-status="queued"] {
-  border-color: #4a6fa5;
-}
-.work-card[data-status="failed"],
-.work-card[data-status="awaiting-user"],
-.work-card[data-status="blocked"] {
-  border-color: #a66f26;
-}
-.work-card[data-status="completed"] {
-  border-color: #58754c;
-}
-.work-card-header,
 .work-details-header {
   display: flex;
   align-items: center;
@@ -97,13 +70,11 @@
   background: #ececec;
   color: #666;
 }
-.work-card-prompt,
 .work-details-request {
   margin: 8px 0;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
-.work-card-reason,
 .work-details-reason {
   margin: 6px 0;
   color: var(--text-secondary, #555);
@@ -116,14 +87,6 @@
   background: #f0e2cf;
   border-radius: 6px;
   padding: 8px;
-}
-.work-card-meta {
-  color: var(--text-secondary, #555);
-}
-.work-card-error {
-  color: #7a4f16;
-  font-size: 12px;
-  margin: 6px 0;
 }
 .work-promote-form {
   margin-top: 8px;
@@ -145,7 +108,6 @@
   resize: vertical;
   min-height: 60px;
 }
-.work-card-actions,
 .work-details-actions {
   display: flex;
   flex-wrap: wrap;
@@ -153,7 +115,6 @@
   align-items: center;
   margin-top: 8px;
 }
-.work-card-actions button,
 .work-details-actions button {
   border: 1px solid var(--border, #bbb);
   border-radius: 6px;
@@ -163,7 +124,6 @@
   min-height: 28px;
   cursor: pointer;
 }
-.work-card-actions button:hover,
 .work-details-actions button:hover {
   background: var(--surface-muted, #f0f0f0);
 }

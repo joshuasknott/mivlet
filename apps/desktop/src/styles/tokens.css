@@ -28,7 +28,6 @@
   --accent-line: #cfcfcf;
   --accent-strong: #111111;
   --brand-copper: #6b6b6b;
-  --brand-copper-strong: #3f3f3f;
   --positive: #397a4f;
   --positive-subtle: #edf6f0;
   --caution: #8c6719;
@@ -44,11 +43,9 @@
   --text-15: 14px;
   --text-16: 15px;
   --text-20: 18px;
-  --text-24: 22px;
   --text-30: 26px;
 
   /* Spacing */
-  --space-1: 4px;
   --space-2: 8px;
   --space-3: 12px;
   --space-4: 16px;
@@ -71,7 +68,6 @@
 
   /* Compatibility aliases while the component styles consume one token set. */
   --shell: var(--surface);
-  --canvas: var(--surface);
   --radius: var(--radius-2);
 }
 
@@ -94,7 +90,6 @@
   --accent-line: #5b574e;
   --accent-strong: #ffffff;
   --brand-copper: #a9a9a9;
-  --brand-copper-strong: #d0d0d0;
   --positive: #7ec18d;
   --positive-subtle: rgba(126, 193, 141, 0.13);
   --caution: #f0b452;
