@@ -111,6 +111,29 @@ describe("permission profile policy", () => {
     expect(effectForTool("connector-action")).toBe("connector-write");
   });
 
+  it("keeps command starts approval-gated and separates observation from Stop", () => {
+    for (const tool of ["repository-start", "workspace-start"]) {
+      const effect = effectForTool(tool)!;
+      expect(effect).toBe("shell-execution");
+      for (const mode of ["read-only", "trusted-scope"] as const) {
+        expect(evaluatePermissionPolicy({ mode, effect, riskLevel: "critical" }).allowed).toBe(false);
+      }
+      expect(evaluatePermissionPolicy({ mode: "full-access", effect, riskLevel: "critical" }))
+        .toMatchObject({ allowed: true, approvalRequired: true });
+    }
+    for (const tool of ["command-jobs", "command-output"]) {
+      const effect = effectForTool(tool)!;
+      expect(effect).toBe("local-read");
+      expect(evaluatePermissionPolicy({ mode: "read-only", effect }))
+        .toMatchObject({ allowed: true, approvalRequired: false });
+    }
+    const effect = effectForTool("command-stop")!;
+    expect(effect).toBe("app-state-mutation");
+    expect(evaluatePermissionPolicy({ mode: "read-only", effect, riskLevel: "high" }).allowed).toBe(false);
+    expect(evaluatePermissionPolicy({ mode: "full-access", effect, riskLevel: "high" }))
+      .toMatchObject({ allowed: true, approvalRequired: true });
+  });
+
   it("maps browser automation actions onto the shared permission effects", () => {
     expect(effectForBrowserAction("browser.read-url")).toBe("browser-read");
     expect(effectForBrowserAction("browser.click")).toBe("browser-state-mutation");
