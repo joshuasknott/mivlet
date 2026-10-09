@@ -355,6 +355,7 @@ pub fn run() {
             local_computer::repositories::local_computer_import_repository,
             local_computer::coding::coding_repository_attach,
             local_computer::coding::coding_repository_status,
+            local_computer::coding::checkpoints::coding_checkpoint_inspect,
             local_computer::execution_setup::native_execution_status,
             local_computer::execution_setup::native_execution_setup,
             local_computer::local_computer_status,

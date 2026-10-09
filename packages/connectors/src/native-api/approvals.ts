@@ -181,6 +181,12 @@ export function buildToolApproval(
     ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
     : toolName === "repository-publish" && isRegistered
     ? "Push reviewed code and create its pull request on the attached GitHub origin using your native GitHub CLI account."
+    : toolName === "repository-checkpoint-restore" && isRegistered
+    ? "Restore reviewed files in this agent's private copy. Save current code first and invalidate prior test verification. Preserve ignored files, original checkout, Git HEAD and chat history. External effects remain."
+    : toolName === "repository-checkpoint-delete" && isRegistered
+    ? "Permanently delete this exact checkpoint. Preserve current repository files."
+    : toolName === "repository-checkpoint-capture" && isRegistered
+    ? "Save an immutable checkpoint of this private copy. Exclude ignored files, credentials and Git metadata."
     : toolName === "repository-recover" && isRegistered
     ? "Reconcile command-import files and release retained staging/backup, or inspect uncertain GitHub publication. Keep uncertainty receipts; replay nothing."
     : toolName === "local-app-select" && isRegistered

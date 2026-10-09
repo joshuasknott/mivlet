@@ -1,7 +1,7 @@
 use super::super::authority::ComputerAuthority;
 use super::*;
 
-fn fixture() -> (
+pub(super) fn fixture() -> (
     tempfile::TempDir,
     PathBuf,
     Arc<ComputerAuthority>,

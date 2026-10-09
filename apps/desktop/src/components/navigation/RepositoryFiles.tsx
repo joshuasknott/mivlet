@@ -9,6 +9,7 @@ import {
   cancelRuntimeLocalComputer,
   loadRuntimeLocalComputer,
 } from "../../runtime/domains/local-computer";
+import { RepositoryCheckpoints } from "./RepositoryCheckpoints";
 import "./repository-files.css";
 
 export function RepositoryFiles({
@@ -235,6 +236,14 @@ function RepositoryDetails({
               </a>
             </p>
           )}
+          <RepositoryCheckpoints
+            key={repo.id}
+            workspaceId={workspaceId}
+            agentId={agentId}
+            repositoryId={repo.id}
+            disabled={!!status.data?.busy || !!status.data?.recoveryRequired}
+            onChanged={() => void status.refetch()}
+          />
         </>
       )}
     </div>
