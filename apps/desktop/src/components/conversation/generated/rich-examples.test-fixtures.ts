@@ -1,5 +1,12 @@
 /** Representative provider output. Fixtures are not live-provider evidence. */
 export const richExamples = {
+  charts: `$tab = "bars"
+root = Stack([tabs])
+tabs = Tabs("chartTabs", [bars, lines], $tab)
+bars = TabItem("bars", "Costs", [bar])
+lines = TabItem("lines", "Trend", [line])
+bar = BarChart("Weekend costs", ["Day trip", "Seaside stay"], [40, 100])
+line = LineChart("Sample trend", ["Mon", "Tue", "Wed"], [10, 20, 15])`,
   itinerary: `root = Stack([heading, days, schedule, photo])
 heading = TextContent("Two days by the sea", "large-heavy")
 $day = "Day 1"

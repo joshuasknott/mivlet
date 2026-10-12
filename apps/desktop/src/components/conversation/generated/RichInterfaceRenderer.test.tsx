@@ -11,6 +11,7 @@ import RichInterfaceRenderer from "./RichInterfaceRenderer";
 import { richExamples } from "./rich-examples.test-fixtures";
 import { validateRichInterface } from "./rich-interface-guard";
 import catalogueInstructions from "../../../lib/rich-interface-instructions.json";
+import { createParser } from "@openuidev/lang-core";
 
 const preview = vi.hoisted(() => vi.fn());
 vi.mock("../../../lib/computer-artifacts", () => ({
@@ -35,6 +36,13 @@ function mount(code: string, saved = "{}", disabled = false) {
   return { change, review };
 }
 describe("rich production interface", () => {
+  it("registers both chart schemas independently in the upstream parser", () => {
+    const parser = createParser(richInterfaceLibrary.toJSONSchema());
+    const result = parser.parse(richExamples.charts);
+    expect(result.meta.errors).toEqual([]);
+    expect(JSON.stringify(result.root)).toContain("BarChart");
+    expect(JSON.stringify(result.root)).toContain("LineChart");
+  });
   it("refuses credential collection even when the provider ignores its instructions", async () => {
     mount('$value = ""\nroot = Input("value", "API key", $value, "text")');
     expect(await screen.findByRole("alert")).toHaveTextContent(
