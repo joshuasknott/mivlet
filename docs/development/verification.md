@@ -310,7 +310,10 @@ native pass recorded 906 passed and 16 explicitly ignored opt-in tests, plus
 `cargo fmt --check` and all-target/all-feature Clippy with warnings denied.
 Two pnpm advisories are source-verified local patches; Cargo reports two reviewed
 notification-only quick-xml findings expiring October 31 and nine informational
-maintenance/unsoundness warnings. These accepted findings remain visible.
+maintenance/unsoundness warnings. Those findings remain part of the October 9
+record. The October 12 notification dependency update removes quick-xml 0.37.5
+and both vulnerability exceptions; the current audit gate rejects every
+vulnerability and retains visible informational warning counts.
 
 That final gate includes the shared production-CSS compaction fix and the
 responsive pane-lifetime regression. GitHub TypeScript and Windows validation
