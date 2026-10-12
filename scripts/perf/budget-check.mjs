@@ -4,6 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   collectAssets,
   conversationUpgradeAssetPattern,
+  intelligentUiAssetPattern,
   formatBytes,
   formatKiB,
   summarizeBundle,
@@ -51,7 +52,12 @@ function compareCeiling(label, actualBytes, ceilingBytes, baselineBytes) {
 export function checkBudget(summary, budget) {
   const violations = [];
   // Renderer growth cannot consume the budget of the ordinary workspace.
-  for (const group of ["commonJsCss", "pdfPreview", "conversationUpgrade"]) {
+  for (const group of [
+    "commonJsCss",
+    "pdfPreview",
+    "conversationUpgrade",
+    "intelligentUi",
+  ]) {
     if (!budget.ceilings[group] || !summary[group]) continue;
     const actual = summary[group];
     for (const [unit, key] of [
@@ -69,7 +75,12 @@ export function checkBudget(summary, budget) {
 
   const totalViolation = compareCeiling(
     "totalJsCss.raw",
-    summary.totalJsCss.rawBytes,
+    summary.totalJsCss.rawBytes -
+      Math.max(
+        0,
+        (summary.intelligentUi?.rawBytes ?? 0) -
+          (budget.intelligentUiBaseline?.rawBytes ?? 0),
+      ),
     budget.ceilings.totalJsCss.rawBytes,
     budget.recordedBaseline.totalJsCss.rawBytes,
   );
@@ -77,7 +88,12 @@ export function checkBudget(summary, budget) {
 
   const totalGzipViolation = compareCeiling(
     "totalJsCss.gzip",
-    summary.totalJsCss.gzipBytes,
+    summary.totalJsCss.gzipBytes -
+      Math.max(
+        0,
+        (summary.intelligentUi?.gzipBytes ?? 0) -
+          (budget.intelligentUiBaseline?.gzipBytes ?? 0),
+      ),
     budget.ceilings.totalJsCss.gzipBytes,
     budget.recordedBaseline.totalJsCss.gzipBytes,
   );
@@ -159,7 +175,8 @@ export async function runBudgetCheck({
     const manifest = JSON.parse(
       await readFile(join(distDir, ".vite", "manifest.json"), "utf8"),
     );
-    if (budget.requireDeferredPdf) violations.push(...checkDeferredPdf(manifest));
+    if (budget.requireDeferredPdf)
+      violations.push(...checkDeferredPdf(manifest));
     if (budget.requireDeferredConversationUpgrade) {
       violations.push(...checkDeferredConversationUpgrade(manifest));
     }
@@ -243,7 +260,10 @@ export function checkDeferredConversationUpgrade(manifest) {
   const featureKeys = Object.entries(manifest)
     .filter(([, chunk]) => {
       const fileName = chunk.file?.split("/").at(-1) ?? "";
-      return conversationUpgradeAssetPattern.test(fileName);
+      return (
+        conversationUpgradeAssetPattern.test(fileName) ||
+        intelligentUiAssetPattern.test(fileName)
+      );
     })
     .map(([key]) => key);
   if (featureKeys.length === 0) {

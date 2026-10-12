@@ -47,7 +47,13 @@ export function GeneratedResponse({
   const extracted = useMemo(() => extractGeneratedInterface(text), [text]);
   const checked = useMemo(
     () =>
-      extracted ? validateGeneratedInterface(extracted.code, streaming) : null,
+      extracted
+        ? validateGeneratedInterface(
+            extracted.code,
+            streaming,
+            extracted.profile,
+          )
+        : null,
     [extracted, streaming],
   );
   const [saved, setSaved] = useState<GeneratedInterfaceState>();
@@ -75,7 +81,9 @@ export function GeneratedResponse({
       return;
     }
     if (checked?.error) {
-      setStatus("Controls are unavailable. Ask the agent to revise this response.");
+      setStatus(
+        "Controls are unavailable. Ask the agent to revise this response.",
+      );
       return;
     }
     if (!source || !responseRevisionId) {
@@ -196,7 +204,14 @@ export function GeneratedResponse({
             fallback={<p role="status">Loading interactive response…</p>}
           >
             <InterfaceRenderer
+              key={
+                extracted.profile
+                  ? `${responseRevisionId ?? "pending"}:${saved?.sourceRevision ?? "loading"}`
+                  : "legacy"
+              }
               code={checked.code}
+              profile={extracted.profile}
+              owner={{ workspaceId, agentId, generation }}
               streaming={streaming}
               interaction={{
                 state: values,

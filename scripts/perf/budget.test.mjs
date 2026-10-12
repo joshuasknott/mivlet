@@ -41,6 +41,55 @@ test("logicalChunkId ignores hashed suffixes and handles real hyphenated Vite na
   );
 });
 
+test("reactive UI is capped independently and cannot borrow workspace or startup allowance", async () => {
+  const budget = await loadBudget();
+  const summary = {
+    intelligentUi: {
+      rawBytes: budget.intelligentUiBaseline.rawBytes + 100,
+      gzipBytes: budget.intelligentUiBaseline.gzipBytes + 50,
+    },
+    commonJsCss: {
+      rawBytes: budget.ceilings.commonJsCss.rawBytes,
+      gzipBytes: budget.ceilings.commonJsCss.gzipBytes,
+    },
+    totalJsCss: {
+      rawBytes: budget.ceilings.totalJsCss.rawBytes + 100,
+      gzipBytes: budget.ceilings.totalJsCss.gzipBytes + 50,
+    },
+    css: { rawBytes: 100, gzipBytes: 50 },
+    initialEntryJs: { rawBytes: budget.ceilings.initialEntryJs.rawBytes },
+    routeChunks: Object.fromEntries(
+      Object.entries(budget.ceilings.routeChunks).map(([name, cap]) => [
+        name,
+        { rawBytes: cap.rawBytes },
+      ]),
+    ),
+  };
+  assert.deepEqual(checkBudget(summary, budget), []);
+  summary.commonJsCss.rawBytes++;
+  assert.ok(
+    checkBudget(summary, budget).some((v) => v.label === "commonJsCss.raw"),
+  );
+  summary.commonJsCss.rawBytes--;
+  summary.intelligentUi.rawBytes = budget.ceilings.intelligentUi.rawBytes + 1;
+  assert.ok(
+    checkBudget(summary, budget).some((v) => v.label === "intelligentUi.raw"),
+  );
+  const manifest = {
+    "index.html": {
+      isEntry: true,
+      file: "assets/index-a.js",
+      imports: ["rich"],
+    },
+    rich: { file: "assets/intelligent-ui-runtime-b.js" },
+  };
+  assert.ok(
+    checkDeferredConversationUpgrade(manifest).some(
+      (v) => v.label === "conversationUpgrade.eager",
+    ),
+  );
+});
+
 test("summarizeBundle groups totals and route chunks", async () => {
   const root = await mkdtemp(join(tmpdir(), "mivlet-perf-"));
   const distDir = join(root, "dist", "assets");

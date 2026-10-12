@@ -1,0 +1,89 @@
+.rich-interface {
+  --openui-background: var(--surface-raised);
+  --openui-muted-foreground: var(--ink-muted);
+  --openui-border: var(--line);
+  --openui-text-neutral-primary: var(--ink);
+  --openui-text-neutral-secondary: var(--ink-muted);
+  --openui-text-neutral-tertiary: var(--ink-muted);
+  --openui-foreground: var(--surface-raised);
+  --openui-stroke-default: var(--line);
+  --openui-space-m: 16px;
+  --openui-space-s: 8px;
+  --openui-space-l: 24px;
+  --openui-radius-m: 8px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.rich-interface > * {
+  min-width: 0;
+}
+.rich-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-width: 0;
+}
+.rich-stack--row {
+  flex-direction: row;
+  flex-wrap: wrap;
+}
+.rich-stack--row > * {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.rich-text--large,
+.rich-text--large-heavy {
+  font-size: 20px;
+}
+.rich-text--large-heavy,
+.rich-text--small-heavy {
+  font-weight: 650;
+}
+.rich-text--small,
+.rich-text--small-heavy {
+  font-size: 12px;
+}
+.rich-chart {
+  margin: 0;
+  min-width: 0;
+}
+.rich-interface select {
+  min-height: 44px;
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  padding: 8px;
+  font: inherit;
+}
+.rich-interface input {
+  min-height: 44px;
+}
+.generated-photo {
+  margin: 0;
+}
+.generated-photo img {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: 8px;
+}
+.generated-photo figcaption {
+  display: block;
+  color: var(--ink-muted);
+  margin-top: 8px;
+  font-size: 12px;
+}
+.rich-interface [role="slider"] {
+  touch-action: none;
+}
+@media (prefers-reduced-motion: reduce) {
+  .rich-interface *,
+  .rich-interface *::before,
+  .rich-interface *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
