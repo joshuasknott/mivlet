@@ -266,6 +266,11 @@ pub(super) fn apply(
             run_id,
             resource_id,
         } => {
+            id(&run_id)?;
+            if resource_id.len() != 64 || !resource_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(invalid("Invalid HTML preview resource."));
+            }
             crate::mcp_app_host::release_generated_html(
                 &ctx.scope.private,
                 &room.id,
@@ -495,5 +500,6 @@ mod wire_tests {
         assert!(matches!(request.command, UiCommand::QuoteOutput { .. }));
         assert!(serde_json::from_value::<Request>(json!({"workspaceId":"workspace-local","conversationId":"room","agentId":"agent","action":"unknown"})).is_err());
         assert!(serde_json::from_value::<Request>(json!({"workspaceId":"workspace-local","conversationId":"room","agentId":"agent","action":"quote-output","outputId":"output","revisionId":"revision","selection":"passage","unexpected":true})).is_err());
+        assert!(serde_json::from_value::<Request>(json!({"workspaceId":"workspace-local","conversationId":"room","agentId":"agent","action":"render-html","runId":"run","source":"saved","html":"substituted document"})).is_err());
     }
 }

@@ -510,6 +510,9 @@ The existing read-only resource host issues an ephemeral opaque URL on a separat
 127.0.0.2 loopback site, pinned to its account and origin. Windows requests site
 isolation and fences child-frame navigation to that exact issued URL. An unavailable
 listener or navigation fence disables the preview with a prerequisite.
+The native request guard pauses document requests before transmission and binds
+the Chromium frame id to the issued resource. This blocks navigation egress,
+including process swaps; cancelling NavigationStarting alone can be too late.
 
 The guest has only `allow-scripts`, no same-origin allowance or AppBridge, and a
 fixed CSP denying network, forms, nested frames, workers, external assets and

@@ -173,7 +173,7 @@ fn http_origin() -> Result<&'static str, String> {
 }
 
 #[cfg(windows)]
-fn is_registered_mcp_url(uri: &str) -> bool {
+pub(crate) fn is_registered_mcp_url(uri: &str) -> bool {
     let Some(path) = [HTTP_ORIGIN.get(), GENERATED_ORIGIN.get()]
         .into_iter()
         .flatten()
@@ -248,6 +248,7 @@ fn install_frame_navigation_handlers(frame: ICoreWebView2Frame) -> windows::core
 fn install_navigation_guard_on_webview(webview: &PlatformWebview) -> windows::core::Result<()> {
     let controller = webview.controller();
     let core: ICoreWebView2 = unsafe { controller.CoreWebView2()? };
+    crate::interactive_network_guard::install(&core)?;
     let core4: ICoreWebView2_4 = core.cast()?;
     let frame_handler = FrameCreatedEventHandler::create(Box::new(move |_sender, args| {
         let Some(args) = args else {
@@ -895,6 +896,7 @@ fn serve_for_owner(request: &Request<Vec<u8>>, owner_subject: &str) -> Response<
         .is_some_and(|origin| origin.starts_with("http://127.0.0.2:"))
     {
         response = response.header("Referrer-Policy", "no-referrer")
+            .header("X-DNS-Prefetch-Control", "off")
             .header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), display-capture=(), clipboard-read=(), clipboard-write=(), usb=(), payment=(), fullscreen=()")
             .header("Origin-Agent-Cluster", "?1");
     }
@@ -1018,6 +1020,8 @@ pub(crate) fn register_generated_html(
     if !GENERATED_SERVER_READY.load(Ordering::Acquire) {
         return Err("The isolated HTML preview server is unavailable.".into());
     }
+    #[cfg(windows)]
+    crate::interactive_network_guard::require_ready()?;
     let origin = GENERATED_ORIGIN
         .get()
         .ok_or("The isolated HTML preview server is unavailable.")?;

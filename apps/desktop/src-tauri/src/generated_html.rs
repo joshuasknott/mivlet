@@ -1,5 +1,5 @@
 //! Self-contained generated HTML; authority comes from a saved assistant revision.
-pub(crate) const CSP: &str = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; media-src 'none'; worker-src 'none'";
+pub(crate) const CSP: &str = "default-src 'none'; sandbox allow-scripts; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; font-src data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; media-src 'none'; worker-src 'none'";
 const MAX_HTML_BYTES: usize = 80_000;
 
 pub(crate) fn extract(source: &str) -> Result<String, String> {

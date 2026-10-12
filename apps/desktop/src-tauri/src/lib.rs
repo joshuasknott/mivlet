@@ -46,6 +46,8 @@ mod execution_control;
 mod generated_html;
 mod google;
 mod hosted_computer;
+#[cfg(windows)]
+mod interactive_network_guard;
 mod knowledge;
 mod local_computer;
 mod local_projects;
