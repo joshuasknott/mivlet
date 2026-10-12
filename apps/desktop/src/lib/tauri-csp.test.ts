@@ -22,8 +22,6 @@ function loadCsp(configPath: string) {
   return { conf, csp };
 }
 
-
-
 const desktopRoot = join(__dirname, "..", "..");
 const prodConfigPath = join(desktopRoot, "src-tauri", "tauri.conf.json");
 const devConfigPath = join(desktopRoot, "src-tauri", "tauri.dev.conf.json");
@@ -51,7 +49,7 @@ describe("tauri csp config (production)", () => {
     expect(cspStr).not.toBe("null");
     // No wildcard or catch-all anywhere
     const withoutMcpLoopbackPort = cspStr.replace(
-      /http:\/\/127\.0\.0\.1:\*/g,
+      /http:\/\/127\.0\.0\.[12]:\*/g,
       "",
     );
     expect(withoutMcpLoopbackPort).not.toMatch(/\*/);
@@ -61,19 +59,23 @@ describe("tauri csp config (production)", () => {
     // No bare external http/https wild or non-ipc (robust against suffixes like ipc.localhost.evil)
     expect(cspStr).not.toMatch(/https?:\/\/\*/);
     expect(cspStr).not.toMatch(
-      /https?:\/\/(?!ipc\.localhost|127\.0\.0\.1:\*(?:[\s;"\']|$))/,
+      /https?:\/\/(?!ipc\.localhost|127\.0\.0\.[12]:\*(?:[\s;"\']|$))/,
     );
     // Also reject any http/https not exactly the allowed ipc token (covers suffix attacks)
     expect(cspStr).not.toMatch(/https?:\/\/ipc\.localhost(?!\b|[\s;"\']|$)/);
     // No ws: or broad dev hosts in prod
     expect(cspStr).not.toMatch(/\bws:/);
     // No external services / providers
-    expect(cspStr).not.toMatch(/convex|api\.|openai|anthropic|xai|googleapis|localhost:1420/i);
+    expect(cspStr).not.toMatch(
+      /convex|api\.|openai|anthropic|xai|googleapis|localhost:1420/i,
+    );
   });
 
-  it("allows HTTPS previews and only the dedicated MCP App origin in frames", () => {
+  it("allows HTTPS previews and only the dedicated MCP App and generated HTML origins in frames", () => {
     const { csp } = loadCsp(prodConfigPath);
-    expect(csp["frame-src"]).toBe("https: http://127.0.0.1:*");
+    expect(csp["frame-src"]).toBe(
+      "https: http://127.0.0.1:* http://127.0.0.2:*",
+    );
     expect(csp["script-src"]).toBe("'self'");
   });
 
@@ -82,7 +84,9 @@ describe("tauri csp config (production)", () => {
     const cspStr = typeof csp === "string" ? csp : JSON.stringify(csp);
     expect(typeof csp).toBe("object");
     // No wildcard host or catch-all
-    expect(cspStr.replace(/http:\/\/127\.0\.0\.1:\*/g, "")).not.toMatch(/\*/);
+    expect(cspStr.replace(/http:\/\/127\.0\.0\.[12]:\*/g, "")).not.toMatch(
+      /\*/,
+    );
     // No broad unsafe-eval in production
     expect(cspStr).not.toMatch(/unsafe-eval/i);
     // No bare http/https: * or external CDNs in webview policy
@@ -114,7 +118,9 @@ describe("tauri csp config (production)", () => {
     // Must not include external services or broad ws or http in prod
     expect(connect).not.toMatch(/https?:\/\/(?!ipc\.localhost(?:[\s;"\']|$))/);
     expect(connect).not.toMatch(/\bws:/);
-    expect(connect).not.toMatch(/convex|api\.|openai|anthropic|xai|googleapis/i);
+    expect(connect).not.toMatch(
+      /convex|api\.|openai|anthropic|xai|googleapis/i,
+    );
   });
 
   it("allows only self + data: for fonts/images and unsafe-inline only for styles (Tauri nonces cover scripts)", () => {
@@ -148,11 +154,10 @@ describe("tauri csp config (production)", () => {
       "media-src",
       "object-src",
       "script-src",
-      "style-src"
+      "style-src",
     ].sort();
     expect(allowed).toEqual(expected);
   });
-
 });
 
 describe("tauri csp config (dev separation)", () => {
@@ -162,7 +167,8 @@ describe("tauri csp config (dev separation)", () => {
     expect(devCsp).toBeTruthy();
     expect(prodCsp).toBeTruthy();
     const devStr = typeof devCsp === "string" ? devCsp : JSON.stringify(devCsp);
-    const prodStr = typeof prodCsp === "string" ? prodCsp : JSON.stringify(prodCsp);
+    const prodStr =
+      typeof prodCsp === "string" ? prodCsp : JSON.stringify(prodCsp);
     // Dev may need more (e.g. ws port wildcards + eval for HMR), but still no global '*" source
     expect(devStr).not.toContain("'*'");
     // Dev separation legitimately relaxes for Vite HMR (not present in prod)

@@ -18,13 +18,14 @@
         "width": 1440,
         "height": 1024,
         "minWidth": 640,
-        "minHeight": 600
+        "minHeight": 600,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --site-per-process"
       }
     ],
     "security": {
       "csp": {
         "default-src": "'self'",
-        "frame-src": "https: http://127.0.0.1:*",
+        "frame-src": "https: http://127.0.0.1:* http://127.0.0.2:*",
         "script-src": "'self'",
         "connect-src": "'self' ipc: http://ipc.localhost",
         "font-src": "'self'",
@@ -54,9 +55,7 @@
       "resources/pdfjs-notices/**/*",
       "resources/pdf-fonts/README.md"
     ],
-    "icon": [
-      "icons/icon.ico"
-    ],
+    "icon": ["icons/icon.ico"],
     "publisher": "Mivlet"
   }
 }

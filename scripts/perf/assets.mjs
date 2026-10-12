@@ -28,7 +28,7 @@ export function formatMs(ms) {
 export const conversationUpgradeAssetPattern =
   /^(assistant-ui-|openui-|mcp-apps-|mcp-semantic-execution-|mcp-transport-core-|connected-app-cancellation-|conversation-markdown-|conversation-branches-|ConversationPane-|ArtifactPreview-|WorkspaceHistory-|OutputCsvEditor-|generated-interface-|InterfaceRenderer-|MessageMarkdown-|CopyButton-|collaboration-mentions-)/;
 export const intelligentUiAssetPattern =
-  /^(intelligent-ui-|RichInterfaceRenderer-|rich-interface-instructions-)/;
+  /^(intelligent-ui-|RichInterfaceRenderer-|GeneratedHtmlResponse-|rich-interface-instructions-)/;
 
 async function walk(dir) {
   const entries = await readdir(dir, { withFileTypes: true });

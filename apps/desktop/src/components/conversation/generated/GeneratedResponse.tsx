@@ -7,6 +7,7 @@ import {
 import { conversationUi } from "../../../runtime/domains/conversation-ui";
 import { MessageMarkdown } from "../MessageMarkdown";
 import "./generated.css";
+import { extractGeneratedHtml } from "../../../lib/generated-html";
 
 // @openuidev/react-lang auto-mounts its development inspector when the package
 // is evaluated. Mivlet deliberately keeps observability opt-in and publishes no
@@ -18,6 +19,7 @@ const openUiFlags = globalThis as typeof globalThis & {
 openUiFlags[Symbol.for("openui.devtools.autoMount")] = true;
 
 const InterfaceRenderer = lazy(() => import("./InterfaceRenderer"));
+const GeneratedHtmlResponse = lazy(() => import("./GeneratedHtmlResponse"));
 export function GeneratedResponse({
   text,
   streaming,
@@ -114,7 +116,24 @@ export function GeneratedResponse({
       epoch.current++;
     };
   }, [scope, streaming, extracted?.complete, checked?.error, reload]);
-  if (!extracted) return <MessageMarkdown content={text} />;
+  if (!extracted) {
+    if (extractGeneratedHtml(text))
+      return (
+        <Suspense fallback={<p role="status">Loading preview controls…</p>}>
+          <GeneratedHtmlResponse
+            key={`${workspaceId}:${conversationId}:${runId}:${agentId}:${generation ?? 0}:${responseRevisionId ?? ""}`}
+            text={text}
+            source={source}
+            streaming={streaming}
+            workspaceId={workspaceId}
+            conversationId={conversationId}
+            agentId={agentId}
+            runId={runId}
+          />
+        </Suspense>
+      );
+    return <MessageMarkdown content={text} />;
+  }
   const change = (key: string, value: string | boolean) => {
     if (!latest.current.saved || streaming || reviewing.current) return;
     const version = epoch.current;
