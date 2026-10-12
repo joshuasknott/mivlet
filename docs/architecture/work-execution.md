@@ -513,6 +513,9 @@ listener or navigation fence disables the preview with a prerequisite.
 The native request guard pauses document requests before transmission and binds
 the Chromium frame id to the issued resource. This blocks navigation egress,
 including process swaps; cancelling NavigationStarting alone can be too late.
+Out-of-process child renderer targets start paused and receive the same request
+guard before their JavaScript resumes. Native continuations use the event's exact
+protocol session; handling only the main renderer does not fence child requests.
 
 The guest has only `allow-scripts`, no same-origin allowance or AppBridge, and a
 fixed CSP denying network, forms, nested frames, workers, external assets and
