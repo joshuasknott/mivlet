@@ -95,16 +95,19 @@ const Tabs = defineComponent({
     );
   },
 });
-const chartProps = z.object({
-  title: z.string().max(500),
-  labels: z.array(z.string().max(160)).min(1).max(100),
-  values: z.array(z.number().finite().min(-1e12).max(1e12)).min(1).max(100),
-});
+// OpenUI tags schemas with component identity. Each chart needs its own schema
+// instance, otherwise registering LineChart overwrites BarChart's catalogue id.
+const chartProps = () =>
+  z.object({
+    title: z.string().max(500),
+    labels: z.array(z.string().max(160)).min(1).max(100),
+    values: z.array(z.number().finite().min(-1e12).max(1e12)).min(1).max(100),
+  });
 const ChartView = ({
   props,
   line = false,
 }: {
-  props: z.infer<typeof chartProps>;
+  props: z.infer<ReturnType<typeof chartProps>>;
   line?: boolean;
 }) => {
   if (props.labels.length !== props.values.length)
@@ -149,13 +152,13 @@ const ChartView = ({
 const BarChart = defineComponent({
   name: "BarChart",
   description: "Interactive bar chart with accessible data.",
-  props: chartProps,
+  props: chartProps(),
   component: ({ props }) => <ChartView props={props} />,
 });
 const LineChart = defineComponent({
   name: "LineChart",
   description: "Interactive line chart with accessible data.",
-  props: chartProps,
+  props: chartProps(),
   component: ({ props }) => <ChartView props={props} line />,
 });
 const Button = defineComponent({
