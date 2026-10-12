@@ -27,6 +27,7 @@ export default function GeneratedHtmlResponse({
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
   const live = useRef<Resource | undefined>(undefined);
+  const preview = useRef<HTMLElement>(null);
   const epoch = useRef(0);
   const owner = { workspaceId, conversationId, agentId };
   const release = useCallback(
@@ -54,9 +55,9 @@ export default function GeneratedHtmlResponse({
     };
     // The cleanup must retain the owner of the resource being torn down.
   }, [release, source, streaming]);
-  if (!extracted) return <MessageMarkdown content={text} />;
   const open = async () => {
     if (
+      !extracted ||
       opening ||
       streaming ||
       !source ||
@@ -102,10 +103,41 @@ export default function GeneratedHtmlResponse({
     setResource(undefined);
     setOpening(false);
   };
+  useEffect(() => {
+    if (!resource) return;
+    const stop = () => {
+      ++epoch.current;
+      release(resource);
+      live.current = undefined;
+      setResource(undefined);
+      setOpening(false);
+    };
+    // Resource expiry must also remove the executable guest, rather than only
+    // refusing subsequent HTTP reads. Hidden compact panes must not keep it running.
+    const timeout = setTimeout(stop, 15 * 60 * 1000);
+    const dock = preview.current?.closest(".conversation-dock");
+    if (dock?.hasAttribute("hidden")) stop();
+    const observer = dock
+      ? new MutationObserver(() => {
+          if (dock.hasAttribute("hidden")) stop();
+        })
+      : undefined;
+    if (dock)
+      observer?.observe(dock, {
+        attributes: true,
+        attributeFilter: ["hidden"],
+      });
+    return () => {
+      clearTimeout(timeout);
+      observer?.disconnect();
+    };
+  }, [resource, release]);
+  if (!extracted) return <MessageMarkdown content={text} />;
   return (
     <div className="generated-html-response">
       <MessageMarkdown content={extracted.before} />
       <section
+        ref={preview}
         className="generated-html-preview"
         aria-label="Custom interactive response"
       >
@@ -138,7 +170,8 @@ export default function GeneratedHtmlResponse({
           />
         )}
         <p className="generated-html-note">
-          Runs locally. No network or tool access. Changes reset when closed.
+          Runs locally. No network or tool access. Closes after 15 minutes.
+          Changes reset when closed.
         </p>
         {(error || extracted.error) && (
           <p role="status">{error || extracted.error}</p>

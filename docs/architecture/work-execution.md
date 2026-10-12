@@ -516,7 +516,8 @@ fixed CSP denying network, forms, nested frames, workers, external assets and
 native protocols. Inline CSS, SVG and JavaScript can implement local calculators,
 diagrams and simulations. Host Close stays outside the guest. Teardown releases
 resources on source/chat/account changes and late registration; expiry bounds
-abandoned resources. Guest state resets on close and never enters saved answers
+abandoned resources. The executable frame also closes at fifteen minutes and
+when its compact conversation pane is hidden. Guest state resets on close and never enters saved answers
 or model context. Use OpenUI for durable selections and native artifacts for photos.
 
 Interactive answers belong to an exact saved terminal message revision and its

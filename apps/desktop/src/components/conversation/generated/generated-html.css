@@ -17,7 +17,7 @@
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--surface);
-  color: var(--text);
+  color: var(--ink);
   cursor: pointer;
 }
 .generated-html-toolbar button:disabled {

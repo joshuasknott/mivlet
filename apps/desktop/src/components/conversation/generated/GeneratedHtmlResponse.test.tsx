@@ -1,4 +1,5 @@
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -32,8 +33,42 @@ beforeEach(() => {
   invoke.mockReset();
   invoke.mockResolvedValue(resource);
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 describe("generated HTML authority and lifecycle", () => {
+  it("removes executable content when its native resource lifetime expires", async () => {
+    vi.useFakeTimers();
+    render(<GeneratedHtmlResponse {...props} />);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
+    });
+    expect(document.querySelector("iframe")).not.toBeNull();
+    act(() => {
+      vi.advanceTimersByTime(15 * 60 * 1000);
+    });
+    expect(document.querySelector("iframe")).toBeNull();
+    expect(invoke).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "close-html" }),
+    );
+  });
+  it("stops executable previews when their compact conversation pane is hidden", async () => {
+    const view = render(
+      <div className="conversation-dock">
+        <GeneratedHtmlResponse {...props} />
+      </div>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Open preview" }));
+    await screen.findByRole("button", { name: "Close preview" });
+    view.container.firstElementChild!.setAttribute("hidden", "");
+    await waitFor(() => expect(document.querySelector("iframe")).toBeNull());
+    expect(invoke).toHaveBeenLastCalledWith(
+      expect.anything(),
+      expect.objectContaining({ action: "close-html" }),
+    );
+  });
   it("parses complete bounded previews while preserving ordinary text", () => {
     expect(extractGeneratedHtml(source)).toMatchObject({
       before: "Try this.\n",
