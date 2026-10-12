@@ -44,7 +44,7 @@ fn native_ci_setup_acceptance() {
 fn pipe_namespace_probe() {
     use windows_sys::Win32::{Storage::FileSystem::PIPE_ACCESS_DUPLEX, System::Pipes::*};
     let name = security::random_id().unwrap();
-    let legacy_name = security::wide(&format!(r"\\?\pipe\uv\mivlet-{name}"));
+    let legacy_name = security::wide(format!(r"\\?\pipe\uv\mivlet-{name}"));
     let legacy = unsafe {
         CreateNamedPipeW(
             legacy_name.as_ptr(),
@@ -69,7 +69,7 @@ fn pipe_namespace_probe() {
         "Legacy pipe namespace unexpectedly accepted inside AppContainer"
     );
     assert_eq!(error, ERROR_ACCESS_DENIED);
-    let local_name = security::wide(&format!(r"\\?\pipe\LOCAL\uv\mivlet-{name}"));
+    let local_name = security::wide(format!(r"\\?\pipe\LOCAL\uv\mivlet-{name}"));
     let local = unsafe {
         CreateNamedPipeW(
             local_name.as_ptr(),

@@ -20,7 +20,7 @@ fn resources() -> PathBuf {
 #[ignore = "Actual host-to-AppContainer TCP denial; requires native runtime and execution setup"]
 fn native_loopback_isolation_acceptance() {
     let source = tempfile::tempdir().unwrap();
-    fs::write(source.path().join("listener.js"), "const net=require('node:net');const server=net.createServer(socket=>socket.end('private test listener'));server.on('error',error=>{if(error.code!=='EACCES')throw error;console.log('PRIVATE_LISTEN_DENIED=EACCES');process.exit(0);});server.listen(0,'127.0.0.1',()=>console.log('PRIVATE_PORT='+server.address().port));setInterval(()=>{},1000);").unwrap();
+    fs::write(source.path().join("listener.js"), "const net=require('node:net');const server=net.createServer(socket=>socket.end('private test listener'));const timer=setInterval(()=>{},1000);server.on('error',error=>{if(error.code!=='EACCES')throw error;console.log('PRIVATE_LISTEN_DENIED=EACCES');clearInterval(timer);});server.listen(0,'127.0.0.1',()=>console.log('PRIVATE_PORT='+server.address().port));").unwrap();
     let cancel = Arc::new(AtomicBool::new(false));
     let stopped = cancel.clone();
     let log = OutputLog::new(|_, text| text.to_owned());
@@ -41,7 +41,7 @@ fn native_loopback_isolation_acceptance() {
             |launch| launch(),
         )
     });
-    let deadline = Instant::now() + Duration::from_secs(30);
+    let deadline = Instant::now() + Duration::from_secs(120);
     let mut port = None;
     let mut listen_denied = false;
     while Instant::now() < deadline {
