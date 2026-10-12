@@ -43,6 +43,7 @@ mod env_compat;
 mod execution_approvals;
 mod execution_attempts;
 mod execution_control;
+mod generated_html;
 mod google;
 mod hosted_computer;
 mod knowledge;

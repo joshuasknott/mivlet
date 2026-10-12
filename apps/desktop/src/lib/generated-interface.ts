@@ -273,5 +273,6 @@ export const GENERATED_UI_INSTRUCTIONS = `Mivlet supports an optional interactiv
 export async function loadGeneratedUiInstructions() {
   const { default: catalogue } =
     await import("./rich-interface-instructions.json");
-  return `${GENERATED_UI_INSTRUCTIONS}\n${catalogue.instructions}`;
+  const { GENERATED_HTML_INSTRUCTIONS } = await import("./generated-html");
+  return `${GENERATED_UI_INSTRUCTIONS}\n${catalogue.instructions}\n${GENERATED_HTML_INSTRUCTIONS}`;
 }

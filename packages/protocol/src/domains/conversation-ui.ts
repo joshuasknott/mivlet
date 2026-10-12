@@ -51,6 +51,8 @@ export type ConversationUiCommand =
   | { action: "preview-context" }
   | { action: "set-context"; selection: ConversationContextSelection }
   | { action: "load-interface"; runId: string; source: string }
+  | { action: "render-html"; runId: string; source: string }
+  | { action: "close-html"; runId: string; resourceId: string }
   | {
       action: "quote-response";
       runId: string;

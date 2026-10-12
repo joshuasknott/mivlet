@@ -501,6 +501,24 @@ a prerequisite. Local interactions do not call a provider; follow-ups remain
 reviewable composer drafts. No hosted gateway, extra API key or vendor branch is
 introduced. Generative reliability still needs representative provider tests.
 
+Custom responses can use one bounded `mivlet-html` fence when the OpenUI
+catalogue cannot represent the interaction. They remain source-only until a user
+opens the preview. Native collaboration validates the exact selected terminal
+assistant revision, agent/account/workspace ownership and completed attempt
+before extracting the HTML itself; the renderer cannot substitute a document.
+The existing read-only resource host issues an ephemeral opaque URL on a separate
+127.0.0.2 loopback site, pinned to its account and origin. Windows requests site
+isolation and fences child-frame navigation to that exact issued URL. An unavailable
+listener or navigation fence disables the preview with a prerequisite.
+
+The guest has only `allow-scripts`, no same-origin allowance or AppBridge, and a
+fixed CSP denying network, forms, nested frames, workers, external assets and
+native protocols. Inline CSS, SVG and JavaScript can implement local calculators,
+diagrams and simulations. Host Close stays outside the guest. Teardown releases
+resources on source/chat/account changes and late registration; expiry bounds
+abandoned resources. Guest state resets on close and never enters saved answers
+or model context. Use OpenUI for durable selections and native artifacts for photos.
+
 Interactive answers belong to an exact saved terminal message revision and its
 native conversation/agent owner. The encrypted `conversation_ui` repository uses
 compare-and-swap revisions. A deliberate review checks current branch ownership,
