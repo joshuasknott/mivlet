@@ -77,7 +77,8 @@ export function BackgroundExecutionSettings() {
           </span>
           <p>
             New Read Only text work and schedules can continue with Codex,
-            Claude or supported APIs.
+            Claude or supported APIs. Attachments, projects, connected apps and
+            agent handoffs need the open workspace.
           </p>
         </div>
         <dl className="background-execution__details">

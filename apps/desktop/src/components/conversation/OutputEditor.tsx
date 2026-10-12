@@ -288,7 +288,7 @@ export function OutputEditor({
     <section className="output-editor" aria-label={`${output.title} editor`}>
       <div className="output-editor__toolbar">
         <span className="output-editor__format">
-          {output.format} · editing current revision {output.currentRevisionNumber}
+          {output.format} · {isStructured ? "read-only preview of" : "editing"} current revision {output.currentRevisionNumber}
         </span>
         {output.pinned && pinnedRevision ? (
           <span className="output-editor__pin-status" role="status">
