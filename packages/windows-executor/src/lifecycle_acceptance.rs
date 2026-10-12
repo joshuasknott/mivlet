@@ -15,33 +15,91 @@ fn resources() -> PathBuf {
         .expect("Executor package belongs to the workspace")
         .join("apps/desktop/src-tauri/resources/execution-runtime/runtime")
 }
+
+#[test]
+#[ignore = "Actual host-to-AppContainer TCP denial; requires native runtime and execution setup"]
+fn native_loopback_isolation_acceptance() {
+    let source = tempfile::tempdir().unwrap();
+    fs::write(source.path().join("listener.js"), "const net=require('node:net');const server=net.createServer(socket=>socket.end('private test listener'));server.on('error',error=>{if(error.code!=='EACCES')throw error;console.log('PRIVATE_LISTEN_DENIED=EACCES');process.exit(0);});server.listen(0,'127.0.0.1',()=>console.log('PRIVATE_PORT='+server.address().port));setInterval(()=>{},1000);").unwrap();
+    let cancel = Arc::new(AtomicBool::new(false));
+    let stopped = cancel.clone();
+    let log = OutputLog::new(|_, text| text.to_owned());
+    let observed = log.clone();
+    let path = source.path().to_owned();
+    let worker = std::thread::spawn(move || {
+        run_with_output(
+            &resources(),
+            &path,
+            "node listener.js",
+            false,
+            60,
+            Limits::ANALYSIS,
+            binding(5),
+            ExecutionMode::Persistent,
+            log,
+            || !stopped.load(Ordering::Acquire),
+            |launch| launch(),
+        )
+    });
+    let deadline = Instant::now() + Duration::from_secs(30);
+    let mut port = None;
+    let mut listen_denied = false;
+    while Instant::now() < deadline {
+        let page = observed.read(0).unwrap();
+        listen_denied = page
+            .frames
+            .iter()
+            .any(|frame| frame.text.trim() == "PRIVATE_LISTEN_DENIED=EACCES");
+        port = page.frames.iter().find_map(|frame| {
+            frame
+                .text
+                .strip_prefix("PRIVATE_PORT=")
+                .and_then(|value| value.trim().parse::<u16>().ok())
+        });
+        if port.is_some() || listen_denied || worker.is_finished() {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    let connection = port.map(|port| {
+        std::net::TcpStream::connect_timeout(
+            &std::net::SocketAddr::from(([127, 0, 0, 1], port)),
+            Duration::from_millis(500),
+        )
+    });
+    if !listen_denied {
+        cancel.store(true, Ordering::Release);
+    }
+    let completed = worker.join().unwrap().unwrap();
+    if listen_denied {
+        assert!(port.is_none());
+        assert_eq!(completed.receipt().exit_code, Some(0));
+        assert!(!completed.receipt().interrupted);
+        assert!(observed.read(0).unwrap().closed);
+        println!("Actual AppContainer loopback listen refused with EACCES.");
+        return;
+    }
+    assert!(
+        port.is_some(),
+        "Listener never became ready: {}",
+        completed.receipt().output
+    );
+    assert!(
+        connection.unwrap().is_err(),
+        "Host reached a network-disabled AppContainer listener"
+    );
+    assert!(completed.receipt().interrupted);
+    assert!(observed.read(0).unwrap().closed);
+    println!(
+        "Actual host-to-AppContainer loopback connection refused; Stop terminated the listener."
+    );
+}
 fn binding(operation_id: u64) -> Binding {
     Binding {
         scope_id: "5".repeat(64),
         generation: 1,
         operation_id,
     }
-}
-
-#[test]
-#[ignore = "Real LPAC process: requires prepared bundled runtimes and native execution setup"]
-fn native_live_persistent_server_acceptance() {
-    persistent_job_lifecycle_acceptance(
-        r#"
-const fs=require('node:fs'), http=require('node:http'), cp=require('node:child_process');
-const child=cp.spawn(process.execPath,['-e',"setTimeout(()=>require('fs').writeFileSync('late.txt','escaped'),15000)"],{detached:true,stdio:'ignore'}); child.unref();
-const server=http.createServer((req,res)=>res.end('disposable native development server'));
-server.listen(0,'127.0.0.1',()=>{
-  fs.writeFileSync('ready.json',JSON.stringify({pid:child.pid, port:server.address().port}));
-  console.log('SERVER_LISTENING '+server.address().port+' CHILD='+child.pid);
-  process.stdout.write('token=synthetic-');
-  setTimeout(()=>process.stdout.write('canary-value\n'),50);
-});
-setInterval(()=>console.log('server heartbeat'),200);
-"#,
-        "SERVER_LISTENING",
-        1,
-    );
 }
 
 #[test]
