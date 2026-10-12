@@ -39,7 +39,7 @@ export default defineConfig({
       },
     ],
   },
-  clearScreen: false,
+  clearScreen: false, // Prompt generation uses a separate dependency cache.
   server: {
     port: 1420,
     strictPort: true,
@@ -66,9 +66,11 @@ export default defineConfig({
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
+        onlyExplicitManualChunks: true,
         manualChunks(id) {
           // The PDF engine is loaded only when a verified PDF preview opens.
-          if (/[/\\]node_modules[/\\]pdfjs-dist[/\\]/.test(id)) return "pdf-renderer";
+          if (/[/\\]node_modules[/\\]pdfjs-dist[/\\]/.test(id))
+            return "pdf-renderer";
           if (id.includes("@phosphor-icons")) return "icons";
           // Conversation-only UI engines are reached through the lazy
           // ConversationPane boundary. Keeping their package graphs in
@@ -76,7 +78,13 @@ export default defineConfig({
           // eagerly pulling OpenUI, assistant-ui, or MCP App code at startup.
           if (id.includes("vite/preload-helper")) return "feature-preload";
           if (id.includes("@assistant-ui")) return "assistant-ui";
-          if (id.includes("@openuidev")) return "openui";
+          if (id.includes("@openuidev")) return "intelligent-ui-runtime";
+          if (
+            /[/\\]node_modules[/\\](?:\.pnpm[/\\])?(?:@radix-ui|radix-ui|@floating-ui|d3-|internmap|lucide-react)/.test(
+              id,
+            )
+          )
+            return "intelligent-ui-widgets";
           if (id.includes("@modelcontextprotocol")) return "mcp-apps";
           if (/[/\\]node_modules[/\\]marked[/\\]/.test(id))
             return "conversation-markdown";
@@ -90,6 +98,7 @@ export default defineConfig({
   },
   envPrefix: ["VITE_", "TAURI_"],
   test: {
+    server: { deps: { inline: ["@openuidev/react-ui"] } },
     environment: "jsdom",
     globals: true,
     setupFiles: "./src/test/setup.ts",

@@ -32,6 +32,12 @@ a deployed or production-validated service.
 
 ### Implemented locally
 
+- Interactive conversation answers through OpenUI: reactive calculators, quizzes,
+  planners and comparisons, reusable layouts/cards/tabs, charts, searchable tables
+  and verified published images. The selected provider emits the same text format;
+  no additional UI-generation service or subscription is required. Inputs restore
+  from the exact saved response; local changes are immediate and follow-up actions
+  stage a reply for review. Legacy interactive responses remain supported.
 - Managed coding repositories for named agents: attach a local Git repository,
   edit a separate copy, run native Windows checks in a restricted snapshot, review
   the actual diff, commit an approved snapshot and optionally open a GitHub PR.
