@@ -121,7 +121,7 @@ export function GeneratedResponse({
       return (
         <Suspense fallback={<p role="status">Loading preview controls…</p>}>
           <GeneratedHtmlResponse
-            key={scope}
+            key={`${workspaceId}:${conversationId}:${runId}:${agentId}:${generation ?? 0}:${responseRevisionId ?? ""}`}
             text={text}
             source={source}
             streaming={streaming}
