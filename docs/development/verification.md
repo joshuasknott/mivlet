@@ -15,6 +15,18 @@ domain directly. Provider setup and model discovery belong to
 `hooks/shell-runtime/useProviderConnections.ts`. Keep account transitions,
 snapshot persistence and execution ownership explicit when separating shell code.
 
+Provider startup publishes each native API provider only after its own credential
+check succeeds; pending secondary providers do not delay an already verified
+connection. The account-scoped request owner coalesces overlapping checks and
+model discovery, bounds renderer waits to 20 seconds, and rejects results after
+account changes, disconnects or credential replacement. A renderer timeout does
+not cancel native IPC or establish provider failure; the saved key remains
+available for an explicit Check connection retry. Native network deadlines and
+credential custody remain authoritative. Focused regression coverage is in
+`hooks/shell-runtime/useProviderConnections.test.tsx`, including a simulated
+80 ms primary check with a 5,000 ms secondary. That timing demonstrates gating
+behavior under controlled responses, not measured live startup latency.
+
 `useAccountWorkspace` owns account requests and scope transitions;
 `useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;
 `useWorkspaceApprovals` owns the queue, audit and decision bridge.

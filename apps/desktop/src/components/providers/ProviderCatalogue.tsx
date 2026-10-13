@@ -717,12 +717,17 @@ function ProviderConnectionFlow({
           className="provider-method-detail__back"
           onClick={goBack}
           aria-label={
-            selectedMethod && !pending ? "Back to connection methods" : "Back to providers"
+            selectedMethod && !pending
+              ? "Back to connection methods"
+              : "Back to providers"
           }
         >
-          <ArrowLeft size={18} /> {selectedMethod && !pending ? family.label : "Providers"}
+          <ArrowLeft size={18} />{" "}
+          {selectedMethod && !pending ? family.label : "Providers"}
         </button>
-        {pending && <p role="status">You can go back while this connection finishes.</p>}
+        {pending && (
+          <p role="status">You can go back while this connection finishes.</p>
+        )}
         <header className="provider-connection-flow__header">
           <span className="provider-connection-flow__logo" aria-hidden="true">
             <ProviderIcon
@@ -775,6 +780,31 @@ function ProviderConnectionFlow({
               </div>
             ) : null}
 
+            {selectedMethod.provider.backendType === "native-api" &&
+            selectedMethod.provider.authState === "unavailable" &&
+            !methodConnected ? (
+              <div className="provider-method-detail__instructions">
+                <div>
+                  <p role="status">
+                    {selectedMethod.provider.installHint ??
+                      "Check your network, then retry the saved connection."}
+                  </p>
+                  {onCheckConnection ? (
+                    <button
+                      type="button"
+                      className="provider-method-detail__check"
+                      disabled={pending}
+                      onClick={() =>
+                        void checkConnection(selectedMethod.provider.id)
+                      }
+                    >
+                      {pending ? "Checking…" : "Check connection"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+
             {selectedMethod.kind === "api-key" &&
             (!methodConnected || replacingCredential) ? (
               <form
@@ -806,7 +836,12 @@ function ProviderConnectionFlow({
                 }}
               >
                 <label>
-                  <span>{selectedMethod.provider.id === "openai" ? "OpenAI" : selectedMethod.provider.label} API key</span>
+                  <span>
+                    {selectedMethod.provider.id === "openai"
+                      ? "OpenAI"
+                      : selectedMethod.provider.label}{" "}
+                    API key
+                  </span>
                   <span className="provider-key-input">
                     <input
                       ref={keyInputRef}

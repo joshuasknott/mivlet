@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+  useRef,
+  type RefObject,
+} from "react";
 import type {
   BackendProvider,
   BackendVerifyOutcome,
@@ -19,8 +26,6 @@ import {
 import {
   clearRuntimeBackend,
   connectRuntimeBackend,
-  listRuntimeBackends,
-  listRuntimeBackendModels,
   checkRuntimeAntigravityConnection,
   checkRuntimeManagedConnection,
   installRuntimeAntigravity,
@@ -30,7 +35,6 @@ import {
   startRuntimeCodexBrowserLogin,
   startRuntimeManagedLogin,
   type ManagedRuntimeProviderId,
-  verifyRuntimeBackend,
 } from "../../runtime/domains/providers";
 import { type PersistedShellState } from "../../lib/types";
 import { hasTauriRuntime } from "../../lib/persistence";
@@ -40,58 +44,20 @@ import {
   isMivletProviderEnabled,
 } from "../../lib/provider-availability";
 
-async function resolveUsableBackendProviders(
-  providers: BackendProvider[],
-): Promise<BackendProvider[]> {
-  const resolved = enabledMivletProviders(providers);
-  const nativeVerification = new Map<string, BackendVerifyResult | null>();
-
-  await Promise.all(
-    resolved
-      .filter(
-        (provider) =>
-          provider.backendType === "native-api" &&
-          provider.authState === "connected",
-      )
-      .map(async (provider) => {
-        nativeVerification.set(
-          provider.id,
-          await verifyRuntimeBackend(provider.id),
-        );
-      }),
-  );
-
-  return resolved.map((provider) => {
-    const verification = nativeVerification.get(provider.id);
-    if (
-      verification === undefined ||
-      verification?.outcome === "ready" ||
-      verification?.outcome === "configured"
-    ) {
-      return provider;
-    }
-    const authState =
-      verification?.outcome === "auth-failed" ? "needs-auth" : "unavailable";
-    return {
-      ...provider,
-      authState,
-      capabilities: [],
-      models: provider.models.map((model) => ({ ...model, available: false })),
-      installHint:
-        verification?.message ??
-        "Mivlet could not verify this saved provider. Check the connection and try again.",
-    };
-  });
-}
+import { createProviderConnectionRequests } from "./provider-connection-requests";
 
 /** Provider setup, verification, discovery and model selection for one shell. */
 export function useProviderConnections({
   initialState,
+  workspaceScopeGeneration,
+  workspaceIdentityRef,
   selectedModelId,
   hiddenModelIds,
   setLastAction,
 }: {
   initialState: PersistedShellState;
+  workspaceScopeGeneration: number;
+  workspaceIdentityRef: RefObject<string | null>;
   selectedModelId: string;
   hiddenModelIds: string[];
   setLastAction: (message: string) => void;
@@ -125,11 +91,54 @@ export function useProviderConnections({
 
   const [backendStatus, setBackendStatus] = useState<string | null>(null);
 
+  const [providerScopeGeneration, setProviderScopeGeneration] = useState(
+    workspaceScopeGeneration,
+  );
+  const scopeGenerationRef = useRef(workspaceScopeGeneration);
+  scopeGenerationRef.current = workspaceScopeGeneration;
+  const requests = useMemo(() => {
+    const identity = workspaceIdentityRef.current;
+    return createProviderConnectionRequests({
+      isCurrent: () =>
+        workspaceIdentityRef.current === identity &&
+        scopeGenerationRef.current === workspaceScopeGeneration &&
+        (!hasTauriRuntime() || identity !== null),
+      onProviders: (providers) => {
+        setBackendProviders(providers);
+        setConnectedBackendIds(
+          providers
+            .filter((provider) => provider.authState === "connected")
+            .map((provider) => provider.id),
+        );
+      },
+      onDiscovery: (providerId, result) => {
+        setModelDiscoveryByProvider((current) => ({
+          ...current,
+          [providerId]: result?.outcome ?? "unsupported",
+        }));
+        if (!result) return;
+        setDiscoveredModels((current) => ({
+          ...current,
+          [providerId]: result,
+        }));
+        if (result.outcome === "failed")
+          setBackendStatus(
+            result.message ??
+              "Model discovery failed. Choose Refresh models to retry.",
+          );
+      },
+    });
+  }, [workspaceScopeGeneration, workspaceIdentityRef]);
+  const scopedBackendProviders =
+    providerScopeGeneration === workspaceScopeGeneration && requests.isCurrent()
+      ? backendProviders
+      : enabledMivletProviders(listBackendProviders());
+
   // Every runnable connection participates in the model picker. Selection owns
   // routing: Mivlet no longer silently sends all prompts to the first connection.
   const connectedAgentBackends = useMemo(
     () =>
-      backendProviders.filter(
+      scopedBackendProviders.filter(
         (provider) =>
           provider.authState === "connected" &&
           provider.capabilities.includes("streaming") &&
@@ -141,7 +150,7 @@ export function useProviderConnections({
           ) &&
           (provider.backendType === "native-api" || hasTauriRuntime()),
       ),
-    [backendProviders],
+    [scopedBackendProviders],
   );
 
   const allModelOptions = useMemo(
@@ -193,78 +202,42 @@ export function useProviderConnections({
 
   const resolvedModelOptionId = resolvedModelOption?.id ?? "";
 
+  const refreshBackendProviders = useCallback(
+    (checkedProviderId?: string) => requests.refresh(checkedProviderId),
+    [requests],
+  );
+
   useEffect(() => {
-    let active = true;
+    requests.activate();
+    setProviderScopeGeneration(workspaceScopeGeneration);
+    setBackendProviders(enabledMivletProviders(listBackendProviders()));
+    setConnectedBackendIds(
+      hasTauriRuntime()
+        ? []
+        : initialState.connectedBackendIds.filter(isMivletProviderEnabled),
+    );
+    setDiscoveredModels({});
+    setModelDiscoveryByProvider({});
+    setBackendStatus(null);
+    void refreshBackendProviders();
+    return () => requests.dispose();
+  }, [
+    requests,
+    refreshBackendProviders,
+    workspaceScopeGeneration,
+    initialState,
+  ]);
 
-    void listRuntimeBackends().then(async (providers) => {
-      if (!active || !providers) {
-        return;
-      }
-
-      const resolved = await resolveUsableBackendProviders(providers);
-
-      if (!active) {
-        return;
-      }
-      setBackendProviders(resolved);
-      const connectedIds = resolved
-        .filter((provider) => provider.authState === "connected")
-        .map((provider) => provider.id);
-      setConnectedBackendIds(connectedIds);
-    });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  // Dynamic model discovery: ask the Rust boundary to list a connected
-  // provider's models (fail closed — no key in JS) and merge the result with the
-  // curated catalogue. Outside Tauri this is a no-op so the catalogue fallback
-  // drives selection and fixture tests stay green.
-  //
-  // `runModelDiscovery` is the single entry point for both the auto-run on
-  // connect and the manual Settings "Refresh models" action. It drives the
-  // per-provider lifecycle so Settings can show a spinner and recoverable
-  // failure copy. `active` guards stale completions if the provider changes
-  // mid-flight; the manual refresh path always resolves regardless (it sets
-  // its own lifecycle entry).
   const runModelDiscovery = useCallback(
-    async (providerId: string): Promise<void> => {
+    (providerId: string): Promise<void> => {
+      if (!requests.isCurrent()) return Promise.resolve();
       setModelDiscoveryByProvider((current) => ({
         ...current,
         [providerId]: "loading",
       }));
-      const result = await listRuntimeBackendModels(providerId);
-      // null means preview/no desktop runtime. Mark this attempt unsupported so
-      // the automatic discovery effect cannot spin idle -> loading -> idle.
-      // A manual refresh can still call this entry point again.
-      if (result === null) {
-        setModelDiscoveryByProvider((current) => ({
-          ...current,
-          [providerId]: "unsupported",
-        }));
-        return;
-      }
-      setDiscoveredModels((current) => ({
-        ...current,
-        [providerId]: result,
-      }));
-      // Map the runtime outcome onto the UI lifecycle. `empty`/`offline`/
-      // `unsupported`/`failed` are kept distinct so failed/offline never
-      // masquerade as an empty account.
-      setModelDiscoveryByProvider((current) => ({
-        ...current,
-        [providerId]: result.outcome,
-      }));
-      if (result.outcome === "failed") {
-        setBackendStatus(
-          result.message ??
-            "Model discovery failed; using the curated catalogue.",
-        );
-      }
+      return requests.discover(providerId);
     },
-    [],
+    [requests],
   );
 
   // Auto-run discovery for connected HTTP providers and Antigravity's cached
@@ -288,7 +261,7 @@ export function useProviderConnections({
    */
   const refreshModels = useCallback(
     async (providerId: string): Promise<void> => {
-      const provider = backendProviders.find(
+      const provider = scopedBackendProviders.find(
         (entry) => entry.id === providerId,
       );
       if (!provider || provider.authState !== "connected") {
@@ -296,7 +269,7 @@ export function useProviderConnections({
       }
       await runModelDiscovery(providerId);
     },
-    [backendProviders, runModelDiscovery],
+    [scopedBackendProviders, runModelDiscovery],
   );
 
   // Agent-runtime backend connect/disconnect. The secret is handed to the Rust
@@ -308,20 +281,25 @@ export function useProviderConnections({
   // point for onboarding + Settings: store → mark connecting → verify against
   // the provider inside the boundary → reflect. `connectBackend` is retained as
   // a fire-and-forget wrapper over it for the legacy contract.
-  const refreshBackendProviders = async () => {
-    const refreshed = await listRuntimeBackends();
-    if (refreshed) {
-      const resolved = await resolveUsableBackendProviders(refreshed);
-      setBackendProviders(resolved);
-      setConnectedBackendIds(
-        resolved
-          .filter((provider) => provider.authState === "connected")
-          .map((provider) => provider.id),
-      );
-      return resolved;
-    }
-    return null;
+  const resetProviderDiscovery = (providerId: string) => {
+    connectionChecks.delete(providerId);
+    setDiscoveredModels((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
+    setModelDiscoveryByProvider((current) => {
+      const next = { ...current };
+      delete next[providerId];
+      return next;
+    });
   };
+  const staleConnection = (providerId: string): BackendVerifyResult => ({
+    providerId,
+    outcome: "failed",
+    message:
+      "The account or provider connection changed. Check the current connection again.",
+  });
 
   const markProviderState = (
     providerId: string,
@@ -358,6 +336,9 @@ export function useProviderConnections({
       setBackendStatus(message);
       return { providerId, outcome: "unsupported", message };
     }
+    const token = requests.invalidate(providerId);
+    if (!requests.isCurrent(token)) return staleConnection(providerId);
+    resetProviderDiscovery(providerId);
     setBackendStatus(`Connecting ${providerId}…`);
     // Surface the connecting state on the provider card while the round-trip
     // is in flight. This is a transient UI state; the boundary re-resolves to
@@ -365,6 +346,8 @@ export function useProviderConnections({
     markProviderState(providerId, "connecting");
     try {
       const stored = await connectRuntimeBackend({ providerId, secret });
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
+      requests.finishMutation(token);
       if (stored === null) {
         // Preview mode (no Tauri runtime): record a local connection only.
         // The secret is the placeholder preview value, never a real key, so no
@@ -380,12 +363,15 @@ export function useProviderConnections({
 
       // Key stored in the keychain. Verify it against the provider inside the
       // Rust boundary — the secret never crosses back into JS.
-      const result = await verifyRuntimeBackend(providerId);
+      const result = await requests.verify(providerId);
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
       // A missing verification command must never turn key storage into proof
       // of a usable provider. Browser preview returned earlier above.
       if (!result) {
         await clearRuntimeBackend(providerId);
-        await refreshBackendProviders();
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
+        await refreshBackendProviders(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         markProviderState(providerId, "needs-auth");
         const message =
           "Mivlet could not verify this provider in the desktop runtime. Update Mivlet and try again.";
@@ -400,7 +386,9 @@ export function useProviderConnections({
         // The provider rejected the key: clear it so the bad credential does
         // not linger as a "connected" provider, then surface a useful error.
         await clearRuntimeBackend(providerId);
-        await refreshBackendProviders();
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
+        await refreshBackendProviders(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         markProviderState(providerId, "needs-auth");
         const status =
           message ??
@@ -411,7 +399,8 @@ export function useProviderConnections({
       }
 
       if (outcome === "ready" || outcome === "configured") {
-        await refreshBackendProviders();
+        await refreshBackendProviders(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         const status =
           message ??
           (outcome === "configured"
@@ -428,7 +417,8 @@ export function useProviderConnections({
 
       // offline / unsupported / failed: retain the key so the user can retry,
       // but do not let key presence clear onboarding or claim readiness.
-      await refreshBackendProviders();
+      await refreshBackendProviders(providerId);
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
       setConnectedBackendIds((current) =>
         current.filter((id) => id !== providerId),
       );
@@ -440,7 +430,9 @@ export function useProviderConnections({
       setLastAction(status);
       return { providerId, outcome, message };
     } catch (error) {
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
       // Storage itself failed. Fail closed: do not report a connection.
+      requests.finishMutation(token);
       markProviderState(providerId, "needs-auth");
       const message =
         error instanceof Error
@@ -459,10 +451,14 @@ export function useProviderConnections({
     await connectBackendWithVerify(providerId, secret);
   };
 
-  const checkBackendConnection = async (
+  const checkBackendConnectionOnce = async (
     providerId: string,
   ): Promise<BackendVerifyResult> => {
-    const provider = backendProviders.find((entry) => entry.id === providerId);
+    const token = requests.capture(providerId);
+    if (!requests.isCurrent(token)) return staleConnection(providerId);
+    const provider = scopedBackendProviders.find(
+      (entry) => entry.id === providerId,
+    );
     if (!provider) {
       return {
         providerId,
@@ -476,9 +472,12 @@ export function useProviderConnections({
         if (provider.authState === "install-required") {
           setBackendStatus("Installing Google's Antigravity ACP runtime…");
           await installRuntimeAntigravity();
+          if (!requests.isCurrent(token)) return staleConnection(providerId);
           setBackendStatus("Opening Google sign-in…");
           const login = await startRuntimeAntigravityBrowserLogin();
-          await refreshBackendProviders();
+          if (!requests.isCurrent(token)) return staleConnection(providerId);
+          await refreshBackendProviders(providerId);
+          if (!requests.isCurrent(token)) return staleConnection(providerId);
           const result: BackendVerifyResult = login
             ? { providerId, outcome: "ready", message: login.message }
             : {
@@ -490,7 +489,9 @@ export function useProviderConnections({
           return result;
         }
         const result = await checkRuntimeAntigravityConnection();
-        await refreshBackendProviders();
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
+        await refreshBackendProviders(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         return (
           result ?? {
             providerId,
@@ -499,11 +500,13 @@ export function useProviderConnections({
           }
         );
       } catch (error) {
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         const message =
           error instanceof Error
             ? error.message
             : "Antigravity could not be installed or connected.";
-        await refreshBackendProviders();
+        await refreshBackendProviders(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         setBackendStatus(message);
         return { providerId, outcome: "failed", message };
       }
@@ -519,9 +522,12 @@ export function useProviderConnections({
         ) {
           setBackendStatus(`Opening the official ${provider.label} sign-in…`);
           await startRuntimeManagedLogin(providerId);
+          if (!requests.isCurrent(token)) return staleConnection(providerId);
         }
         const result = await checkRuntimeManagedConnection(providerId);
-        await refreshBackendProviders();
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
+        await refreshBackendProviders(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         const resolved = result ?? {
           providerId,
           outcome: "unsupported" as const,
@@ -532,18 +538,21 @@ export function useProviderConnections({
         );
         return resolved;
       } catch (error) {
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         const message =
           error instanceof Error
             ? error.message
             : `${provider.label} could not be connected.`;
-        await refreshBackendProviders();
+        await refreshBackendProviders(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         setBackendStatus(message);
         return { providerId, outcome: "failed", message };
       }
     }
 
     if (provider.backendType !== "native-api") {
-      const refreshed = await refreshBackendProviders();
+      const refreshed = await refreshBackendProviders(providerId);
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
       const current =
         refreshed?.find((entry) => entry.id === providerId) ?? provider;
       const ready =
@@ -561,7 +570,8 @@ export function useProviderConnections({
       return result;
     }
 
-    const result = await verifyRuntimeBackend(providerId);
+    const result = await requests.verify(providerId);
+    if (!requests.isCurrent(token)) return staleConnection(providerId);
     if (result === null) {
       const previewResult: BackendVerifyResult = {
         providerId,
@@ -575,7 +585,9 @@ export function useProviderConnections({
 
     if (result.outcome === "auth-failed") {
       await clearRuntimeBackend(providerId);
-      await refreshBackendProviders();
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
+      await refreshBackendProviders(providerId);
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
       markProviderState(providerId, "needs-auth");
       setBackendStatus(
         result.message ?? `${providerId} rejected or revoked this key.`,
@@ -583,7 +595,8 @@ export function useProviderConnections({
       return result;
     }
 
-    await refreshBackendProviders();
+    await refreshBackendProviders(providerId);
+    if (!requests.isCurrent(token)) return staleConnection(providerId);
     setBackendStatus(
       result.message ??
         (result.outcome === "ready"
@@ -591,6 +604,23 @@ export function useProviderConnections({
           : `${providerId} could not be checked right now.`),
     );
     return result;
+  };
+
+  const connectionChecks = useMemo(
+    () => new Map<string, Promise<BackendVerifyResult>>(),
+    [requests],
+  );
+  const checkBackendConnection = (
+    providerId: string,
+  ): Promise<BackendVerifyResult> => {
+    const existing = connectionChecks.get(providerId);
+    if (existing) return existing;
+    const request = checkBackendConnectionOnce(providerId).finally(() => {
+      if (connectionChecks.get(providerId) === request)
+        connectionChecks.delete(providerId);
+    });
+    connectionChecks.set(providerId, request);
+    return request;
   };
 
   const startBackendBrowserLogin = async (
@@ -604,6 +634,9 @@ export function useProviderConnections({
           "This provider does not expose a supported browser sign-in through Mivlet.",
       };
     }
+    const token = requests.invalidate(providerId);
+    if (!requests.isCurrent(token)) return staleConnection(providerId);
+    resetProviderDiscovery(providerId);
     markProviderState(providerId, "connecting");
     setBackendStatus(
       providerId === "codex"
@@ -621,10 +654,14 @@ export function useProviderConnections({
               if (status?.authState === "install-required") {
                 setBackendStatus("Preparing Google Antigravity…");
                 await installRuntimeAntigravity();
+                if (!requests.isCurrent(token))
+                  return staleConnection(providerId);
               }
               setBackendStatus("Opening the official Google sign-in…");
               return startRuntimeAntigravityBrowserLogin();
             })();
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
+      requests.finishMutation(token);
       if (!started) {
         markProviderState(providerId, "needs-auth");
         return {
@@ -638,7 +675,8 @@ export function useProviderConnections({
       // same check and can contend with the provider-owned profile teardown.
       let verified: BackendVerifyResult;
       if (providerId === "antigravity") {
-        await refreshBackendProviders();
+        await refreshBackendProviders(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
         verified = {
           providerId,
           outcome: "ready",
@@ -646,6 +684,7 @@ export function useProviderConnections({
         };
       } else {
         verified = await checkBackendConnection(providerId);
+        if (!requests.isCurrent(token)) return staleConnection(providerId);
       }
       const result =
         verified.outcome === "ready"
@@ -655,6 +694,8 @@ export function useProviderConnections({
       setLastAction(result.message ?? "ChatGPT connected");
       return result;
     } catch (error) {
+      if (!requests.isCurrent(token)) return staleConnection(providerId);
+      requests.finishMutation(token);
       markProviderState(providerId, "needs-auth");
       const message =
         error instanceof Error
@@ -667,12 +708,22 @@ export function useProviderConnections({
   };
 
   const disconnectBackend = async (providerId: string) => {
+    const token = requests.invalidate(providerId);
+    if (!requests.isCurrent(token)) return;
+    resetProviderDiscovery(providerId);
+    markProviderState(providerId, "needs-auth");
+    setConnectedBackendIds((current) =>
+      current.filter((id) => id !== providerId),
+    );
     setBackendStatus(`Disconnecting ${providerId}…`);
     try {
       if (providerId === "antigravity") {
         const cleared = await logoutRuntimeAntigravity();
+        if (!requests.isCurrent(token)) return;
         if (cleared !== null) {
-          await refreshBackendProviders();
+          requests.finishMutation(token);
+          await refreshBackendProviders(providerId);
+          if (!requests.isCurrent(token)) return;
           setBackendStatus("Antigravity disconnected.");
           setLastAction("Antigravity disconnected");
           return;
@@ -682,14 +733,19 @@ export function useProviderConnections({
         const cleared = await logoutRuntimeManaged(
           providerId as ManagedRuntimeProviderId,
         );
+        if (!requests.isCurrent(token)) return;
         if (cleared !== null) {
-          await refreshBackendProviders();
+          requests.finishMutation(token);
+          await refreshBackendProviders(providerId);
+          if (!requests.isCurrent(token)) return;
           setBackendStatus(`${providerId} disconnected.`);
           setLastAction(`${providerId} disconnected`);
           return;
         }
       }
       const cleared = await clearRuntimeBackend(providerId);
+      if (!requests.isCurrent(token)) return;
+      requests.finishMutation(token);
       if (cleared === null) {
         setConnectedBackendIds((current) =>
           current.filter((id) => id !== providerId),
@@ -713,10 +769,13 @@ export function useProviderConnections({
         return;
       }
 
-      await refreshBackendProviders();
+      await refreshBackendProviders(providerId);
+      if (!requests.isCurrent(token)) return;
       setBackendStatus(`${providerId} disconnected.`);
       setLastAction(`${providerId} disconnected`);
     } catch (error) {
+      if (!requests.isCurrent(token)) return;
+      requests.finishMutation(token);
       const message =
         error instanceof Error
           ? error.message
@@ -726,9 +785,13 @@ export function useProviderConnections({
     }
   };
   return {
-    connectedBackendIds,
+    connectedBackendIds:
+      providerScopeGeneration === workspaceScopeGeneration &&
+      requests.isCurrent()
+        ? connectedBackendIds
+        : [],
     setConnectedBackendIds,
-    backendProviders,
+    backendProviders: scopedBackendProviders,
     backendStatus,
     setBackendStatus,
     connectedAgentBackends,
