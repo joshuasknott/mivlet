@@ -31,7 +31,7 @@ export function useLocalComputer({ workspaceId, agentId, executionOwner = true }
     // One elected observer polls; ownership moves when that view closes.
     // Hidden windows do not suspend execution/control refreshes.
     refetchIntervalInBackground: shared.node?.control.status === "active" || shared.node?.control.status === "connecting",
-    refetchInterval: isLeader ? (query => query.state.data?.control.status === "active" || query.state.data?.control.status === "connecting" ? 2_000 : 30_000) : false });
+    refetchInterval: isLeader ? (() => shared.node?.control.status === "active" || shared.node?.control.status === "connecting" ? 2_000 : 30_000) : false });
   useEffect(() => {
     if (!isLeader) return;
     const refresh = () => { shared.invalidateFiles(); void queries.invalidateQueries({ queryKey: shared.queryKey, exact: true }, { cancelRefetch: false }); };

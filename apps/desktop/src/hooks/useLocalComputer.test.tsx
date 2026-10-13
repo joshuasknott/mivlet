@@ -22,6 +22,15 @@ const hook=()=>renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentI
 beforeEach(()=>{vi.resetAllMocks();mocks.load.mockResolvedValue(node());mocks.files.mockResolvedValue(null);mocks.preview.mockResolvedValue(null);mocks.stop.mockResolvedValue(undefined);mocks.cancel.mockResolvedValue(null);});
 afterEach(()=>{cleanup();clearActiveRuntimeDataScope();focusManager.setFocused(undefined);vi.useRealTimers();});
 describe("native local computer",()=>{
+  it("retains active refresh cadence through a status failure while hidden",async()=>{
+    vi.useFakeTimers();mocks.load.mockResolvedValue(active());const {result}=hook();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(50);});focusManager.setFocused(false);
+    mocks.load.mockRejectedValueOnce(new Error("Status disconnected"));
+    await act(async()=>{await vi.advanceTimersByTimeAsync(2_000);});
+    expect(result.current.node).toBeNull();expect(result.current.error).toBe("Status disconnected");expect(mocks.load).toHaveBeenCalledTimes(2);
+    await act(async()=>{await vi.advanceTimersByTimeAsync(2_000);});
+    expect(mocks.load).toHaveBeenCalledTimes(3);expect(result.current.node?.control.status).toBe("active");expect(result.current.error).toBeNull();
+  });
   it("skips hidden idle reads but keeps active control refreshes running",async()=>{
     vi.useFakeTimers();const {result}=hook();await act(async()=>{await vi.advanceTimersByTimeAsync(50);});
     focusManager.setFocused(false);await act(async()=>{await vi.advanceTimersByTimeAsync(30_000);});expect(mocks.load).toHaveBeenCalledOnce();
