@@ -75,8 +75,12 @@ supported by the adapter's model catalogue. Unsupported selections fail before
 transport. Mivlet preserves each teammate's model and effort preferences.
 
 The native HTTP formats support text completion, streaming, bounded multi-round
-tool calls, retries before a stream begins, and cancellation. Image and file
-attachments are not yet supported by the native provider payload path.
+tool calls, retries before a stream begins, and cancellation. The audited
+OpenAI, Anthropic and xAI visual routes accept user images; the shared Claude
+SDK bridge also delivers composer images. Other routes advertise only their
+implemented capabilities. Durable workspace files retain scoped references;
+transient images require reattachment after restart. The conversation's Context
+control shows proposed and actually captured context without invoking a model.
 
 Connect attempts time out after 20 seconds. A connected stream fails after 90
 seconds without a new chunk. Authentication and client-request failures do not
@@ -100,9 +104,15 @@ new attempt from the durable user request. It never replays a previous tool
 result, approval permit, or external effect. Completed, cancelled, failed, and
 interrupted are mutually exclusive terminal outcomes.
 
-Ordinary conversation does not continue after Mivlet closes. Closing Mivlet also
-revokes native window permission and stops its owned computer driver. An optional
-hosted computer being alive does not change the conversation-lifetime claim.
+Ordinary foreground conversations require the open workspace. The opt-in native
+Windows background owner accepts eligible Read Only text requests and schedules
+with Codex, Claude and supported native APIs, plus previously approved commands.
+It does not support attachments, projects, connectors or delegation in its
+autonomous text lane; new tools/approvals require return and review. Windows must
+stay awake with a valid account session. Closing Mivlet revokes foreground
+window permission and stops its owned computer driver. See
+[background execution](../architecture/work-execution.md#opt-in-native-background-text-execution-on-windows)
+for the exact lifetime and recovery rules; hosted operation remains separately gated.
 
 ## Tool safety
 
