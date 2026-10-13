@@ -56,6 +56,10 @@ export function NativeCommandJobs({
     >
       <summary>Commands</summary>
       <p>Live logs for your agent. Closing this panel keeps jobs running.</p>
+      <p>
+        Job status is saved; live logs are unavailable after restart. Persistent
+        jobs discard file changes.
+      </p>
       {agents.length > 1 && (
         <label>
           Agent{" "}
