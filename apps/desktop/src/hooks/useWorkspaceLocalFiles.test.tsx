@@ -25,12 +25,20 @@ it("reuses per-agent lists on reopen, reorder and addition; Refresh still rescan
   await waitFor(()=>expect(second.result.current.data.every(row=>row.snapshot)).toBe(true));expect(mocks.files).toHaveBeenCalledTimes(3);
   await act(async()=>{await second.result.current.refetch();});expect(mocks.files).toHaveBeenCalledTimes(6);
 });
-it("preserves the combined metadata reference on unrelated rerenders and agent reorder",async()=>{
+it("preserves combined metadata on unrelated rerenders and displays the requested agent order",async()=>{
   const {Provider}=wrapper();const {result,rerender}=renderHook(({ids})=>useWorkspaceLocalFiles("workspace-a",ids),
     {initialProps:{ids:["agent-b","agent-a"]},wrapper:Provider});
   await waitFor(()=>expect(result.current.data.every(row=>row.snapshot)).toBe(true));
-  const data=result.current.data;rerender({ids:["agent-a","agent-b"]});
+  const data=result.current.data;rerender({ids:["agent-b","agent-a"]});
   expect(result.current.data).toBe(data);expect(mocks.files).toHaveBeenCalledTimes(2);
+  rerender({ids:["agent-a","agent-b"]});expect(result.current.data.map(row=>row.agentId)).toEqual(["agent-a","agent-b"]);expect(mocks.files).toHaveBeenCalledTimes(2);
+});
+it("retains in-flight scans when another agent is added",async()=>{
+  const {Provider}=wrapper();const pending=deferred<LocalComputerFilesSnapshot>();mocks.files.mockReturnValue(pending.promise);
+  const {result,rerender}=renderHook(({ids})=>useWorkspaceLocalFiles("workspace-a",ids),{initialProps:{ids:["agent-a","agent-b"]},wrapper:Provider});
+  expect(mocks.files).toHaveBeenCalledTimes(2);rerender({ids:["agent-a","agent-b","agent-c"]});expect(mocks.files).toHaveBeenCalledTimes(3);
+  await act(async()=>{pending.resolve(listing());});await waitFor(()=>expect(result.current.data.every(row=>row.snapshot)).toBe(true));
+  expect(mocks.files).toHaveBeenCalledTimes(3);
 });
 it("coalesces concurrent Files and inspector scans without starting status polling for Files",async()=>{
   const {Provider}=wrapper();const pending=deferred<LocalComputerFilesSnapshot>();mocks.files.mockReturnValue(pending.promise);
