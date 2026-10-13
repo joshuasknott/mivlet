@@ -30,7 +30,6 @@ interface LocalComputerReads {
   owners: Set<string>;
   reading: { epoch: number; promise: Promise<LocalComputerSnapshot | null> } | null;
   fileReading: { epoch: number; promise: Promise<LocalComputerFilesSnapshot | null> } | null;
-  fileSnapshot: { epoch: number; node: LocalComputerFilesSnapshot | null } | null;
   current: () => boolean;
   leader: () => string | undefined;
   subscribe: (id: string, notify: () => void, polling?: boolean) => () => void;
@@ -62,7 +61,6 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
     consumers: new Map(), owners: new Set(),
     reading: null as { epoch: number; promise: Promise<LocalComputerSnapshot | null> } | null,
     fileReading: null as { epoch: number; promise: Promise<LocalComputerFilesSnapshot | null> } | null,
-    fileSnapshot: null,
     current: () => getActiveRuntimeDataScope() === dataScope.scope,
     leader: () => [...shared.consumers].find(([, consumer]) => consumer.polling)?.[0],
     notify: () => {
@@ -75,16 +73,15 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
       for (const listener of shared.consumers.values()) listener.notify();
       return () => {
         shared.consumers.delete(id);
-        if (![...shared.consumers.values()].some(consumer => !consumer.polling)) shared.fileSnapshot = null;
         for (const listener of shared.consumers.values()) listener.notify();
         if (!shared.consumers.size) {
-          shared.epoch++; shared.fileEpoch++; shared.fileSnapshot = null;
+          shared.epoch++; shared.fileEpoch++;
           releaseTimer = setTimeout(dispose, 0);
         }
       };
     },
     invalidateFiles: () => {
-      shared.fileEpoch++; shared.fileSnapshot = null;
+      shared.fileEpoch++;
       // Clear visible metadata immediately; native checks still own every open.
       client.setQueriesData({ queryKey: filesKey }, null);
       void client.invalidateQueries({ queryKey: filesKey });
@@ -119,7 +116,7 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
       if (!target || !shared.current()) return null;
       if (revision !== undefined && revision !== shared.fileRevision) {
         if (shared.fileRevision !== undefined) {
-          shared.fileEpoch++; shared.fileSnapshot = null;
+          shared.fileEpoch++;
           client.setQueriesData({ queryKey: filesKey }, null);
           shared.notify();
         }
@@ -129,23 +126,21 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
       const epoch = shared.fileEpoch;
       const promise = listRuntimeLocalComputerFiles(target).then(result => {
         if (!shared.current()) return null;
-        if (epoch !== shared.fileEpoch) return shared.fileSnapshot?.epoch === shared.fileEpoch ? shared.fileSnapshot.node : shared.consumers.size ? shared.readFiles() : null;
+        if (epoch !== shared.fileEpoch) {
+          // The scoped query cache owns bounded metadata; retain no second copy.
+          const latest = client.getQueryData<LocalComputerFilesSnapshot | null>([...filesKey, shared.fileRevision]);
+          return latest !== undefined ? latest : shared.consumers.size ? shared.readFiles() : null;
+        }
         const node = !shared.node || result?.computerId === shared.node.computerId ? result : null;
-        shared.fileSnapshot = { epoch, node };
         return node;
       }).catch((error: unknown) => {
         if (epoch === shared.fileEpoch && shared.current()) {
-          shared.fileEpoch++; shared.fileSnapshot = null;
+          shared.fileEpoch++;
           client.setQueriesData({ queryKey: filesKey }, null);
           shared.notify();
         }
         throw error;
-      }).finally(() => {
-        if (shared.fileReading?.promise === promise) {
-          shared.fileReading = null;
-          if (![...shared.consumers.values()].some(consumer => !consumer.polling)) shared.fileSnapshot = null;
-        }
-      });
+      }).finally(() => { if (shared.fileReading?.promise === promise) shared.fileReading = null; });
       shared.fileReading = { epoch, promise };
       return promise;
     },

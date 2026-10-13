@@ -1,6 +1,6 @@
 import type { CollaborationWorkItem } from "@mivlet/protocol";
 import { QueryObserver, useQueryClient } from "@tanstack/react-query";
-import { useCallback, useEffect, useId, useMemo, useRef, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useRef, useSyncExternalStore } from "react";
 import { getLocalComputerReads, localComputerDataScope } from "./local-computer-reads";
 
 /** Per-agent metadata only. Preview/open still rechecks native access and scope. */
@@ -29,23 +29,21 @@ export function useWorkspaceLocalFiles(workspaceId: string, agentIds: string[], 
     enabled: Boolean(workspaceId),
     queryFn: () => reads.readFiles(revisions[index]),
   })), [client, scopes, workspaceId, revisions.join("\n")]);
-  const snapshot = useRef<{
-    observers: typeof observers;
-    results: ReturnType<(typeof observers)[number]["getCurrentResult"]>[];
-  } | null>(null);
-  const subscribe = useCallback((notify: () => void) => {
-    const releases = observers.map(observer => observer.subscribe(notify));
-    return () => { for (const release of releases) release(); };
+  const bridge = useMemo(() => {
+    let current = observers.map(observer => observer.getCurrentResult());
+    return {
+      getSnapshot: () => {
+        const next = observers.map(observer => observer.getCurrentResult());
+        if (next.some((result, index) => result !== current[index])) current = next;
+        return current;
+      },
+      subscribe: (notify: () => void) => {
+        const releases = observers.map(observer => observer.subscribe(notify));
+        return () => { for (const release of releases) release(); };
+      },
+    };
   }, [observers]);
-  const getSnapshot = useCallback(() => {
-    const results = observers.map(observer => observer.getCurrentResult());
-    const previous = snapshot.current;
-    if (previous?.observers === observers && results.every((result, index) => result === previous.results[index]))
-      return previous.results;
-    snapshot.current = { observers, results };
-    return results;
-  }, [observers]);
-  const queries = useSyncExternalStore(subscribe, getSnapshot);
+  const queries = useSyncExternalStore(bridge.subscribe, bridge.getSnapshot);
   const files = useMemo(() => ({
     data: displayIndices.map(index => ({ agentId: scopes[index].agentId,
       snapshot: scopes[index].reads.current() && !queries[index].isError ? queries[index].data ?? null : null,
