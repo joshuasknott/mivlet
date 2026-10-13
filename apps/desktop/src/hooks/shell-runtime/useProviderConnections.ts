@@ -62,6 +62,7 @@ export function useProviderConnections({
   hiddenModelIds: string[];
   setLastAction: (message: string) => void;
 }) {
+  const initialStateRef = useRef(initialState);
   const [connectedBackendIds, setConnectedBackendIds] = useState<string[]>(
     hasTauriRuntime()
       ? []
@@ -214,19 +215,16 @@ export function useProviderConnections({
     setConnectedBackendIds(
       hasTauriRuntime()
         ? []
-        : initialState.connectedBackendIds.filter(isMivletProviderEnabled),
+        : initialStateRef.current.connectedBackendIds.filter(
+            isMivletProviderEnabled,
+          ),
     );
     setDiscoveredModels({});
     setModelDiscoveryByProvider({});
     setBackendStatus(null);
     void refreshBackendProviders();
     return () => requests.dispose();
-  }, [
-    requests,
-    refreshBackendProviders,
-    workspaceScopeGeneration,
-    initialState,
-  ]);
+  }, [requests, refreshBackendProviders, workspaceScopeGeneration]);
 
   const runModelDiscovery = useCallback(
     (providerId: string): Promise<void> => {
