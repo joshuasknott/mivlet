@@ -47,7 +47,7 @@ function harness() {
   };
   persistence.current = persisted;
   const session: NativeAgentEventSession = {
-    persisted, persistence, durableWriter: writer, attemptId: "attempt",
+    persisted, persistence, durableWriter: writer, attemptId: "attempt", isCurrent: () => true,
     setState: (update) => {
       state = typeof update === "function" ? update(state) : update;
       updates.push(state);
@@ -197,7 +197,7 @@ describe("native stream text presentation", () => {
     expect(h.record).toHaveBeenLastCalledWith(expect.objectContaining({ kind: "interruption" }));
   });
 
-  it.each(["thread", "attempt"])("rejects pending presentation after switching the %s", async (scope) => {
+  it.each(["thread", "attempt", "workspace"])("rejects pending presentation after switching the %s", async (scope) => {
     const h = harness();
     const ready = deferred();
     const finish = deferred();
@@ -207,11 +207,14 @@ describe("native stream text presentation", () => {
       await finish.promise;
       yield { type: "done", finishReason: "stop" };
     }
+    let currentScope = true;
+    h.session.isCurrent = () => currentScope;
     const consuming = consumeNativeAgentEvents(waiting(), h.session);
     await ready.promise;
+    if (scope === "workspace") currentScope = false;
     h.replace({
       ...h.state(), transcript: "New view",
-      ...(scope === "thread" ? { progressThreadId: "other-thread" } : { currentAttemptId: "other-attempt" }),
+      ...(scope === "thread" ? { progressThreadId: "other-thread" } : scope === "attempt" ? { currentAttemptId: "other-attempt" } : {}),
     });
     vi.advanceTimersByTime(32);
     expect(h.state().transcript).toBe("New view");
@@ -222,7 +225,7 @@ describe("native stream text presentation", () => {
 
   it("rechecks scope when React evaluates an already queued updater", () => {
     const queued: SetStateAction<NativeAgentState>[] = [];
-    const presentation = createTextPresentation((update) => queued.push(update), "attempt", "thread");
+    const presentation = createTextPresentation((update) => queued.push(update), "attempt", "thread", () => true);
     presentation.append("old text");
     presentation.flush();
     const current = { ...createInitialNativeAgentState(), currentAttemptId: "new-attempt", progressThreadId: "thread" };

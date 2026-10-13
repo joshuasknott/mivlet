@@ -511,6 +511,8 @@ export async function runNativeAgentTurn(
     persistence,
     durableWriter,
     attemptId,
+    isCurrent: () =>
+      activeAttemptIdRef.current === attemptId && isCurrentThread() && isCurrentScope(),
     setState,
     onToolCall: () => onToolCallRef.current,
     onTextDelta: control?.onTextDelta,

@@ -46,6 +46,19 @@ function history(count: number, threadId = "thread"): ConversationMessageView[] 
   ]).flat() as unknown as ConversationMessageView[];
 }
 
+function withText(entry: ConversationMessageView, content: string): ConversationMessageView {
+  if (entry.currentRevision.state === "redacted") throw new Error("Fixture is redacted");
+  return { ...entry, currentRevision: { ...entry.currentRevision, content } };
+}
+
+function redact(entry: ConversationMessageView): ConversationMessageView {
+  const { content: _content, redaction: _redaction, ...revision } = entry.currentRevision;
+  return { ...entry, currentRevision: {
+    ...revision, state: "redacted", reason: "redaction",
+    redaction: { reason: "user-request" },
+  } };
+}
+
 describe("retained conversation rendering", () => {
   beforeEach(() => renders.mockClear());
 
@@ -81,16 +94,14 @@ describe("retained conversation rendering", () => {
     const revised = messages.map((entry, index) => index === 1 ? {
       ...entry,
       message: { ...entry.message, currentRevisionId: "revised" as never },
-      currentRevision: { ...entry.currentRevision, content: "Edited answer" },
+      currentRevision: withText(entry, "Edited answer").currentRevision,
     } : entry);
     view.rerender(<ConversationFeed {...base} messages={revised} state={idle} generation={2} />);
     expect(screen.queryByText("Answer 0")).toBeNull();
     expect(renders).toHaveBeenLastCalledWith(expect.objectContaining({
       text: "Edited answer", responseRevisionId: "revised", generation: 2,
     }));
-    const redacted = revised.map((entry, index) => index === 1 ? {
-      ...entry, currentRevision: { ...entry.currentRevision, state: "redacted" as const },
-    } : entry);
+    const redacted = revised.map((entry, index) => index === 1 ? redact(entry) : entry);
     view.rerender(<ConversationFeed {...base} messages={redacted} state={idle} generation={3} />);
     expect(screen.queryByText("Edited answer")).toBeNull();
     expect(screen.getByText("This message was removed.")).toBeVisible();
@@ -98,9 +109,7 @@ describe("retained conversation rendering", () => {
 
   it("switches workspace/thread without retaining prior text or output scope", () => {
     const view = render(<ConversationFeed {...base} messages={history(1)} state={idle} />);
-    const other = history(1, "other").map((entry) => ({
-      ...entry, currentRevision: { ...entry.currentRevision, content: "Other workspace" },
-    }));
+    const other = history(1, "other").map((entry) => withText(entry, "Other workspace"));
     view.rerender(<ConversationFeed {...base} workspaceId="other-workspace" threadId="other" messages={other} state={live} />);
     expect(screen.queryByText("Answer 0")).toBeNull();
     expect(screen.queryByText("delta")).toBeNull();
