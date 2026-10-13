@@ -21,6 +21,7 @@ interface LocalComputerReads {
   target: LocalComputerTarget | null;
   epoch: number;
   fileEpoch: number;
+  version: number;
   fileRevision?: string;
   node: LocalComputerSnapshot | null;
   disconnected: boolean;
@@ -29,10 +30,12 @@ interface LocalComputerReads {
   owners: Set<string>;
   reading: { epoch: number; promise: Promise<LocalComputerSnapshot | null> } | null;
   fileReading: { epoch: number; promise: Promise<LocalComputerFilesSnapshot | null> } | null;
+  fileSnapshot: { epoch: number; node: LocalComputerFilesSnapshot | null } | null;
   current: () => boolean;
   leader: () => string | undefined;
   subscribe: (id: string, notify: () => void, polling?: boolean) => () => void;
   invalidateFiles: () => void;
+  notify: () => void;
   read: () => Promise<LocalComputerSnapshot | null>;
   readFiles: (revision?: string) => Promise<LocalComputerFilesSnapshot | null>;
 }
@@ -54,13 +57,18 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
   const filesKey = ["local-computer-files", dataScope.id, target?.workspaceId, target?.agentId] as const;
   let releaseTimer: ReturnType<typeof setTimeout> | undefined;
   const shared: LocalComputerReads = {
-    queryKey, filesKey, target, epoch: 0, fileEpoch: 0,
+    queryKey, filesKey, target, epoch: 0, fileEpoch: 0, version: 0,
     node: null as LocalComputerSnapshot | null, disconnected: false, failure: null as string | null,
     consumers: new Map(), owners: new Set(),
     reading: null as { epoch: number; promise: Promise<LocalComputerSnapshot | null> } | null,
     fileReading: null as { epoch: number; promise: Promise<LocalComputerFilesSnapshot | null> } | null,
+    fileSnapshot: null,
     current: () => getActiveRuntimeDataScope() === dataScope.scope,
     leader: () => [...shared.consumers].find(([, consumer]) => consumer.polling)?.[0],
+    notify: () => {
+      shared.version++;
+      for (const listener of shared.consumers.values()) listener.notify();
+    },
     subscribe: (id: string, notify: () => void, polling = true) => {
       clearTimeout(releaseTimer);
       shared.consumers.set(id, { notify, polling });
@@ -69,16 +77,17 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
         shared.consumers.delete(id);
         for (const listener of shared.consumers.values()) listener.notify();
         if (!shared.consumers.size) {
-          shared.epoch++; shared.fileEpoch++;
+          shared.epoch++; shared.fileEpoch++; shared.fileSnapshot = null;
           releaseTimer = setTimeout(dispose, 0);
         }
       };
     },
     invalidateFiles: () => {
-      shared.fileEpoch++;
+      shared.fileEpoch++; shared.fileSnapshot = null;
       // Clear visible metadata immediately; native checks still own every open.
       client.setQueriesData({ queryKey: filesKey }, null);
       void client.invalidateQueries({ queryKey: filesKey });
+      shared.notify();
     },
     read: async (): Promise<LocalComputerSnapshot | null> => {
       if (!target || !shared.current()) return null;
@@ -87,8 +96,11 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
       const promise = loadRuntimeLocalComputer(target).then(node => {
         if (epoch !== shared.epoch || !shared.current()) return null;
         if (node && (node.workspaceId !== target.workspaceId || node.agentId !== target.agentId || node.generation < (shared.node?.generation ?? 0))) return shared.node;
-        if (node?.generation !== shared.node?.generation) shared.invalidateFiles();
+        const generationChanged = node?.generation !== shared.node?.generation;
+        const recovered = shared.disconnected;
         shared.node = node; shared.disconnected = false; shared.failure = null;
+        if (generationChanged) shared.invalidateFiles();
+        else if (recovered) shared.notify();
         return node;
       }).catch((error: unknown) => {
         if (epoch === shared.epoch && shared.current()) {
@@ -106,8 +118,9 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
       if (!target || !shared.current()) return null;
       if (revision !== undefined && revision !== shared.fileRevision) {
         if (shared.fileRevision !== undefined) {
-          shared.fileEpoch++;
+          shared.fileEpoch++; shared.fileSnapshot = null;
           client.setQueriesData({ queryKey: filesKey }, null);
+          shared.notify();
         }
         shared.fileRevision = revision;
       }
@@ -115,8 +128,17 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
       const epoch = shared.fileEpoch;
       const promise = listRuntimeLocalComputerFiles(target).then(result => {
         if (!shared.current()) return null;
-        if (epoch !== shared.fileEpoch) return shared.consumers.size ? shared.readFiles() : null;
-        return !shared.node || result?.computerId === shared.node.computerId ? result : null;
+        if (epoch !== shared.fileEpoch) return shared.fileSnapshot?.epoch === shared.fileEpoch ? shared.fileSnapshot.node : shared.consumers.size ? shared.readFiles() : null;
+        const node = !shared.node || result?.computerId === shared.node.computerId ? result : null;
+        shared.fileSnapshot = { epoch, node };
+        return node;
+      }).catch((error: unknown) => {
+        if (epoch === shared.fileEpoch && shared.current()) {
+          shared.fileEpoch++; shared.fileSnapshot = null;
+          client.setQueriesData({ queryKey: filesKey }, null);
+          shared.notify();
+        }
+        throw error;
       }).finally(() => { if (shared.fileReading?.promise === promise) shared.fileReading = null; });
       shared.fileReading = { epoch, promise };
       return promise;

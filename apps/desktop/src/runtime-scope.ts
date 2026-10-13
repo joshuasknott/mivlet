@@ -27,11 +27,12 @@ export function getActiveRuntimeDataScope(): RuntimeDataScope | null {
   return isNativeRuntime() ? null : PREVIEW_RUNTIME_DATA_SCOPE;
 }
 
-export function setActiveRuntimeDataScope(workspaceId: string, identity = ""): RuntimeDataScope {
+export function setActiveRuntimeDataScope(workspaceId: string, identity?: string): RuntimeDataScope {
   // Status revalidation is not an account transition. Preserve the cache token
   // until the verified owner changes or the active session is explicitly reset.
-  if (activeScope?.workspaceId === workspaceId && activeIdentity === identity) return activeScope;
-  activeIdentity = identity;
+  // Legacy one-argument callers deliberately reset transient previews.
+  if (identity !== undefined && activeScope?.workspaceId === workspaceId && activeIdentity === identity) return activeScope;
+  activeIdentity = identity ?? "";
   activeScope = { workspaceId };
   return activeScope;
 }

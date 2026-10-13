@@ -12,3 +12,7 @@ it("retains the verified scope on revalidation and replaces it on owner/workspac
   clearActiveRuntimeDataScope();
   expect(setActiveRuntimeDataScope("workspace", "owner-a")).not.toBe(first);
 });
+it("preserves explicit one-argument resets used by transient attachment scopes", () => {
+  const first = setActiveRuntimeDataScope("workspace");
+  expect(setActiveRuntimeDataScope("workspace")).not.toBe(first);
+});

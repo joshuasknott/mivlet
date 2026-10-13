@@ -19,7 +19,8 @@ export function useLocalComputer({ workspaceId, agentId, executionOwner = true }
   const [, redraw] = useState(0);
   const current = (epoch = scope.epoch) => active.current === scope && scope.epoch === epoch && shared.current();
   const subscribe = useCallback((notify: () => void) => shared.subscribe(instance, notify), [shared, instance]);
-  const isLeader = useSyncExternalStore(subscribe, () => shared.leader() === instance);
+  const readVersion = useSyncExternalStore(subscribe, () => shared.version * 2 + Number(shared.leader() === instance));
+  const isLeader = readVersion % 2 === 1;
   const computer = useQuery({ queryKey: shared.queryKey, queryFn: async () => {
     const epoch = shared.epoch;
     const result = await shared.read();

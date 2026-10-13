@@ -36,7 +36,8 @@ export function useWorkspaceLocalFiles(workspaceId: string, agentIds: string[], 
   return {
     data: queries.map((query, index) => ({ agentId: scopes[index].agentId,
       snapshot: scopes[index].reads.current() && !query.isError ? query.data ?? null : null,
-      error: query.error instanceof Error ? query.error.message : query.isSuccess && !query.data ? "Open the desktop app to view saved files." : "",
+      error: query.isError ? query.error instanceof Error ? query.error.message : "Files could not be loaded."
+        : query.isSuccess && !query.data && !query.isFetching ? "Open the desktop app to view saved files." : "",
     })),
     isFetching: queries.some(query => query.isFetching),
     refetch: () => Promise.all(queries.map(query => query.refetch({ cancelRefetch: false }))),

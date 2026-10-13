@@ -64,6 +64,7 @@ it("fences a file scan that began before a Work file change",async()=>{
   mocks.files.mockResolvedValue(listing("new.txt"));rerender({items:[work("agent-a","second")]});
   await act(async()=>{pending.resolve(listing("old.txt"));});
   await waitFor(()=>expect(result.current.data[0].snapshot?.entries[0].name).toBe("new.txt"));
+  expect(mocks.files).toHaveBeenCalledTimes(2);
 });
 it("discards an old file list after a workspace switch",async()=>{
   const {Provider}=wrapper();const pending=deferred<LocalComputerFilesSnapshot>();mocks.files.mockReturnValueOnce(pending.promise);
@@ -85,8 +86,16 @@ it("revalidates stale lists on reopen and evicts inactive metadata after thirty 
 it("shows native access failures instead of cached entries and retries explicitly",async()=>{
   const {Provider}=wrapper();const {result}=renderHook(()=>useWorkspaceLocalFiles("workspace-a",["agent-a"]),{wrapper:Provider});
   await waitFor(()=>expect(result.current.data[0].snapshot).not.toBeNull());mocks.files.mockRejectedValueOnce(new Error("Access changed"));
-  await act(async()=>{await result.current.refetch();});expect(result.current.data[0].snapshot).toBeNull();expect(result.current.data[0].error).toBe("Access changed");
-  await act(async()=>{await result.current.refetch();});expect(result.current.data[0].snapshot).not.toBeNull();
+  await act(async()=>{await result.current.refetch();});await waitFor(()=>expect(result.current.data[0].snapshot).toBeNull());expect(result.current.data[0].error).toBe("Access changed");
+  await act(async()=>{await result.current.refetch();});await waitFor(()=>expect(result.current.data[0].snapshot).not.toBeNull());
+});
+it("clears other consumers' cached file metadata after a native access failure",async()=>{
+  const {Provider}=wrapper();const files=renderHook(()=>useWorkspaceLocalFiles("workspace-a",["agent-a"]),{wrapper:Provider});
+  await waitFor(()=>expect(files.result.current.data[0].snapshot).not.toBeNull());
+  const inspector=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a",executionOwner:false}),{wrapper:Provider});
+  mocks.files.mockRejectedValueOnce(new Error("Access changed"));
+  await act(async()=>{await expect(inspector.result.current.refreshFiles()).rejects.toThrow("Access changed");});
+  await waitFor(()=>expect(files.result.current.data[0].snapshot).toBeNull());
 });
 it("loads files across development StrictMode remounts",async()=>{
   const {Provider}=wrapper();const {result}=renderHook(()=>useWorkspaceLocalFiles("workspace-a",["agent-a"]),
