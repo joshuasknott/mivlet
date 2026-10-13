@@ -456,4 +456,46 @@ describe("provider startup and recovery", () => {
     ]);
     expect(providersRuntime.verifyRuntimeBackend).toHaveBeenCalledTimes(2);
   });
+
+  it("starts fresh discovery after catalogue removal and reconnect instead of retaining the old spinner", async () => {
+    const oldDiscovery =
+      deferred<
+        Awaited<ReturnType<typeof providersRuntime.listRuntimeBackendModels>>
+      >();
+    vi.mocked(providersRuntime.listRuntimeBackendModels).mockReturnValueOnce(
+      oldDiscovery.promise,
+    );
+    const { result } = mount();
+    await waitFor(() =>
+      expect(result.current.modelDiscoveryByProvider.openai).toBe("loading"),
+    );
+    vi.mocked(providersRuntime.listRuntimeBackends).mockResolvedValue([]);
+    await act(async () => {
+      await result.current.refreshBackendProviders();
+    });
+    expect(result.current.modelDiscoveryByProvider.openai).toBeUndefined();
+    vi.mocked(providersRuntime.listRuntimeBackends).mockResolvedValue([
+      connected("openai"),
+    ]);
+    await act(async () => {
+      await result.current.refreshBackendProviders();
+    });
+    await waitFor(() =>
+      expect(result.current.modelDiscoveryByProvider.openai).toBe(
+        "unsupported",
+      ),
+    );
+    await act(async () => {
+      oldDiscovery.resolve({
+        outcome: "success",
+        models: [{ id: "removed-credential-only", available: true }],
+      });
+    });
+    expect(
+      result.current.modelOptions.some(
+        (model) => model.modelId === "removed-credential-only",
+      ),
+    ).toBe(false);
+    expect(providersRuntime.listRuntimeBackendModels).toHaveBeenCalledTimes(2);
+  });
 });

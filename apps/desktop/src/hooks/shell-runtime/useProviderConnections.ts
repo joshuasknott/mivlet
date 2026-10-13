@@ -106,11 +106,25 @@ export function useProviderConnections({
         (!hasTauriRuntime() || identity !== null),
       onProviders: (providers) => {
         setBackendProviders(providers);
-        setConnectedBackendIds(
+        const connected = new Set(
           providers
             .filter((provider) => provider.authState === "connected")
             .map((provider) => provider.id),
         );
+        // A refreshed native catalogue can remove a connection without a UI
+        // disconnect action. Drop its discovery lifecycle so reconnect can run
+        // a fresh query rather than inherit a spinner or another credential's list.
+        setDiscoveredModels((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(([id]) => connected.has(id)),
+          ),
+        );
+        setModelDiscoveryByProvider((current) =>
+          Object.fromEntries(
+            Object.entries(current).filter(([id]) => connected.has(id)),
+          ),
+        );
+        setConnectedBackendIds([...connected]);
       },
       onDiscovery: (providerId, result) => {
         setModelDiscoveryByProvider((current) => ({
