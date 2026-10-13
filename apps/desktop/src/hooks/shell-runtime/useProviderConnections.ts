@@ -431,6 +431,7 @@ export function useProviderConnections({
       if (!requests.isCurrent(token)) return staleConnection(providerId);
       // Storage itself failed. Fail closed: do not report a connection.
       requests.finishMutation(token);
+      void refreshBackendProviders();
       markProviderState(providerId, "needs-auth");
       const message =
         error instanceof Error
@@ -774,6 +775,7 @@ export function useProviderConnections({
     } catch (error) {
       if (!requests.isCurrent(token)) return;
       requests.finishMutation(token);
+      void refreshBackendProviders();
       const message =
         error instanceof Error
           ? error.message

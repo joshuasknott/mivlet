@@ -389,4 +389,71 @@ describe("provider startup and recovery", () => {
     expect(result.current.connectedAgentBackends).toEqual([]);
     expect(result.current.connectedBackendIds).toEqual([]);
   });
+
+  it("keeps an unrelated startup check useful when storing another credential fails", async () => {
+    const secondary = deferred<BackendVerifyResult | null>();
+    vi.mocked(providersRuntime.listRuntimeBackends).mockResolvedValue([
+      connected("openai"),
+      connected("xai"),
+    ]);
+    vi.mocked(providersRuntime.verifyRuntimeBackend).mockImplementation(
+      async (providerId) =>
+        providerId === "xai"
+          ? secondary.promise
+          : { providerId, outcome: "ready" },
+    );
+    const { result } = mount();
+    await waitFor(() =>
+      expect(result.current.connectedAgentBackends).toHaveLength(1),
+    );
+    vi.mocked(providersRuntime.connectRuntimeBackend).mockRejectedValueOnce(
+      new Error("Credential storage unavailable"),
+    );
+    await act(async () => {
+      await result.current.connectBackendWithVerify(
+        "anthropic",
+        "synthetic-test-key",
+      );
+    });
+    await act(async () => {
+      secondary.resolve({ providerId: "xai", outcome: "ready" });
+    });
+    expect(
+      result.current.connectedAgentBackends.map((provider) => provider.id),
+    ).toEqual(["openai", "xai"]);
+  });
+
+  it("rejects a pending check when a refreshed catalogue removes that connection", async () => {
+    const verification = deferred<BackendVerifyResult | null>();
+    vi.mocked(providersRuntime.verifyRuntimeBackend).mockReturnValueOnce(
+      verification.promise,
+    );
+    const { result } = mount();
+    await waitFor(() =>
+      expect(providersRuntime.verifyRuntimeBackend).toHaveBeenCalledTimes(1),
+    );
+    vi.mocked(providersRuntime.listRuntimeBackends).mockResolvedValue([]);
+    await act(async () => {
+      await result.current.refreshBackendProviders();
+    });
+    await act(async () => {
+      verification.resolve({ providerId: "openai", outcome: "ready" });
+    });
+    expect(result.current.connectedAgentBackends).toEqual([]);
+    vi.mocked(providersRuntime.listRuntimeBackends).mockResolvedValue([
+      connected("openai"),
+    ]);
+    let snapshot: BackendProvider[] | null = null;
+    await act(async () => {
+      snapshot = await result.current.refreshBackendProviders();
+    });
+    expect(snapshot!).toEqual([
+      expect.objectContaining({
+        id: "openai",
+        authState: "connecting",
+        capabilities: [],
+      }),
+    ]);
+    expect(providersRuntime.verifyRuntimeBackend).toHaveBeenCalledTimes(2);
+  });
 });

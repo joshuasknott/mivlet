@@ -55,6 +55,7 @@ export function createProviderConnectionRequests(options: {
 }) {
   let active = true;
   let refreshGeneration = 0;
+  let catalogueGeneration = 0;
   let refreshPromise: Promise<BackendProvider[] | null> | null = null;
   let providers: BackendProvider[] = [];
   const epochs = new Map<string, number>();
@@ -113,10 +114,14 @@ export function createProviderConnectionRequests(options: {
         if (!isCurrent() || generation !== refreshGeneration || !listed)
           return null;
         const saved = enabledMivletProviders(listed);
+        const catalogue = ++catalogueGeneration;
         for (const previous of providers) {
           if (
             previous.id !== checkedProviderId &&
-            previous.authState === "connected" &&
+            (previous.authState === "connected" ||
+              verifying.has(previous.id) ||
+              discovering.has(previous.id) ||
+              verified.has(previous.id)) &&
             !saved.some(
               (entry) =>
                 entry.id === previous.id && entry.authState === "connected",
@@ -163,7 +168,7 @@ export function createProviderConnectionRequests(options: {
           void verify(provider.id).then((result) => {
             if (
               !isCurrent(token) ||
-              generation !== refreshGeneration ||
+              catalogue !== catalogueGeneration ||
               mutating.has(provider.id)
             )
               return;
