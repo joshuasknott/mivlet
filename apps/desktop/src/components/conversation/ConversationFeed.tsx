@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AssistantMessageActions } from "./AssistantMessageActions";
 import { displayWorkspaceMentions } from "../../lib/collaboration-mentions";
 import type {
@@ -108,6 +108,32 @@ interface Props {
   onOpenWorkspaceFiles?: (agentId: string) => void;
 }
 
+// Event identity can stay stable while the committed handler and authority change.
+function useTurnCallback<Args extends unknown[], Result>(
+  callback: ((...args: Args) => Result) | undefined,
+  scope: string,
+) {
+  const latest = useRef({ callback, scope });
+  useLayoutEffect(() => {
+    latest.current = { callback, scope };
+    return () => { latest.current = { callback: undefined, scope }; };
+  }, [callback, scope]);
+  const available = Boolean(callback);
+  return useMemo(() => available ? (...args: Args): Result => {
+    const current = latest.current;
+    if (current.scope !== scope || !current.callback)
+      throw new Error("This conversation action is no longer available.");
+    return current.callback(...args);
+  } : undefined, [available, scope]);
+}
+
+function sameAuthor(left: MivletAgentProfile | undefined, right: MivletAgentProfile) {
+  if (!left) return false;
+  const keys = Object.keys(right) as (keyof MivletAgentProfile)[];
+  return Object.keys(left).length === keys.length &&
+    keys.every(key => Object.is(left[key], right[key]));
+}
+
 export function ConversationFeed(props: Props) {
   const { state, threadId } = props;
   const live = Boolean(
@@ -133,6 +159,29 @@ export function ConversationFeed(props: Props) {
     () => conversationTurns(visibleMessages),
     [visibleMessages],
   );
+  const callbackScope = JSON.stringify([
+    props.workspaceId, threadId, props.generation, props.appGeneration,
+  ]);
+  const isMcpRunCurrent = useTurnCallback(props.isMcpRunCurrent, callbackScope);
+  const onOpenConnector = useTurnCallback(props.onOpenConnector, callbackScope);
+  const onPreviewArtifact = useTurnCallback(props.onPreviewArtifact, callbackScope);
+  const onDraftResponse = useTurnCallback(props.onDraftResponse, callbackScope);
+  const onSaveMemory = useTurnCallback(props.onSaveMemory, callbackScope);
+  const onPinResponse = useTurnCallback(props.onPinResponse, callbackScope);
+  const onMcpAppApproval = useTurnCallback(props.onMcpAppApproval, callbackScope);
+  const onMcpAppResourceRegister = useTurnCallback(props.onMcpAppResourceRegister, callbackScope);
+  const onMcpAppResourceRelease = useTurnCallback(props.onMcpAppResourceRelease, callbackScope);
+  const onOpenWorkspaceFiles = useTurnCallback(props.onOpenWorkspaceFiles, callbackScope);
+  const previousAuthors = useRef<Record<string, MivletAgentProfile>>({});
+  const authors = useMemo(() => {
+    const next: Record<string, MivletAgentProfile> = {};
+    for (const [id, author] of Object.entries(props.authors ?? {})) {
+      const previous = previousAuthors.current[id];
+      next[id] = sameAuthor(previous, author) ? previous : author;
+    }
+    previousAuthors.current = next;
+    return next;
+  }, [props.authors]);
   const redactedRuns = useMemo(
     () => new Set<string | undefined>(
       visibleMessages
@@ -281,7 +330,7 @@ export function ConversationFeed(props: Props) {
           );
         }
         const { turn } = entry;
-        const author = props.authors?.[turn.id];
+        const author = authors[turn.id];
         const liveEntry = liveStates.find(
           (entry) =>
             entry.state.currentAttemptId === turn.id &&
@@ -307,15 +356,15 @@ export function ConversationFeed(props: Props) {
             approval={liveEntry ? props.approval : undefined}
             interruption={liveEntry ? props.interruption : undefined}
             appGeneration={props.appGeneration}
-            isMcpRunCurrent={props.isMcpRunCurrent}
-            onOpenConnector={props.onOpenConnector}
-            onDraftResponse={props.onDraftResponse}
-            onSaveMemory={props.onSaveMemory}
-            onPinResponse={props.onPinResponse}
-            onMcpAppApproval={props.onMcpAppApproval}
-            onMcpAppResourceRegister={props.onMcpAppResourceRegister}
-            onMcpAppResourceRelease={props.onMcpAppResourceRelease}
-            onOpenWorkspaceFiles={props.onOpenWorkspaceFiles}
+            isMcpRunCurrent={isMcpRunCurrent}
+            onOpenConnector={onOpenConnector}
+            onDraftResponse={onDraftResponse}
+            onSaveMemory={onSaveMemory}
+            onPinResponse={onPinResponse}
+            onMcpAppApproval={onMcpAppApproval}
+            onMcpAppResourceRegister={onMcpAppResourceRegister}
+            onMcpAppResourceRelease={onMcpAppResourceRelease}
+            onOpenWorkspaceFiles={onOpenWorkspaceFiles}
             agent={
               author ??
               (props.requireAuthor
@@ -325,7 +374,7 @@ export function ConversationFeed(props: Props) {
             onPreviewArtifact={
               props.requireAuthor && !author
                 ? undefined
-                : props.onPreviewArtifact
+                : onPreviewArtifact
             }
             generation={
               props.requireAuthor && !author ? undefined : props.generation

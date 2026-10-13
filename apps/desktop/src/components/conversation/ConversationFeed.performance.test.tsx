@@ -6,7 +6,7 @@ import { createInitialNativeAgentState } from "../../hooks/native-agent/runtime"
 import { ConversationFeed } from "./ConversationFeed";
 
 const { renders } = vi.hoisted(() => ({
-  renders: vi.fn<(props: { text: string; workspaceId: string; conversationId: string; generation?: number; responseRevisionId?: string }) => void>(),
+  renders: vi.fn<(props: { text: string; workspaceId: string; conversationId: string; generation?: number; responseRevisionId?: string; onDraft: (text: string) => void }) => void>(),
 }));
 vi.mock("./AssistantMessageActions", () => ({ AssistantMessageActions: () => null }));
 // Count the actual feed/turn boundary; renderer internals keep their existing suites.
@@ -64,25 +64,64 @@ describe("retained conversation rendering", () => {
 
   it("renders 200 retained answers once across 20 live updates while the live disclosure stays current", () => {
     const messages = history(200);
-    const view = render(<ConversationFeed {...base} messages={messages} state={live} />);
+    const drafted = vi.fn();
+    // The production pane rebuilds author records and inline handlers each tick.
+    const paneProps = (tick: number) => ({
+      authors: Object.fromEntries(Array.from({ length: 200 }, (_, index) =>
+        [`old-${index}`, { ...agent }],
+      )),
+      requireAuthor: true,
+      onDraftResponse: (text: string) => drafted(tick, text),
+      onSaveMemory: async () => undefined,
+      onPinResponse: async () => undefined,
+      onMcpAppResourceRegister: async () => null,
+      onMcpAppResourceRelease: async () => undefined,
+      isMcpRunCurrent: () => true,
+    });
+    const view = render(<ConversationFeed {...base} {...paneProps(-1)} messages={messages} state={live} />);
     expect(renders).toHaveBeenCalledTimes(200);
     for (let i = 0; i < 20; i++) {
-      view.rerender(<ConversationFeed {...base} messages={messages} state={{
+      view.rerender(<ConversationFeed {...base} {...paneProps(i)} messages={messages} state={{
         ...live, transcript: `delta ${i}`,
         responseParts: [{ id: "text-0", kind: "text", content: `delta ${i}` }],
       }} />);
     }
     // Previously every update entered all 200 retained renderers: 4,200 calls.
     expect(renders).toHaveBeenCalledTimes(200);
+    renders.mock.calls[0][0].onDraft("reviewed reply");
+    expect(drafted).toHaveBeenCalledWith(19, "reviewed reply");
     expect(screen.getByText("Answer 199")).toBeVisible();
     fireEvent.click(screen.getByText("Working"));
     expect(screen.getByText("delta 19")).toBeVisible();
-    view.rerender(<ConversationFeed {...base} messages={messages} state={{
+    view.rerender(<ConversationFeed {...base} {...paneProps(20)} messages={messages} state={{
       ...live, transcript: "Final answer", running: false, status: "completed",
       responseParts: [{ id: "text-0", kind: "text", content: "Final answer" }],
     }} />);
     expect(screen.getByText("Final answer")).toBeVisible();
     expect(renders).toHaveBeenCalledTimes(201);
+  });
+
+  it("refreshes author identity and revokes old callbacks after scope changes", () => {
+    const messages = history(1);
+    const first = vi.fn();
+    const second = vi.fn();
+    const view = render(<ConversationFeed {...base} messages={messages} state={idle}
+      authors={{ "old-0": { ...agent } }} onDraftResponse={first} generation={1} />);
+    const oldDraft = renders.mock.calls[0][0].onDraft;
+    view.rerender(<ConversationFeed {...base} messages={messages} state={idle}
+      authors={{ "old-0": { ...agent, name: "Renamed", iconImageDataUrl: "data:image/png;base64,a" } }}
+      onDraftResponse={second} generation={1} />);
+    expect(renders).toHaveBeenCalledTimes(2);
+    oldDraft("current handler");
+    expect(first).not.toHaveBeenCalled();
+    expect(second).toHaveBeenCalledWith("current handler");
+    view.rerender(<ConversationFeed {...base} messages={messages} state={idle}
+      onDraftResponse={second} generation={2} />);
+    expect(() => oldDraft("stale action")).toThrow("no longer available");
+    renders.mock.calls.at(-1)![0].onDraft("new authority");
+    expect(second).toHaveBeenCalledWith("new authority");
+    view.unmount();
+    expect(() => renders.mock.calls.at(-1)![0].onDraft("closed pane")).toThrow("no longer available");
   });
 
   it("reconciles revision/redaction changes and forwards the current generation to retained outputs", () => {
