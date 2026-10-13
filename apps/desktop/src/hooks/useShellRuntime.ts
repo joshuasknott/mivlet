@@ -231,6 +231,8 @@ export function useShellRuntime(
     disconnectBackend,
   } = useProviderConnections({
     initialState,
+    workspaceScopeGeneration,
+    workspaceIdentityRef,
     selectedModelId,
     hiddenModelIds,
     setLastAction,
