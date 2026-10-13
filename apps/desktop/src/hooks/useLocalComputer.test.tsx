@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalComputerSnapshot } from "@mivlet/protocol";
 import { useLocalComputer } from "./useLocalComputer";
+import { clearActiveRuntimeDataScope, setActiveRuntimeDataScope } from "../runtime-scope";
 const mocks=vi.hoisted(()=>({load:vi.fn(),files:vi.fn(),preview:vi.fn(),stop:vi.fn(),cancel:vi.fn()}));
 vi.mock("../runtime/domains/local-computer", ()=>({
 loadRuntimeLocalComputer:mocks.load,
@@ -19,8 +20,59 @@ function wrapper(){const client=new QueryClient({defaultOptions:{queries:{retry:
 function deferred<T>(){let resolve!:(v:T)=>void;const promise=new Promise<T>(done=>{resolve=done;});return{promise,resolve};}
 const hook=()=>renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:wrapper()});
 beforeEach(()=>{vi.resetAllMocks();mocks.load.mockResolvedValue(node());mocks.files.mockResolvedValue(null);mocks.preview.mockResolvedValue(null);mocks.stop.mockResolvedValue(undefined);mocks.cancel.mockResolvedValue(null);});
-afterEach(()=>{cleanup();vi.useRealTimers();});
+afterEach(()=>{cleanup();clearActiveRuntimeDataScope();vi.useRealTimers();});
 describe("native local computer",()=>{
+  it("shares the initial read across an execution owner and inspectors",async()=>{
+    const Provider=wrapper();const pending=deferred<LocalComputerSnapshot>();mocks.load.mockReturnValue(pending.promise);
+    const owner=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:Provider});
+    const inspector=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a",executionOwner:false}),{wrapper:Provider});
+    let prepared!:Promise<LocalComputerSnapshot>;
+    act(()=>{prepared=owner.result.current.prepareForTool("read-file");});
+    expect(mocks.load).toHaveBeenCalledOnce();
+    await act(async()=>{pending.resolve(active());await prepared;});
+    await waitFor(()=>expect(inspector.result.current.node?.control.status).toBe("active"));
+    inspector.unmount();expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(owner.result.current.node?.control.status).toBe("active");
+  });
+  it("polls once for staggered consumers and transfers the poller without stopping execution",async()=>{
+    vi.useFakeTimers();mocks.load.mockResolvedValue(active());const Provider=wrapper();
+    const inspector=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a",executionOwner:false}),{wrapper:Provider});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(50);});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(1_000);});
+    const owner=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:Provider});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(50);});expect(mocks.load).toHaveBeenCalledOnce();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(950);});expect(mocks.load).toHaveBeenCalledTimes(2);
+    inspector.unmount();expect(mocks.cancel).not.toHaveBeenCalled();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(2_000);});expect(mocks.load).toHaveBeenCalledTimes(3);
+    owner.unmount();expect(mocks.cancel).toHaveBeenCalledOnce();
+    await act(async()=>{await vi.advanceTimersByTimeAsync(30_000);});expect(mocks.load).toHaveBeenCalledTimes(3);
+  });
+  it("shares Stop with other consumers and rejects their stale capability preparation",async()=>{
+    const Provider=wrapper();const owner=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:Provider});
+    const inspector=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a",executionOwner:false}),{wrapper:Provider});
+    await waitFor(()=>expect(owner.result.current.node).not.toBeNull());
+    const late=deferred<LocalComputerSnapshot>();mocks.load.mockReturnValueOnce(late.promise);
+    let prepared!:Promise<LocalComputerSnapshot>;act(()=>{prepared=owner.result.current.prepareForTool("write-file");});
+    const rejected=expect(prepared).rejects.toThrow("Computer status changed");
+    mocks.load.mockResolvedValue(node({generation:2}));
+    await act(async()=>{await inspector.result.current.stop();late.resolve(active());await rejected;});
+    await waitFor(()=>expect(owner.result.current.node?.generation).toBe(2));
+    expect(owner.result.current.node?.control.status).toBe("idle");
+  });
+  it("keeps the last execution owner in control when another owner unmounts",async()=>{
+    mocks.load.mockResolvedValue(active());const Provider=wrapper();
+    const first=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:Provider});
+    const second=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:Provider});
+    await waitFor(()=>expect(second.result.current.node?.control.status).toBe("active"));
+    first.unmount();expect(mocks.cancel).not.toHaveBeenCalled();second.unmount();expect(mocks.cancel).toHaveBeenCalledOnce();
+  });
+  it("retains the scope on revalidation but rejects a previous account owner's late read",async()=>{
+    setActiveRuntimeDataScope("workspace-a","owner-a");const late=deferred<LocalComputerSnapshot>();mocks.load.mockReturnValueOnce(late.promise);
+    const {result,rerender}=hook();
+    setActiveRuntimeDataScope("workspace-a","owner-a");rerender();expect(mocks.load).toHaveBeenCalledOnce();
+    setActiveRuntimeDataScope("workspace-a","owner-b");mocks.load.mockResolvedValue(node({generation:2}));rerender();
+    await act(async()=>{late.resolve(active());});await waitFor(()=>expect(result.current.node?.generation).toBe(2));
+  });
   it("loads capabilities after a development StrictMode remount without cancelling idle control",async()=>{
     const Provider=wrapper();
     const {result}=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:({children}:PropsWithChildren)=><StrictMode><Provider>{children}</Provider></StrictMode>});

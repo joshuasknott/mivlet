@@ -84,9 +84,10 @@ export function useAccountWorkspace(options: {
         // active native data scope. Historical requests never become permits.
         callbacks.current.onScopeChange();
         workspaceIdentityRef.current = identity;
+        clearActiveRuntimeDataScope();
       }
       if (canUseWorkspace) {
-        setActiveRuntimeDataScope(status.activeWorkspace.localWorkspaceId);
+        setActiveRuntimeDataScope(status.activeWorkspace.localWorkspaceId, identity ?? "");
       } else {
         clearActiveRuntimeDataScope();
       }

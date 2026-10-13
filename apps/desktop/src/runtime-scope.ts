@@ -12,6 +12,7 @@ const PREVIEW_RUNTIME_DATA_SCOPE: RuntimeDataScope = {
 };
 
 let activeScope: RuntimeDataScope | null = null;
+let activeIdentity = "";
 
 function isNativeRuntime() {
   return (
@@ -26,11 +27,16 @@ export function getActiveRuntimeDataScope(): RuntimeDataScope | null {
   return isNativeRuntime() ? null : PREVIEW_RUNTIME_DATA_SCOPE;
 }
 
-export function setActiveRuntimeDataScope(workspaceId: string): RuntimeDataScope {
+export function setActiveRuntimeDataScope(workspaceId: string, identity = ""): RuntimeDataScope {
+  // Status revalidation is not an account transition. Preserve the cache token
+  // until the verified owner changes or the active session is explicitly reset.
+  if (activeScope?.workspaceId === workspaceId && activeIdentity === identity) return activeScope;
+  activeIdentity = identity;
   activeScope = { workspaceId };
   return activeScope;
 }
 
 export function clearActiveRuntimeDataScope() {
   activeScope = null;
+  activeIdentity = "";
 }
