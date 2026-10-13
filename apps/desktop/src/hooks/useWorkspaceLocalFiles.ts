@@ -16,11 +16,20 @@ export function useWorkspaceLocalFiles(workspaceId: string, agentIds: string[], 
     .filter(item => item.workspaceId === workspaceId && item.agentId === agentId)
     .map(item => [item.id, item.generation, item.status, item.updatedAt])
     .sort((left, right) => String(left[0]).localeCompare(String(right[0])))));
-  const queries = useQueries({ queries: scopes.map(({ reads }, index) => ({
+  const files = useQueries({ queries: scopes.map(({ reads }, index) => ({
     queryKey: [...reads.filesKey, revisions[index]],
     enabled: Boolean(workspaceId), retry: false, staleTime: 10_000, gcTime: 30_000,
     queryFn: () => reads.readFiles(revisions[index]),
-  })) });
+  })), combine: queries => ({
+    // TanStack's combined result structurally shares unchanged metadata, keeping
+    // WorkspaceLibrary's row memoization useful during unrelated shell updates.
+    data: queries.map((query, index) => ({ agentId: scopes[index].agentId,
+      snapshot: scopes[index].reads.current() && !query.isError ? query.data ?? null : null,
+      error: query.isError ? query.error instanceof Error ? query.error.message : "Files could not be loaded."
+        : query.isSuccess && !query.data && !query.isFetching ? "Open the desktop app to view saved files." : "",
+    })),
+    isFetching: queries.some(query => query.isFetching),
+  }) });
   useEffect(() => {
     const releases = scopes.map(({ reads }) => reads.subscribe(instance, () => {}, false));
     const refresh = () => { for (const { reads } of scopes) if (!reads.leader()) reads.invalidateFiles(); };
@@ -34,12 +43,7 @@ export function useWorkspaceLocalFiles(workspaceId: string, agentIds: string[], 
     }));
   }, [client, scopes, revisions.join("\n")]);
   return {
-    data: queries.map((query, index) => ({ agentId: scopes[index].agentId,
-      snapshot: scopes[index].reads.current() && !query.isError ? query.data ?? null : null,
-      error: query.isError ? query.error instanceof Error ? query.error.message : "Files could not be loaded."
-        : query.isSuccess && !query.data && !query.isFetching ? "Open the desktop app to view saved files." : "",
-    })),
-    isFetching: queries.some(query => query.isFetching),
-    refetch: () => Promise.all(queries.map(query => query.refetch({ cancelRefetch: false }))),
+    ...files,
+    refetch: () => Promise.all(scopes.map(({ reads }, index) => client.refetchQueries({ queryKey: [...reads.filesKey, revisions[index]], exact: true }, { cancelRefetch: false }))),
   };
 }

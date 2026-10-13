@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { isLiveSource } from "@mivlet/knowledge";
 import { useQuery } from "@tanstack/react-query";
 import type {
@@ -17,7 +17,7 @@ import type { RightPanelTab } from "./right-panel-state";
 import { NativeExecutionSetup } from "./NativeExecutionSetup";
 import { NativeCommandJobs } from "./NativeCommandJobs";
 import { MessageAttachments } from "../conversation/MessageAttachments";
-import { parseComputerArtifact } from "../../lib/computer-artifacts";
+import { collectLibraryArtifacts } from "./library-artifacts";
 import { subscribeOutputPinned } from "../../lib/output-revision-events";
 import type { ReactNode } from "react";
 
@@ -47,11 +47,20 @@ export function WorkspaceLibrary({
   addFiles?: ReactNode;
 }) {
   const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+  const agentNames = useMemo(
+    () => new Map(agents.map((agent) => [agent.id, agent.name])),
+    [agents],
+  );
   const files = useWorkspaceLocalFiles(workspaceId, agents.map(agent => agent.id), work);
-  const rows = (files.data ?? []).flatMap(({ agentId, snapshot }) =>
-    (snapshot?.entries ?? [])
-      .filter((file) => file.kind === "file")
-      .map((file) => ({ ...file, agentId })),
+  const rows = useMemo(
+    () =>
+      (files.data ?? []).flatMap(({ agentId, snapshot }) =>
+        (snapshot?.entries ?? [])
+          .filter((file) => file.kind === "file")
+          .map((file) => ({ ...file, agentId })),
+      ),
+    [files.data],
   );
   const pinnedOutputs = useQuery({
     queryKey: ["workspace-pinned-outputs", workspaceId],
@@ -74,21 +83,26 @@ export function WorkspaceLibrary({
     });
   }, [workspaceId, pinnedOutputs.refetch]);
   const visible = rows.filter((file) =>
-    `${file.name} ${file.path} ${agents.find((agent) => agent.id === file.agentId)?.name ?? ""}`
+    `${file.name} ${file.path} ${agentNames.get(file.agentId) ?? ""}`
       .toLowerCase()
-      .includes(query.trim().toLowerCase()),
+      .includes(normalizedQuery),
   );
   const matches = (text: string) =>
-    text.toLowerCase().includes(query.trim().toLowerCase());
+    text.toLowerCase().includes(normalizedQuery);
   const visiblePinnedOutputs = (pinnedOutputs.data ?? []).filter((output) =>
     matches(output.title),
   );
-  const chatWork = room
-    ? work.filter(
-        (item) =>
-          item.workspaceId === workspaceId && item.conversationId === room.id,
-      )
-    : [];
+  const chatWork = useMemo(
+    () =>
+      room
+        ? work.filter(
+            (item) =>
+              item.workspaceId === workspaceId &&
+              item.conversationId === room.id,
+          )
+        : [],
+    [work, workspaceId, room?.id],
+  );
   const seenAttachments = new Set<string>();
   const attachments = chatWork.flatMap((item) =>
     (item.attachments ?? [])
@@ -100,23 +114,10 @@ export function WorkspaceLibrary({
       })
       .map((file) => ({ file, agentId: item.agentId })),
   );
-  const created = chatWork
-    .flatMap((item) =>
-      item.outputs.flatMap((output) => {
-        const artifact = parseComputerArtifact(output.text);
-        return artifact && matches(artifact.title)
-          ? [{ artifact, output: output.text, agentId: item.agentId }]
-          : [];
-      }),
-    )
-    .filter(
-      (entry, index, all) =>
-        all.findIndex(
-          (other) =>
-            other.artifact.id === entry.artifact.id &&
-            other.agentId === entry.agentId,
-        ) === index,
-    );
+  const created = useMemo(
+    () => collectLibraryArtifacts(chatWork, normalizedQuery),
+    [chatWork, normalizedQuery],
+  );
   const projectFiles = sources.filter(
     (source) =>
       project?.knowledgeSourceIds.includes(source.id) &&
@@ -274,7 +275,8 @@ export function WorkspaceLibrary({
                 <span className="workspace-library__detail">
                   <strong>{output.title}</strong>
                   <small>
-                    {output.format} · pinned revision {pinnedRevision?.number ?? output.currentRevisionNumber}
+                    {output.format} · pinned revision{" "}
+                    {pinnedRevision?.number ?? output.currentRevisionNumber}
                   </small>
                 </span>
                 <ArrowRight size={16} aria-hidden="true" />
