@@ -49,6 +49,7 @@ const MAX_HTTP_CONNECTIONS: usize = 8;
 
 #[derive(Debug)]
 struct ResourceEntry {
+    origin: Option<String>,
     owner_subject: String,
     workspace_id: String,
     session_id: String,
@@ -61,6 +62,8 @@ struct ResourceEntry {
 static RESOURCES: OnceLock<Mutex<HashMap<String, ResourceEntry>>> = OnceLock::new();
 static HTTP_ORIGIN: OnceLock<String> = OnceLock::new();
 static HTTP_SERVER_READY: AtomicBool = AtomicBool::new(false);
+static GENERATED_ORIGIN: OnceLock<String> = OnceLock::new();
+static GENERATED_SERVER_READY: AtomicBool = AtomicBool::new(false);
 
 #[cfg(windows)]
 static NAVIGATION_FENCE: OnceLock<Arc<Mutex<NavigationFence>>> = OnceLock::new();
@@ -106,10 +109,21 @@ fn allow_navigation(state: &mut NavigationFence, frame_id: usize, uri: &str) -> 
 /// is not a Tauri custom protocol: registered Windows protocols are classified
 /// as local by Tauri and would let a child frame reach the normal IPC bridge.
 pub fn start_http_server() -> Result<(), String> {
-    if HTTP_ORIGIN.get().is_some() {
+    start_server("127.0.0.1", &HTTP_ORIGIN, &HTTP_SERVER_READY)?;
+    // A missing optional guest listener disables previews, not the workspace.
+    let _ = start_server("127.0.0.2", &GENERATED_ORIGIN, &GENERATED_SERVER_READY);
+    Ok(())
+}
+
+fn start_server(
+    host: &str,
+    origin_cell: &'static OnceLock<String>,
+    ready: &'static AtomicBool,
+) -> Result<(), String> {
+    if origin_cell.get().is_some() {
         return Ok(());
     }
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0))
+    let listener = std::net::TcpListener::bind((host, 0))
         .map_err(|_| "MCP App loopback server is unavailable.".to_string())?;
     listener
         .set_nonblocking(true)
@@ -118,8 +132,8 @@ pub fn start_http_server() -> Result<(), String> {
         .local_addr()
         .map_err(|_| "MCP App loopback server address is unavailable.")?
         .port();
-    let origin = format!("http://127.0.0.1:{port}");
-    HTTP_ORIGIN
+    let origin = format!("http://{host}:{port}");
+    origin_cell
         .set(origin.clone())
         .map_err(|_| "MCP App loopback server was initialized twice.")?;
     let connections = Arc::new(tokio::sync::Semaphore::new(MAX_HTTP_CONNECTIONS));
@@ -130,7 +144,7 @@ pub fn start_http_server() -> Result<(), String> {
         let Ok(listener) = tokio::net::TcpListener::from_std(listener) else {
             return;
         };
-        HTTP_SERVER_READY.store(true, Ordering::Release);
+        ready.store(true, Ordering::Release);
         loop {
             let Ok((stream, _peer)) = listener.accept().await else {
                 break;
@@ -159,11 +173,12 @@ fn http_origin() -> Result<&'static str, String> {
 }
 
 #[cfg(windows)]
-fn is_registered_mcp_url(uri: &str) -> bool {
-    let Ok(origin) = http_origin() else {
-        return false;
-    };
-    let Some(path) = uri.strip_prefix(&format!("{origin}/")) else {
+pub(crate) fn is_registered_mcp_url(uri: &str) -> bool {
+    let Some(path) = [HTTP_ORIGIN.get(), GENERATED_ORIGIN.get()]
+        .into_iter()
+        .flatten()
+        .find_map(|origin| uri.strip_prefix(&format!("{origin}/")))
+    else {
         return false;
     };
     let mut segments = path.split('/');
@@ -233,6 +248,7 @@ fn install_frame_navigation_handlers(frame: ICoreWebView2Frame) -> windows::core
 fn install_navigation_guard_on_webview(webview: &PlatformWebview) -> windows::core::Result<()> {
     let controller = webview.controller();
     let core: ICoreWebView2 = unsafe { controller.CoreWebView2()? };
+    crate::interactive_network_guard::install(&core)?;
     let core4: ICoreWebView2_4 = core.cast()?;
     let frame_handler = FrameCreatedEventHandler::create(Box::new(move |_sender, args| {
         let Some(args) = args else {
@@ -854,11 +870,18 @@ fn serve_for_owner(request: &Request<Vec<u8>>, owner_subject: &str) -> Response<
     if entry.owner_subject != owner_subject {
         return invalid_response("MCP App account changed.");
     }
+    if entry
+        .origin
+        .as_ref()
+        .is_some_and(|origin| !request.uri().to_string().starts_with(&format!("{origin}/")))
+    {
+        return invalid_response("Interactive resource origin rejected.");
+    }
     if Instant::now() >= entry.expires_at {
         guard.remove(resource_token);
         return invalid_response("MCP App resource expired.");
     }
-    Response::builder()
+    let mut response = Response::builder()
         .status(StatusCode::OK)
         .header(
             header::CONTENT_TYPE,
@@ -866,7 +889,18 @@ fn serve_for_owner(request: &Request<Vec<u8>>, owner_subject: &str) -> Response<
         )
         .header(header::CONTENT_SECURITY_POLICY, entry.csp.as_str())
         .header(header::CACHE_CONTROL, "no-store")
-        .header("X-Content-Type-Options", "nosniff")
+        .header("X-Content-Type-Options", "nosniff");
+    if entry
+        .origin
+        .as_ref()
+        .is_some_and(|origin| origin.starts_with("http://127.0.0.2:"))
+    {
+        response = response.header("Referrer-Policy", "no-referrer")
+            .header("X-DNS-Prefetch-Control", "off")
+            .header("Permissions-Policy", "camera=(), microphone=(), geolocation=(), display-capture=(), clipboard-read=(), clipboard-write=(), usb=(), payment=(), fullscreen=()")
+            .header("Origin-Agent-Cluster", "?1");
+    }
+    response
         .body(entry.html.clone())
         .expect("MCP App response headers are valid")
 }
@@ -958,6 +992,7 @@ pub fn register_mcp_app_resource(
     guard.insert(
         resource_token.clone(),
         ResourceEntry {
+            origin: Some(http_origin()?.to_owned()),
             owner_subject: scope.private.owner_subject().into(),
             workspace_id: request.workspace_id,
             session_id: request.session_id,
@@ -971,6 +1006,69 @@ pub fn register_mcp_app_resource(
     // perform its initialize handshake once the document has loaded. The
     // ephemeral loopback origin remains remote to Tauri's ACL classifier.
     Ok(format!("{}/{resource_token}/index.html", http_origin()?))
+}
+
+/// Called only after collaboration validates the exact selected terminal
+/// assistant revision and completed attempt. Generated HTML has no AppBridge.
+pub(crate) fn register_generated_html(
+    owner: &crate::store::repos::scope::PrivateDataScope,
+    conversation: &str,
+    result: &str,
+    html: String,
+) -> Result<serde_json::Value, String> {
+    require_navigation_guard()?;
+    if !GENERATED_SERVER_READY.load(Ordering::Acquire) {
+        return Err("The isolated HTML preview server is unavailable.".into());
+    }
+    #[cfg(windows)]
+    crate::interactive_network_guard::require_ready()?;
+    let origin = GENERATED_ORIGIN
+        .get()
+        .ok_or("The isolated HTML preview server is unavailable.")?;
+    let key = token()?;
+    let now = Instant::now();
+    let mut entries = resources()
+        .lock()
+        .map_err(|_| "Interactive resources are unavailable.")?;
+    entries.retain(|_, entry| entry.expires_at > now);
+    if entries.len() >= MAX_LIVE_RESOURCES {
+        return Err("Close an interactive preview before opening another.".into());
+    }
+    entries.insert(
+        key.clone(),
+        ResourceEntry {
+            origin: Some(origin.clone()),
+            owner_subject: owner.owner_subject().into(),
+            workspace_id: owner.workspace_id().into(),
+            session_id: conversation.into(),
+            result_id: result.into(),
+            html: html.into_bytes(),
+            csp: crate::generated_html::CSP.into(),
+            expires_at: now + RESOURCE_TTL,
+        },
+    );
+    Ok(serde_json::json!({"resourceId":key,"url":format!("{origin}/{key}/index.html")}))
+}
+
+pub(crate) fn release_generated_html(
+    owner: &crate::store::repos::scope::PrivateDataScope,
+    conversation: &str,
+    result: &str,
+    key: &str,
+) -> Result<(), String> {
+    let mut entries = resources()
+        .lock()
+        .map_err(|_| "Interactive resources are unavailable.")?;
+    if entries.get(key).is_some_and(|entry| {
+        entry.owner_subject == owner.owner_subject()
+            && entry.workspace_id == owner.workspace_id()
+            && entry.session_id == conversation
+            && entry.result_id == result
+            && entry.origin.as_ref() == GENERATED_ORIGIN.get()
+    }) {
+        entries.remove(key);
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1003,6 +1101,55 @@ pub fn release_mcp_app_resource(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn generated_html_is_bound_to_its_guest_origin_and_fixed_policy() {
+        let key = "e".repeat(64);
+        let origin = "http://127.0.0.2:43128";
+        resources().lock().unwrap().insert(
+            key.clone(),
+            ResourceEntry {
+                origin: Some(origin.into()),
+                owner_subject: "html-owner".into(),
+                workspace_id: "workspace".into(),
+                session_id: "room".into(),
+                result_id: "agent:run".into(),
+                html: b"<button>Local</button>".to_vec(),
+                csp: crate::generated_html::CSP.into(),
+                expires_at: Instant::now() + RESOURCE_TTL,
+            },
+        );
+        let good = request(&format!("{origin}/{key}/index.html"));
+        let response = serve_for_owner(&good, "html-owner");
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(
+            response.headers()[header::CONTENT_SECURITY_POLICY],
+            crate::generated_html::CSP
+        );
+        assert_eq!(response.headers()["Referrer-Policy"], "no-referrer");
+        assert_eq!(response.headers()["Origin-Agent-Cluster"], "?1");
+        assert!(response.headers()["Permissions-Policy"]
+            .to_str()
+            .unwrap()
+            .contains("microphone=()"));
+        assert_eq!(
+            serve_for_owner(&good, "other-owner").status(),
+            StatusCode::NOT_FOUND
+        );
+        assert_eq!(
+            serve_for_owner(
+                &request(&format!("http://127.0.0.1:43128/{key}/index.html")),
+                "html-owner"
+            )
+            .status(),
+            StatusCode::NOT_FOUND
+        );
+        resources().lock().unwrap().remove(&key);
+        assert_eq!(
+            serve_for_owner(&good, "html-owner").status(),
+            StatusCode::NOT_FOUND
+        );
+    }
 
     #[test]
     fn loopback_http_parser_accepts_only_the_bound_origin_and_get() {
@@ -1045,6 +1192,7 @@ mod tests {
         resources().lock().unwrap().insert(
             token.clone(),
             ResourceEntry {
+                origin: None,
                 owner_subject: "account-owner".into(),
                 workspace_id: "workspace".into(),
                 session_id: "session".into(),
@@ -1427,6 +1575,7 @@ mod tests {
         resources().lock().unwrap().insert(
             key.clone(),
             ResourceEntry {
+                origin: None,
                 owner_subject: "account-owner".into(),
                 workspace_id: "workspace".into(),
                 session_id: "session".into(),
@@ -1480,6 +1629,7 @@ mod tests {
         resources().lock().unwrap().insert(
             key.clone(),
             ResourceEntry {
+                origin: None,
                 owner_subject: private.owner_subject().into(),
                 workspace_id: "default".into(),
                 session_id: "session".into(),
@@ -1503,6 +1653,7 @@ mod tests {
         resources().lock().unwrap().insert(
             key.clone(),
             ResourceEntry {
+                origin: None,
                 owner_subject: "account-owner".into(),
                 workspace_id: "workspace".into(),
                 session_id: "session".into(),

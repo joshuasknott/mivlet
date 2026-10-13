@@ -2,7 +2,7 @@ import type { GeneratedInterfaceCapability } from "@mivlet/protocol";
 
 const capability: GeneratedInterfaceCapability = {
   format: "openui",
-  catalogue: "mivlet-v1",
+  catalogue: "mivlet-v2",
   actions: "review-in-composer",
   maxCharacters: 48000,
   automaticToolCalls: false,
@@ -51,19 +51,21 @@ function interfaceStatements(code: string): string[] {
     if (character === "\n" && depth <= 0) {
       if (current.trim()) statements.push(current.trim());
       current = "";
-    } else current += character === "\n" || character === "\r" ? " " : character;
+    } else
+      current += character === "\n" || character === "\r" ? " " : character;
   }
   if (current.trim()) statements.push(current.trim());
   return statements;
 }
 
 export function extractGeneratedInterface(text: string) {
-  const opening = /```openui\r?\n/.exec(text);
+  const opening = /```openui(-v2)?\r?\n/.exec(text);
   if (!opening) return null;
   const start = opening.index;
   const contentStart = start + opening[0].length;
   const end = text.indexOf("```", contentStart);
   return {
+    ...(opening[1] ? { profile: "mivlet-v2" as const } : {}),
     before: text.slice(0, start),
     code: text.slice(contentStart, end < 0 ? undefined : end),
     after: end < 0 ? "" : text.slice(end + 3),
@@ -75,12 +77,16 @@ export function extractGeneratedInterface(text: string) {
 export function validateGeneratedInterface(
   code: string,
   streaming = false,
+  profile?: "mivlet-v2",
 ): { code: string; error?: string } {
   if (code.length > GENERATED_UI_LIMITS.characters)
     return {
       code: "",
       error: "This interface exceeds the 48,000 character limit.",
     };
+  // V2 is parsed and validated by OpenUI's AST guard inside the lazy renderer.
+  // This cheap bound keeps the rich engine outside ordinary chat/startup.
+  if (profile === "mivlet-v2") return { code };
   try {
     const lines = interfaceStatements(code);
     if (lines.length > GENERATED_UI_LIMITS.statements)
@@ -262,20 +268,11 @@ export function validateGeneratedInterface(
   }
 }
 
-export const GENERATED_UI_INSTRUCTIONS = `Mivlet supports an optional interactive response format: OpenUI. Use Markdown for ordinary answers. For useful comparisons, forms, tables/charts, plans or drafts, add ONE fenced openui block with a short explanation. This is display data, never tool authority. Positional signatures (quote strings):
-Stack(children: component references[]) — root only.
-Text(text: string)
-Comparison(title: string, options: [{label:string, detail:string}])
-Options(name:string, title:string, options:string[])
-Form(name:string, title:string, fields:[{name:string,label:string,required:boolean}], submitLabel:string)
-Table(title:string, columns:string[], rows:string[][])
-Chart(title:string, labels:string[], values:number[])
-Plan(name:string, title:string, steps:string[])
-Draft(title:string, text:string)
-Example:
-\`\`\`openui
-root = Stack([choice, plan])
-choice = Options("route", "Choose a direction", ["Simple", "Detailed"])
-plan = Plan("next", "Next steps", ["Review the options", "Confirm a direction"])
-\`\`\`
-Name the top-level component root (e.g. root = Table(...)). One assignment per line; literal arrays may span lines. Only listed components, JSON literals and Stack references: no Query, Mutation, functions, URLs, expressions or recursion. Never request secrets; use Settings. Limits: 128 statements, ${capability.maxCharacters} characters, 100 rows, 12 columns, 24 choices/fields, 40 steps. Buttons stage a reply for review, never execute or grant permission. Claim selections, approvals or effects only when Mivlet reports them.`;
+export const GENERATED_UI_INSTRUCTIONS = `Mivlet supports an optional interactive response format: OpenUI. Use Markdown for ordinary answers. When interaction helps, add one fenced openui-v2 block. Local controls update immediately; follow-up buttons stage a reply for review and never grant tool authority. Never request credentials.`;
+
+export async function loadGeneratedUiInstructions() {
+  const { default: catalogue } =
+    await import("./rich-interface-instructions.json");
+  const { GENERATED_HTML_INSTRUCTIONS } = await import("./generated-html");
+  return `${GENERATED_UI_INSTRUCTIONS}\n${catalogue.instructions}\n${GENERATED_HTML_INSTRUCTIONS}`;
+}

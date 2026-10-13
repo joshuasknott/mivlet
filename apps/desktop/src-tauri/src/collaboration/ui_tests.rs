@@ -52,6 +52,17 @@ fn obsolete_work_generation_can_be_read_but_cannot_accept_interface_actions() {
         author.work_id = Some(work.id);
         author.generation = 1;
         ctx.put(Kind::Author, "ui-run", Some(&room.id), None, &author)?;
+        let error = ui::apply(
+            ctx,
+            &room,
+            "lead",
+            UiCommand::RenderHtml {
+                run_id: "ui-run".into(),
+                source: source.clone(),
+            },
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("obsolete or unfinished"));
         ui::apply(
             ctx,
             &room,
@@ -187,6 +198,22 @@ fn ui_state_is_encrypted_durable_revision_bound_and_duplicate_actions_fail() {
 fn ui_rejects_foreign_owner_changed_source_and_nonliteral_selection() {
     fixture(&store(), |ctx| {
         let (room, source) = interactive(ctx)?;
+        for (agent, text, expected) in [
+            ("reviewer", source.clone(), "owner"),
+            ("lead", format!("{source}changed"), "saved response changed"),
+        ] {
+            let error = ui::apply(
+                ctx,
+                &room,
+                agent,
+                UiCommand::RenderHtml {
+                    run_id: "ui-run".into(),
+                    source: text,
+                },
+            )
+            .unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
+        }
         assert!(ui::apply(
             ctx,
             &room,

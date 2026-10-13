@@ -90,6 +90,11 @@
       "marginNote": "PDF.js 6.4.299 plus the viewer and its .mjs worker; loaded only when a PDF opens, enforced by the Vite static import graph.",
       "gzipBytes": 600000,
       "rawBytes": 1900000
+    },
+    "intelligentUi": {
+      "marginNote": "Optional reactive UI measured 350109 raw / 106072 gzip after separating shared widget dependencies from startup. Allow 12 KiB raw / 4 KiB gzip. Existing startup, common workspace, conversation, CSS and PDF ceilings remain unchanged.",
+      "gzipBytes": 110168,
+      "rawBytes": 362400
     }
   },
   "requireDeferredPdf": true,
@@ -127,5 +132,11 @@
       "gzipBytes": 130502
     },
     "settingsRouteRawBytes": 63767
+  },
+  "intelligentUiBaseline": {
+    "gzipBytes": 24219,
+    "rawBytes": 72518,
+    "commit": "e3dc8f6439ca724de929fc6fbb84ed868dea261a",
+    "note": "Previously budgeted OpenUI 0.3.2 engine. Aggregate comparisons subtract only the incremental optional UI graph above this contribution; the entire new graph is independently capped."
   }
 }

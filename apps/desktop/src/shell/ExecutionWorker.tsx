@@ -25,7 +25,7 @@ import {
   conversationToolsForModel,
 } from "../lib/computer-tools";
 import { COMPUTER_WORK_INSTRUCTIONS } from "../lib/computer-instructions";
-import { GENERATED_UI_INSTRUCTIONS } from "../lib/generated-interface";
+import { loadGeneratedUiInstructions } from "../lib/generated-interface";
 import { capturedFileExclusions } from "../lib/context-selection";
 import { builtinPluginInstructions } from "../lib/builtin-plugins";
 import { composerImageInputs } from "../lib/composer-images";
@@ -323,12 +323,13 @@ export function ExecutionWorker({
             excludedKnowledgeSourceIds: capturedFileExclusions(session.work.capturedContext),
           },
         );
+        const generatedUiInstructions = await loadGeneratedUiInstructions();
         if (!service.current(session)) return;
         const instructions = [
           agentExecutionInstructions(session.profile),
           session.work.capturedContext ? `Captured request context (${session.work.capturedContext.capturedAt}):\n${session.work.capturedContext.text}` : "",
           CONVERSATION_STYLE_INSTRUCTIONS,
-          GENERATED_UI_INSTRUCTIONS,
+          generatedUiInstructions,
           tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
           tools.some(tool => tool.name === "local-browser-observe") ? "Owned browser: select sole window, list/observe exact origin, act once, verify. tabRefs 60s; input refs 30s/single-use. Blank: navigate only. Click fully visible buttons/HTTP links; scroll public center up/down <=600px. May submit/download/run handlers. No tab switching/forms/JS/file import. Unknown input: fresh request, never replay." : "",
           builtinPluginInstructions(

@@ -466,23 +466,65 @@ Fixture tests establish parsing, storage and admission fences; authenticated
 provider/runtime acceptance and packaged desktop behavior remain separate gates.
 ### Interactive response presentation
 
-The conversation renders one optional `openui` block using OpenUI's language
+The conversation renders one optional `openui-v2` block using OpenUI's language
 renderer and Mivlet's approved catalogue. The provider-neutral text profile is
-`mivlet-v1`: comparisons, options, validated clarification forms, searchable
-tables, labelled bar charts, checklists and draft previews. It uses existing
+`mivlet-v2`: responsive layouts, reusable cards, keyboard accessible tabs, bar/line
+charts, searchable tables, native-owned photos, reactive inputs/sliders/dropdowns
+and deliberate follow-up buttons. OpenUI's parser, reactive state and reusable
+Card/Tabs/Charts widgets own rendering; Mivlet wraps the input and media boundaries.
+Legacy `openui` (`mivlet-v1`) responses retain their original catalogue and state.
+The generated prompt comes from the exact registered schemas (`ui:generate`);
+normal dispatch and recovery load it before building provider context. It uses existing
 provider connections and ordinary streamed assistant text; no provider-specific
 JSON mode, gateway or telemetry is required. Text-only clients retain the fenced
 source. Providers still need an available authenticated text route; the renderer
 does not provide one. Rich provider-native tool UI is handled separately by the
 MCP Apps host.
 
-The pre-parser rejects expressions, queries, mutations, unknown components,
-cycles and excessive expansion before OpenUI interprets the content. Limits are
+The v2 guard inspects OpenUI's AST before interpretation. Bounded local arithmetic,
+comparisons, ternaries and state actions are allowed. Queries, mutations, tool runs,
+URL actions, member/index access, iteration, unknown components, cycles and excessive
+expansion are rejected. The v1 parser retains its original literal-only rules. Limits are
 48,000 characters, 128 statements, 12 levels and 2,048 parsed/expanded nodes;
 individual catalogue components have stricter row, field and string limits.
 Incomplete streams remain display-only. Invalid source remains inspectable.
 Generated forms cannot request credentials. The OpenUI renderer receives no tool
 provider and observability publishing is disabled.
+
+The upstream opaque reactive state is encoded into one bounded `openuiState`
+field in the existing encrypted interface repository; it retains native ownership,
+secret rejection and compare-and-swap revisions. Saved state hydrates once per
+source revision rather than resetting on each edit. Photo reads use the existing
+workspace/agent/generation-bound artifact preview; arbitrary URLs, filesystem paths
+and model-invented inline image data are not media authority. Missing assets show
+a prerequisite. Local interactions do not call a provider; follow-ups remain
+reviewable composer drafts. No hosted gateway, extra API key or vendor branch is
+introduced. Generative reliability still needs representative provider tests.
+
+Custom responses can use one bounded `mivlet-html` fence when the OpenUI
+catalogue cannot represent the interaction. They remain source-only until a user
+opens the preview. Native collaboration validates the exact selected terminal
+assistant revision, agent/account/workspace ownership and completed attempt
+before extracting the HTML itself; the renderer cannot substitute a document.
+The existing read-only resource host issues an ephemeral opaque URL on a separate
+127.0.0.2 loopback site, pinned to its account and origin. Windows requests site
+isolation and fences child-frame navigation to that exact issued URL. An unavailable
+listener or navigation fence disables the preview with a prerequisite.
+The native request guard pauses document requests before transmission and binds
+the Chromium frame id to the issued resource. This blocks navigation egress,
+including process swaps; cancelling NavigationStarting alone can be too late.
+Out-of-process child renderer targets start paused and receive the same request
+guard before their JavaScript resumes. Native continuations use the event's exact
+protocol session; handling only the main renderer does not fence child requests.
+
+The guest has only `allow-scripts`, no same-origin allowance or AppBridge, and a
+fixed CSP denying network, forms, nested frames, workers, external assets and
+native protocols. Inline CSS, SVG and JavaScript can implement local calculators,
+diagrams and simulations. Host Close stays outside the guest. Teardown releases
+resources on source/chat/account changes and late registration; expiry bounds
+abandoned resources. The executable frame also closes at fifteen minutes and
+when its compact conversation pane is hidden. Guest state resets on close and never enters saved answers
+or model context. Use OpenUI for durable selections and native artifacts for photos.
 
 Interactive answers belong to an exact saved terminal message revision and its
 native conversation/agent owner. The encrypted `conversation_ui` repository uses

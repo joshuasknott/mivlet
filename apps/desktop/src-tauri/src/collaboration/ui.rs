@@ -93,6 +93,14 @@ pub(super) enum UiCommand {
         run_id: String,
         source: String,
     },
+    RenderHtml {
+        run_id: String,
+        source: String,
+    },
+    CloseHtml {
+        run_id: String,
+        resource_id: String,
+    },
     QuoteResponse {
         run_id: String,
         source: String,
@@ -254,6 +262,24 @@ pub(super) fn apply(
             super::output_revisions::apply(ctx, room, agent, &work_id)
         }
         UiCommand::ApplyOutputRevisions => super::output_revisions::apply_pending(ctx, room, agent),
+        UiCommand::CloseHtml {
+            run_id,
+            resource_id,
+        } => {
+            id(&run_id)?;
+            if resource_id.len() != 64 || !resource_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err(invalid("Invalid HTML preview resource."));
+            }
+            crate::mcp_app_host::release_generated_html(
+                &ctx.scope.private,
+                &room.id,
+                &format!("{agent}:{run_id}"),
+                &resource_id,
+            )
+            .map_err(|error| invalid(&error))?;
+            Ok(json!({}))
+        }
         UiCommand::PreviewContext => {
             let capture = context::capture(ctx, room, profile(ctx.profiles, agent)?)?;
             Ok(json!({"selection":context_selection(ctx,room,agent)?,"capture":capture}))
@@ -297,6 +323,7 @@ pub(super) fn apply(
         command => {
             let (run, source) = match &command {
                 UiCommand::LoadInterface { run_id, source }
+                | UiCommand::RenderHtml { run_id, source }
                 | UiCommand::SaveInterface { run_id, source, .. }
                 | UiCommand::ReviewInterface { run_id, source, .. }
                 | UiCommand::QuoteResponse { run_id, source, .. } => (run_id, source),
@@ -305,7 +332,9 @@ pub(super) fn apply(
             let (key, source_revision) = interface_key(ctx, room, agent, run, source)?;
             if matches!(
                 command,
-                UiCommand::SaveInterface { .. } | UiCommand::ReviewInterface { .. }
+                UiCommand::SaveInterface { .. }
+                    | UiCommand::ReviewInterface { .. }
+                    | UiCommand::RenderHtml { .. }
             ) {
                 validate_interface_generation(ctx, room, run)?;
             }
@@ -317,6 +346,17 @@ pub(super) fn apply(
                     },
                 );
             match command {
+                UiCommand::RenderHtml { source, run_id } => {
+                    let html =
+                        crate::generated_html::extract(&source).map_err(|error| invalid(&error))?;
+                    crate::mcp_app_host::register_generated_html(
+                        &ctx.scope.private,
+                        &room.id,
+                        &format!("{agent}:{run_id}"),
+                        html,
+                    )
+                    .map_err(|error| invalid(&error))
+                }
                 UiCommand::QuoteResponse {
                     selection,
                     source,
@@ -460,5 +500,6 @@ mod wire_tests {
         assert!(matches!(request.command, UiCommand::QuoteOutput { .. }));
         assert!(serde_json::from_value::<Request>(json!({"workspaceId":"workspace-local","conversationId":"room","agentId":"agent","action":"unknown"})).is_err());
         assert!(serde_json::from_value::<Request>(json!({"workspaceId":"workspace-local","conversationId":"room","agentId":"agent","action":"quote-output","outputId":"output","revisionId":"revision","selection":"passage","unexpected":true})).is_err());
+        assert!(serde_json::from_value::<Request>(json!({"workspaceId":"workspace-local","conversationId":"room","agentId":"agent","action":"render-html","runId":"run","source":"saved","html":"substituted document"})).is_err());
     }
 }
