@@ -23,8 +23,8 @@ export interface NativeAgentEventSession {
   persistence: AttemptPersistence;
   durableWriter: DurableRunWriter | null;
   attemptId: string;
-  /** Rechecks account/workspace, thread and the admitted attempt for delayed presentation. */
-  isCurrent: () => boolean;
+  /** Rechecks account/workspace and thread for delayed presentation. */
+  isScopeCurrent: () => boolean;
   setState: Dispatch<SetStateAction<NativeAgentState>>;
   onToolCall?: () =>
     | ((event: Extract<BackendAgentEvent, { type: "tool-call" }>) => void)
@@ -44,7 +44,7 @@ export async function consumeNativeAgentEvents(
     session.setState,
     session.attemptId,
     session.persisted.threadId,
-    session.isCurrent,
+    session.isScopeCurrent,
   );
   session.persistence.setTextFlush(presentation.flush);
   let terminalized = false;

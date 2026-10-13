@@ -47,7 +47,7 @@ function harness() {
   };
   persistence.current = persisted;
   const session: NativeAgentEventSession = {
-    persisted, persistence, durableWriter: writer, attemptId: "attempt", isCurrent: () => true,
+    persisted, persistence, durableWriter: writer, attemptId: "attempt", isScopeCurrent: () => true,
     setState: (update) => {
       state = typeof update === "function" ? update(state) : update;
       updates.push(state);
@@ -208,7 +208,7 @@ describe("native stream text presentation", () => {
       yield { type: "done", finishReason: "stop" };
     }
     let currentScope = true;
-    h.session.isCurrent = () => currentScope;
+    h.session.isScopeCurrent = () => currentScope;
     const consuming = consumeNativeAgentEvents(waiting(), h.session);
     await ready.promise;
     if (scope === "workspace") currentScope = false;
@@ -221,6 +221,20 @@ describe("native stream text presentation", () => {
     finish.resolve();
     await consuming;
     expect(h.state().transcript).toBe("New view");
+  });
+
+  it("delivers accepted queued text after completion while that attempt is still the visible one", () => {
+    const queued: SetStateAction<NativeAgentState>[] = [];
+    const presentation = createTextPresentation((update) => queued.push(update), "attempt", "thread", () => true);
+    presentation.append("Final answer");
+    presentation.flush();
+    const current: NativeAgentState = {
+      ...createInitialNativeAgentState(), currentAttemptId: "attempt", progressThreadId: "thread", status: "completed",
+    };
+    const update = queued[0]!;
+    expect(typeof update === "function" ? update(current) : update).toMatchObject({
+      transcript: "Final answer", status: "completed", running: false,
+    });
   });
 
   it("rechecks scope when React evaluates an already queued updater", () => {

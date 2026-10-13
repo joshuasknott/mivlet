@@ -511,8 +511,9 @@ export async function runNativeAgentTurn(
     persistence,
     durableWriter,
     attemptId,
-    isCurrent: () =>
-      activeAttemptIdRef.current === attemptId && isCurrentThread() && isCurrentScope(),
+    // Completion releases the active owner before React may evaluate queued text.
+    // The presentation reducer separately checks its exact retained attempt ID.
+    isScopeCurrent: () => isCurrentThread() && isCurrentScope(),
     setState,
     onToolCall: () => onToolCallRef.current,
     onTextDelta: control?.onTextDelta,

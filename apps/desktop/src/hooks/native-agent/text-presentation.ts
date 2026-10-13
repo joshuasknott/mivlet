@@ -7,7 +7,7 @@ export function createTextPresentation(
   setState: Dispatch<SetStateAction<NativeAgentState>>,
   attemptId: string,
   threadId: string | undefined,
-  isCurrent: () => boolean,
+  isScopeCurrent: () => boolean,
 ) {
   let chunks: string[] = [];
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -17,9 +17,9 @@ export function createTextPresentation(
     if (!chunks.length) return;
     const text = chunks.join("");
     chunks = [];
-    if (!isCurrent()) return;
+    if (!isScopeCurrent()) return;
     setState((current) =>
-      isCurrent() && current.currentAttemptId === attemptId && current.progressThreadId === threadId
+      isScopeCurrent() && current.currentAttemptId === attemptId && current.progressThreadId === threadId
         ? {
             ...current,
             transcript: current.transcript + text,
