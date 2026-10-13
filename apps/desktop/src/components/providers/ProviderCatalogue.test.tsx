@@ -152,6 +152,50 @@ describe("provider families", () => {
 });
 
 describe("ProviderCatalogue", () => {
+  it("retries a saved unavailable API connection without asking for the key again", async () => {
+    const user = userEvent.setup();
+    const onCheckConnection = vi.fn(async (providerId: string) => ({
+      providerId,
+      outcome: "ready" as const,
+    }));
+    const onConnect = vi.fn(async (providerId: string) => ({
+      providerId,
+      outcome: "ready" as const,
+    }));
+    render(
+      <ProviderCatalogue
+        providers={[
+          {
+            ...provider("openai", "OpenAI", "native-api", "unavailable"),
+            installHint:
+              "Check your network, then choose Check connection to retry the saved key.",
+          },
+        ]}
+        connectedBackendIds={[]}
+        onConnect={onConnect}
+        onCheckConnection={onCheckConnection}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /ChatGPT/ }));
+    const dialog = screen.getByRole("region", { name: "ChatGPT" });
+    await user.click(
+      within(dialog).getByRole("button", { name: /Use an API key/ }),
+    );
+    expect(within(dialog).getByRole("status")).toHaveTextContent(
+      "retry the saved key",
+    );
+    await user.click(
+      within(dialog).getByRole("button", { name: "Check connection" }),
+    );
+    await waitFor(() =>
+      expect(onCheckConnection).toHaveBeenCalledWith("openai"),
+    );
+    expect(onConnect).not.toHaveBeenCalled();
+    expect(
+      within(dialog).getByText("Connected and verified."),
+    ).toBeInTheDocument();
+  });
+
   it("finds Qwen and passes Alibaba's endpoint and key together to native verification", async () => {
     const user = userEvent.setup();
     const { onConnect } = renderCatalogue(listBackendProviders());
