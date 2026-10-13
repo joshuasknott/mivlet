@@ -23,7 +23,9 @@ export function useWorkspaceLocalFiles(workspaceId: string, agentIds: string[], 
   })) });
   useEffect(() => {
     const releases = scopes.map(({ reads }) => reads.subscribe(instance, () => {}, false));
-    return () => { for (const release of releases) release(); };
+    const refresh = () => { for (const { reads } of scopes) if (!reads.leader()) reads.invalidateFiles(); };
+    window.addEventListener("mivlet-builtin-plugins-changed", refresh);
+    return () => { window.removeEventListener("mivlet-builtin-plugins-changed", refresh); for (const release of releases) release(); };
   }, [scopes, instance]);
   // Retain one inactive list per agent, rather than every streamed Work revision.
   useEffect(() => {

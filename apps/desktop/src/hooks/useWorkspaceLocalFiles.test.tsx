@@ -36,6 +36,12 @@ it("coalesces concurrent Files and inspector scans without starting status polli
   await waitFor(()=>expect(files.result.current.data[0].snapshot?.entries).toHaveLength(1));
   expect(inspector.result.current.files?.entries).toHaveLength(1);
 });
+it("invalidates visible files immediately on plugin changes even without a status observer",async()=>{
+  const {Provider}=wrapper();const {result}=renderHook(()=>useWorkspaceLocalFiles("workspace-a",["agent-a"]),{wrapper:Provider});
+  await waitFor(()=>expect(result.current.data[0].snapshot).not.toBeNull());mocks.files.mockResolvedValue(listing("fresh.txt"));
+  await act(async()=>{window.dispatchEvent(new Event("mivlet-builtin-plugins-changed"));});
+  await waitFor(()=>expect(result.current.data[0].snapshot?.entries[0].name).toBe("fresh.txt"));expect(mocks.files).toHaveBeenCalledTimes(2);
+});
 it("does not inherit files after a verified account owner changes in the same workspace",async()=>{
   setActiveRuntimeDataScope("workspace-a","owner-a");const {Provider}=wrapper();
   const {result,rerender}=renderHook(()=>useWorkspaceLocalFiles("workspace-a",["agent-a"]),{wrapper:Provider});

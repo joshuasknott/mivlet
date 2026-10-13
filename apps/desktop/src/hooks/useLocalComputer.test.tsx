@@ -1,6 +1,6 @@
 import { StrictMode, type PropsWithChildren } from "react";
 import { act, cleanup, renderHook, waitFor } from "@testing-library/react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { focusManager, QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { LocalComputerSnapshot } from "@mivlet/protocol";
 import { useLocalComputer } from "./useLocalComputer";
@@ -20,8 +20,14 @@ function wrapper(){const client=new QueryClient({defaultOptions:{queries:{retry:
 function deferred<T>(){let resolve!:(v:T)=>void;const promise=new Promise<T>(done=>{resolve=done;});return{promise,resolve};}
 const hook=()=>renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:wrapper()});
 beforeEach(()=>{vi.resetAllMocks();mocks.load.mockResolvedValue(node());mocks.files.mockResolvedValue(null);mocks.preview.mockResolvedValue(null);mocks.stop.mockResolvedValue(undefined);mocks.cancel.mockResolvedValue(null);});
-afterEach(()=>{cleanup();clearActiveRuntimeDataScope();vi.useRealTimers();});
+afterEach(()=>{cleanup();clearActiveRuntimeDataScope();focusManager.setFocused(undefined);vi.useRealTimers();});
 describe("native local computer",()=>{
+  it("skips hidden idle reads but keeps active control refreshes running",async()=>{
+    vi.useFakeTimers();const {result}=hook();await act(async()=>{await vi.advanceTimersByTimeAsync(50);});
+    focusManager.setFocused(false);await act(async()=>{await vi.advanceTimersByTimeAsync(30_000);});expect(mocks.load).toHaveBeenCalledOnce();
+    mocks.load.mockResolvedValue(active());await act(async()=>{await result.current.refresh();});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(2_000);});expect(mocks.load).toHaveBeenCalledTimes(3);
+  });
   it("shares the initial read across an execution owner and inspectors",async()=>{
     const Provider=wrapper();const pending=deferred<LocalComputerSnapshot>();mocks.load.mockReturnValue(pending.promise);
     const owner=renderHook(()=>useLocalComputer({workspaceId:"workspace-a",agentId:"agent-a"}),{wrapper:Provider});

@@ -29,7 +29,7 @@ export function useLocalComputer({ workspaceId, agentId, executionOwner = true }
   }, enabled: Boolean(scope.target), retry: false, gcTime: 0, staleTime: Infinity,
     // One elected observer polls; ownership moves when that view closes.
     // Hidden windows do not suspend execution/control refreshes.
-    refetchIntervalInBackground: true,
+    refetchIntervalInBackground: shared.node?.control.status === "active" || shared.node?.control.status === "connecting",
     refetchInterval: isLeader ? (query => query.state.data?.control.status === "active" || query.state.data?.control.status === "connecting" ? 2_000 : 30_000) : false });
   useEffect(() => {
     if (!isLeader) return;

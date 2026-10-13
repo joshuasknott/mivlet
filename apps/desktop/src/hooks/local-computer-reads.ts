@@ -15,7 +15,7 @@ export function localComputerDataScope() {
 }
 
 const reads = new WeakMap<QueryClient, Map<string, LocalComputerReads>>();
-export interface LocalComputerReads {
+interface LocalComputerReads {
   queryKey: readonly [string, number, string | undefined, string | undefined];
   filesKey: readonly [string, number, string | undefined, string | undefined];
   target: LocalComputerTarget | null;
