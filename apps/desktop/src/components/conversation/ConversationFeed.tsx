@@ -113,18 +113,18 @@ function useTurnCallback<Args extends unknown[], Result>(
   callback: ((...args: Args) => Result) | undefined,
   scope: string,
 ) {
-  const latest = useRef({ callback, scope });
+  const latest = useMemo(() => ({ callback }), [scope]);
   useLayoutEffect(() => {
-    latest.current = { callback, scope };
-    return () => { latest.current = { callback: undefined, scope }; };
-  }, [callback, scope]);
+    latest.callback = callback;
+    return () => { latest.callback = undefined; };
+  }, [callback, latest]);
   const available = Boolean(callback);
   return useMemo(() => available ? (...args: Args): Result => {
-    const current = latest.current;
-    if (current.scope !== scope || !current.callback)
+    const current = latest.callback;
+    if (!current)
       throw new Error("This conversation action is no longer available.");
-    return current.callback(...args);
-  } : undefined, [available, scope]);
+    return current(...args);
+  } : undefined, [available, latest]);
 }
 
 function sameAuthor(left: MivletAgentProfile | undefined, right: MivletAgentProfile) {
