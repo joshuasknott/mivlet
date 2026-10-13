@@ -95,26 +95,16 @@ interface PanelProps {
 }
 
 /** Mocked callback handlers, typed so `.mock` is always accessible. */
-type HandlerKey =
-  | "onDecision"
-  | "onStartModify"
-  | "onUpdateModification"
-  | "onSaveModify"
-  | "onCancelModify"
-  | "onUpdateConfirmation"
-  | "onConfirmDecision"
-  | "onCancelConfirmation";
-
 function renderPanel(props: PanelProps = {}) {
-  const handlers: Record<HandlerKey, ReturnType<typeof vi.fn>> = {
-    onDecision: vi.fn(),
-    onStartModify: vi.fn(),
-    onUpdateModification: vi.fn(),
-    onSaveModify: vi.fn(),
-    onCancelModify: vi.fn(),
-    onUpdateConfirmation: vi.fn(),
-    onConfirmDecision: vi.fn(),
-    onCancelConfirmation: vi.fn()
+  const handlers = {
+    onDecision: vi.fn<NonNullable<PanelProps["onDecision"]>>(),
+    onStartModify: vi.fn<NonNullable<PanelProps["onStartModify"]>>(),
+    onUpdateModification: vi.fn<NonNullable<PanelProps["onUpdateModification"]>>(),
+    onSaveModify: vi.fn<NonNullable<PanelProps["onSaveModify"]>>(),
+    onCancelModify: vi.fn<NonNullable<PanelProps["onCancelModify"]>>(),
+    onUpdateConfirmation: vi.fn<NonNullable<PanelProps["onUpdateConfirmation"]>>(),
+    onConfirmDecision: vi.fn<NonNullable<PanelProps["onConfirmDecision"]>>(),
+    onCancelConfirmation: vi.fn<NonNullable<PanelProps["onCancelConfirmation"]>>()
   };
   const view = render(
     <ApprovalPanel
