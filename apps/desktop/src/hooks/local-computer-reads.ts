@@ -75,6 +75,7 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
       for (const listener of shared.consumers.values()) listener.notify();
       return () => {
         shared.consumers.delete(id);
+        if (![...shared.consumers.values()].some(consumer => !consumer.polling)) shared.fileSnapshot = null;
         for (const listener of shared.consumers.values()) listener.notify();
         if (!shared.consumers.size) {
           shared.epoch++; shared.fileEpoch++; shared.fileSnapshot = null;
@@ -139,7 +140,12 @@ function createReads(client: QueryClient, target: LocalComputerTarget | null, da
           shared.notify();
         }
         throw error;
-      }).finally(() => { if (shared.fileReading?.promise === promise) shared.fileReading = null; });
+      }).finally(() => {
+        if (shared.fileReading?.promise === promise) {
+          shared.fileReading = null;
+          if (![...shared.consumers.values()].some(consumer => !consumer.polling)) shared.fileSnapshot = null;
+        }
+      });
       shared.fileReading = { epoch, promise };
       return promise;
     },

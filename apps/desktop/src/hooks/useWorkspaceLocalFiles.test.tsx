@@ -25,6 +25,13 @@ it("reuses per-agent lists on reopen, reorder and addition; Refresh still rescan
   await waitFor(()=>expect(second.result.current.data.every(row=>row.snapshot)).toBe(true));expect(mocks.files).toHaveBeenCalledTimes(3);
   await act(async()=>{await second.result.current.refetch();});expect(mocks.files).toHaveBeenCalledTimes(6);
 });
+it("preserves the combined metadata reference on unrelated rerenders and agent reorder",async()=>{
+  const {Provider}=wrapper();const {result,rerender}=renderHook(({ids})=>useWorkspaceLocalFiles("workspace-a",ids),
+    {initialProps:{ids:["agent-b","agent-a"]},wrapper:Provider});
+  await waitFor(()=>expect(result.current.data.every(row=>row.snapshot)).toBe(true));
+  const data=result.current.data;rerender({ids:["agent-a","agent-b"]});
+  expect(result.current.data).toBe(data);expect(mocks.files).toHaveBeenCalledTimes(2);
+});
 it("coalesces concurrent Files and inspector scans without starting status polling for Files",async()=>{
   const {Provider}=wrapper();const pending=deferred<LocalComputerFilesSnapshot>();mocks.files.mockReturnValue(pending.promise);
   const files=renderHook(()=>useWorkspaceLocalFiles("workspace-a",["agent-a"]),{wrapper:Provider});
