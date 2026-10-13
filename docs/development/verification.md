@@ -30,6 +30,12 @@ behavior under controlled responses, not measured live startup latency.
 `useAccountWorkspace` owns account requests and scope transitions;
 `useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;
 `useWorkspaceApprovals` owns the queue, audit and decision bridge.
+`useMemoryControls` owns the scope-fenced memory operations while the shell
+retains hydration state. `workspace-context.ts` prepares the current account's
+bounded retrieval/context through the existing native boundaries.
+`useConversationBranches` owns branch selection and submission guards;
+`useConversationOutputRequests` owns source-bound draft/revision staging and
+preserves a newer selection when an older submission completes.
 `shell/TeammateWorkspace.tsx` remains the public shell entry (account, theme,
 and onboarding). `shell/ActiveWorkspace.tsx` owns live workspace composition
 and `WorkspaceExecution` service wiring. Conversation chrome, the context

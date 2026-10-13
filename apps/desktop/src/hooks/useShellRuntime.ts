@@ -1,17 +1,12 @@
+import { createWorkspaceContext } from "./shell-runtime/workspace-context";
+import { useMemoryControls } from "./shell-runtime/useMemoryControls";
 import {
   importLocalTextFile,
   normalizeCustomApprovalSettings,
   resolvePermissionModeFromCustom,
   type LocalTextFileCandidate,
 } from "@mivlet/connectors";
-import {
-  assembleContext,
-  chunkSourceText,
-  exportMemories,
-  isLiveMemory,
-  isLiveSource,
-  retrieve,
-} from "@mivlet/knowledge";
+import { isLiveSource } from "@mivlet/knowledge";
 import type {
   ConnectorAccountOption,
   ConnectorManifest,
@@ -22,20 +17,12 @@ import type {
   MemoryControlState,
   MemoryRecord,
   PermissionMode,
-  PreparedExecutionContext,
 } from "@mivlet/protocol";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   isApprovalPresetLabel,
-  knowledgeScopeForRun,
   permissionLabelFor,
   permissionModeFor,
-  privateRunAudience,
-  recordsVisibleToRunAudience,
-  selectMemoryForRun,
-  sourceAllowedByConnections,
-  withPreviewPrivateAuthority,
-  type KnowledgeRunContext,
 } from "../lib/agent-run";
 import { CONNECTOR_CONNECTIONS_CHANGED } from "../lib/connector-connections";
 import { listVerifiedConnectorStatuses as listRuntimeConnectorStatuses } from "../lib/load-connector-connections";
@@ -61,14 +48,9 @@ import { mergeKnowledgeSources, readFileAsText } from "../lib/helpers";
 import { hasTauriRuntime, readPersistedShellState } from "../lib/persistence";
 import { type PersistedShellState } from "../lib/types";
 import {
-  changeRuntimeMemoryRecord,
-  correctRuntimeMemoryRecord,
-  exportRuntimeMemoryState,
   importRuntimeLocalKnowledgeSource,
-  listRuntimeContextSummaries,
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
-  saveRuntimeMemoryState,
 } from "../runtime/domains/memory";
 
 import { isMivletProviderEnabled } from "../lib/provider-availability";
@@ -83,12 +65,6 @@ export type {
   ShellRuntime,
   UseShellRuntimeOptions,
 } from "./shell-runtime/types";
-
-function createExecutionAttemptId() {
-  const uuid = globalThis.crypto?.randomUUID?.();
-  if (uuid) return `run-${uuid}`;
-  return `run-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 12)}`;
-}
 
 /** Coordinates the account, snapshot, approval and provider owners with workspace settings and context. */
 export function useShellRuntime(
@@ -601,310 +577,34 @@ export function useShellRuntime(
     }
   };
 
-  const connectionIsAuthorized = (
-    connectorId: string,
-    _account?: string,
-    connectionId?: string,
-  ) => {
-    if (connectorId === "local-files") return true;
-    if (!connectionId) return false;
-    if (!hasTauriRuntime()) return false;
-    const connection = connectorAccounts[connectorId]?.find(
-      (candidate) => candidate.connectionId === connectionId,
-    );
-    return Boolean(
-      connection &&
-      connection.lifecycle === "authorized" &&
-      connection.authorizationState === "authorized" &&
-      connection.credentialState === "available" &&
-      connection.healthState !== "unhealthy" &&
-      connection.healthState !== "offline",
-    );
-  };
+  const { assembleConversationContext } = createWorkspaceContext({
+    connectorAccounts,
+    workspaceKnowledgeSources,
+    managedMemoryRecords,
+    memoryDisabled,
+    accountWorkspaceStatus,
+  });
 
-  const sourceIsAuthorized = (source: KnowledgeSource) => {
-    if (
-      source.disabled ||
-      source.deletedAt ||
-      source.status === "stale" ||
-      source.status === "error"
-    )
-      return false;
-    return connectionIsAuthorized(
-      source.connectorId,
-      source.account,
-      source.connectionId,
-    );
-  };
-
-  const knowledgeRetrievalSources = (
-    sources: readonly KnowledgeSource[] = workspaceKnowledgeSources,
-    context?: KnowledgeRunContext,
-  ) =>
-    sources
-      // Only live (non-disabled), authorized, connected-connector sources can
-      // enter retrieval. Stale/error statuses are additionally excluded by the
-      // retrieval filter; we re-check live here so a
-      // disabled source is never even chunked.
-      .filter(
-        (source) =>
-          isLiveSource(source) &&
-          sourceIsAuthorized(source) &&
-          sourceAllowedByConnections(source, context) &&
-          !context?.excludedKnowledgeSourceIds?.includes(source.id) &&
-          (!context?.allowedConnectorIds ||
-            source.connectorId === "local-files" ||
-            context.allowedConnectorIds.includes(source.connectorId)) &&
-          (!context?.allowedKnowledgeSourceIds ||
-            context.allowedKnowledgeSourceIds.includes(source.id)),
-      )
-      .map((source) => ({
-        source,
-        chunks: chunkSourceText(source.contentPreview ?? "", {
-          sourceId: source.id,
-          mimeType: source.providerMetadata?.mimeType,
-        }),
-      }))
-      .filter((record) => record.chunks.length > 0);
-
-  const assembleConversationContext = async (
-    query: string,
-    context?: KnowledgeRunContext,
-  ): Promise<PreparedExecutionContext> => {
-    const attemptId = createExecutionAttemptId();
-    const assembledAt = new Date().toISOString();
-    const scope = knowledgeScopeForRun(context?.threadId);
-    const audience = privateRunAudience(accountWorkspaceStatus);
-    const selectedMemory = selectMemoryForRun(managedMemoryRecords);
-    // Native records must already carry canonical ownership from migration.
-    // Browser preview has no native store, so its deliberate fixtures receive
-    // explicit private ownership before the same fail-closed filter is applied.
-    const governedSources = hasTauriRuntime()
-      ? workspaceKnowledgeSources
-      : withPreviewPrivateAuthority(workspaceKnowledgeSources, audience);
-    const governedMemory = hasTauriRuntime()
-      ? selectedMemory
-      : withPreviewPrivateAuthority(selectedMemory, audience);
-    const visibleSources = recordsVisibleToRunAudience(
-      governedSources,
-      audience,
-    );
-    const visibleMemory = recordsVisibleToRunAudience(governedMemory, audience);
-    // Durable derived summaries for this exact conversation. They are account-
-    // scoped natively and only enter the prefix as untrusted prior evidence.
-    const summaries =
-      hasTauriRuntime() && context?.threadId && !context.excludeDerivedSummaries
-        ? ((await listRuntimeContextSummaries(context.threadId)) ?? [])
-        : [];
-    const result = await retrieve(
-      knowledgeRetrievalSources(visibleSources, context),
-      {
-        query,
-        scope,
-        audience,
-        limit: 8,
-        budgetChars: 6_000,
-      },
-    );
-    const assembled = assembleContext({
-      attemptId,
-      assembledAt,
-      scope,
-      audience,
-      // Only live memories enter context: forgotten/disabled records are
-      // excluded by isLiveMemory. Memory-disabled (the workspace-level kill
-      // switch) excludes everything.
-      memory:
-        memoryDisabled || context?.excludePrivateMemory ? [] : visibleMemory,
-      summaries,
-      citations: result.citations,
-      authorization: {
-        isSourceAuthorized: connectionIsAuthorized,
-      },
-    });
-    return Object.freeze({
-      systemPrefix: assembled.systemPrefix,
-      receipt: assembled.receipt,
-    });
-  };
-
-  const commitMemoryState = (state: MemoryControlState, status: string) => {
-    // Capture the pre-change state so a native save failure rolls back the
-    // optimistic update instead of leaving a phantom record in the UI.
-    const previousDisabled = memoryDisabled;
-    const previousRecords = managedMemoryRecords;
-    const generation = connectorScopeRef.current;
-    setMemoryDisabled(state.disabled);
-    setManagedMemoryRecords(
-      state.records.filter((record) => !record.forgottenAt),
-    );
-    setMemoryStatus("Saving memory…");
-
-    return saveRuntimeMemoryState(state)
-      .then((runtimeState) => {
-        if (!runtimeState || connectorScopeRef.current !== generation) {
-          return;
-        }
-
-        setMemoryDisabled(runtimeState.disabled);
-        setManagedMemoryRecords(runtimeState.records);
-        setMemoryStatus(status);
-      })
-      .catch(async (error) => {
-        const current = await loadRuntimeMemoryState().catch(() => null);
-        if (connectorScopeRef.current !== generation) return;
-        // A concurrent correction may be newer than this optimistic snapshot.
-        setMemoryDisabled(current?.disabled ?? previousDisabled);
-        setManagedMemoryRecords(current?.records ?? previousRecords);
-        setMemoryStatus(
-          error instanceof Error
-            ? error.message
-            : "Mivlet could not save memory state.",
-        );
-      });
-  };
-
-  // Send only the changed record; the native transaction merges other memories
-  // and rejects stale revisions and forgotten-record resurrection.
-  const saveMemoryRecord = async (record: MemoryRecord) => {
-    const generation = connectorScopeRef.current;
-    const state = await saveRuntimeMemoryState({ disabled: memoryDisabled, records: [record] });
-    if (!state) throw new Error("Saving memories requires the desktop app.");
-    if (connectorScopeRef.current !== generation) return;
-    setMemoryDisabled(state.disabled);
-    setManagedMemoryRecords(state.records);
-    setMemoryStatus("Memory saved.");
-  };
-  const refreshMemories = useCallback(async () => {
-    const generation = connectorScopeRef.current;
-    const state = await loadRuntimeMemoryState();
-    if (state && connectorScopeRef.current === generation) {
-      setMemoryDisabled(state.disabled);
-      setManagedMemoryRecords(state.records);
-    }
-  }, []);
-  const addChatMemory = async (threadId: string, title: string, value: string) => {
-    if (!threadId || !title.trim() || !value.trim()) throw new Error("Enter a title and memory for this chat.");
-    if (title.trim().length > 120 || value.trim().length > 2000) throw new Error("Keep the title under 120 characters and memory under 2,000 characters.");
-    const now = new Date().toISOString();
-    await saveMemoryRecord({ id: `memory-${crypto.randomUUID()}`, kind: "fact", title: title.trim(), value: value.trim(), source: "Added by you", freshness: now, approved: true, approvalState: "approved", pinned: false, scope: { level: "thread", threadId }, provenance: { origin: "manual", note: "Saved explicitly in this chat" }, confidence: 1, createdAt: now, updatedAt: now });
-  };
-  const approveMemory = async (recordId: string) => {
-    const record = managedMemoryRecords.find(item => item.id === recordId && !item.forgottenAt && item.approvalState === "suggested");
-    if (!record) throw new Error("That suggestion is no longer available.");
-    await saveMemoryRecord({ ...record, approved: true, approvalState: "approved", confidence: 1 });
-  };
-
-  const changeMemory = async (
-    recordId: string,
-    change: "enabled" | "disabled" | "forgotten",
-  ) => {
-    const record = managedMemoryRecords.find(
-      (item) => item.id === recordId && !item.forgottenAt,
-    );
-    if (!record) throw new Error("That memory is no longer available.");
-    const generation = connectorScopeRef.current;
-    const state = await changeRuntimeMemoryRecord({
-      id: recordId,
-      state: change,
-      expectedUpdatedAt: record.updatedAt,
-    });
-    if (connectorScopeRef.current !== generation) return;
-    setMemoryDisabled(state.disabled);
-    setManagedMemoryRecords(state.records);
-    setMemoryStatus(
-      change === "forgotten"
-        ? "Memory forgotten."
-        : change === "disabled"
-          ? "Memory disabled."
-          : "Memory enabled.",
-    );
-  };
-  const forgetMemory = (recordId: string) =>
-    changeMemory(recordId, "forgotten");
-
-  const correctMemory = async (
-    recordId: string,
-    title: string,
-    value: string,
-    expectedUpdatedAt?: string,
-  ) => {
-    const generation = connectorScopeRef.current;
-    const state = await correctRuntimeMemoryRecord({
-      id: recordId,
-      title,
-      value,
-      expectedUpdatedAt,
-    });
-    if (connectorScopeRef.current !== generation) return;
-    setMemoryDisabled(state.disabled);
-    setManagedMemoryRecords(state.records);
-    setMemoryStatus("Memory corrected.");
-  };
-
-  /**
-   * Toggle a single memory's disabled state. A disabled memory is excluded from
-   * retrieval, context, and export (like a forgotten one) but stays visible in
-   * the management view and can be re-enabled — no record duplication. Pinning
-   * is dropped while disabled so it cannot bypass the exclusion via pinned
-   * context.
-   */
-  const toggleMemoryRecordDisabled = (recordId: string) =>
-    changeMemory(
-      recordId,
-      managedMemoryRecords.find((record) => record.id === recordId)?.disabled
-        ? "enabled"
-        : "disabled",
-    );
-
-  const toggleMemoryPin = (recordId: string) => {
-    const target = managedMemoryRecords.find(
-      (record) => record.id === recordId,
-    );
-    if (!target) return;
-    // Pinning must not bypass exclusion: a disabled or forgotten memory cannot
-    // be pinned. Unpinning a currently-pinned record is always allowed so a
-    // stale pin can be cleared.
-    if (!target.pinned && !isLiveMemory(target)) {
-      setMemoryStatus("Disabled or forgotten memories cannot be pinned.");
-      return;
-    }
-    const nextRecords = managedMemoryRecords.map((record) =>
-      record.id === recordId ? { ...record, pinned: !record.pinned } : record,
-    );
-    const changed = nextRecords.find((record) => record.id === recordId);
-    commitMemoryState(
-      { disabled: memoryDisabled, records: nextRecords },
-      changed?.pinned ? "Memory pinned." : "Memory unpinned.",
-    );
-  };
-
-  const toggleMemoryDisabled = () => {
-    return commitMemoryState(
-      { disabled: !memoryDisabled, records: managedMemoryRecords },
-      memoryDisabled ? "Memory enabled." : "Memory disabled.",
-    );
-  };
-
-  const exportMemory = async () => {
-    try {
-      // Live memories only: forgotten/disabled records are excluded by
-      // `exportMemories`. The native export is authoritative when present; the
-      // fallback re-applies the same live-only filter so secrets never ride
-      // along on a forgotten record's payload and disabled records never leak.
-      const liveFallback = exportMemories(memoryState.records);
-      const exported =
-        (await exportRuntimeMemoryState(memoryState)) ?? liveFallback;
-      setMemoryExportText(exported);
-      setMemoryStatus("Memory export ready.");
-    } catch (error) {
-      setMemoryStatus(
-        error instanceof Error
-          ? error.message
-          : "Mivlet could not export memory.",
-      );
-    }
-  };
+  const {
+    toggleMemoryPin,
+    forgetMemory,
+    addChatMemory,
+    approveMemory,
+    refreshMemories,
+    correctMemory,
+    toggleMemoryRecordDisabled,
+    toggleMemoryDisabled,
+    exportMemory,
+  } = useMemoryControls({
+    memoryDisabled,
+    managedMemoryRecords,
+    memoryState,
+    connectorScopeRef,
+    setMemoryDisabled,
+    setManagedMemoryRecords,
+    setMemoryStatus,
+    setMemoryExportText,
+  });
 
   const replaceConnectorManifest = (manifest: ConnectorManifest) => {
     setConnectorManifests((current) =>
