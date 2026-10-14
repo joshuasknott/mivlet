@@ -280,7 +280,7 @@ docs                maintained architecture, security, and operations notes
 ## Requirements
 
 - Node.js 22 or newer
-- pnpm 10 (the repository pins `pnpm@10.15.0`)
+- pnpm 10 (the repository pins `pnpm@10.34.7`)
 - Stable Rust and the Windows Tauri prerequisites
 - Windows WebView2
 - Official Codex app-server components for optional ChatGPT browser sign-in

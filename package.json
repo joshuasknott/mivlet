@@ -4,7 +4,7 @@
   "private": true,
   "license": "MIT",
   "description": "Mivlet is a local-first AI agent workspace.",
-  "packageManager": "pnpm@10.15.0",
+  "packageManager": "pnpm@10.34.7",
   "scripts": {
     "dev": "pnpm --filter @mivlet/desktop dev",
     "build": "pnpm --filter @mivlet/protocol build && pnpm --filter @mivlet/connectors build && pnpm --filter @mivlet/agent-host build && pnpm --filter @mivlet/broker build && pnpm --filter @mivlet/hosted-runner build && pnpm --filter @mivlet/knowledge build && pnpm --filter @mivlet/desktop build && pnpm --filter @mivlet/accounts build",
