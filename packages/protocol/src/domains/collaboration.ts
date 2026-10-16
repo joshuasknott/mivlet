@@ -70,6 +70,17 @@ export interface WorkOutput {
 
 export interface CapturedWorkContext extends Extract<ContextShare, { mode: "snapshot" }> { version: 1 }
 export interface WorkSteering { id: string; text: string; createdAt: string }
+/** Scheduling metadata only. Holding or ordering a request never grants execution authority. */
+export interface WorkQueue { held: boolean; order: number }
+export interface OutcomeGoal {
+  objective: string;
+  successCriteria: string;
+  status: "active" | "paused" | "completed" | "blocked" | "budget-exhausted";
+  /** Completion is an attributed agent report, not independent verification. */
+  report?: { status: "completed" | "continue" | "blocked"; text: string; runId: string; createdAt: string };
+}
+export interface OutcomeGoalInput { objective: string; successCriteria: string; maxTurns: number; maxTokens: number }
+export interface LiveWorkSteering { id: string; text: string; runId: string; delivery: "pending" | "accepted" | "rejected" | "uncertain"; createdAt: string }
 /** Agent-authored data, never user steering or additional permission. */
 export interface TaskMessage {
   id: string;
@@ -96,6 +107,10 @@ export interface WorkAttachment {
   sha256?: string;
 }
 export interface CollaborationWorkItem {
+  repositoryBinding?: import("./coding").RepositoryWorkBinding;
+  queue?: WorkQueue;
+  outcomeGoal?: OutcomeGoal;
+  liveSteering?: LiveWorkSteering[];
   executionOwner?: "native-background";
   continuation?: import("./provider-continuation").ProviderContinuation;
   /** Frozen occurrence metadata; carries no claim token or execution authority. */
@@ -234,6 +249,12 @@ export interface CollaborationSnapshot {
 
 /** Exact native operation inputs. Agent operations additionally require a live bound attempt. */
 export type CollaborationCommand =
+  | { action: "live-steer-work"; id: string; expectedGeneration: number; eventId: string; text: string }
+  | { action: "edit-queued-work"; id: string; expectedGeneration: number; prompt: string }
+  | { action: "set-work-held"; id: string; expectedGeneration: number; held: boolean }
+  | { action: "move-queued-work"; id: string; expectedGeneration: number; beforeId?: string }
+  | { action: "set-outcome-goal"; id: string; expectedGeneration: number; objective: string; successCriteria: string; maxTurns: number; maxTokens: number }
+  | { action: "set-goal-paused"; id: string; expectedGeneration: number; paused: boolean }
   | { action: "start-provider-continuation"; id: string; input: import("./provider-continuation").ProviderContinuationInput; fingerprint: string; reconcile: true }
   | { action: "steer-work"; id: string; expectedGeneration: number; eventId: string; text: string }
   | { action: "reply-work"; id: string; expectedGeneration: number; eventId: string; text: string }
@@ -292,6 +313,7 @@ export type CollaborationCommand =
     }
   | {
       action: "start-work";
+      outcomeGoal?: OutcomeGoalInput;
       id: string;
       conversationId: string;
       agentId: string;
@@ -365,6 +387,7 @@ export type CollaborationCommand =
   | { action: "save-layout"; layout: ConversationLayout };
 
 export type CollaborationAgentCommand =
+  | { kind: "goal-report"; status: "completed" | "continue" | "blocked"; text: string }
   | { kind: "message"; assignmentId: string; message: string; question: boolean }
   | { kind: "claim-resource"; resource: string }
   | {

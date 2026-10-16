@@ -11,6 +11,8 @@ use sha2::{Digest, Sha256};
 mod branch_tests;
 #[path = "exchange_regressions.rs"]
 mod exchange_regressions;
+#[path = "queue_goal_tests.rs"]
+mod queue_goal_tests;
 #[path = "output_revision_tests.rs"]
 mod output_revision_tests;
 #[path = "pr_watch_tests.rs"]
@@ -1854,6 +1856,7 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
         commands::apply(
             ctx,
             Command::StartWork {
+                outcome_goal: None,
                 id: "attach".into(),
                 conversation_id: room.id.clone(),
                 agent_id: "lead".into(),
@@ -2054,6 +2057,7 @@ fn roadmap_attachment_refs_survive_restart_review_without_replay() {
         commands::apply(
             ctx,
             Command::StartWork {
+                outcome_goal: None,
                 id: "recover".into(),
                 conversation_id: room.id.clone(),
                 agent_id: "lead".into(),

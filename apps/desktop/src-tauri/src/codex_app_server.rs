@@ -139,6 +139,10 @@ pub struct CodexInterruptRequest {
 }
 
 struct ActiveCodexRun {
+    run_id: Option<String>,
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+    steering: HashMap<String, (String, mpsc::Sender<bool>)>,
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<crate::provider_process::SupervisedChild>>,
     computer: Option<CodexComputerScope>,
@@ -951,6 +955,10 @@ pub fn start_codex_app_server_turn(
         runs.insert(
             request.request_id.clone(),
             ActiveCodexRun {
+                run_id: request.options.run_id.clone(),
+                thread_id: None,
+                turn_id: None,
+                steering: HashMap::new(),
                 stdin: Arc::clone(&stdin),
                 child: Arc::clone(&child),
                 computer: request.options.computer.clone(),
@@ -1018,6 +1026,7 @@ fn read_codex_stdout(
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+        observe_steering_route(&request.request_id, &value);
         if crate::provider_usage::codex_event_is_limit(&value) {
             crate::provider_usage::record_limit_failure("codex", request.options.run_id.as_deref());
         }
@@ -1684,6 +1693,117 @@ pub fn respond_codex_app_server_approval(
 
 fn approval_rpc_id(encoded: &str) -> Value {
     serde_json::from_str(encoded).unwrap_or_else(|_| Value::String(encoded.to_string()))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SteeringDelivery {
+    Accepted,
+    Rejected,
+    Uncertain,
+}
+impl SteeringDelivery {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::Accepted => "accepted",
+            Self::Rejected => "rejected",
+            Self::Uncertain => "uncertain",
+        }
+    }
+}
+
+fn observe_steering_route(request_id: &str, value: &Value) {
+    let Ok(mut runs) = active_runs().lock() else {
+        return;
+    };
+    let Some(run) = runs.get_mut(request_id) else {
+        return;
+    };
+    if let Some(id) = value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|_| value.get("method").is_none())
+    {
+        if let Some((expected, sender)) = run.steering.remove(id) {
+            let _ = sender.send(
+                value.get("error").is_none()
+                    && value.pointer("/result/turnId").and_then(Value::as_str) == Some(&expected),
+            );
+        }
+    }
+    if is_rpc_response(value, 2) {
+        run.thread_id = value
+            .pointer("/result/thread/id")
+            .and_then(Value::as_str)
+            .map(Into::into);
+    }
+    match value.get("method").and_then(Value::as_str) {
+        Some("turn/started") => {
+            run.turn_id = value
+                .pointer("/params/turn/id")
+                .and_then(Value::as_str)
+                .map(Into::into)
+        }
+        Some("turn/completed") => run.turn_id = None,
+        _ => {}
+    }
+}
+
+/// Official turn/steer protocol: exact active thread and expectedTurnId come
+/// only from this adapter's observed events. No renderer-supplied provider IDs.
+/// An acknowledgement confirms acceptance, not that earlier actions were undone.
+pub(crate) fn steer_active_turn(attempt: &str, event: &str, text: &str) -> SteeringDelivery {
+    if crate::execution_control::ensure_active_execution_allowed().is_err() {
+        return SteeringDelivery::Rejected;
+    }
+    let Ok(fence) = crate::account_session::AccountDispatchFence::capture() else {
+        return SteeringDelivery::Rejected;
+    };
+    let rpc = format!("mivlet-steer:{event}");
+    let (send, receive) = mpsc::channel();
+    let mut registered = false;
+    let write = fence.with_current(|| {
+        let mut runs = active_runs().lock().map_err(|_| "Codex state is unavailable.")?;
+        let run = runs.values_mut().find(|run| run.run_id.as_deref() == Some(attempt)).ok_or("The exact Codex attempt is no longer active.")?;
+        let thread = run.thread_id.clone().ok_or("The Codex thread has not started.")?;
+        let turn = run.turn_id.clone().ok_or("The Codex turn has already ended or has not started.")?;
+        if run.steering.len() >= 16 || *run.image_delivery_stopped.lock().map_err(|_| "Codex was stopped.")? {
+            return Err("Codex steering is unavailable.".into());
+        }
+        run.steering.insert(rpc.clone(), (turn.clone(), send));
+        registered = true;
+        write_json_line(&run.stdin, &json!({"id":rpc,"method":"turn/steer","params":{"threadId":thread,"expectedTurnId":turn,"input":[{"type":"text","text":text.trim()}]}}))
+    });
+    if write.is_err() {
+        // Before registration, nothing was sent. A registered write failure may
+        // have delivered a prefix, so it must never be retried automatically.
+        if let Ok(mut runs) = active_runs().lock() {
+            if let Some(run) = runs
+                .values_mut()
+                .find(|run| run.run_id.as_deref() == Some(attempt))
+            {
+                run.steering.remove(&rpc);
+            }
+        }
+        return if registered {
+            SteeringDelivery::Uncertain
+        } else {
+            SteeringDelivery::Rejected
+        };
+    }
+    let delivery = match receive.recv_timeout(Duration::from_secs(3)) {
+        Ok(true) => SteeringDelivery::Accepted,
+        Ok(false) => SteeringDelivery::Rejected,
+        Err(_) => SteeringDelivery::Uncertain,
+    };
+    if let Ok(mut runs) = active_runs().lock() {
+        if let Some(run) = runs
+            .values_mut()
+            .find(|run| run.run_id.as_deref() == Some(attempt))
+        {
+            run.steering.remove(&rpc);
+        }
+    }
+    delivery
 }
 
 // JSON-RPC peers own independent request-id spaces. Server tool requests can

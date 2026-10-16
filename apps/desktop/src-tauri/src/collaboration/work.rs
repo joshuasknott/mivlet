@@ -360,6 +360,24 @@ fn new_work_with_parent(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        repository_binding: crate::local_computer::coding::capture_work_repository(
+            ctx.scope.data.workspace_id(),
+            &agent_id,
+            ctx.time,
+        )
+        .map_err(StoreError::Invalid)?,
+        queue: Some(WorkQueue {
+            held: false,
+            order: ctx
+                .all_work()?
+                .iter()
+                .filter_map(|item| item.queue.as_ref().map(|queue| queue.order))
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1),
+        }),
+        outcome_goal: None,
+        live_steering: vec![],
         external_client: None,
         execution_owner: None,
         reset_continuation: None,
@@ -533,6 +551,7 @@ pub(super) fn bind(
     if item.status != WorkStatus::Queued {
         return Err(invalid("This assignment is not queued."));
     }
+    super::queue::ensure_dispatchable(ctx, &item)?;
     if let Some(refs) = attachments {
         validate_attachments(refs)?;
         item.attachments = refs.to_vec();
@@ -717,9 +736,22 @@ pub(super) fn finish(
         .unwrap_or(8_000);
     let mut root = ctx.item(&item.root_id)?;
     item.token_usage = item.token_usage.saturating_add(usage);
+    super::goals::finished(&mut item, run);
+    super::goals::enforce_budget(&mut item);
+    if item.live_steering.iter().any(|event| {
+        event.run_id == run && matches!(event.delivery.as_str(), "pending" | "uncertain")
+    }) {
+        item.status = WorkStatus::AwaitingUser;
+        item.awaiting_user = false;
+        item.reason = Some("Live guidance has no confirmed delivery receipt. Review the saved result before continuing; it was not resent.".into());
+        if let Some(goal) = item.outcome_goal.as_mut() {
+            goal.status = "paused".into();
+        }
+    }
     item.updated_at = ctx.time.into();
     if root.id != item.id {
         root.token_usage = root.token_usage.saturating_add(usage);
+        super::goals::enforce_budget(&mut root);
         ctx.work(&root)?;
     }
     ctx.work(&item)?;
@@ -779,6 +811,9 @@ pub(super) fn agent_command(
         return Err(invalid("This assignment is not executing."));
     }
     match &command {
+        AgentCommand::GoalReport { status, text } => {
+            super::goals::report(ctx, &mut item, run, status, text)?;
+        }
         AgentCommand::Delegate {
             agent_id,
             prompt,

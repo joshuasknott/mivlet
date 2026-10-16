@@ -25,6 +25,9 @@ pub(super) fn reply_user(
     if item.generation != expected_generation {
         return Err(invalid("This assignment changed. Reload before replying."));
     }
+    if item.steering.len() >= 16 {
+        return Err(invalid("This assignment reached its follow-up limit. Start a fresh request with the saved results."));
+    }
     if item.status == WorkStatus::Cancelled || item.status == WorkStatus::Failed {
         return Err(invalid("This assignment has already ended."));
     }

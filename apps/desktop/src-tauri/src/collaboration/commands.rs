@@ -105,6 +105,47 @@ pub(super) fn hydrate_fact_source(
 
 pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
     match command {
+        Command::LiveSteerWork { .. } => {
+            return Err(invalid(
+                "Live steering requires the native provider delivery boundary.",
+            ))
+        }
+        Command::EditQueuedWork {
+            id,
+            expected_generation,
+            prompt,
+        } => queue::edit(ctx, &id, expected_generation, &prompt)?,
+        Command::SetWorkHeld {
+            id,
+            expected_generation,
+            held,
+        } => queue::hold(ctx, &id, expected_generation, held)?,
+        Command::MoveQueuedWork {
+            id,
+            expected_generation,
+            before_id,
+        } => queue::move_before(ctx, &id, expected_generation, before_id.as_deref())?,
+        Command::SetOutcomeGoal {
+            id,
+            expected_generation,
+            objective,
+            success_criteria,
+            max_turns,
+            max_tokens,
+        } => goals::set(
+            ctx,
+            &id,
+            expected_generation,
+            &objective,
+            &success_criteria,
+            max_turns,
+            max_tokens,
+        )?,
+        Command::SetGoalPaused {
+            id,
+            expected_generation,
+            paused,
+        } => goals::pause(ctx, &id, expected_generation, paused)?,
         Command::ArmProviderReset {
             id,
             expected_generation,
@@ -373,6 +414,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             }
         }
         Command::StartWork {
+            outcome_goal,
             id,
             conversation_id,
             agent_id,
@@ -382,6 +424,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             recipient_ids,
             attachments,
         } => {
+            let work_id = id.clone();
             if let Some(refs) = &attachments {
                 work::validate_attachments(refs)?;
             }
@@ -415,6 +458,27 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                     parent_message_id.as_deref(),
                     attachments.as_deref(),
                 )?;
+            }
+            if let Some(goal) = outcome_goal {
+                let item = ctx.item(&work_id)?;
+                if item.outcome_goal.as_ref().is_some_and(|existing| {
+                    existing.objective == goal.objective
+                        && existing.success_criteria == goal.success_criteria
+                }) && item.max_turns == goal.max_turns
+                    && item.max_tokens == goal.max_tokens
+                {
+                    // Same submission retry; its bound attempts are immutable.
+                } else {
+                    goals::set(
+                        ctx,
+                        &work_id,
+                        item.generation,
+                        &goal.objective,
+                        &goal.success_criteria,
+                        goal.max_turns,
+                        goal.max_tokens,
+                    )?;
+                }
             }
         }
         Command::BindWork {
@@ -508,6 +572,10 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             // Reconciliation is a new user-authorized foreground attempt; a
             // crashed native attempt is never resurrected automatically.
             item.execution_owner = None;
+            if let Some(goal) = item.outcome_goal.as_mut() {
+                goal.status = "active".into();
+                goal.report = None;
+            }
             super::provider_resets::require_review(
                 &mut item,
                 "An ordinary continuation replaced the reset request.",
