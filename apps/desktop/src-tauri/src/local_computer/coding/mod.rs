@@ -3,7 +3,7 @@ pub(crate) mod checkpoints;
 pub(crate) mod copy_manager;
 mod git;
 mod jobs;
-mod task_binding;
+pub(crate) mod task_binding;
 pub(crate) use task_binding::{capture_work_repository, RepositoryWorkBinding};
 pub(super) mod process;
 pub(crate) mod pull_requests;
@@ -312,7 +312,7 @@ pub(crate) fn execute(
     arguments: Value,
     request_id: &str,
 ) -> Result<String, String> {
-    let task = task_binding::executing_binding(workspace, agent)?;
+    let mut task = task_binding::executing_binding(workspace, agent)?;
     if tool == "repository-pr-watch" {
         if let Some(task) = &task {
             let directory = directory(state, workspace, agent)?;
@@ -328,6 +328,19 @@ pub(crate) fn execute(
     }
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let directory = directory(state, workspace, agent)?;
+    if tool == "repository-checkpoint-restore" {
+        if let Some(restore) =
+            checkpoints::conversation::restore_task_for_request(&directory, &ticket, request_id)?
+        {
+            if task
+                .as_ref()
+                .is_some_and(|current| current.binding != restore.binding)
+            {
+                return Err("The current task and reviewed restore belong to different copies. Stop current work before restoring.".into());
+            }
+            task = Some(restore);
+        }
+    }
     if tool == "repository-start" {
         return jobs::start(
             directory,
@@ -468,6 +481,9 @@ fn execute_observed(
                 );
             }
             let target = crate::tools::confine_path(path, &root)?;
+            checkpoints::conversation::capture_before_task_mutation(
+                directory, &repo, ticket, request_id,
+            )?;
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(|_| "Cannot create repository directory.")?;
             }
@@ -491,6 +507,9 @@ fn execute_observed(
             if !(1..=900).contains(&timeout) {
                 return Err("Command timeout must be 1–900 seconds.".into());
             }
+            checkpoints::conversation::capture_before_task_mutation(
+                directory, &repo, ticket, request_id,
+            )?;
             repo.operation =
                 "command running; if interrupted inspect changes before continuing".into();
             repo.last_result = None;
@@ -571,7 +590,12 @@ fn execute_observed(
             }
             serde_json::to_value(result).map_err(|_| "Invalid command result.")?
         }
-        "repository-commit" => git::commit(directory, &mut repo, &input, ticket)?,
+        "repository-commit" => {
+            checkpoints::conversation::capture_before_task_mutation(
+                directory, &repo, ticket, request_id,
+            )?;
+            git::commit(directory, &mut repo, &input, ticket)?
+        }
         "repository-publish" => git::publish(directory, &mut repo, &input, ticket)?,
         "repository-recover" => git::recover(directory, &mut repo, ticket)?,
         _ => return Err("Unknown repository operation.".into()),

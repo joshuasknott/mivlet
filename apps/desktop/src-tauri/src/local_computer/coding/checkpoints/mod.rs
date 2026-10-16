@@ -1,5 +1,6 @@
 //! Immutable file checkpoints in a selected private repository. Conversation
 //! state, provider sessions and Git HEAD are deliberately outside restoration.
+pub(crate) mod conversation;
 mod preview;
 // Native service projection for the separately stacked copy inventory consumer.
 // It grants no action and must never be exposed as a cleanup authorization.
@@ -129,6 +130,17 @@ pub(super) fn execute(
                 save(directory, repo)?;
                 Ok(committed)
             })?;
+            crate::collaboration::restore::record_restore_receipt(
+                &ticket.execution_binding().scope_id,
+                request_id,
+                &repo.id,
+                checkpoint_id,
+                &before.id,
+                input
+                    .expected_output
+                    .as_deref()
+                    .ok_or("Missing reviewed restore output.")?,
+            )?;
             committed.acknowledge(|| ticket.check().is_ok())?;
             storage::remove_tree(&prepared.tree, Limits::CODING, ticket)?;
             Ok(

@@ -15,13 +15,30 @@ pub struct RepositoryWorkBinding {
 }
 
 #[derive(Clone)]
-pub(super) struct TaskRepository {
-    pub(super) binding: RepositoryWorkBinding,
+pub(crate) struct TaskRepository {
+    pub(crate) binding: RepositoryWorkBinding,
     account: String,
     workspace: String,
     agent: String,
 }
 impl TaskRepository {
+    /// Native saga intent supplies the immutable binding after matching its
+    /// exact consumed request. This constructor grants no operation permission.
+    pub(crate) fn for_restore(
+        binding: RepositoryWorkBinding,
+        workspace: &str,
+        agent: &str,
+    ) -> Result<Self, String> {
+        if !binding.valid() {
+            return Err("The saved task repository binding needs review.".into());
+        }
+        Ok(Self {
+            binding,
+            account: crate::account_session::binding()?.into(),
+            workspace: workspace.into(),
+            agent: agent.into(),
+        })
+    }
     pub(super) fn load(&self, directory: &Path) -> Result<Repository, String> {
         let repo = copy_manager::owned_repository_in_account(
             directory,
