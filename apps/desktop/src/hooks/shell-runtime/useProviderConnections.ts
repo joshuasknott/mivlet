@@ -46,6 +46,19 @@ import {
 
 import { createProviderConnectionRequests } from "./provider-connection-requests";
 
+function initialProviders(connectedIds: string[]): BackendProvider[] {
+  return enabledMivletProviders(listBackendProviders()).map((provider) => {
+    if (hasTauriRuntime() || provider.backendType !== "native-api" ||
+        !connectedIds.includes(provider.id)) return provider;
+    return {
+      ...provider,
+      authState: "connected",
+      capabilities: resolveCapabilities(provider.backendType, "connected", true),
+      models: provider.models.map((model) => ({ ...model, available: true })),
+    };
+  });
+}
+
 /** Provider setup, verification, discovery and model selection for one shell. */
 export function useProviderConnections({
   initialState,
@@ -74,19 +87,7 @@ export function useProviderConnections({
   // shell stays testable. Preview connections remain visibly synthetic, while
   // the same provider gate is enforced in preview and native builds.
   const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(
-    () => enabledMivletProviders(listBackendProviders()).map((provider) => {
-      // Browser fixtures have no native credential registry to hydrate from.
-      // Restore only their previously selected API providers; native readiness
-      // always comes from the verified native boundary below.
-      if (hasTauriRuntime() || provider.backendType !== "native-api" ||
-          !initialState.connectedBackendIds.includes(provider.id)) return provider;
-      return {
-        ...provider,
-        authState: "connected",
-        capabilities: resolveCapabilities(provider.backendType, "connected", true),
-        models: provider.models.map((model) => ({ ...model, available: true })),
-      };
-    }),
+    () => initialProviders(initialState.connectedBackendIds),
   );
 
   // Dynamically discovered model ids per native provider id, plus whether
@@ -237,7 +238,7 @@ export function useProviderConnections({
   useEffect(() => {
     requests.activate();
     setProviderScopeGeneration(workspaceScopeGeneration);
-    setBackendProviders(enabledMivletProviders(listBackendProviders()));
+    setBackendProviders(initialProviders(initialStateRef.current.connectedBackendIds));
     setConnectedBackendIds(
       hasTauriRuntime()
         ? []

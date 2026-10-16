@@ -27,6 +27,30 @@ beforeEach(() => {
 });
 
 describe("contextual workspace panel", () => {
+  it("announces dock targets and releases replaced apps without closing the next inspector", () => {
+    const ready = vi.fn();
+    const closed = vi.fn();
+    window.addEventListener("mivlet:mcp-app-panel-ready", ready);
+    window.addEventListener("mivlet:mcp-app-panel-closed", closed);
+    const first: RightPanelTab = { id: "app:first", kind: "mcp-app", title: "First tool" };
+    const second: RightPanelTab = { id: "app:second", kind: "mcp-app", title: "Second tool" };
+    const props = { ...base(), renderTab: (tab: RightPanelTab) => <div data-mcp-app-panel={tab.id}>{tab.title}</div> };
+    const view = render(<WorkspaceRightNav {...props} request={first} />);
+    expect(ready.mock.calls.at(-1)?.[0].detail).toMatchObject({ id: first.id, target: expect.any(HTMLElement) });
+    view.rerender(<WorkspaceRightNav {...props} request={second} />);
+    expect(closed.mock.calls.at(-1)?.[0].detail.id).toBe(first.id);
+    expect(screen.getByText("Second tool", { selector: "div" })).toBeVisible();
+    expect(ready.mock.calls.at(-1)?.[0].detail.id).toBe(second.id);
+    view.rerender(<WorkspaceRightNav {...props} request={second} open={false} />);
+    expect(closed).toHaveBeenCalledTimes(1);
+    view.rerender(<WorkspaceRightNav {...props} request={second} />);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(closed.mock.calls.at(-1)?.[0].detail.id).toBe(second.id);
+    expect(screen.getByRole("tab", { name: "Activity" })).toBeVisible();
+    view.unmount();
+    window.removeEventListener("mivlet:mcp-app-panel-ready", ready);
+    window.removeEventListener("mivlet:mcp-app-panel-closed", closed);
+  });
   it("starts with Activity, Files and Memory without the former utility menu", () => {
     render(
       <WorkspaceRightNav {...base()} activity={() => <p>Current work</p>} />,

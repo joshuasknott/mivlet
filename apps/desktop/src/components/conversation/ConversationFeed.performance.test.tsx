@@ -91,7 +91,7 @@ describe("retained conversation rendering", () => {
     renders.mock.calls[0][0].onDraft("reviewed reply");
     expect(drafted).toHaveBeenCalledWith(19, "reviewed reply");
     expect(screen.getByText("Answer 199")).toBeVisible();
-    fireEvent.click(screen.getByText("Working"));
+    expect(screen.queryByText("Working")).toBeNull();
     expect(screen.getByText("delta 19")).toBeVisible();
     view.rerender(<ConversationFeed {...base} {...paneProps(20)} messages={messages} state={{
       ...live, transcript: "Final answer", running: false, status: "completed",

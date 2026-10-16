@@ -211,6 +211,8 @@ describe("panel browsing boundaries", () => {
       runId: "run",
       conversationId: "chat",
       evidence: "agent-report" as const,
+      messageId: "response",
+      sourceRevisionId: "revision-2",
     });
     const entries = panelFiles({
       workspaceId: "workspace",
@@ -224,6 +226,9 @@ describe("panel browsing boundaries", () => {
       kind: "artifact",
       agentId: "mira",
       title: "Brief.docx",
+      conversationId: "chat",
+      messageId: "response",
+      sourceRevisionId: "revision-2",
     });
     expect(entries.every((entry) => entry.origin === "created")).toBe(true);
   });

@@ -32,6 +32,16 @@ a deployed or production-validated service.
 
 ### Implemented locally
 
+- Interactive conversation answers through OpenUI: reactive calculators, quizzes,
+  planners and comparisons, reusable layouts/cards/tabs, charts, searchable tables
+  and verified published images. The selected provider emits the same text format;
+  no additional UI-generation service or subscription is required. Inputs restore
+  from the exact saved response; local changes are immediate and follow-up actions
+  stage a reply for review. Legacy interactive responses remain supported.
+- Custom interactive HTML previews for simulations, diagrams and small games.
+  OpenUI remains the first choice; bespoke HTML opens only on a deliberate click
+  in an isolated native guest with no network or tool access. Guest edits reset
+  when closed, while the saved response source remains in the conversation.
 - Managed coding repositories for named agents: attach a local Git repository,
   edit a separate copy, run native Windows checks in a restricted snapshot, review
   the actual diff, commit an approved snapshot and optionally open a GitHub PR.
@@ -39,6 +49,23 @@ a deployed or production-validated service.
   Node/npm and isolated Python/pip are bundled; publication additionally requires GitHub CLI login. Available through
   Codex, Claude SDK and direct API routes that bridge Mivlet tools. See the
   [coding workflow and its limits](docs/architecture/coding-workflow.md).
+  File checkpoints save named code states in the private copy, preview real file
+  changes, and restore an explicitly approved tree with a recoverable before-restore
+  checkpoint. Original checkouts, Git HEAD and conversation history stay intact;
+  restored files need fresh verification. See [checkpoint limits and recovery](docs/architecture/coding-workflow.md#file-checkpoints).
+- Bounded live command logs and native persistent jobs for repository snapshots
+  or selected workspace files. Library's Commands section shows status and Stop.
+  Persistent jobs require an explicit lifetime, retain isolation and repository
+  locks, and discard every file change. Desktop-owned jobs end with the app;
+  the opt-in [background owner](docs/architecture/work-execution.md#opt-in-native-background-text-execution-on-windows)
+  retains approved commands after the window closes. Restart never replays jobs.
+  See the [native lifecycle](docs/architecture/native-execution.md#live-output-and-controlled-jobs).
+- GitHub PR review for attached repositories: paginated changes, checks and
+  comments, revision-aware viewed files, local review drafts, explicitly approved
+  managed-branch updates and review actions, and bounded optional PR watches
+  that wake existing Work while the desktop is open. Uncertain writes require
+  read-only reconciliation; credentials stay native. See the
+  [PR workflow](docs/architecture/coding-workflow.md#pull-request-review-and-updates).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
   profiles, persistent robot avatar identities or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens
@@ -74,6 +101,23 @@ a deployed or production-validated service.
 - Encrypted SQLite persistence for conversations, attached files, memory,
   connections, approvals, audit history, and a minimal internal execution
   attempt used for safe interruption and retry.
+- Protected secret requests on supported Mivlet tool bridges: the human supplies
+  or declines a webhook signing secret in native Windows entry. Agents receive
+  an expiring, scoped, one-use reference; the value stays in account-keyed native
+  credential custody. A native webhook verifier consumes it, with local signature
+  checks, status and approved revocation. This does not deploy webhook ingress or
+  dispatch events. See [protected requests](docs/architecture/local-teammate-computer.md#protected-secret-requests).
+- Conversation controls use assistant-ui over Mivlet's canonical history. Earlier
+  messages can be edited into durable branches, answers regenerated, and saved
+  alternatives reopened without replaying completed actions. OpenUI renders a
+  bounded Mivlet catalogue in ordinary provider responses; selections and forms
+  stage reviewable replies. The context inspector distinguishes proposed context
+  from the native capture and retrieval receipt used by a completed request.
+- Outputs support immutable working revisions, comparison, restoration, pinning
+  and native export. Text, Markdown, JSON and CSV are editable; supported DOCX
+  paragraphs and XLSX cells retain their Office package structure and formulas.
+  Unsupported complex Office content remains explicitly read-only. Selected
+  passages offer source-bound questions, refinement and deliberate memory saving.
 - Published images appear directly in chat and open the existing file viewer;
   documents, spreadsheets and other published files use clickable file cards.
   Text, Markdown, JSON and bounded Office content render in the viewer, with sheet
@@ -89,6 +133,16 @@ a deployed or production-validated service.
   The official MCP SDK owns negotiation and discovery in the bundled
   native host over the existing transport. Credentials stay in native or service-secret custody rather than
   React state or conversation transcripts.
+  Compatible MCP Apps open beside their saved tool results and can expand into
+  the right panel. The isolated host renegotiates on reopen, keeps app requests
+  behind Mivlet authority, and retains readable ordinary results on failure.
+  See [MCP Apps](docs/architecture/mcp-apps.md) for supported capabilities and
+  [verification](docs/development/verification.md) for evidence and limitations.
+- An authenticated local MCP server lets external assistants inspect explicitly
+  shared Work and request tasks from selected agents. Native desktop consent,
+  read-only defaults, expiry, revocation and scoped access history preserve
+  Mivlet authority. Remote access requires an operator-provided HTTPS proxy;
+  the app does not publish an endpoint. See [external assistants](docs/architecture/mcp-server.md).
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.

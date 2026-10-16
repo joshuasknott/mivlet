@@ -602,11 +602,7 @@ const Turn = memo(function Turn({
         part.state === "failed" &&
         !part.terminalStatus,
     ) && !recoveredToolFailure);
-  const label = running
-    ? awaitingApproval
-      ? "Waiting for your approval"
-      : "Working"
-    : interrupted
+  const label = interrupted
       ? `Interrupted${elapsed > 0 ? ` · ${duration}` : ""}`
       : failedTerminal
         ? `Failed${elapsed > 0 ? ` · ${duration}` : ""}`
@@ -674,8 +670,9 @@ const Turn = memo(function Turn({
           </header>
         ) : null}
         {hasActivity ? (
-          <details className="turn-activity" open={expanded}>
+          <details className="turn-activity" open={running || expanded}>
             <summary
+              hidden={running}
               onClick={(event) => {
                 event.preventDefault();
                 setDisclosure({ running, open: !expanded });
@@ -705,7 +702,7 @@ const Turn = memo(function Turn({
                 </span>
               ) : null}
             </summary>
-            {expanded ? (
+            {running || expanded ? (
               <div className="turn-activity__body">
                 {summary ? <MessageMarkdown content={summary} /> : null}
                 {work.map((part) => (
@@ -729,9 +726,9 @@ const Turn = memo(function Turn({
             ) : null}
           </details>
         ) : null}
-        {running && activity && !awaitingApproval && !expanded ? (
+        {running && (awaitingApproval || (!work.length && !summary)) ? (
           <p className="turn-current" role="status">
-            {activity}
+            {awaitingApproval ? "Waiting for your approval" : activity || "Thinking…"}
           </p>
         ) : null}
         {final?.kind === "text" ? (

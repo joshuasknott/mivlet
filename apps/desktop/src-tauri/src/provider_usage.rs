@@ -586,7 +586,12 @@ pub(crate) fn report(
     })
 }
 #[tauri::command]
-pub(crate) fn provider_usage_report() -> std::result::Result<Report, String> {
+pub(crate) async fn provider_usage_report() -> std::result::Result<Report, String> {
+    tauri::async_runtime::spawn_blocking(provider_usage_report_blocking)
+        .await
+        .map_err(|_| "Usage history loading stopped unexpectedly.".to_string())?
+}
+fn provider_usage_report_blocking() -> std::result::Result<Report, String> {
     let store = crate::store::try_global().ok_or("Encrypted storage is unavailable.")?;
     store
         .with_conn(|conn| {
@@ -596,7 +601,14 @@ pub(crate) fn provider_usage_report() -> std::result::Result<Report, String> {
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub(crate) fn provider_allowance(provider_id: String) -> std::result::Result<Allowance, String> {
+pub(crate) async fn provider_allowance(
+    provider_id: String,
+) -> std::result::Result<Allowance, String> {
+    tauri::async_runtime::spawn_blocking(move || provider_allowance_blocking(provider_id))
+        .await
+        .map_err(|_| "Usage loading stopped unexpectedly.".to_string())?
+}
+fn provider_allowance_blocking(provider_id: String) -> std::result::Result<Allowance, String> {
     if !crate::models::SUPPORTED_BACKEND_PROVIDER_IDS.contains(&provider_id.as_str()) {
         return Err("Unsupported provider.".into());
     }

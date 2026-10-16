@@ -51,25 +51,9 @@ jobs:
         run: |
           node apps/desktop/scripts/prepare-execution-runtime.mjs
           node scripts/release/node-lpac/stage-acceptance.mjs C:\mivlet-node-lpac
-      - name: Configure disposable CI execution ancestry
-        shell: pwsh
-        run: |
-          $result = @(cargo test --manifest-path packages/windows-executor/Cargo.toml acceptance::native_ci_setup_acceptance -- --ignored --exact --nocapture --test-threads=1 2>&1)
-          $exit = $LASTEXITCODE
-          $result | Write-Output
-          if ($exit -ne 0 -or -not ($result -match 'test result: ok\. 1 passed;')) { throw 'Native CI setup failed or no test ran' }
       - name: Verify Win32 pipe namespace, Node test runner, isolation and Stop
         shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          foreach ($test in @('acceptance::native_pipe_namespace_acceptance', 'lifecycle_acceptance::native_live_build_and_test_acceptance', 'acceptance::native_execution_acceptance', 'lifecycle_acceptance::native_live_persistent_process_acceptance', 'lifecycle_acceptance::native_loopback_isolation_acceptance')) {
-            $result = @(cargo test --manifest-path packages/windows-executor/Cargo.toml $test -- --ignored --exact --nocapture --test-threads=1 2>&1)
-            $exit = $LASTEXITCODE
-            $result | Write-Output
-            if ($exit -ne 0 -or -not ($result -match 'test result: ok\. 1 passed;')) { throw "Native acceptance failed or no test ran: $test" }
-          }
-          $receipt = Get-Content -LiteralPath C:\mivlet-node-lpac\artifact-receipt.json -Raw | ConvertFrom-Json
-          @{ sourceCommit = $env:GITHUB_SHA; artifactSha256 = $receipt.sha256; executableSha256 = $receipt.executableSha256; win32PipeProbe = 'passed'; restrictedNodeTestRunner = 'passed'; credentialIsolation = 'passed'; descendantStop = 'passed'; loopbackIsolation = 'passed'; packagedApp = 'not-tested'; liveProvider = 'not-tested' } | ConvertTo-Json | Set-Content -LiteralPath C:\mivlet-node-lpac\acceptance.json -Encoding utf8NoBOM
+        run: ./scripts/release/node-lpac/acceptance.ps1
       - uses: actions/upload-artifact@v4
         if: always()
         with:

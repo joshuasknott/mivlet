@@ -30,18 +30,13 @@ import type {
   WorkspaceExecution,
   WorkspaceExecutionState,
 } from "../lib/workspace-execution";
-import { ComputerInspector, LocalSchedules } from "./workspace-lazy";
+import { ComputerInspector, LocalSchedules, WorkspaceLibrary } from "./workspace-lazy";
 import type { RenderWorkspaceConversation } from "./WorkspaceConversationChrome";
 import type { WorkspaceNavigation } from "./useWorkspaceNavigation";
 
 const WorkspaceHistory = lazy(() =>
   import("./WorkspaceHistory").then(({ WorkspaceHistory: Component }) => ({
     default: Component,
-  })),
-);
-const WorkspaceLibrary = lazy(() =>
-  import("../components/navigation/WorkspaceLibrary").then((module) => ({
-    default: module.WorkspaceLibrary,
   })),
 );
 const WorkspaceMemories = lazy(() =>

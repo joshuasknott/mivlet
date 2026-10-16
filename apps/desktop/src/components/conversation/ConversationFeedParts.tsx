@@ -70,6 +70,7 @@ export function ConversationFeedPart({
   return (
     <div
       className={`turn-tool${failed ? " turn-tool--failed" : ""}`}
+      role={running && part.state === "running" ? "status" : undefined}
     >
       <span aria-hidden="true">
         {part.state === "succeeded"

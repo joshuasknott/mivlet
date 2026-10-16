@@ -138,7 +138,6 @@ export function WorkspaceRightNav({
   const closeContent = () => {
     onCloseComputer?.();
     dispatch({ type: "close" });
-    if (selected?.kind === "mcp-app") window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id: selected.id } }));
   };
   useEffect(() => {
     const closeApp = (event: Event) => {
@@ -154,6 +153,18 @@ export function WorkspaceRightNav({
       .find((candidate) => candidate.dataset.mcpAppPanel === selected.id);
     if (target) window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-ready", { detail: { id: selected.id, target } }));
   }, [selected?.id, selected?.kind, open, computerAgentId]);
+  const dockedApp = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const next = selected?.kind === "mcp-app" && !computerAgentId ? selected.id : undefined;
+    const previousApp = dockedApp.current;
+    dockedApp.current = next;
+    if (previousApp && previousApp !== next)
+      window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id: previousApp } }));
+  }, [selected?.id, selected?.kind, computerAgentId]);
+  useEffect(() => () => {
+    if (dockedApp.current)
+      window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id: dockedApp.current } }));
+  }, []);
   const focusKey = inspecting ? (selected?.id ?? "computer") : state.page;
   const lastFocus = useRef(focusKey);
   useEffect(() => {

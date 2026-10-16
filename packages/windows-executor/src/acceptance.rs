@@ -34,9 +34,10 @@ fn execute(root: &Path, command: &str, seconds: u64) -> CompletedRun {
 #[ignore = "Administrator setup on a disposable Windows CI runner only"]
 fn native_ci_setup_acceptance() {
     assert_eq!(std::env::var("GITHUB_ACTIONS").as_deref(), Ok("true"));
-    let owner = security::user_sid().unwrap();
+    // CI configures the disposable standard user's ancestry from its elevated
+    // setup step; ordinary execution must still reject administrator tokens.
+    let owner = std::env::var("MIVLET_CI_EXECUTION_OWNER").unwrap();
     setup::configure(&owner, false).unwrap();
-    setup::ready().unwrap();
 }
 
 #[test]

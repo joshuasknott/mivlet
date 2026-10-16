@@ -1812,7 +1812,15 @@ pub(crate) fn normalize_backend_event(
 }
 
 #[tauri::command]
-pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, String> {
+pub async fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, String> {
+    // Managed provider probes can wait for a child process. Never perform them
+    // on the WebView's command thread: even closing a dialog must stay usable.
+    tauri::async_runtime::spawn_blocking(move || list_backends_blocking(app))
+        .await
+        .map_err(|_| "Provider discovery stopped unexpectedly.".to_string())?
+}
+
+fn list_backends_blocking(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, String> {
     let internal_user_id = require_current_internal_user()?;
     let connected = connected_providers_for(&internal_user_id)?;
     let path = connected_backends_path(&app)?;
@@ -1922,6 +1930,9 @@ pub fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, Stri
             provider.models.clear();
             provider.install_hint = status.message;
         }
+    }
+    if require_current_internal_user()? != internal_user_id {
+        return Err("The account changed during provider discovery.".into());
     }
     Ok(providers)
 }

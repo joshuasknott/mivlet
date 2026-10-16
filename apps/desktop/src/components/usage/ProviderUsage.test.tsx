@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderAllowance, ProviderUsageReport } from "@mivlet/protocol";
 // Use the shipping deferred export for the direct detail renders below.
 import { ProviderUsageDetails } from "../pages/SettingsPage";
-import { ProviderAllowanceIndicator } from "./ProviderUsage";
+import { ModelPicker } from "../ModelPicker";
 import {
   currentAllowance,
   allowanceLabel,
@@ -93,24 +93,12 @@ beforeEach(() => {
   );
 });
 describe("provider usage", () => {
-  it("opens subscription usage from the additive control, traps focus and restores the trigger", async () => {
-    const user = userEvent.setup();
-    render(<ProviderAllowanceIndicator providerId="codex" />);
-    const trigger = screen.getByRole("button", { name: /Provider usage/ });
-    await user.click(trigger);
-    await screen.findByRole("progressbar");
-    expect(screen.queryByRole("combobox")).not.toBeInTheDocument();
+  it("keeps usage and its background requests out of the model control", () => {
+    render(<ModelPicker models={[{ id: "codex::model", providerId: "codex", providerLabel: "ChatGPT", modelId: "model", label: "Model", available: true }]} selectedId="codex::model" label="Model" onSelect={vi.fn()} open={false} onOpenChange={vi.fn()} />);
+    expect(screen.queryByRole("button", { name: /usage/i })).not.toBeInTheDocument();
     expect(readProviderUsage).not.toHaveBeenCalled();
-    await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Close usage" })).toHaveFocus(),
-    );
-    await user.keyboard("{Shift>}{Tab}{/Shift}");
-    expect(screen.getByRole("dialog")).toContainElement(
-      document.activeElement as HTMLElement,
-    );
-    await user.keyboard("{Escape}");
-    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
-    expect(trigger).toHaveFocus();
+    expect(readProviderAllowance).not.toHaveBeenCalled();
+    expect(listRuntimeBackends).not.toHaveBeenCalled();
   });
   it("keeps unknown costs distinct from a reported zero and filters model detail", async () => {
     const user = userEvent.setup();

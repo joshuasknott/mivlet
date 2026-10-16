@@ -39,14 +39,18 @@ it("edits from a non-modal right panel and saves the notification preference wit
 });
 
 describe("agent portrait ownership", () => {
-  it("keeps icon colour independent when selecting a different character", async () => {
+  it("offers distinct character colours and lets the selected character be recoloured", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     const view = render(<AgentEditor {...props} open agent={profile} onSave={onSave} />);
+    const previews = Array.from(view.container.querySelectorAll(".character-options feColorMatrix"));
+    expect(new Set(previews.map((node) => node.getAttribute("values"))).size).toBe(6);
     await user.click(screen.getByRole("button", { name: "Pilot character" }));
-    expect(screen.getByLabelText("Icon hex colour")).toHaveValue("#865DFA");
+    expect(screen.getByLabelText("Icon hex colour")).toHaveValue("#008577");
     expect(view.container.querySelector(".agent-editor__identity .agent-avatar")).toHaveAttribute("data-character", "1");
     await user.click(screen.getByRole("button", { name: "Amber" }));
+    await user.click(screen.getByRole("button", { name: "Pilot character" }));
+    expect(screen.getByLabelText("Icon hex colour")).toHaveValue("#D69A32");
     expect(screen.getByRole("button", { name: "Pilot character" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#D69A32", avatarSeed: expect.stringMatching(/^ink-v1:1:/) }));

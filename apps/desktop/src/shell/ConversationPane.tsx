@@ -28,6 +28,7 @@ import {
 } from "../lib/composer-attachments";
 import { builtinPluginMentions } from "../lib/builtin-plugins";
 import { composerModelsFor } from "./composer-models";
+import { resolveProviderModelOption } from "../lib/provider-models";
 import { Composer } from "../components/Composer";
 import { RecipientPicker } from "../components/conversation/RecipientPicker";
 import type { ComposerInputHandle } from "../components/ComposerInput";
@@ -395,7 +396,7 @@ export function ConversationPane({
     () => composerModelsFor(undefined, runtime.modelOptions),
     [runtime.modelOptions],
   );
-  const model = models.find((model) => model.id === profile?.modelId);
+  const model = resolveProviderModelOption(runtime.modelOptions, profile?.modelId ?? "");
   const appApprovals = useMcpAppApprovals(
     runtime,
     `${service.workspaceId}:${room.id}:${room.generation}`,
@@ -1117,7 +1118,7 @@ export function ConversationPane({
             }}
             models={models}
             selectedModelId={model?.id ?? profile?.modelId ?? ""}
-            selectedModelLabel={model?.label ?? "Choose model"}
+            selectedModelLabel={model?.label ?? (profile?.modelId ? "Unavailable model" : "Automatic")}
             modelScope={
               recipient === "discussion"
                 ? `${displayAgent.name} leads this discussion using this model. Other participants use their own saved models if invited.`

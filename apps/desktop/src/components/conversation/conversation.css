@@ -5,6 +5,7 @@
 .conversation-response__author strong { font-weight: 500; }
 .turn-activity { min-width: 0; color: var(--ink-muted); font-size: 12px; }
 .turn-activity > summary { display: flex; align-items: center; gap: 7px; width: fit-content; max-width: 100%; list-style: none; cursor: pointer; min-height: 32px; padding: 4px 0; line-height: 20px; overflow-wrap: anywhere; }
+.turn-activity > summary[hidden] { display: none; }
 .turn-activity > summary::-webkit-details-marker { display: none; }
 .turn-activity > summary:hover { color: var(--ink); }
 .turn-chevron { flex: 0 0 12px; }
