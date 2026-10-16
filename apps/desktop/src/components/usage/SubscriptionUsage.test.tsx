@@ -59,6 +59,14 @@ beforeEach(() => {
 });
 
 describe("connected subscription usage", () => {
+  it("collects the first measurement on opening Usage when the connection has no cache", async () => {
+    vi.mocked(readProviderAllowance).mockResolvedValue({ ...allowance("codex"), status: "unavailable", windows: [] });
+    vi.mocked(refreshProviderAllowance).mockResolvedValue(allowance("codex", 18));
+    render(<SubscriptionUsage providers={[codex]} />);
+    expect(await screen.findByText("18% used")).toBeVisible();
+    expect(refreshProviderAllowance).toHaveBeenCalledExactlyOnceWith("codex");
+    expect(listRuntimeBackends).not.toHaveBeenCalled();
+  });
   it("does not restart pending reads when discovery replaces equivalent provider arrays", async () => {
     let complete!: (value: ProviderAllowance) => void;
     vi.mocked(readProviderAllowance).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));

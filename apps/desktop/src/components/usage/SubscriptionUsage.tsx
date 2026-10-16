@@ -121,6 +121,11 @@ export function SubscriptionUsage({
               report = await boundedUsageRead((
                 refresh ? refreshProviderAllowance : readProviderAllowance
               )(provider.id));
+              if (request !== generation.current) return;
+              // A new connection has no cached measurement yet. Opening Usage
+              // should collect it once, without adding polling to the composer.
+              if (!refresh && (!report || report.status === "unavailable"))
+                report = await boundedUsageRead(refreshProviderAllowance(provider.id));
             } catch {
               failed = true;
             }

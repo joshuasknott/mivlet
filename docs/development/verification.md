@@ -32,7 +32,9 @@ inventory. Provider discovery and cached usage reads run off the native window
 thread; renderer reads time out after ten seconds with an explicit retry. A timeout
 does not cancel native IPC. Tests cover stalled reads, late replies and equivalent
 provider inventories without restarting a pending read. The composer performs no
-usage polling.
+usage polling. A connected provider without a cached allowance is checked once
+when Usage opens. Verified account-owned Codex sessions reconcile missing legacy
+connection metadata without invalidating existing measurements on each discovery.
 
 `useAccountWorkspace` owns account requests and scope transitions;
 `useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;

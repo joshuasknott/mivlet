@@ -67,7 +67,7 @@ a deployed or production-validated service.
   read-only reconciliation; credentials stay native. See the
   [PR workflow](docs/architecture/coding-workflow.md#pull-request-review-and-updates).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
-  profiles, persistent robot avatar identities or uploaded images, and model
+  profiles, animated coloured character icons or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens
   its settings in the right panel. The composer keeps model selection and
   dictation visible, with uploads and a connected-plugin submenu under +.
@@ -80,7 +80,8 @@ a deployed or production-validated service.
   review before upload; it fills the draft without sending it. See the
   [speech guide](docs/architecture/voice-conversations.md).
 - Log in and Sign up account entry for signed-out users, followed by required
-  AI provider setup. Users with a usable provider open chat directly.
+  AI provider setup and first-agent name, icon and colour selection. Returning
+  users with a usable provider open chat directly.
   Provider setup uses native credential storage and existing connection checks.
 - One provider-driver registry with stable instance ids for ChatGPT/Codex,
   Claude, Google Antigravity, Grok, Cursor, OpenCode, and advanced direct API
