@@ -12,6 +12,7 @@ import { richExamples } from "./rich-examples.test-fixtures";
 import { validateRichInterface } from "./rich-interface-guard";
 import catalogueInstructions from "../../../lib/rich-interface-instructions.json";
 import { createParser } from "@openuidev/lang-core";
+import { buildRichInterfaceInstructions } from "../../../lib/rich-interface-prompt";
 
 const preview = vi.hoisted(() => vi.fn());
 vi.mock("../../../lib/computer-artifacts", () => ({
@@ -52,7 +53,7 @@ describe("rich production interface", () => {
   });
   it("uses the same generated instructions and catalogue for every provider", () => {
     expect(catalogueInstructions.instructions).toBe(
-      richInterfaceLibrary.prompt(richPromptOptions),
+      buildRichInterfaceInstructions(richInterfaceLibrary.prompt(richPromptOptions)),
     );
     const names = new Set(Object.keys(richInterfaceLibrary.components));
     for (const source of Object.values(richExamples))

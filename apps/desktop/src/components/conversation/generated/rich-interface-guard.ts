@@ -205,7 +205,7 @@ export function encodeRichState(state: Record<string, unknown>): string {
   };
   inspect(state, 0);
   const encoded = JSON.stringify(state);
-  if (encoded.length > 8000)
+  if (new TextEncoder().encode(encoded).byteLength > 8000)
     throw new Error("Interface state exceeds its storage limit.");
   return encoded;
 }

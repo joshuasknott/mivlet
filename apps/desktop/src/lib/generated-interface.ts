@@ -59,16 +59,26 @@ function interfaceStatements(code: string): string[] {
 }
 
 export function extractGeneratedInterface(text: string) {
-  const opening = /```openui(-v2)?\r?\n/.exec(text);
-  if (!opening) return null;
+  const opening = /^ {0,3}```openui(-v2)?[\t ]*\r?\n/im.exec(text);
+  if (!opening) {
+    // Older provider prompts required a raw program. Recover that envelope
+    // without evaluating ordinary prose or guessing a missing root.
+    const code = text.trim();
+    if (/^\$?[a-zA-Z][a-zA-Z0-9_]*\s*=/.test(code) && /^root\s*=/m.test(code) && !code.includes("```"))
+      return { profile: "mivlet-v2" as const, before: "", code, after: "", complete: true };
+    return null;
+  }
   const start = opening.index;
   const contentStart = start + opening[0].length;
-  const end = text.indexOf("```", contentStart);
+  const closing = /^ {0,3}```[\t ]*(?=\r?$)/m.exec(text.slice(contentStart));
+  const end = closing ? contentStart + closing.index : -1;
+  const code = text.slice(contentStart, end < 0 ? undefined : end);
+  const rich = Boolean(opening[1]) || /^\s*\$[a-zA-Z]/m.test(code) || /\b(?:TextContent|Card|Input|Slider|Choice|Photo|Tabs|TabItem|BarChart|LineChart|Button)\(/.test(code);
   return {
-    ...(opening[1] ? { profile: "mivlet-v2" as const } : {}),
+    ...(rich ? { profile: "mivlet-v2" as const } : {}),
     before: text.slice(0, start),
-    code: text.slice(contentStart, end < 0 ? undefined : end),
-    after: end < 0 ? "" : text.slice(end + 3),
+    code,
+    after: end < 0 ? "" : text.slice(end + closing![0].length),
     complete: end >= 0,
   };
 }

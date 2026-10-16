@@ -20,6 +20,15 @@ openUiFlags[Symbol.for("openui.devtools.autoMount")] = true;
 
 const InterfaceRenderer = lazy(() => import("./InterfaceRenderer"));
 const GeneratedHtmlResponse = lazy(() => import("./GeneratedHtmlResponse"));
+/** Renderer waits are bounded; native writes may still complete and must be
+ * reconciled by reloading rather than automatically replaying an action. */
+function awaitSavedInterface<T>(request: Promise<T>): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timeout = setTimeout(() => reject(new Error("Saved answers did not respond in time. Reload to check the saved state; a pending change may still finish.")), 20_000);
+  });
+  return Promise.race([request, deadline]).finally(() => clearTimeout(timeout));
+}
 export function GeneratedResponse({
   text,
   streaming,
@@ -62,6 +71,7 @@ export function GeneratedResponse({
   const [values, setValues] = useState<Record<string, string | boolean>>({});
   const [status, setStatus] = useState("Loading saved answers…");
   const [error, setError] = useState("");
+  const [renderError, setRenderError] = useState("");
   const [reload, setReload] = useState(0);
   const latest = useRef({ saved, values });
   latest.current = { saved, values };
@@ -72,9 +82,11 @@ export function GeneratedResponse({
   useEffect(() => {
     const version = ++epoch.current;
     reviewing.current = false;
+    pending.current = Promise.resolve();
     setSaved(undefined);
     setValues({});
     setError("");
+    setRenderError("");
     setStatus("Loading saved answers…");
     if (!streaming && extracted && !extracted.complete) {
       setStatus(
@@ -95,10 +107,10 @@ export function GeneratedResponse({
       return;
     }
     if (streaming || !extracted?.complete || checked?.error) return;
-    void conversationUi<GeneratedInterfaceState>(
+    void awaitSavedInterface(conversationUi<GeneratedInterfaceState>(
       { workspaceId, conversationId, agentId },
       { action: "load-interface", runId, source: interactionSource },
-    )
+    ))
       .then((result) => {
         if (version !== epoch.current) return;
         latest.current = { saved: result, values: result.values };
@@ -144,7 +156,7 @@ export function GeneratedResponse({
     pending.current = pending.current
       .then(async () => {
         if (version !== epoch.current || !latest.current.saved) return;
-        const result = await conversationUi<GeneratedInterfaceState>(
+        const result = await awaitSavedInterface(conversationUi<GeneratedInterfaceState>(
           { workspaceId, conversationId, agentId },
           {
             action: "save-interface",
@@ -153,7 +165,7 @@ export function GeneratedResponse({
             expectedRevision: latest.current.saved.revision,
             values: next,
           },
-        );
+        ));
         if (version !== epoch.current) return;
         latest.current.saved = result;
         setSaved(result);
@@ -176,7 +188,7 @@ export function GeneratedResponse({
     void pending.current
       .then(async () => {
         if (version !== epoch.current || !latest.current.saved) return;
-        const result = await conversationUi<{
+        const result = await awaitSavedInterface(conversationUi<{
           state: GeneratedInterfaceState;
           draft: string;
         }>(
@@ -189,7 +201,7 @@ export function GeneratedResponse({
             eventId: crypto.randomUUID(),
             label,
           },
-        );
+        ));
         if (version !== epoch.current) return;
         latest.current.saved = result.state;
         setSaved(result.state);
@@ -197,8 +209,12 @@ export function GeneratedResponse({
         setStatus("Reply ready to review in composer");
       })
       .catch((reason) => {
-        if (version === epoch.current)
+        if (version === epoch.current) {
           setError(reason instanceof Error ? reason.message : String(reason));
+          setStatus("Reply unavailable. Reload saved answers before trying again.");
+          setSaved(undefined);
+          latest.current.saved = undefined;
+        }
       })
       .finally(() => {
         if (version === epoch.current) reviewing.current = false;
@@ -231,6 +247,7 @@ export function GeneratedResponse({
               code={checked.code}
               profile={extracted.profile}
               owner={{ workspaceId, agentId, generation }}
+              onError={setRenderError}
               streaming={streaming}
               interaction={{
                 state: values,
@@ -246,7 +263,7 @@ export function GeneratedResponse({
         <small role="status">
           {streaming
             ? "Generating… controls become available when this response is saved."
-            : status}
+            : renderError ? "Controls unavailable; repair this response to continue." : status}
         </small>
         {error ? (
           <>
@@ -259,6 +276,15 @@ export function GeneratedResponse({
               Reload saved answers
             </button>
           </>
+        ) : null}
+        {!streaming && (checked?.error || renderError || !extracted.complete) ? (
+          <button
+            type="button"
+            disabled={!source || !responseRevisionId}
+            onClick={() => onDraft(`Please repair the interactive response in conversation ${conversationId}, run ${runId}, revision ${responseRevisionId}. ${checked?.error || renderError || "The response ended before its interface was complete."} Return one complete, valid openui-v2 block using Mivlet's supported components. Preserve my request and do not perform additional actions.`)}
+          >
+            Ask agent to repair response
+          </button>
         ) : null}
         <details>
           <summary>Inspect interface source</summary>
