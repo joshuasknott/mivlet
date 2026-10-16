@@ -1,0 +1,85 @@
+name: Node AppContainer runtime acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - scripts/release/node-lpac/**
+      - .github/workflows/node-lpac.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: node-lpac-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  candidate:
+    runs-on: windows-2022
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.3
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Verify recipe regressions
+        run: node --test scripts/release/node-lpac/candidate.test.mjs
+      - name: Prepare pinned NASM without a system installation
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          New-Item -ItemType Directory -Path C:\mivlet-node-tools | Out-Null
+          $archive = 'C:\mivlet-node-tools\nasm.zip'
+          Invoke-WebRequest 'https://www.nasm.us/pub/nasm/releasebuilds/2.16.03/win64/nasm-2.16.03-win64.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '3ee4782247bcb874378d02f7eab4e294a84d3d15f3f6ee2de2f47a46aa7226e6') { throw 'NASM checksum mismatch' }
+          Expand-Archive -LiteralPath $archive -DestinationPath C:\mivlet-node-tools\nasm
+      - name: Compile and package the pinned backport with one worker
+        shell: pwsh
+        run: |
+          $nasm = @(Get-ChildItem -LiteralPath C:\mivlet-node-tools\nasm -Filter nasm.exe -Recurse)
+          if ($nasm.Count -ne 1) { throw 'Expected one pinned NASM executable' }
+          & scripts/release/node-lpac/build.ps1 -Build -Directory C:\mivlet-node-lpac -Python (Get-Command python.exe).Source -Nasm $nasm[0].FullName
+      - name: Stage verified candidate for actual restricted-process tests
+        run: |
+          node apps/desktop/scripts/prepare-execution-runtime.mjs
+          node scripts/release/node-lpac/stage-acceptance.mjs C:\mivlet-node-lpac
+      - name: Configure disposable CI execution ancestry
+        shell: pwsh
+        run: |
+          $result = @(cargo test --manifest-path packages/windows-executor/Cargo.toml acceptance::native_ci_setup_acceptance -- --ignored --exact --nocapture --test-threads=1 2>&1)
+          $exit = $LASTEXITCODE
+          $result | Write-Output
+          if ($exit -ne 0 -or -not ($result -match 'test result: ok\. 1 passed;')) { throw 'Native CI setup failed or no test ran' }
+      - name: Verify Win32 pipe namespace, Node test runner, isolation and Stop
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          foreach ($test in @('acceptance::native_pipe_namespace_acceptance', 'lifecycle_acceptance::native_live_build_and_test_acceptance', 'acceptance::native_execution_acceptance', 'lifecycle_acceptance::native_live_persistent_process_acceptance', 'lifecycle_acceptance::native_loopback_isolation_acceptance')) {
+            $result = @(cargo test --manifest-path packages/windows-executor/Cargo.toml $test -- --ignored --exact --nocapture --test-threads=1 2>&1)
+            $exit = $LASTEXITCODE
+            $result | Write-Output
+            if ($exit -ne 0 -or -not ($result -match 'test result: ok\. 1 passed;')) { throw "Native acceptance failed or no test ran: $test" }
+          }
+          $receipt = Get-Content -LiteralPath C:\mivlet-node-lpac\artifact-receipt.json -Raw | ConvertFrom-Json
+          @{ sourceCommit = $env:GITHUB_SHA; artifactSha256 = $receipt.sha256; executableSha256 = $receipt.executableSha256; win32PipeProbe = 'passed'; restrictedNodeTestRunner = 'passed'; credentialIsolation = 'passed'; descendantStop = 'passed'; loopbackIsolation = 'passed'; packagedApp = 'not-tested'; liveProvider = 'not-tested' } | ConvertTo-Json | Set-Content -LiteralPath C:\mivlet-node-lpac\acceptance.json -Encoding utf8NoBOM
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: node-lpac-${{ github.sha }}
+          path: |
+            C:/mivlet-node-lpac/artifact-receipt.json
+            C:/mivlet-node-lpac/acceptance.json
+            C:/mivlet-node-lpac/*.zip
+            C:/mivlet-node-lpac/build.json
+            C:/mivlet-node-lpac/build-*.log
+            C:/mivlet-node-lpac/artifact/provenance.json
+          if-no-files-found: warn
+          retention-days: 30

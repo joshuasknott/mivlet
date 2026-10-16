@@ -31,6 +31,96 @@ fn execute(root: &Path, command: &str, seconds: u64) -> CompletedRun {
 }
 
 #[test]
+#[ignore = "Administrator setup on a disposable Windows CI runner only"]
+fn native_ci_setup_acceptance() {
+    assert_eq!(std::env::var("GITHUB_ACTIONS").as_deref(), Ok("true"));
+    let owner = security::user_sid().unwrap();
+    setup::configure(&owner, false).unwrap();
+    setup::ready().unwrap();
+}
+
+#[test]
+#[ignore = "Only invoked inside the actual acceptance AppContainer"]
+fn pipe_namespace_probe() {
+    use windows_sys::Win32::{Storage::FileSystem::PIPE_ACCESS_DUPLEX, System::Pipes::*};
+    let name = security::random_id().unwrap();
+    let legacy_name = security::wide(format!(r"\\?\pipe\uv\mivlet-{name}"));
+    let legacy = unsafe {
+        CreateNamedPipeW(
+            legacy_name.as_ptr(),
+            PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            1,
+            4096,
+            4096,
+            0,
+            ptr::null(),
+        )
+    };
+    let error = unsafe { GetLastError() };
+    if legacy != INVALID_HANDLE_VALUE {
+        unsafe {
+            CloseHandle(legacy);
+        }
+    }
+    println!("LEGACY_PIPE_ERROR={error}");
+    assert_eq!(
+        legacy, INVALID_HANDLE_VALUE,
+        "Legacy pipe namespace unexpectedly accepted inside AppContainer"
+    );
+    assert_eq!(error, ERROR_ACCESS_DENIED);
+    let local_name = security::wide(format!(r"\\?\pipe\LOCAL\uv\mivlet-{name}"));
+    let local = unsafe {
+        CreateNamedPipeW(
+            local_name.as_ptr(),
+            PIPE_ACCESS_DUPLEX,
+            PIPE_TYPE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
+            1,
+            4096,
+            4096,
+            0,
+            ptr::null(),
+        )
+    };
+    assert_ne!(
+        local,
+        INVALID_HANDLE_VALUE,
+        "Container-scoped pipe failed: {}",
+        unsafe { GetLastError() }
+    );
+    unsafe {
+        CloseHandle(local);
+    }
+    println!("LOCAL_PIPE_CREATED");
+}
+
+#[test]
+#[ignore = "Actual Win32 namespace diagnosis; requires native runtime and execution setup"]
+fn native_pipe_namespace_acceptance() {
+    let source = tempfile::tempdir().unwrap();
+    fs::copy(
+        std::env::current_exe().unwrap(),
+        source.path().join("probe.exe"),
+    )
+    .unwrap();
+    let completed = execute(
+        source.path(),
+        "probe.exe --ignored --exact acceptance::pipe_namespace_probe --nocapture",
+        20,
+    );
+    assert_eq!(
+        completed.receipt().exit_code,
+        Some(0),
+        "{}",
+        completed.receipt().output
+    );
+    assert!(completed.receipt().output.contains("LEGACY_PIPE_ERROR=5"));
+    assert!(completed.receipt().output.contains("LOCAL_PIPE_CREATED"));
+    assert!(completed.receipt().output.contains("1 passed"));
+    println!("{}", completed.receipt().output);
+}
+
+#[test]
 #[ignore = "Invoked only inside the native acceptance AppContainer"]
 fn credential_probe() {
     let name = fs::read_to_string("credential-name.txt").unwrap();
