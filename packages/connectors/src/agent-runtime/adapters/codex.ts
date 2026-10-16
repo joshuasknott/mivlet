@@ -147,6 +147,9 @@ export function createCodexBackend(
 
     async function* stream(): AsyncIterable<BackendAgentEvent> {
       try {
+        if (request.serviceTier && provider.models.find((model) => model.id === request.model && model.available)?.fastMode?.serviceTier !== request.serviceTier) {
+          throw new Error("Fast mode is unavailable for this model. Refresh the model list or turn Fast mode off.");
+        }
         await liveHandle.initialize();
         const existingThreadId = requestedThreadId(request);
         const thread = existingThreadId

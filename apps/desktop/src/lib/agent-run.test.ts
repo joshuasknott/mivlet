@@ -268,6 +268,11 @@ describe("sourceAllowedByConnections", () => {
 });
 
 describe("buildAgentRequest", () => {
+  it("preserves the chosen reasoning effort when fast processing is requested", () => {
+    expect(buildAgentRequest({ model: "reasoner", prompt: "Plan", reasoningEffort: "high", serviceTier: "fast" }))
+      .toMatchObject({ model: "reasoner", reasoningEffort: "high", serviceTier: "fast" });
+    expect(buildAgentRequest({ model: "reasoner", prompt: "Plan" })).not.toHaveProperty("serviceTier");
+  });
   it("keeps agent instructions out of the user's message", () => {
     const request = buildAgentRequest({ model: "test", prompt: "Plan my week", instructions: "  Keep priorities clear.  " });
     expect(request.messages).toEqual([

@@ -21,6 +21,7 @@ import {
 } from "./agent-run";
 import { normalizeActiveItem } from "./helpers";
 import type { PersistedShellState } from "./types";
+import { normalizeSidebarPreferences } from "./sidebar-preferences";
 
 const AGENT_ICON_COLORS = ["#865DFA", "#3581FB", "#2CC663", "#FCBD22", "#FC6D69", "#555B63"];
 const MAX_AGENT_IMAGE_DATA_URL_CHARACTERS = 512_000;
@@ -106,6 +107,7 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     approvalRules: state.approvalRules,
     agents: state.agents,
     activeAgentId: state.activeAgentId,
+    sidebarPreferences: normalizeSidebarPreferences(state.sidebarPreferences),
     pinnedSourceIds: state.pinnedSourceIds,
     importedKnowledgeSources: state.importedKnowledgeSources,
     memoryDisabled: state.memoryDisabled,
@@ -137,6 +139,7 @@ export function shellStateFromRuntimeSnapshot(
     approvalRules: snapshot.approvalRules,
     agents: normalizeAgentProfiles(snapshot.agents?.length ? snapshot.agents : defaultShellState.agents),
     activeAgentId: snapshot.activeAgentId ?? defaultShellState.activeAgentId,
+    sidebarPreferences: normalizeSidebarPreferences(snapshot.sidebarPreferences),
     pinnedSourceIds: snapshot.pinnedSourceIds,
     importedKnowledgeSources: snapshot.importedKnowledgeSources,
     memoryDisabled: snapshot.memoryDisabled,
@@ -169,6 +172,7 @@ function normalizePersistedShellState(state: PersistedShellState): PersistedShel
     voiceProvider: state.voiceProvider === "openai" ? "openai" : "browser",
     onboardingVersion: state.onboardingVersion ?? 0,
     agents: normalizeAgentProfiles(state.agents),
+    sidebarPreferences: normalizeSidebarPreferences(state.sidebarPreferences),
     permissionMode,
     permissionLabel: normalizeApprovalPresetLabel(state.permissionLabel, permissionMode),
     customApprovalSettings: normalizeCustomApprovalSettings(state.customApprovalSettings)
@@ -206,6 +210,7 @@ function normalizeAgentProfiles(agents: MivletAgentProfile[] | undefined): Mivle
       ...agent,
       notificationsEnabled: agent.notificationsEnabled !== false,
       reasoningEffort: typeof agent.reasoningEffort === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(agent.reasoningEffort) ? agent.reasoningEffort : undefined,
+      fastMode: agent.fastMode === true,
       icon: "agent",
       iconColor,
       avatarSeed: typeof agent.avatarSeed === "string" && /^(?:blob-v1:|ink-v1:[0-5]:|robot-v3:[0-7]:|rounded-v2:[0-7]:|organic-v1:[0-7]:)/.test(agent.avatarSeed) && agent.avatarSeed.length <= 160

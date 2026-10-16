@@ -264,6 +264,7 @@ export function buildContextPrefixForRun(input: BuildContextPrefixForRunInput): 
 export interface BuildAgentRequestInput {
   model: string;
   reasoningEffort?: string;
+  serviceTier?: AgentTurnRequest["serviceTier"];
   prompt: string;
   instructions?: string;
   maxTokens?: number;
@@ -282,6 +283,7 @@ export function buildAgentRequest(input: BuildAgentRequestInput): AgentTurnReque
   return {
     model: input.model,
     ...(input.reasoningEffort ? { reasoningEffort: input.reasoningEffort } : {}),
+    ...(input.serviceTier ? { serviceTier: input.serviceTier } : {}),
     messages: [
       ...(input.instructions?.trim()
         ? [{ role: "system" as const, content: input.instructions.trim() }]

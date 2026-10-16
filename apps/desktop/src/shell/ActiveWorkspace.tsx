@@ -5,6 +5,7 @@ import type { MivletAgentProfile } from "@mivlet/protocol";
 import {
   Suspense,
   useEffect,
+  useMemo,
   useRef,
   useState,
   useSyncExternalStore,
@@ -13,6 +14,7 @@ import {
 import {
   AgentSidebar,
 } from "../components/agents/AgentSidebar";
+import { sidebarActivity, sidebarAttention } from "../components/agents/sidebar-data";
 import { OpenWebPreview } from "../components/navigation/PanelContent";
 import type { SettingsTab } from "../components/pages/settings-tabs";
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
@@ -298,6 +300,9 @@ export function ActiveWorkspace({
     sessions: state.sessions,
     openApprovals: runtime.openApprovals,
   });
+  const sidebarRecency = useMemo(() => sidebarActivity(projects.projects, state.data.conversations, state.data.work),
+    [projects.projects, state.data.conversations, state.data.work]);
+  const attention = sidebarAttention(state.data.work, state.sessions, runtime.openApprovals, state.data.conversations);
   const newSideChat = () => {
     const intent = sideChatIntent({
       navContext: nav.navContext,
@@ -368,6 +373,21 @@ export function ActiveWorkspace({
       >
         <AgentNotifications agents={runtime.agents} work={state.data.work} onOpen={nav.open} />
         <AgentSidebar
+          preferences={runtime.sidebarPreferences}
+          onPreferencesChange={runtime.setSidebarPreferences}
+          projectActivity={sidebarRecency.project}
+          agentActivity={sidebarRecency.agent}
+          teams={state.data.teams}
+          attention={attention}
+          onOpenAttention={(item) => {
+            setAgentEditor(null);
+            nav.setProjectDetailsId(null);
+            nav.setComputer(null);
+            nav.setPanelRequest(null);
+            if (item.kind === "approval") nav.open(item.conversationId);
+            else nav.selectNavWork(item.id);
+          }}
+          onNewConversation={newConversation}
           onSearch={() => setSearchOpen(true)}
           hidden={nav.phone && !nav.mobileNavigation}
           agents={runtime.agents}

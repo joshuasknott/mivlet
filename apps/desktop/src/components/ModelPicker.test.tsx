@@ -11,13 +11,45 @@ function Harness({ choose = () => undefined, options = models }: { choose?: (val
   const [open, setOpen] = useState(false);
   const [id, setId] = useState(options[0]?.id ?? "");
   const [effort, setEffort] = useState<string>();
+  const [fastMode, setFastMode] = useState(false);
   return <><button>Outside</button><ModelPicker models={options} selectedId={id} label={options.find((model) => model.id === id)?.label ?? "Automatic"}
     effort={effort} onSelect={(value) => { setId(value); setEffort(undefined); }}
+    fastMode={fastMode} onFastModeChange={setFastMode}
     onSelectEffort={(value) => { choose(value); setEffort(value); }} open={open} onOpenChange={setOpen} /></>;
 }
 const openPicker = () => fireEvent.click(screen.getByRole("button", { name: /^Select model:/ }));
 const browse = () => fireEvent.click(screen.getByRole("button", { name: "Change model" }));
 describe("Model picker", () => {
+  it("toggles advertised Fast mode independently of effort and resets both", () => {
+    render(<Harness options={[{ ...models[0], fastMode: { serviceTier: "fast" } }]} />);
+    openPicker();
+    const slider = screen.getByRole("slider");
+    fireEvent.change(slider, { target: { value: "1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Fast mode" }));
+    expect(screen.getByRole("button", { name: "Fast mode" })).toHaveAttribute("aria-pressed", "true");
+    expect(slider).toHaveAttribute("aria-valuetext", "High");
+    expect(screen.getByRole("button", { name: "Select model: Reasoner, High, Fast mode" })).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Reset model options" }));
+    expect(slider).toHaveAttribute("aria-valuetext", "Low");
+    expect(screen.getByRole("button", { name: "Fast mode" })).toHaveAttribute("aria-pressed", "false");
+  });
+  it("turns Fast mode off when switching models and hides it when unsupported", () => {
+    render(<Harness options={[{ ...models[0], fastMode: { serviceTier: "priority" } }, models[1]]} />);
+    openPicker();
+    fireEvent.click(screen.getByRole("button", { name: "Fast mode" }));
+    browse();
+    fireEvent.click(screen.getByRole("menuitemradio", { name: "xAI Other" }));
+    expect(screen.getByRole("button", { name: "Select model: Other" })).toBeVisible();
+    openPicker();
+    expect(screen.queryByRole("button", { name: "Fast mode" })).not.toBeInTheDocument();
+  });
+  it("lets a saved Fast setting be turned off after a model loses support", () => {
+    const change = vi.fn();
+    render(<ModelPicker models={models} selectedId={models[0].id} label="Reasoner" onSelect={vi.fn()}
+      fastMode onFastModeChange={change} open onOpenChange={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Fast mode" }));
+    expect(change).toHaveBeenCalledWith(false);
+  });
   it("announces each supported slider step and the selected model", () => {
     const choose = vi.fn();
     render(<Harness choose={choose} options={[{ ...models[0], reasoning: { supportedEfforts: ["low", "medium", "high", "xhigh", "max"], defaultEffort: "low" } }]} />);

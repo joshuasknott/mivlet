@@ -46,6 +46,7 @@ import {
 import { MAX_IMPORTED_KNOWLEDGE_SOURCES } from "../lib/constants";
 import { mergeKnowledgeSources, readFileAsText } from "../lib/helpers";
 import { hasTauriRuntime, readPersistedShellState } from "../lib/persistence";
+import { normalizeSidebarPreferences } from "../lib/sidebar-preferences";
 import { type PersistedShellState } from "../lib/types";
 import {
   importRuntimeLocalKnowledgeSource,
@@ -224,6 +225,9 @@ export function useShellRuntime(
   const [hiddenModelIds, setHiddenModelIds] = useState<string[]>(
     initialState.hiddenModelIds ?? [],
   );
+  const [sidebarPreferences, setSidebarPreferences] = useState(() =>
+    normalizeSidebarPreferences(initialState.sidebarPreferences),
+  );
   const {
     connectedBackendIds,
     setConnectedBackendIds,
@@ -287,6 +291,7 @@ export function useShellRuntime(
       onboardingVersion,
       selectedModelId,
       hiddenModelIds,
+      sidebarPreferences,
       permissionMode,
       permissionLabel,
       customApprovalSettings,
@@ -310,6 +315,7 @@ export function useShellRuntime(
       pinnedSourceIds,
       selectedModelId,
       hiddenModelIds,
+      sidebarPreferences,
       voiceEnabled,
       voiceProvider,
     ],
@@ -323,6 +329,7 @@ export function useShellRuntime(
     setLastAction,
     onReset: () => {
       setActiveItem(defaultShellState.activeItem);
+      setSidebarPreferences(normalizeSidebarPreferences(undefined));
 
       setAgents(defaultShellState.agents ?? []);
       setActiveAgentId(defaultShellState.activeAgentId ?? "chief-of-staff");
@@ -376,6 +383,7 @@ export function useShellRuntime(
       setOnboardingVersion(recovered.onboardingVersion ?? 0);
       setSelectedModelId(recovered.selectedModelId);
       setHiddenModelIds(recovered.hiddenModelIds ?? []);
+      setSidebarPreferences(normalizeSidebarPreferences(recovered.sidebarPreferences));
       setPermissionMode(recovered.permissionMode);
       setPermissionLabel(
         isApprovalPresetLabel(recovered.permissionLabel)
@@ -1088,6 +1096,8 @@ export function useShellRuntime(
     modelOptions,
     allModelOptions,
     hiddenModelIds,
+    sidebarPreferences,
+    setSidebarPreferences,
     setModelVisible: (modelId: string, visible: boolean) => {
       if (!allModelOptions.some((model) => model.id === modelId)) return;
       setHiddenModelIds((current) =>

@@ -132,6 +132,7 @@ export function AgentEditor({
       instructions: agent.instructions,
       modelId: agent.modelId,
       reasoningEffort: agent.reasoningEffort,
+      fastMode: agent.fastMode,
       notificationsEnabled: agent.notificationsEnabled !== false,
       icon: "agent",
       iconColor: agent.iconColor || DEFAULT_AGENT_COLOR,
@@ -215,8 +216,9 @@ export function AgentEditor({
           <div className="agent-editor__model-settings">
             <div className="agent-editor__field agent-editor__model"><span>Model</span>
               <ModelPicker models={models} selectedId={draft.modelId} label={models.find((model) => model.id === draft.modelId)?.label ?? (draft.modelId ? "Unavailable model" : "Automatic")}
-                effort={draft.reasoningEffort} onSelect={(modelId) => setDraft({ ...draft, modelId, reasoningEffort: undefined })}
-                onSelectEffort={(reasoningEffort) => setDraft({ ...draft, reasoningEffort })} open={modelOpen} onOpenChange={setModelOpen} allowAutomatic />
+                effort={draft.reasoningEffort} fastMode={draft.fastMode} onFastModeChange={(fastMode) => setDraft((current) => ({ ...current, fastMode }))}
+                onSelect={(modelId) => setDraft((current) => ({ ...current, modelId, reasoningEffort: undefined, fastMode: false }))}
+                onSelectEffort={(reasoningEffort) => setDraft((current) => ({ ...current, reasoningEffort }))} open={modelOpen} onOpenChange={setModelOpen} allowAutomatic />
               <small>{draft.modelId ? "This model and reasoning setting apply to this agent's future requests." : "Automatic uses an available connected model."}</small>
             </div>
           </div>

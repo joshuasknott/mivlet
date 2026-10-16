@@ -59,9 +59,10 @@ describe("conversation shell persistence", () => {
   });
 
   it("keeps agent skills, reasoning and previous conversations across snapshots", () => {
-    const profile = { ...defaultShellState.agents![0], avatarSeed: "blob-v1:stable-avatar", reasoningEffort: "high", threadId: "current", threadIds: ["earlier", "earlier"], learnedTasks: [{ id: "weekly", title: "Plan", instruction: "Ask about priorities", createdAt: "2026-09-04", updatedAt: "2026-09-04" }] };
+    const profile = { ...defaultShellState.agents![0], avatarSeed: "blob-v1:stable-avatar", reasoningEffort: "high", fastMode: true, threadId: "current", threadIds: ["earlier", "earlier"], learnedTasks: [{ id: "weekly", title: "Plan", instruction: "Ask about priorities", createdAt: "2026-09-04", updatedAt: "2026-09-04" }] };
     const restored = shellStateFromRuntimeSnapshot(shellStateToRuntimeSnapshot({ ...defaultShellState, agents: [profile] }), defaultShellState);
     expect(restored.agents![0]).toMatchObject({ avatarSeed: profile.avatarSeed, reasoningEffort: "high", threadIds: ["earlier", "current"], learnedTasks: profile.learnedTasks });
+    expect(restored.agents![0].fastMode).toBe(true);
   });
 
   it("round-trips the supported local state without orchestration collections", () => {

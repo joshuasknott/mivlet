@@ -143,13 +143,12 @@ P3/P4/P5 call from an explicit user action:
 
 ### Explicit provider continuation
 
-The conversation composer offers **Continue with selected model…** after the
-user writes the next request. Select another connected model in the ordinary
-picker to switch providers, or retain it for a fresh session. Stop active Work
-first. The preview shows the actual native selection and requires review of
-saved results and uncertain effects before admission. Draft attachments must be
-removed for this text-only action; historical attachment bytes are never copied,
-and the preview reports their missing references.
+The composer uses the ordinary model picker for future requests. It does not
+expose a separate continuation preview or context inspector. Context assembly,
+recovery, and the native continuation commands described below remain intact.
+Continuation admission is text-only: historical attachment bytes are never
+copied, and the native preview reports missing references. Active Work must stop
+before a continuation can be admitted.
 
 `collaboration/provider_continuation.rs` reads the canonical account/member
 conversation and current scoped context. It preserves complete user/assistant

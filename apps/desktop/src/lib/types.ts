@@ -58,6 +58,7 @@ export interface PersistedShellState {
   /** User-owned agents. Optional only for snapshots created before agents existed. */
   agents?: import("@mivlet/protocol").MivletAgentProfile[];
   activeAgentId?: string;
+  sidebarPreferences?: import("@mivlet/protocol").SidebarPreferences;
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;

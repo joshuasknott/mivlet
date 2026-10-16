@@ -181,6 +181,8 @@ export interface ShellRuntime {
   modelOptions: ProviderModelOption[];
   allModelOptions: ProviderModelOption[];
   hiddenModelIds: string[];
+  sidebarPreferences: import("@mivlet/protocol").SidebarPreferences;
+  setSidebarPreferences: (preferences: import("@mivlet/protocol").SidebarPreferences) => void;
   setModelVisible: (modelId: string, visible: boolean) => void;
   /** The provider model id that should drive the next agent run (re-validated). */
   resolvedSelectedModelId: string;

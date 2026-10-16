@@ -10,16 +10,21 @@ const seed = "ink-v1:0:saved";
 describe("ink agent characters", () => {
   it("renders all six artwork cells without stretching or sharing the selected cell", () => {
     const view = render(<>{AVATAR_SHAPES.map((_, index) => <AgentAvatar key={index} seed={`ink-v1:${index}:saved`} />)}</>);
-    const characters = [...view.container.querySelectorAll<HTMLElement>(".ink-character__artwork")];
+    const characters = [...view.container.querySelectorAll(".ink-character__artwork image")];
     expect(characters).toHaveLength(6);
-    expect(new Set(characters.map((character) => character.style.backgroundPosition)).size).toBe(6);
-    for (const character of characters) expect(character.style.backgroundImage).toContain("agent-characters.webp");
+    expect(new Set(characters.map((character) => `${character.getAttribute("x")}:${character.getAttribute("y")}`)).size).toBe(6);
+    for (const character of characters) {
+      expect(character.getAttribute("href")).toContain("agent-characters.webp");
+      expect(character).toHaveAttribute("width", "1536");
+      expect(character).toHaveAttribute("height", "1024");
+      expect(character.closest("svg")).toHaveAttribute("viewBox", "0 0 512 512");
+    }
   });
 
   it("recolours only the body, preserving pupils, white faces and transparency", () => {
     const view = render(<AgentAvatar seed={seed} color="#3659E3" />);
-    const artwork = view.container.querySelector<HTMLElement>(".ink-character__artwork")!;
-    const position = artwork.style.backgroundPosition;
+    const artwork = view.container.querySelector(".ink-character__artwork image")!;
+    const position = [artwork.getAttribute("x"), artwork.getAttribute("y")];
     const values = () => view.container.querySelector("feColorMatrix")!.getAttribute("values")!.split(" ").map(Number);
     const matrix = values();
     for (let row = 0; row < 3; row++) {
@@ -31,7 +36,7 @@ describe("ink agent characters", () => {
     expect((view.container.firstChild as HTMLElement).style.backgroundColor).toBe("");
     view.rerender(<AgentAvatar seed={seed} color="#E4684B" presence="waiting" />);
     expect(values()).not.toEqual(matrix);
-    expect(artwork.style.backgroundPosition).toBe(position);
+    expect([artwork.getAttribute("x"), artwork.getAttribute("y")]).toEqual(position);
   });
 
   it("leaves uploaded portraits unaltered without generated motion or a colour background", () => {

@@ -21,7 +21,7 @@ describe("quiet agent surface", () => {
   it("caps project avatars at three distinct current members and preserves uploaded images", () => {
     const members = Array.from({ length: 5 }, (_, index) => ({ ...agent, id: `member-${index}`, name: `Member ${index}`,
       iconImageDataUrl: index === 0 ? "data:image/png;base64,fixture" : undefined }));
-    render(<AgentSidebar agents={[agent, ...members]} activeAgentId={agent.id} profileName="Local" connectors={[]}
+    render(<AgentSidebar onNewConversation={vi.fn()} agents={[agent, ...members]} activeAgentId={agent.id} profileName="Local" connectors={[]}
       previews={{}} marketplaceActive={false} projects={[{ id: "project", name: "Launch", threadId: "main" }, { id: "empty", name: "Empty" }]}
       conversations={[{ id: "main", title: "Launch", kind: "group", participants: [...members.map(member => ({ agentId: member.id })), { agentId: members[0].id }, { agentId: "deleted" }] }]}
       onSelectAgent={vi.fn()} onCreateAgent={vi.fn()} onOpenMarketplace={vi.fn()}
@@ -37,7 +37,7 @@ describe("quiet agent surface", () => {
       onSelectAgent = vi.fn(),
       onSelectProject = vi.fn();
     render(
-      <AgentSidebar
+      <AgentSidebar onNewConversation={vi.fn()}
         agents={[agent]}
         activeAgentId={agent.id}
         profileName="Local"
@@ -101,7 +101,7 @@ describe("quiet agent surface", () => {
   it("shows work in progress, then a completion dot until selected, and rearms for the next task", () => {
     const onSelectAgent = vi.fn();
     const sidebar = (presence: "idle" | "working" | "service" | "done" | "waiting" | "blocked", completionId = "turn-1") => (
-      <AgentSidebar agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]}
+      <AgentSidebar onNewConversation={vi.fn()} agents={[agent]} activeAgentId={agent.id} profileName="Local" connectors={[]}
         marketplaceActive={false} previews={{ [agent.id]: { message: "Draft", time: "", presence,
           status: presence === "working" || presence === "service" ? "running" : "idle", completionId } }}
         onSelectAgent={onSelectAgent} onCreateAgent={vi.fn()}
@@ -143,7 +143,7 @@ describe("quiet agent surface", () => {
     const onOpenSettings = vi.fn();
     const onOpenMarketplace = vi.fn();
     render(
-      <AgentSidebar
+      <AgentSidebar onNewConversation={vi.fn()}
         agents={[agent]}
         activeAgentId={agent.id}
         previews={{
@@ -167,12 +167,11 @@ describe("quiet agent surface", () => {
     );
 
     expect(screen.getByRole("button", { name: "Mira" })).toBeVisible();
-    expect(screen.getByText("Draft launch copy")).toBeVisible();
+    expect(screen.queryByText("Draft launch copy")).not.toBeInTheDocument();
     expect(
       screen.queryByRole("button", { name: "Search" }),
     ).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: /Plugins/i }));
-    fireEvent.click(screen.getByRole("button", { name: "Create or message" }));
     fireEvent.click(screen.getByRole("button", { name: "Create agent" }));
     fireEvent.click(screen.getByRole("button", { name: /Local workspace/i }));
     expect(onOpenSettings).not.toHaveBeenCalled();

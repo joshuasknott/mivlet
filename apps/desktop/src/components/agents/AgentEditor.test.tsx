@@ -14,6 +14,23 @@ const props = { models: [], connectors: [], knowledgeSources: [], canDelete: fal
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 beforeEach(() => vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
 
+it("resets effort and speed together without reverting a newly chosen model", async () => {
+  const save = vi.fn();
+  const models = [
+    { id: "codex::first", modelId: "first", providerId: "codex", providerLabel: "ChatGPT", label: "First", available: true, reasoning: { supportedEfforts: ["medium", "high"], defaultEffort: "medium" }, fastMode: { serviceTier: "fast" as const } },
+    { id: "codex::second", modelId: "second", providerId: "codex", providerLabel: "ChatGPT", label: "Second", available: true },
+  ];
+  render(<AgentEditor {...props} models={models} open agent={{ ...profile, modelId: models[0].id, reasoningEffort: "high", fastMode: true }} onSave={save} />);
+  await userEvent.click(screen.getByRole("button", { name: "Select model: First, High, Fast mode" }));
+  await userEvent.click(screen.getByRole("button", { name: "Reset model options" }));
+  expect(screen.getByRole("button", { name: "Select model: First, Medium" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Change model" }));
+  await userEvent.click(screen.getByRole("menuitemradio", { name: "ChatGPT Second" }));
+  expect(screen.getByRole("button", { name: "Select model: Second" })).toBeVisible();
+  await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
+  expect(save).toHaveBeenCalledWith(expect.objectContaining({ modelId: "codex::second", reasoningEffort: undefined, fastMode: false }));
+});
+
 it("traps focus inside the settings panel on a narrow screen", async () => {
   vi.stubGlobal("matchMedia", vi.fn().mockReturnValue({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
   render(<><button>Conversation</button><AgentEditor {...props} open presentation="panel" agent={profile} onSave={vi.fn()} /></>);
