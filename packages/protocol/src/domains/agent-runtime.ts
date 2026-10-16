@@ -427,6 +427,8 @@ export interface BackendModel {
     supportedEfforts: string[];
     defaultEffort?: string;
   };
+  /** Exact faster-processing tier advertised by the connected runtime. */
+  fastMode?: { serviceTier: "fast" | "priority" };
 }
 
 /**
@@ -657,6 +659,8 @@ export type BackendAgentEvent =
 export interface AgentTurnRequest {
   model: string;
   reasoningEffort?: string;
+  /** Explicit opt-in, resolved from the selected model's advertised fast mode. */
+  serviceTier?: "fast" | "priority";
   messages: NativeMessage[];
   tools: NativeToolSpec[];
   /** Max output tokens; adapters clamp to the model's known ceiling. */

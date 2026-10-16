@@ -956,6 +956,17 @@ export interface ConnectorSourceProvider {
     AsyncIterable<ConnectorSourceCandidate> | ConnectorSourceCandidate[];
 }
 
+/** Navigation preferences only; chats cannot be pinned in the workspace sidebar. */
+export interface SidebarPreferences {
+  pinned: { kind: "project" | "agent"; id: string }[];
+  projectOrder: string[];
+  agentOrder: string[];
+  projectSort: "recent" | "manual";
+  agentSort: "recent" | "manual";
+  projectsCollapsed: boolean;
+  agentsCollapsed: boolean;
+}
+
 export interface RuntimeSnapshot {
   version: 1;
   activeItem: string;
@@ -969,6 +980,7 @@ export interface RuntimeSnapshot {
   agents?: MivletAgentProfile[];
   /** The agent currently owning the conversation surface. */
   activeAgentId?: string;
+  sidebarPreferences?: SidebarPreferences;
   pinnedSourceIds: string[];
   importedKnowledgeSources: LocalFileImport[];
   memoryDisabled: boolean;
@@ -1032,6 +1044,8 @@ export interface MivletAgentProfile {
   instructions: string;
   modelId: string;
   reasoningEffort?: string;
+  /** Opt-in faster processing for models that advertise a supported service tier. */
+  fastMode?: boolean;
   icon: MivletAgentIcon;
   /** In-app completion and attention notices; never controls approval prompts. */
   notificationsEnabled?: boolean;

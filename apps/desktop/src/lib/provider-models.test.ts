@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { BackendProvider } from "@mivlet/protocol";
 import {
+  agentServiceTier,
   modelsForProvider,
   providerModelOptions,
   resolveProviderModelOption
@@ -19,6 +20,14 @@ function provider(id: string, label: string): BackendProvider {
 }
 
 describe("provider model choices", () => {
+  it("requires explicit opt-in and a currently advertised fast tier", () => {
+    const model = { id: "reasoner", label: "Reasoner", available: true, fastMode: { serviceTier: "priority" as const } };
+    expect(agentServiceTier(model)).toBeUndefined();
+    expect(agentServiceTier(model, false)).toBeUndefined();
+    expect(agentServiceTier(model, true)).toBe("priority");
+    expect(() => agentServiceTier({ ...model, fastMode: undefined }, true)).toThrow("Fast mode is unavailable");
+    expect(() => agentServiceTier({ ...model, available: false }, true)).toThrow("Fast mode is unavailable");
+  });
   it("always qualifies ids so later provider connections cannot reroute a selection", () => {
     const options = providerModelOptions([
       {

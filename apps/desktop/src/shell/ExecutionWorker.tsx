@@ -29,7 +29,7 @@ import { loadGeneratedUiInstructions } from "../lib/generated-interface";
 import { capturedFileExclusions } from "../lib/context-selection";
 import { builtinPluginInstructions } from "../lib/builtin-plugins";
 import { composerImageInputs } from "../lib/composer-images";
-import { modelsForProvider } from "../lib/provider-models";
+import { agentServiceTier, modelsForProvider } from "../lib/provider-models";
 import { checkRuntimeManagedTool } from "../runtime/domains/providers";
 import {
   prepareExecutionAttachments,
@@ -347,6 +347,7 @@ export function ExecutionWorker({
         const request = buildAgentRequest({
             model: session.model.modelId,
             reasoningEffort: session.profile.reasoningEffort,
+            serviceTier: agentServiceTier(session.model, session.profile.fastMode),
             // userRequest is durable provenance for the root conversation.
             // The provider must receive this assignment's prompt so a child
             // cannot mistake the root request for a fresh delegation order.

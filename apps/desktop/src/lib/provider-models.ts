@@ -20,6 +20,13 @@ export interface ProviderModels {
 
 const MODEL_KEY_SEPARATOR = "::";
 
+/** Never silently keep a premium speed setting when the selected model loses it. */
+export function agentServiceTier(model: BackendModel, fastMode?: boolean) {
+  if (!fastMode) return undefined;
+  if (!model.available || !model.fastMode) throw new Error("Fast mode is unavailable for this model. Turn it off or choose a supported model.");
+  return model.fastMode.serviceTier;
+}
+
 /** Build collision-safe model choices for every connected, runnable backend. */
 export function providerModelOptions(entries: ProviderModels[]): ProviderModelOption[] {
   return entries.flatMap(({ provider, models }) =>

@@ -746,6 +746,8 @@ pub struct BackendModel {
     pub capabilities: Option<serde_json::Value>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reasoning: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<serde_json::Value>,
 }
 
 /// Describes a connected (or connectable) agent-runtime backend. The Rust
@@ -1103,6 +1105,8 @@ pub struct MivletAgentProfile {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reasoning_effort: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fast_mode: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub notifications_enabled: Option<bool>,
     pub icon: String,
     #[serde(default)]
@@ -1151,6 +1155,8 @@ pub struct RuntimeSnapshot {
     pub agents: Vec<MivletAgentProfile>,
     #[serde(default)]
     pub active_agent_id: Option<String>,
+    #[serde(default)]
+    pub sidebar_preferences: Option<SidebarPreferences>,
     pub pinned_source_ids: Vec<String>,
     pub imported_knowledge_sources: Vec<LocalFileImport>,
     pub memory_disabled: bool,
@@ -1178,4 +1184,23 @@ pub struct RuntimeSnapshot {
 
 fn default_permission_mode() -> String {
     "trusted-scope".to_string()
+}
+
+/// Account-owned navigation only. These references confer no data access.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase", default)]
+pub struct SidebarPreferences {
+    pub pinned: Vec<SidebarPin>,
+    pub project_order: Vec<String>,
+    pub agent_order: Vec<String>,
+    pub project_sort: String,
+    pub agent_sort: String,
+    pub projects_collapsed: bool,
+    pub agents_collapsed: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+pub struct SidebarPin {
+    pub kind: String,
+    pub id: String,
 }

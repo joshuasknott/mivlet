@@ -47,8 +47,8 @@ bounded retrieval/context through the existing native boundaries.
 preserves a newer selection when an older submission completes.
 `shell/TeammateWorkspace.tsx` remains the public shell entry (account, theme,
 and onboarding). `shell/ActiveWorkspace.tsx` owns live workspace composition
-and `WorkspaceExecution` service wiring. Conversation chrome, the context
-panel, and overlay dialogs live beside it; `workspace-presentation.ts` owns
+and `WorkspaceExecution` service wiring. Conversation chrome and overlay
+dialogs live beside it; `workspace-presentation.ts` owns
 indicator, preview, and new-action parity. Lazy route islands stay in
 `workspace-lazy.tsx`. `shell/useWorkspaceNavigation.ts` owns view restoration
 and navigation, while `WorkspaceExecution` retains execution ownership. Native-agent regressions are
@@ -57,6 +57,18 @@ their shared `native-agent-test-harness.ts` supplies deterministic native transp
 The hook implementation lives in `hooks/native-agent/` behind the stable
 `hooks/useNativeAgent.ts` facade (`useNativeAgent`, `NativeAgentState`,
 `UseNativeAgentOptions`, `NativeAgentRunControl`).
+
+Sidebar preferences are account-owned snapshot data. Only projects and agents
+can be pinned; recent activity determines the default order without showing
+timestamps. Project member icons use current team membership. `sidebar-data`,
+`sidebar-preferences`, and `AgentSidebar` tests cover these boundaries.
+
+Fast mode is an explicit per-agent speed preference, independent of reasoning
+effort. It requires an advertised tier from the connected model catalogue;
+unsupported requests fail before inference. Codex receives the advertised tier
+when enabled and an explicit default tier when disabled. Model picker, agent
+editor, snapshot, adapter, and native request tests cover this path; these checks
+do not establish live provider latency or paid usage.
 
 Generated logs, screenshots, reports and build comparisons belong under the
 ignored `output/` directory or the system temporary directory, not the repository

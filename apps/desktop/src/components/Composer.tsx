@@ -52,6 +52,8 @@ export function Composer({
   modelScope,
   selectedReasoningEffort,
   onSelectReasoningEffort,
+  fastMode,
+  onFastModeChange,
   placeholder = "Ask anything…",
   onSelectModel,
   inThread = false,
@@ -100,6 +102,8 @@ export function Composer({
   modelScope?: string;
   selectedReasoningEffort?: string;
   onSelectReasoningEffort?: (effort: string | undefined) => void;
+  fastMode?: boolean;
+  onFastModeChange?: (enabled: boolean) => void;
   placeholder?: string;
   onSelectModel: (modelId: string) => void;
   inThread?: boolean;
@@ -466,6 +470,7 @@ export function Composer({
             {recipientControl}
             {secondaryControlsInMenu ? <div className="composer-secondary-model">
               <ModelPicker hideTrigger models={models} selectedId={selectedModelId} label={selectedModelLabel}
+                fastMode={fastMode} onFastModeChange={onFastModeChange}
                 scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
                 onSelectEffort={onSelectReasoningEffort} open={modelOpen}
                 onOpenChange={(open) => { setModelOpen(open); if (!open) addTrigger.current?.focus(); }} />
@@ -476,6 +481,7 @@ export function Composer({
             {!compactAgentSurface && !secondaryControlsInMenu && (modelControl ?? (!models.some(model => model.available) && onConnectProvider
               ? <button type="button" className="composer-model" onClick={() => { closeExternalMenus(); onConnectProvider(); }}>Connect a provider</button>
               : <ModelPicker models={models} selectedId={selectedModelId}
+              fastMode={fastMode} onFastModeChange={onFastModeChange}
               label={selectedModelLabel} scopeLabel={modelScope} effort={selectedReasoningEffort} onSelect={onSelectModel}
               onSelectEffort={onSelectReasoningEffort} open={modelOpen}
               onOpenChange={(open) => { if (open) closeExternalMenus(); setModelOpen(open); }} />))}

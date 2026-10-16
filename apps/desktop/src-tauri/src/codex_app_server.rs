@@ -54,6 +54,7 @@ pub(crate) struct CodexModelCatalogEntry {
     pub(crate) is_default: bool,
     pub(crate) supports_images: bool,
     pub(crate) reasoning: Option<Value>,
+    pub(crate) fast_mode: Option<Value>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -70,10 +71,18 @@ pub struct CodexTurnStartRequest {
 struct CodexAgentRunRequest {
     model: String,
     reasoning_effort: Option<String>,
+    service_tier: Option<CodexServiceTier>,
     messages: Vec<CodexMessage>,
     tools: Vec<Value>,
     #[allow(dead_code)]
     max_tokens: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum CodexServiceTier {
+    Fast,
+    Priority,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -784,6 +793,7 @@ pub(crate) fn codex_model_catalog() -> Result<Vec<CodexModelCatalogEntry>, Strin
                         id: id.to_string(),
                         label: label.to_string(),
                         reasoning: model_reasoning(model),
+                        fast_mode: model_fast_mode(model),
                         supports_images: model
                             .get("inputModalities")
                             .and_then(Value::as_array)
@@ -1092,6 +1102,31 @@ fn read_codex_stdout(
     }
 }
 
+fn model_fast_mode(model: &Value) -> Option<Value> {
+    // Runtime discovery is authoritative. Older clients called these speed tiers.
+    let tier = model
+        .get("serviceTiers")
+        .and_then(Value::as_array)
+        .and_then(|tiers| {
+            tiers
+                .iter()
+                .filter_map(|tier| tier.get("id").and_then(Value::as_str))
+                .find(|tier| matches!(*tier, "fast" | "priority"))
+        })
+        .or_else(|| {
+            model
+                .get("additionalSpeedTiers")
+                .and_then(Value::as_array)
+                .and_then(|tiers| {
+                    tiers
+                        .iter()
+                        .filter_map(Value::as_str)
+                        .find(|tier| matches!(*tier, "fast" | "priority"))
+                })
+        });
+    tier.map(|tier| json!({ "serviceTier": tier }))
+}
+
 fn model_reasoning(model: &Value) -> Option<Value> {
     let efforts = model
         .get("supportedReasoningEfforts")?
@@ -1218,6 +1253,7 @@ fn turn_start_request(
             "input": input,
             "additionalContext": context,
             "effort": request.request.reasoning_effort,
+            "serviceTier": request.request.service_tier.as_ref().map(|tier| json!(tier)).unwrap_or(json!("default")),
             "summary": "auto",
             "model": request.request.model,
             "approvalPolicy": approval_policy
@@ -1917,8 +1953,8 @@ mod tests {
     }
     use super::{
         build_additional_context, chatgpt_login_details, codex_candidates_from,
-        find_codex_executable, thread_start_request, turn_start_request, validated_codex_auth_url,
-        CodexCliStatus, CodexTurnStartRequest,
+        find_codex_executable, model_fast_mode, thread_start_request, turn_start_request,
+        validated_codex_auth_url, CodexCliStatus, CodexServiceTier, CodexTurnStartRequest,
     };
     use serde_json::json;
 
@@ -2003,6 +2039,13 @@ mod tests {
         let context = build_additional_context(&request).unwrap();
         let turn = turn_start_request("ephemeral-thread", &request, &[], context);
         assert_eq!(turn["params"]["effort"], "high");
+        assert_eq!(turn["params"]["serviceTier"], "default");
+        let mut fast_request = request.clone();
+        fast_request.request.service_tier = Some(CodexServiceTier::Fast);
+        let fast_turn =
+            turn_start_request("ephemeral-thread", &fast_request, &[], Default::default());
+        assert_eq!(fast_turn["params"]["serviceTier"], "fast");
+        assert_eq!(fast_turn["params"]["effort"], "high");
         assert_eq!(turn["params"]["input"][0]["text"], "What is its name?");
         assert_eq!(
             turn["params"]["additionalContext"]["mivlet-conversation-0001-of-0001"]["kind"],
@@ -2021,6 +2064,24 @@ mod tests {
             "Quoted knowledge"
         );
         assert_eq!(turn["params"]["approvalPolicy"], "on-request");
+    }
+
+    #[test]
+    fn fast_mode_requires_advertised_runtime_support() {
+        assert_eq!(
+            model_fast_mode(&json!({"serviceTiers": [{"id":"fast"}]})),
+            Some(json!({"serviceTier":"fast"}))
+        );
+        assert_eq!(
+            model_fast_mode(&json!({"additionalSpeedTiers": ["priority"]})),
+            Some(json!({"serviceTier":"priority"}))
+        );
+        assert_eq!(
+            model_fast_mode(&json!({"serviceTiers": [{"id":"default"}, {"id":"ultrafast"}]})),
+            None
+        );
+        assert_eq!(model_fast_mode(&json!({"model":"reasoner"})), None);
+        assert!(serde_json::from_value::<CodexServiceTier>(json!("unexpected")).is_err());
     }
 
     #[test]

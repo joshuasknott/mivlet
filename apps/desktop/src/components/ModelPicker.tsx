@@ -4,6 +4,8 @@ import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { Check } from "@phosphor-icons/react/dist/csr/Check";
+import { Lightning } from "@phosphor-icons/react/dist/csr/Lightning";
+import { ArrowCounterClockwise } from "@phosphor-icons/react/dist/csr/ArrowCounterClockwise";
 import type { ProviderModelOption } from "../lib/provider-models";
 import { ProviderIcon } from "./ProviderIcon";
 
@@ -21,13 +23,15 @@ const PANEL_MAX_HEIGHT = 400;
 const PANEL_MIN_HEIGHT = 96;
 const FLIP_BELOW_THRESHOLD = 176;
 
-export function ModelPicker({ models, selectedId, label, effort, onSelect, onSelectEffort, open, onOpenChange, allowAutomatic = false, scopeLabel, hideTrigger = false }: {
+export function ModelPicker({ models, selectedId, label, effort, onSelect, onSelectEffort, fastMode = false, onFastModeChange, open, onOpenChange, allowAutomatic = false, scopeLabel, hideTrigger = false }: {
   models: ProviderModelOption[];
   selectedId: string;
   label: string;
   effort?: string;
   onSelect: (id: string) => void;
   onSelectEffort?: (effort: string | undefined) => void;
+  fastMode?: boolean;
+  onFastModeChange?: (enabled: boolean) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   allowAutomatic?: boolean;
@@ -55,14 +59,19 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
         : levels[0]
     : undefined;
   const effortIndex = Math.max(0, levels.indexOf(currentEffort ?? ""));
-  const showEffort = view === "effort" && levels.length > 0;
+  const fastAvailable = Boolean(selected?.available && selected.fastMode);
+  const showFastMode = Boolean(onFastModeChange && (fastAvailable || fastMode));
+  const showEffort = view === "effort" && (levels.length > 0 || showFastMode);
   const activeProvider = providers.some(([id]) => id === provider) ? provider : "";
   const visibleModels = models.filter((model) => (!activeProvider || model.providerId === activeProvider)
     && `${model.label} ${model.providerLabel}`.toLowerCase().includes(query.trim().toLowerCase()));
 
   useEffect(() => {
     if (!open) return;
-    root.current?.querySelector<HTMLElement>(showEffort ? '[type="range"]' : '[type="search"]')?.focus();
+    const target = showEffort
+      ? root.current?.querySelector<HTMLElement>('[type="range"]') ?? root.current?.querySelector<HTMLElement>('.model-picker__fast')
+      : root.current?.querySelector<HTMLElement>('[type="search"]');
+    target?.focus();
   }, [open, showEffort]);
   useLayoutEffect(() => {
     if (!open) return;
@@ -154,33 +163,45 @@ export function ModelPicker({ models, selectedId, label, effort, onSelect, onSel
   };
   const chooseModel = (modelId: string) => {
     onSelect(modelId);
-    if (onSelectEffort && models.find((model) => model.id === modelId)?.reasoning?.supportedEfforts.length) setView("effort");
+    onFastModeChange?.(false);
+    const next = models.find((model) => model.id === modelId);
+    if ((onSelectEffort && next?.reasoning?.supportedEfforts.length) || (onFastModeChange && next?.fastMode)) setView("effort");
     else close();
   };
   return <div className="composer-control-anchor composer-control-anchor--model" ref={root}
     onKeyDown={navigate} onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget)) onOpenChange(false); }}>
     <button ref={trigger} hidden={hideTrigger} type="button" className={`composer-model${open ? " composer-trigger--open" : ""}`}
-      aria-label={`Select model: ${label}${currentEffort ? `, ${effortLabel(currentEffort)}` : ""}`} title={scopeLabel}
+      aria-label={`Select model: ${label}${currentEffort ? `, ${effortLabel(currentEffort)}` : ""}${fastMode ? ", Fast mode" : ""}`} title={scopeLabel}
       aria-haspopup="dialog" aria-controls={open ? panelId : undefined} aria-expanded={open}
       onClick={() => { if (!open) { setView("effort"); setQuery(""); setProvider(""); } onOpenChange(!open); }}>
       <span>{label}</span>
+      {fastMode ? <Lightning size={13} weight="fill" className="composer-model__fast" aria-hidden="true" /> : null}
       {selected?.reasoning?.supportedEfforts.length ? <small className="composer-model__effort">{currentEffort ? effortLabel(currentEffort) : "Default"}</small> : null}
       <CaretDown size={13} />
     </button>
     {open ? <div ref={panel} id={panelId} className={`composer-menu model-picker${showEffort ? " model-picker--effort" : ""}${providers.length <= 1 ? " model-picker--single-provider" : ""}`} role="dialog" aria-label="Model and reasoning">
       {showEffort ? <div className="model-picker__effort-view">
         <div className="model-picker__summary">
+          {showFastMode ? <button type="button" className="model-picker__icon model-picker__fast" aria-label="Fast mode"
+            aria-description="Faster responses at higher usage. Keeps your selected reasoning effort."
+            aria-pressed={fastMode} title={fastMode && !fastAvailable ? "Fast mode is unavailable. Turn it off to continue."
+              : `Fast mode ${fastMode ? "on" : "off"} · Faster responses, higher usage`}
+            onClick={() => onFastModeChange?.(!fastMode)}><Lightning size={17} weight={fastMode ? "fill" : "regular"} aria-hidden="true" /></button>
+            : <span className="model-picker__icon-space" aria-hidden="true" />}
           <button type="button" className="model-picker__model-link" aria-label="Change model" onClick={() => setView("models")}>
-            <strong>{currentEffort ? effortLabel(currentEffort) : "Default"}<CaretRight size={12} /></strong>
-            <span title={`${selected!.providerLabel} · ${label}`}>{label}</span>
+            <strong>{currentEffort ? effortLabel(currentEffort) : fastMode ? "Fast" : "Standard"}</strong>
+            <span title={`${selected?.providerLabel ?? ""} · ${label}`}>{label}<CaretRight size={11} aria-hidden="true" /></span>
           </button>
+          <button type="button" className="model-picker__icon" aria-label="Reset model options" title="Use default effort and standard speed"
+            disabled={!effort && !fastMode} onClick={() => { onSelectEffort?.(undefined); onFastModeChange?.(false); }}>
+            <ArrowCounterClockwise size={17} aria-hidden="true" /></button>
         </div>
-        <div className="model-picker__slider" style={{ "--effort-progress": `${levels.length > 1 ? effortIndex / (levels.length - 1) * 100 : 0}%` } as CSSProperties}>
+        {levels.length > 0 ? <div className="model-picker__slider" style={{ "--effort-progress": `${levels.length > 1 ? effortIndex / (levels.length - 1) * 100 : 0}%` } as CSSProperties}>
           <input type="range" min={0} max={Math.max(0, levels.length - 1)} step={1} value={effortIndex}
             aria-label="Reasoning effort" aria-valuetext={currentEffort ? effortLabel(currentEffort) : "Default"}
             disabled={levels.length < 2} onChange={(event) => onSelectEffort?.(levels[Number(event.target.value)])} />
           <div className="model-picker__ticks" aria-hidden="true">{levels.map((level) => <i key={level} />)}</div>
-        </div>
+        </div> : null}
       </div> : <div className="model-picker__browse">
         <div className="model-picker__toolbar">
           {levels.length > 0 ? <button type="button" aria-label="Back to reasoning" onClick={() => setView("effort")}><CaretLeft size={16} /></button> : null}

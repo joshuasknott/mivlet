@@ -64,6 +64,19 @@ function mockCodexDeps(handle: MockCodexAppServer | null): BackendDeps {
 }
 
 describe("AgentBackend Conformance Tests", () => {
+  it("sends advertised Fast mode to Codex and rejects stale speed selections before inference", async () => {
+    const handle = new MockCodexAppServer({ events: [{ type: "done", finishReason: "stop" }] });
+    const submit = vi.spyOn(handle, "submitTurn");
+    const provider = mockCodexProvider({ models: [{ id: "gpt-5", label: "Reasoner", available: true, fastMode: { serviceTier: "priority" } }] });
+    await collectEvents(createCodexBackend(provider, mockCodexDeps(handle))?.run(
+      { ...baseRequest, serviceTier: "priority", reasoningEffort: "high" }, { execute: async () => "" }));
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ serviceTier: "priority", reasoningEffort: "high" }) }));
+    const unsupported = new MockCodexAppServer({ events: [] });
+    const events = await collectEvents(createCodexBackend(mockCodexProvider(), mockCodexDeps(unsupported))?.run(
+      { ...baseRequest, serviceTier: "fast" }, { execute: async () => "" }));
+    expect(unsupported.initialized).toBe(false);
+    expect(events).toContainEqual(expect.objectContaining({ type: "error", message: expect.stringContaining("Fast mode is unavailable") }));
+  });
   // ==========================================
   // Area 1: Secret Redaction
   // ==========================================

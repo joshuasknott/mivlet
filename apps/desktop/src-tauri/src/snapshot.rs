@@ -547,6 +547,9 @@ pub(crate) fn normalize_runtime_snapshot(
         approval_rules,
         agents,
         active_agent_id,
+        sidebar_preferences: snapshot
+            .sidebar_preferences
+            .map(normalize_sidebar_preferences),
         pinned_source_ids: normalize_snapshot_id_list(snapshot.pinned_source_ids),
         imported_knowledge_sources,
         memory_disabled: memory_state.disabled,
@@ -565,6 +568,39 @@ pub(crate) fn normalize_runtime_snapshot(
         custom_approval_settings: snapshot.custom_approval_settings,
         saved_at,
     })
+}
+
+fn normalize_sidebar_preferences(
+    mut value: crate::models::SidebarPreferences,
+) -> crate::models::SidebarPreferences {
+    let mut seen = HashSet::new();
+    value.pinned.retain(|pin| {
+        matches!(pin.kind.as_str(), "agent" | "project")
+            && !pin.id.is_empty()
+            && pin.id.len() <= 160
+            && pin.id.trim() == pin.id
+            && seen.insert((pin.kind.clone(), pin.id.clone()))
+    });
+    value.pinned.truncate(500);
+    let ids = |values: Vec<String>| {
+        let mut seen = HashSet::new();
+        values
+            .into_iter()
+            .filter(|id| {
+                !id.is_empty() && id.len() <= 160 && id.trim() == id && seen.insert(id.clone())
+            })
+            .take(500)
+            .collect()
+    };
+    value.project_order = ids(value.project_order);
+    value.agent_order = ids(value.agent_order);
+    if value.project_sort != "manual" {
+        value.project_sort = "recent".into();
+    }
+    if value.agent_sort != "manual" {
+        value.agent_sort = "recent".into();
+    }
+    value
 }
 
 fn normalize_runtime_agents(
@@ -628,6 +664,7 @@ fn normalize_runtime_agents(
             id,
             name,
             notifications_enabled: agent.notifications_enabled,
+            fast_mode: agent.fast_mode,
             reasoning_effort: agent.reasoning_effort.filter(|value| {
                 !value.is_empty()
                     && value.len() <= 32
@@ -803,6 +840,37 @@ mod tests {
     use super::*;
 
     #[test]
+    fn sidebar_preferences_roundtrip_and_never_pin_chats() {
+        let snapshot: RuntimeSnapshot = serde_json::from_value(serde_json::json!({
+            "version": RUNTIME_SNAPSHOT_VERSION, "activeItem": "Chat", "composerDraft": "",
+            "voiceEnabled": false, "approvalAudit": [], "dismissedApprovalIds": [],
+            "approvalRules": [], "pinnedSourceIds": [], "importedKnowledgeSources": [],
+            "memoryDisabled": false, "memoryRecords": [], "connectedBackendIds": [],
+            "savedAt": "2026-10-16T12:00:00Z",
+            "sidebarPreferences": {
+                "pinned": [{"kind": "project", "id": "launch"}, {"kind": "conversation", "id": "project-chat"},
+                    {"kind": "agent", "id": "mira"}, {"kind": "project", "id": "launch"}],
+                "projectOrder": ["second", "first", "second"], "projectSort": "manual",
+                "agentSort": "invalid", "agentsCollapsed": true
+            }
+        })).unwrap();
+        let normalized = normalize_runtime_snapshot(snapshot).unwrap();
+        let restored: RuntimeSnapshot =
+            serde_json::from_slice(&serde_json::to_vec(&normalized).unwrap()).unwrap();
+        let preferences = normalize_runtime_snapshot(restored)
+            .unwrap()
+            .sidebar_preferences
+            .unwrap();
+        assert_eq!(preferences.pinned.len(), 2);
+        assert_eq!(preferences.pinned[0].id, "launch");
+        assert_eq!(preferences.pinned[1].id, "mira");
+        assert_eq!(preferences.project_order, vec!["second", "first"]);
+        assert_eq!(preferences.project_sort, "manual");
+        assert_eq!(preferences.agent_sort, "recent");
+        assert!(preferences.agents_collapsed);
+    }
+
+    #[test]
     fn selected_avatar_versions_survive_native_snapshot_roundtrip() {
         let mut seeds = vec!["blob-v1:legacy".to_string()];
         for variant in 0..6 {
@@ -861,7 +929,7 @@ mod tests {
     fn teammate_preferences_and_skills_survive_native_roundtrip() {
         let agent: MivletAgentProfile = serde_json::from_value(serde_json::json!({
             "id": "ava", "name": "Ava", "instructions": "Keep things simple.",
-            "modelId": "codex::model", "reasoningEffort": "high", "icon": "agent",
+            "modelId": "codex::model", "reasoningEffort": "high", "fastMode": true, "icon": "agent",
             "avatarSeed": "blob-v1:stable-ava", "notificationsEnabled": false,
             "permissionLabel": "Ask Me", "threadId": "new-chat", "threadIds": ["old-chat", "old-chat"],
             "learnedTasks": [{ "id": "weekly", "title": "Weekly plan", "instruction": "Ask about priorities.", "createdAt": "2026-09-04", "updatedAt": "2026-09-04" }]
@@ -870,6 +938,7 @@ mod tests {
         let encoded = serde_json::to_value(&normalized).unwrap();
         let restored: MivletAgentProfile = serde_json::from_value(encoded).unwrap();
         assert_eq!(restored.reasoning_effort.as_deref(), Some("high"));
+        assert_eq!(restored.fast_mode, Some(true));
         assert_eq!(restored.notifications_enabled, Some(false));
         assert_eq!(restored.avatar_seed.as_deref(), Some("blob-v1:stable-ava"));
         assert_eq!(restored.thread_ids, vec!["old-chat", "new-chat"]);

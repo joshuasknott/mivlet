@@ -78,6 +78,18 @@ describe("conversation shell runtime", () => {
     expect(result.current.permissionLabel).toBe("Work Freely");
   });
 
+  it("keeps sidebar preferences through the scoped shell writer and reload", async () => {
+    const { result, unmount } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    const preferences = { ...result.current.sidebarPreferences, pinned: [{ kind: "agent" as const, id: result.current.agents[0].id }],
+      projectSort: "manual" as const, projectOrder: ["launch", "website"], projectsCollapsed: true };
+    act(() => result.current.setSidebarPreferences(preferences));
+    unmount();
+    const restored = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(restored.result.current.runtimeSnapshotReady).toBe(true));
+    expect(restored.result.current.sidebarPreferences).toEqual(preferences);
+  });
+
   it("hides models across conversations without silently rerouting a selected model", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
     await act(async () => { await result.current.connectBackend("xai", "test-key"); });

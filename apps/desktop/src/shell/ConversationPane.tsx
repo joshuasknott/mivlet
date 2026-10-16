@@ -40,12 +40,10 @@ import { resolveWorkspaceMentions } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
-import { chatConnectorIds } from "../lib/connector-chat";
 import type { ConversationTurn } from "../lib/conversation-presentation";
 import { SideChatContextNotice } from "../components/conversation/SideChats";
 import { AssistantConversationRuntime } from "../components/conversation/AssistantConversationRuntime";
 import { ConversationRecap } from "../components/conversation/ConversationRecap";
-import { ContextInspector } from "../components/conversation/ContextInspector";
 import {
   registerRuntimeMcpAppResource,
   releaseRuntimeMcpAppResource,
@@ -62,14 +60,6 @@ import { conversationUi } from "../runtime/domains/conversation-ui";
 import { branchInputMessageId } from "../lib/conversation-branches";
 import { useConversationOrigin } from "./useConversationOrigin";
 import type { ConversationOriginNavigation } from "./useWorkspaceNavigation";
-
-const ProviderContinuationControl = lazy(() =>
-  import("../components/conversation/ProviderContinuationControl").then(
-    (module) => ({
-      default: module.ProviderContinuationControl,
-    }),
-  ),
-);
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -305,21 +295,6 @@ export function ConversationPane({
     () => state.data.work.filter((work) => work.conversationId === room.id),
     [state.data.work, room.id],
   );
-  const projectContextAllowed = Boolean(
-    project &&
-    room.participants.some((member) => member.agentId === displayAgent.id),
-  );
-  const contextSourceIds = [
-    ...new Set([
-      ...(projectContextAllowed ? (project?.knowledgeSourceIds ?? []) : []),
-      ...composer.attachments.flatMap((attachment) =>
-        attachment.sourceId ? [attachment.sourceId] : [],
-      ),
-    ]),
-  ];
-  const contextFiles = runtime.workspaceKnowledgeSources
-    .filter((source) => contextSourceIds.includes(source.id))
-    .map((source) => ({ id: source.id, title: source.title }));
   useOutputRevisions(
     service.workspaceId,
     room.id,
@@ -987,52 +962,6 @@ export function ConversationPane({
           </div>
         </div>
         <div className="conversation-pane-composer">
-          {history?.messages.length && profile ? (
-            <Suspense fallback={null}>
-              <ProviderContinuationControl
-                workspaceId={service.workspaceId}
-                conversationId={room.id}
-                agentId={profile.id}
-                ownerKey={`${owner?.internalUserId}:${owner?.memberId ?? ""}`}
-                model={model}
-                provider={runtime.backendProviders.find(
-                  (p) => p.id === model?.providerId,
-                )}
-                prompt={composer.text}
-                attachmentCount={composer.attachments.length}
-                disabled={
-                  branchSelectionPending ||
-                  originNavigation.pending ||
-                  Boolean(pendingOutputRevision) ||
-                  running.length > 0 ||
-                  pending ||
-                  Boolean(composer.replyWorkId) ||
-                  runtime.accountWorkspacePending
-                }
-                prepare={async () => {
-                  await runtime.flushSnapshot();
-                  await service.refresh();
-                }}
-                onContinue={async (input, fingerprint) => {
-                  if (!composer.beginSubmission())
-                    throw new Error("This draft is already being submitted.");
-                  try {
-                    await service.command({
-                      action: "start-provider-continuation",
-                      id: `work-${crypto.randomUUID()}`,
-                      input,
-                      fingerprint,
-                      reconcile: true,
-                    });
-                    await composer.consume(composer.revision);
-                    scroll.toLatest();
-                  } finally {
-                    composer.endSubmission();
-                  }
-                }}
-              />
-            </Suspense>
-          ) : null}
           {composer.replyWorkId ? (
             <p className="conversation-attention" role="status">
               Following up with{" "}
@@ -1045,31 +974,6 @@ export function ConversationPane({
               </button>
             </p>
           ) : null}
-          <ContextInspector
-            workspaceId={service.workspaceId}
-            conversationId={room.id}
-            agentId={displayAgent.id}
-            revision={state.revision}
-            work={work}
-            attachments={composer.attachments}
-            draft={composer.text}
-            files={contextFiles}
-            prepareRetrieval={(query, selection) =>
-              runtime.assembleConversationContext(query, {
-                threadId: room.id,
-                allowedConnectorIds: chatConnectorIds(
-                  [],
-                  runtime.connectorManifests,
-                ),
-                allowedKnowledgeSourceIds: contextSourceIds,
-                excludedKnowledgeSourceIds:
-                  selection.excludedKnowledgeSourceIds,
-                excludePrivateMemory: true,
-                excludeDerivedSummaries: true,
-              })
-            }
-            onError={setError}
-          />
           {empty ? (
             <div className="team-conversation-welcome">
               <h1>What would you like to work on?</h1>
@@ -1125,6 +1029,10 @@ export function ConversationPane({
                 : `Model for ${displayAgent.name}. Changes apply to this agent's future requests.`
             }
             selectedReasoningEffort={profile?.reasoningEffort}
+            fastMode={profile?.fastMode}
+            onFastModeChange={(fastMode) => {
+              if (profile) runtime.updateAgent(profile.id, { fastMode });
+            }}
             onSelectReasoningEffort={(effort) => {
               if (profile)
                 runtime.updateAgent(profile.id, { reasoningEffort: effort });
@@ -1134,6 +1042,7 @@ export function ConversationPane({
                 runtime.updateAgent(profile.id, {
                   modelId,
                   reasoningEffort: undefined,
+                  fastMode: false,
                 });
             }}
             placeholder="Message…"

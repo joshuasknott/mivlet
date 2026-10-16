@@ -1,4 +1,5 @@
 import { resolveAgentBackend, type BackendDeps } from "@mivlet/connectors";
+import { agentServiceTier } from "./provider-models";
 import type {
   BackendModel,
   BackendProvider,
@@ -140,6 +141,7 @@ export class AgentRunService {
     const request = {
       model: input.model,
       reasoningEffort: input.agent.reasoningEffort,
+      serviceTier: agentServiceTier(input.modelDefinition, input.agent.fastMode),
       messages: [{ role: "user" as const, content: input.prompt }],
       tools: [],
       maxTokens: 2_048,

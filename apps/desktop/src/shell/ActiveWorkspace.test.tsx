@@ -14,7 +14,7 @@ const snapshot = vi.hoisted(() => ({
     facts: [],
     layout: null,
   },
-  sessions: [{ key: "session-1", work: { agentId: "mira" } }],
+  sessions: [{ key: "session-1", work: { id: "work-1", agentId: "mira" }, approvalIds: new Set<string>() }],
   histories: {},
   loading: false,
   error: null,

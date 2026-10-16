@@ -763,6 +763,7 @@ fn build_provider(entry: &'static BackendCatalogEntry, auth_state: String) -> Ba
             available,
             capabilities: None,
             reasoning: None,
+            fast_mode: None,
         });
     }
 
@@ -1860,6 +1861,7 @@ fn list_backends_blocking(app: tauri::AppHandle) -> Result<Vec<BackendProvider>,
                                 serde_json::json!({ "vision": model.supports_images }),
                             ),
                             reasoning: model.reasoning,
+                            fast_mode: model.fast_mode,
                         })
                         .collect();
                 }

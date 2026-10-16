@@ -540,6 +540,7 @@ fn extract_models(value: &Value) -> Vec<BackendModel> {
                 available: true,
                 capabilities: None,
                 reasoning: None,
+                fast_mode: None,
             })
         })
         .take(32)
