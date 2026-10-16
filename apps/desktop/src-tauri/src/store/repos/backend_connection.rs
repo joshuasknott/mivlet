@@ -33,6 +33,23 @@ pub fn upsert(tx: &Connection, internal_user_id: &str, provider_id: &str, now: &
     Ok(())
 }
 
+/// Reconcile a verified account-owned session created before connection metadata
+/// was recorded, without making existing cached measurements stale on each probe.
+pub fn ensure_verified(
+    tx: &Connection,
+    internal_user_id: &str,
+    provider_id: &str,
+    now: &str,
+) -> Result<()> {
+    if !list(tx, internal_user_id)?
+        .iter()
+        .any(|id| id == provider_id)
+    {
+        upsert(tx, internal_user_id, provider_id, now)?;
+    }
+    Ok(())
+}
+
 /// Remove a backend connection.
 pub fn delete(tx: &Connection, internal_user_id: &str, provider_id: &str) -> Result<()> {
     tx.execute(
@@ -94,6 +111,25 @@ mod tests {
     use super::*;
     use crate::store::vault::{MasterKey, Vault};
     use crate::store::Store;
+
+    #[test]
+    fn verified_session_reconciliation_is_scoped_and_preserves_reconnect_revision() {
+        let vault = Vault::new(&MasterKey::generate().unwrap()).unwrap();
+        let store = Store::open_in_memory(vault).unwrap();
+        store
+            .transaction(|tx| {
+                ensure_verified(tx, "user-a", "codex", "first")?;
+                ensure_verified(tx, "user-a", "codex", "probe")?;
+                assert_eq!(list_records(tx, "user-a")?[0].updated_at, "first");
+                assert!(list(tx, "user-b")?.is_empty());
+                upsert(tx, "user-a", "codex", "reconnected")?;
+                ensure_verified(tx, "user-a", "codex", "next-probe")?;
+                assert_eq!(list_records(tx, "user-a")?[0].updated_at, "reconnected");
+                assert!(ensure_verified(tx, "user-a", "unknown", "now").is_err());
+                Ok(())
+            })
+            .unwrap();
+    }
 
     #[test]
     fn provider_connections_are_isolated_by_local_install_principal() {

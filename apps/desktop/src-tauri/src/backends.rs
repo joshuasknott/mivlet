@@ -1934,6 +1934,24 @@ fn list_backends_blocking(app: tauri::AppHandle) -> Result<Vec<BackendProvider>,
     if require_current_internal_user()? != internal_user_id {
         return Err("The account changed during provider discovery.".into());
     }
+    if providers
+        .iter()
+        .any(|provider| provider.id == "codex" && provider.auth_state == "connected")
+    {
+        // Codex verifies its account-owned profile independently of the API-key
+        // registry. Older successful logins did not populate usage metadata.
+        let store = crate::store::try_global().ok_or("Encrypted storage is unavailable.")?;
+        store
+            .transaction(|conn| {
+                crate::store::repos::backend_connection::ensure_verified(
+                    conn,
+                    &internal_user_id,
+                    "codex",
+                    &chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                )
+            })
+            .map_err(|error| error.to_string())?;
+    }
     Ok(providers)
 }
 
