@@ -9,7 +9,7 @@ import type {
 } from "@mivlet/protocol";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
-import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-computer";
+import { useWorkspaceLocalFiles } from "../../hooks/useWorkspaceLocalFiles";
 import { NativeExecutionSetup } from "./NativeExecutionSetup";
 import { NativeCommandJobs } from "./NativeCommandJobs";
 import { listRuntimeOutputs } from "../../runtime/domains/outputs";
@@ -75,43 +75,7 @@ export function WorkspaceLibrary({
       (origin === "all" || file.origin === origin) &&
       (file.title + " " + file.detail).toLowerCase().includes(search),
   );
-  const listing = useQuery({
-    queryKey: [
-      "workspace-library",
-      workspaceId,
-      agents.map((agent) => agent.id),
-    ],
-    enabled: Boolean(workspaceId) && technical,
-    retry: false,
-    gcTime: 0,
-    queryFn: () =>
-      Promise.all(
-        agents.map(async (agent) => {
-          try {
-            const snapshot = await listRuntimeLocalComputerFiles({
-              workspaceId,
-              agentId: agent.id,
-            });
-            return {
-              agentId: agent.id,
-              snapshot,
-              error: snapshot
-                ? ""
-                : "Open the desktop app to view saved files.",
-            };
-          } catch (error) {
-            return {
-              agentId: agent.id,
-              snapshot: null,
-              error:
-                error instanceof Error
-                  ? error.message
-                  : "Files could not be loaded.",
-            };
-          }
-        }),
-      ),
-  });
+  const listing = useWorkspaceLocalFiles(workspaceId, technical ? agents.map(agent => agent.id) : [], work);
   const workingFiles = (listing.data ?? []).flatMap(({ agentId, snapshot }) =>
     (snapshot?.entries ?? [])
       .filter((file) => file.kind === "file")
