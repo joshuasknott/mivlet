@@ -1,315 +1,286 @@
-import { act, fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
-import type {
-  CollaborationWorkItem,
-  ConversationRoom,
-  MivletAgentProfile,
-  LocalProject,
-} from "@mivlet/protocol";
-import type { ShellRuntime } from "../../hooks/useShellRuntime";
-import { WorkspaceRightNav, type NavContext } from "./WorkspaceRightNav";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import { WorkspaceRightNav } from "./WorkspaceRightNav";
+import type { RightPanelTab } from "./right-panel-state";
 
-vi.mock("../../hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
-
-const agent: MivletAgentProfile = {
-  id: "agent",
-  name: "Mira",
-  instructions: "Help.",
-  modelId: "openai::gpt-5",
-  icon: "agent",
-  iconColor: "#865DFA",
-  connectorIds: [],
-  knowledgeSourceIds: [],
-  permissionLabel: "Ask Me",
+const media = vi.hoisted(() => ({ compact: false }));
+vi.mock("../../hooks/useMediaQuery", () => ({
+  useMediaQuery: () => media.compact,
+}));
+const request: RightPanelTab = {
+  id: "file:brief",
+  kind: "web",
+  title: "Launch brief",
+  url: "https://example.com",
 };
-const project: LocalProject = {
-  shares: [],
-  id: "project",
-  workspaceId: "workspace",
-  name: "Launch",
-  threadId: "main",
-  instructions: "Ship it.",
-  knowledgeSourceIds: [],
-  revision: 1,
-  createdAt: "2026-09-12T10:00:00Z",
-  updatedAt: "2026-09-12T10:00:00Z",
-};
-const room = (patch: Partial<ConversationRoom> = {}): ConversationRoom => ({
-  id: "room",
-  workspaceId: "workspace",
-  kind: "direct",
-  title: "Room",
-  participants: [{ agentId: "agent", name: "Mira" }],
-  revision: 1,
-  generation: 1,
-  createdAt: "2026-09-12T10:00:00Z",
-  updatedAt: "2026-09-12T10:00:00Z",
-  ...patch,
-});
-const item = (
-  patch: Partial<CollaborationWorkItem> = {},
-): CollaborationWorkItem => ({
-  id: "work",
-  rootId: "work",
-  workspaceId: "workspace",
-  conversationId: "room",
-  agentId: "agent",
-  agentName: "Mira",
-  prompt: "Assignment",
-  userRequest: "Original request",
-  status: "failed",
-  reason: "Computer status unavailable",
-  permissionMode: "trusted-scope",
-  dependencies: [],
-  waitingFor: [],
-  prerequisites: [],
-  awaitingUser: false,
-  generation: 1,
-  conversationGeneration: 1,
-  contextRevision: 0,
-  depth: 0,
-  turnCount: 0,
-  tokenUsage: 0,
-  maxTurns: 12,
-  maxTokens: 64000,
-  runIds: [],
-  modelOptionId: "codex::fixture",
-  outputs: [],
-  createdAt: "2026-09-12T10:00:00Z",
-  updatedAt: "2026-09-12T10:00:00Z",
-  ...patch,
-});
-const runtime = {
-  agents: [agent],
-  connectorManifests: [],
-} as unknown as ShellRuntime;
-const base = {
-  rooms: [
-    room({
-      id: "side",
-      title: "Agent side conversation",
-      chat: { role: "side", ownerKind: "agent", ownerId: "agent" },
-    }),
-    room({
-      id: "main",
-      projectId: "project",
-      kind: "group",
-      title: "Launch main",
-    }),
-    room({
-      id: "pside",
-      projectId: "project",
-      kind: "group",
-      title: "Launch side",
-      chat: { role: "side", ownerKind: "project", ownerId: "project" },
-    }),
-  ],
-  work: [
-    item({ id: "a" }),
-    item({
-      id: "b",
-      agentId: "other",
-      agentName: "Theo",
-      projectId: "project",
-      conversationId: "pside",
-      status: "completed",
-    }),
-  ],
-  runtime,
+const base = () => ({
+  context: null,
+  identity: "workspace:chat",
+  title: "Launch planning",
   open: true,
   onClose: vi.fn(),
-  onOpenConversation: vi.fn(),
-  onNewSideChat: vi.fn(),
-  onSchedules: vi.fn(),
-};
-const context = (value: NavContext) => ({ ...base, context: value });
+  onCloseComputer: vi.fn(),
+  onChatActiveChange: vi.fn(),
+});
+beforeEach(() => {
+  media.compact = false;
+});
 
-describe("multifunctional right panel", () => {
-  it("opens Activity from navigation and restores focus on Back", () => {
-    render(<WorkspaceRightNav {...context(null)} history={<p>Conversation assignments</p>} />);
-    fireEvent.click(screen.getByRole("button", { name: "Activity" }));
-    expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
-    expect(screen.getByText("Conversation assignments")).toBeVisible();
-    expect(screen.queryByRole("navigation")).toBeNull();
+describe("contextual workspace panel", () => {
+  it("announces dock targets and releases replaced apps without closing the next inspector", () => {
+    const ready = vi.fn();
+    const closed = vi.fn();
+    window.addEventListener("mivlet:mcp-app-panel-ready", ready);
+    window.addEventListener("mivlet:mcp-app-panel-closed", closed);
+    const first: RightPanelTab = { id: "app:first", kind: "mcp-app", title: "First tool" };
+    const second: RightPanelTab = { id: "app:second", kind: "mcp-app", title: "Second tool" };
+    const props = { ...base(), renderTab: (tab: RightPanelTab) => <div data-mcp-app-panel={tab.id}>{tab.title}</div> };
+    const view = render(<WorkspaceRightNav {...props} request={first} />);
+    expect(ready.mock.calls.at(-1)?.[0].detail).toMatchObject({ id: first.id, target: expect.any(HTMLElement) });
+    view.rerender(<WorkspaceRightNav {...props} request={second} />);
+    expect(closed.mock.calls.at(-1)?.[0].detail.id).toBe(first.id);
+    expect(screen.getByText("Second tool", { selector: "div" })).toBeVisible();
+    expect(ready.mock.calls.at(-1)?.[0].detail.id).toBe(second.id);
+    view.rerender(<WorkspaceRightNav {...props} request={second} open={false} />);
+    expect(closed).toHaveBeenCalledTimes(1);
+    view.rerender(<WorkspaceRightNav {...props} request={second} />);
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByRole("button", { name: "Activity" })).toHaveFocus();
+    expect(closed.mock.calls.at(-1)?.[0].detail.id).toBe(second.id);
+    expect(screen.getByRole("tab", { name: "Activity" })).toBeVisible();
+    view.unmount();
+    window.removeEventListener("mivlet:mcp-app-panel-ready", ready);
+    window.removeEventListener("mivlet:mcp-app-panel-closed", closed);
+  });
+  it("starts with Activity, Files and Memory without the former utility menu", () => {
+    render(
+      <WorkspaceRightNav {...base()} activity={() => <p>Current work</p>} />,
+    );
+    expect(screen.getAllByRole("tab").map((tab) => tab.textContent)).toEqual([
+      "Activity",
+      "Files",
+      "Memory",
+    ]);
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    expect(screen.getByText("Current work")).toBeVisible();
+    for (const name of ["Browser", "Side chat", "Schedules"])
+      expect(screen.queryByRole("button", { name })).toBeNull();
   });
 
-  it("opens Activity for a requested work item", () => {
-    render(<WorkspaceRightNav {...context(null)} historyRequestId="work-1" history={<p>Selected assignment</p>} />);
-    expect(screen.getByRole("heading", { name: "Activity" })).toBeVisible();
-    expect(screen.getByText("Selected assignment")).toBeVisible();
-  });
-
-  it("replaces navigation with Files and restores focus on Back", () => {
-    render(<WorkspaceRightNav {...context(null)} library={<p>Saved files</p>} />);
-    expect(screen.getAllByRole("button").slice(0, 5).map(button => button.textContent)).toEqual(["Files", "Memories", "Browser", "Side chat", "Schedules"]);
-    fireEvent.click(screen.getByRole("button", { name: "Files" }));
-    expect(screen.queryByRole("navigation")).toBeNull();
-    expect(screen.getByText("Saved files")).toBeVisible();
-    expect(screen.getByRole("button", { name: "Back" })).toHaveFocus();
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    expect(screen.getByRole("button", { name: "Files" })).toHaveFocus();
-    expect(screen.queryByText("Saved files")).toBeNull();
-  });
-  it("returns to navigation from a document and deduplicates repeated opens", () => {
-    const request = {
-      id: "file:a",
-      kind: "artifact" as const,
-      title: "Launch brief",
-      output: "file",
-      agentId: "agent",
-    };
+  it("mounts collections only on first visit, preserving a Files search across inspection", () => {
+    const mounted = vi.fn();
+    function Files() {
+      mounted();
+      return <input aria-label="Search files" />;
+    }
     const props = {
-      ...context({ kind: "agent", agent }),
+      ...base(),
+      library: <Files />,
       renderTab: () => <p>Document contents</p>,
     };
-    const view = render(<WorkspaceRightNav {...props} request={request} />);
-    expect(screen.getByText("Document contents")).toBeInTheDocument();
-    expect(screen.queryByRole("navigation")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    for (const name of ["Files", "Memories", "Browser", "Side chat", "Schedules"])
-      expect(screen.getByRole("button", { name })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Browser" }));
-    expect(screen.queryByText("Document contents")).toBeNull();
-    view.rerender(<WorkspaceRightNav {...props} request={{ ...request }} />);
-    expect(screen.getAllByRole("tab")).toHaveLength(1);
-    expect(screen.getByText("Document contents")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close Launch brief" }));
+    const view = render(<WorkspaceRightNav {...props} />);
+    expect(mounted).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "launch" },
+    });
+    view.rerender(<WorkspaceRightNav {...props} request={request} />);
+    expect(screen.getByText("Document contents")).toBeVisible();
     expect(screen.queryByRole("tablist")).toBeNull();
-    expect(screen.getByRole("complementary")).toHaveAttribute("data-navigation-only", "true");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(screen.getByRole("textbox")).toHaveValue("launch");
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveFocus();
   });
-  it("shows only the selected owner's side chats", () => {
-    const view = render(
-      <WorkspaceRightNav {...context({ kind: "agent", agent })} />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Side chat" }));
-    fireEvent.click(screen.getByRole("button", { name: "Agent side conversation" }));
-    expect(base.onOpenConversation).toHaveBeenCalledWith("side");
-    expect(screen.queryByText("Launch side")).toBeNull();
-    view.rerender(
-      <WorkspaceRightNav {...context({ kind: "project", project })} />,
-    );
-    expect(screen.getByText("Launch side")).toBeInTheDocument();
-    expect(screen.queryByText("Agent side conversation")).toBeNull();
-    expect(screen.queryByText("Launch main")).toBeNull();
-  });
-  it("embeds schedules and removes the old inventory sections", () => {
-    render(
-      <WorkspaceRightNav
-        {...context({ kind: "agent", agent })}
-        schedules={<p>Create a routine</p>}
-      />,
-    );
-    fireEvent.click(screen.getByRole("button", { name: "Schedules" }));
-    expect(screen.getByText("Create a routine")).toBeInTheDocument();
-    for (const name of ["Memory", "Work", "Tools", "Approvals", "Team"])
-      expect(screen.queryByRole("heading", { name })).toBeNull();
-  });
-  it("switches tabs by keyboard and closes onto the neighbouring document", () => {
-    const first = {
-      id: "web:a",
-      kind: "web" as const,
-      title: "Website",
-      url: "https://example.com",
-    };
+
+  it("keeps only one inspector and does not grow a document tab strip", () => {
     const props = {
-      ...context(null),
-      renderTab: (tab: { title: string }) => <p>{tab.title} contents</p>,
+      ...base(),
+      renderTab: (tab: RightPanelTab) => <p>{tab.title} content</p>,
     };
-    const view = render(<WorkspaceRightNav {...props} request={first} />);
+    const view = render(<WorkspaceRightNav {...props} request={request} />);
     view.rerender(
       <WorkspaceRightNav
         {...props}
-        request={{ id: "chat:b", kind: "chat", title: "Ideas", roomId: "side" }}
+        request={{ ...request, id: "second", title: "Second" }}
       />,
     );
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Ideas" }), {
-      key: "ArrowLeft",
-    });
-    expect(screen.getByRole("tab", { name: "Website" })).toHaveFocus();
-    expect(screen.getByText("Website contents")).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Close Website" }));
-    expect(screen.getByText("Ideas contents")).toBeInTheDocument();
+    expect(screen.queryByText("Launch brief content")).toBeNull();
+    expect(screen.getByText("Second content")).toBeVisible();
+    expect(screen.queryByRole("tablist")).toBeNull();
   });
-  it("provides a stable MCP App panel slot without recreating the tab", () => {
-    const ready = vi.fn();
-    window.addEventListener("mivlet:mcp-app-panel-ready", ready);
-    const request = {
-      id: "mcp-app:workspace:room:result:4",
-      kind: "mcp-app" as const,
-      title: "Time result",
+
+  it("never reopens a stale request on chat or scope changes", () => {
+    const props = {
+      ...base(),
+      request,
+      renderTab: () => <p>Previous document</p>,
     };
-    const view = render(<WorkspaceRightNav {...context(null)} request={request} />);
-    const slot = document.querySelector("[data-mcp-app-panel]");
-    expect(slot).toBeInTheDocument();
-    expect(slot).toHaveAttribute("data-mcp-app-panel", request.id);
-    expect(ready).toHaveBeenCalledWith(
-      expect.objectContaining({ detail: expect.objectContaining({ id: request.id, target: slot }) }),
+    const view = render(<WorkspaceRightNav {...props} />);
+    expect(screen.getByText("Previous document")).toBeVisible();
+    view.rerender(
+      <WorkspaceRightNav {...props} identity="workspace:other-chat" />,
     );
-    view.rerender(<WorkspaceRightNav {...context(null)} request={{ ...request }} />);
-    expect(document.querySelectorAll("[data-mcp-app-panel]")).toHaveLength(1);
-    window.removeEventListener("mivlet:mcp-app-panel-ready", ready);
+    expect(screen.queryByText("Previous document")).toBeNull();
+    const nextRequest = { ...request };
+    view.rerender(
+      <WorkspaceRightNav
+        {...props}
+        request={nextRequest}
+        identity="workspace:other-chat"
+        scope="owner"
+      />,
+    );
+    expect(screen.getByText("Previous document")).toBeVisible();
+    view.rerender(
+      <WorkspaceRightNav
+        {...props}
+        request={nextRequest}
+        identity="workspace:other-chat"
+        scope="chat"
+      />,
+    );
+    expect(screen.queryByText("Previous document")).toBeNull();
   });
-  it("closes an MCP App tab when its frame announces teardown", () => {
-    const request = {
-      id: "mcp-app:workspace:room:result:4",
-      kind: "mcp-app" as const,
-      title: "Time result",
-    };
-    render(<WorkspaceRightNav {...context(null)} request={request} />);
-    expect(screen.getByRole("tab", { name: "Time result" })).toBeInTheDocument();
-    act(() => {
-      window.dispatchEvent(
-        new CustomEvent("mivlet:mcp-app-panel-closed", {
-          detail: { id: request.id },
-        }),
-      );
+
+  it("switches sections with arrow keys and Home/End", () => {
+    render(
+      <WorkspaceRightNav {...base()} memories={<p>Saved preferences</p>} />,
+    );
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Activity" }), {
+      key: "ArrowRight",
     });
-    expect(screen.queryByRole("tab", { name: "Time result" })).toBeNull();
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Files" }), {
+      key: "End",
+    });
+    expect(screen.getByText("Saved preferences")).toBeVisible();
+    expect(screen.getByRole("tab", { name: "Memory" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Memory" }), {
+      key: "Home",
+    });
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveFocus();
   });
-  it("keeps background work untouched when the panel closes", () => {
-    const onClose = vi.fn();
-    render(<WorkspaceRightNav {...context(null)} onClose={onClose} />);
+
+  it("browses the owning project only after an explicit scope selection", () => {
+    const change = vi.fn();
+    render(
+      <WorkspaceRightNav
+        {...base()}
+        ownerLabel="Portfolio"
+        onScopeChange={change}
+      />,
+    );
+    expect(screen.getByRole("combobox", { name: "Panel scope" })).toHaveValue(
+      "chat",
+    );
+    expect(change).not.toHaveBeenCalled();
+    fireEvent.change(screen.getByRole("combobox"), {
+      target: { value: "owner" },
+    });
+    expect(change).toHaveBeenCalledWith("owner");
+  });
+
+  it("keeps secondary schedules and conversations reachable through More", () => {
+    render(
+      <WorkspaceRightNav
+        {...base()}
+        schedules={<p>Manage routines</p>}
+        sideChats={<p>Saved conversations</p>}
+      />,
+    );
+    fireEvent.click(screen.getByLabelText("More workspace options"));
+    fireEvent.click(screen.getByRole("button", { name: "Schedules" }));
+    expect(screen.getByText("Manage routines")).toBeVisible();
+    const selectedTab = screen.getByRole("tab", { name: "Activity" });
+    expect(
+      document.getElementById(selectedTab.getAttribute("aria-controls")!),
+    ).toBeVisible();
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
+    fireEvent.click(screen.getByLabelText("More workspace options"));
+    fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
+    expect(screen.getByText("Saved conversations")).toBeVisible();
+    expect(screen.queryByText("Manage routines")).not.toBeVisible();
+  });
+
+  it("opens requested work details while retaining the section navigation", () => {
+    render(
+      <WorkspaceRightNav
+        {...base()}
+        historyRequestId="work"
+        history={<p>Selected assignment</p>}
+      />,
+    );
+    expect(screen.getByText("Selected assignment")).toBeVisible();
+    fireEvent.click(screen.getByRole("button", { name: "Back to Activity" }));
+    expect(screen.getByRole("tab", { name: "Activity" })).toHaveFocus();
+  });
+
+  it("releases chat focus when returning from an inspected conversation", () => {
+    const props = base();
+    render(
+      <WorkspaceRightNav
+        {...props}
+        request={{
+          id: "chat:ideas",
+          kind: "chat",
+          roomId: "ideas",
+          title: "Ideas",
+        }}
+        renderTab={() => <p>Side conversation</p>}
+      />,
+    );
+    expect(props.onChatActiveChange).toHaveBeenLastCalledWith(true);
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    expect(props.onChatActiveChange).toHaveBeenLastCalledWith(false);
+  });
+
+  it("hides the entire panel without cancelling or losing its inspected content", () => {
+    const props = {
+      ...base(),
+      request,
+      renderTab: () => <p>Saved document</p>,
+    };
+    const view = render(<WorkspaceRightNav {...props} />);
     fireEvent.click(
       screen.getByRole("button", { name: "Close workspace panel" }),
     );
-    expect(onClose).toHaveBeenCalledOnce();
-  });
-  it("opens a validated website and rejects unsafe schemes", () => {
-    render(<WorkspaceRightNav {...context(null)} renderTab={(tab) => <p>{tab.kind === "web" ? tab.url : tab.title}</p>} />);
-    fireEvent.click(screen.getByRole("button", { name: "Browser" }));
-    const address = screen.getByLabelText("Website address");
-    fireEvent.change(address, { target: { value: "javascript:alert(1)" } });
-    fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(screen.getByRole("alert")).toHaveTextContent("Enter a valid website address");
-    expect(screen.queryByRole("tab")).toBeNull();
-    fireEvent.change(address, { target: { value: "example.com" } });
-    fireEvent.click(screen.getByRole("button", { name: "Open" }));
-    expect(screen.getByText("https://example.com/")).toBeVisible();
-  });
-  it("hides all navigation and preserves content when collapsed", () => {
-    const props = { ...context(null), request: { id: "web:a", kind: "web" as const, title: "Example", url: "https://example.com" }, renderTab: () => <p>Saved page</p> };
-    const view = render(<WorkspaceRightNav {...props} />);
+    expect(props.onClose).toHaveBeenCalledOnce();
     view.rerender(<WorkspaceRightNav {...props} open={false} />);
-    expect(screen.queryByRole("navigation")).toBeNull();
-    expect(screen.queryByRole("button", { name: "Browser" })).toBeNull();
-    expect(screen.getByText("Saved page")).not.toBeVisible();
-    view.rerender(<WorkspaceRightNav {...props} open />);
-    expect(screen.getByText("Saved page")).toBeVisible();
+    expect(screen.getByText("Saved document")).not.toBeVisible();
+    view.rerender(<WorkspaceRightNav {...props} />);
+    expect(screen.getByText("Saved document")).toBeVisible();
   });
-  it("releases side-chat focus when switching to a utility", () => {
-    const active = vi.fn();
-    render(
-      <WorkspaceRightNav
-        {...context(null)}
-        request={{ id: "chat:a", kind: "chat", roomId: "a", title: "Ideas" }}
-        onChatActiveChange={active}
-      />,
+
+  it("traps narrow-screen focus, closes with Escape and restores the opener", () => {
+    media.compact = true;
+    const props = base();
+    const view = render(
+      <>
+        <button>Open panel</button>
+        <WorkspaceRightNav {...props} open={false} />
+      </>,
     );
-    expect(active).toHaveBeenLastCalledWith(true);
-    fireEvent.click(screen.getByRole("button", { name: "Back" }));
-    fireEvent.click(screen.getByRole("button", { name: "Browser" }));
-    expect(active).toHaveBeenLastCalledWith(false);
+    screen.getByRole("button", { name: "Open panel" }).focus();
+    view.rerender(
+      <>
+        <button>Open panel</button>
+        <WorkspaceRightNav {...props} />
+      </>,
+    );
+    expect(screen.getByRole("dialog")).toHaveAttribute("aria-modal", "true");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(props.onClose).toHaveBeenCalledOnce();
+    view.rerender(
+      <>
+        <button>Open panel</button>
+        <WorkspaceRightNav {...props} open={false} />
+      </>,
+    );
+    expect(screen.getByRole("button", { name: "Open panel" })).toHaveFocus();
   });
 });

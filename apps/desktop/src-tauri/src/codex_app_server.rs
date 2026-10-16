@@ -502,6 +502,7 @@ fn chatgpt_login_details(value: &Value) -> Result<(String, String), String> {
 }
 
 fn start_codex_browser_login_blocking() -> Result<CodexBrowserLoginResult, String> {
+    let owner = crate::backends::require_current_internal_user()?;
     let path = find_codex_executable().ok_or_else(missing_codex_runtime_message)?;
     let mut command = codex_command(&path)?;
     command
@@ -588,6 +589,10 @@ fn start_codex_browser_login_blocking() -> Result<CodexBrowserLoginResult, Strin
         {
             return Err("ChatGPT sign-in was not completed.".into());
         }
+        if crate::backends::require_current_internal_user()? != owner {
+            return Err("The account changed during ChatGPT sign-in.".into());
+        }
+        crate::backends::record_connected_provider(&owner, "codex")?;
         Ok(CodexBrowserLoginResult {
             provider_id: "codex",
             outcome: "ready",

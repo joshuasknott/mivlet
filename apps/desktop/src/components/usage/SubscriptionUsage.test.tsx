@@ -1,6 +1,6 @@
 import "@testing-library/jest-dom/vitest";
 import { useState } from "react";
-import { act, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackendProvider, ProviderAllowance } from "@mivlet/protocol";
@@ -59,6 +59,65 @@ beforeEach(() => {
 });
 
 describe("connected subscription usage", () => {
+  it("collects the first measurement on opening Usage when the connection has no cache", async () => {
+    vi.mocked(readProviderAllowance).mockResolvedValue({ ...allowance("codex"), status: "unavailable", windows: [] });
+    vi.mocked(refreshProviderAllowance).mockResolvedValue(allowance("codex", 18));
+    render(<SubscriptionUsage providers={[codex]} />);
+    expect(await screen.findByText("18% used")).toBeVisible();
+    expect(refreshProviderAllowance).toHaveBeenCalledExactlyOnceWith("codex");
+    expect(listRuntimeBackends).not.toHaveBeenCalled();
+  });
+  it("does not restart pending reads when discovery replaces equivalent provider arrays", async () => {
+    let complete!: (value: ProviderAllowance) => void;
+    vi.mocked(readProviderAllowance).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    const view = render(<SubscriptionUsage providers={[codex]} connectedProviderIds={["codex"]} />);
+    await waitFor(() => expect(readProviderAllowance).toHaveBeenCalledOnce());
+    view.rerender(<SubscriptionUsage providers={[{ ...codex, models: [...codex.models] }]} connectedProviderIds={["codex"]} />);
+    await act(async () => complete(allowance("codex", 42)));
+    expect(screen.getByText("42% used")).toBeVisible();
+    expect(readProviderAllowance).toHaveBeenCalledOnce();
+  });
+
+  it("times out stalled reads, allows retry and closing, and ignores the late reply", async () => {
+    vi.useFakeTimers();
+    let complete!: (value: ProviderAllowance) => void;
+    vi.mocked(readProviderAllowance).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
+    vi.mocked(refreshProviderAllowance).mockResolvedValue(allowance("codex", 24));
+    const close = vi.fn();
+    const view = render(<AccountDialog kind="usage" name="Fixture" providers={[codex]} onClose={close} onSignOut={vi.fn()} />);
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+      expect(screen.getByRole("alert")).toHaveTextContent("Try Refresh again");
+      expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      await act(async () => {});
+      expect(screen.getByText("24% used")).toBeVisible();
+      await act(async () => complete(allowance("codex", 99)));
+      expect(screen.queryByText("99% used")).toBeNull();
+      fireEvent.click(screen.getByRole("button", { name: "Close account dialog" }));
+      expect(close).toHaveBeenCalledOnce();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
+
+  it("times out missing connection metadata and recovers on Refresh", async () => {
+    vi.useFakeTimers();
+    vi.mocked(listRuntimeBackends).mockImplementationOnce(() => new Promise(() => {})).mockResolvedValueOnce([codex]);
+    vi.mocked(refreshProviderAllowance).mockResolvedValue(allowance("codex", 21));
+    const view = render(<SubscriptionUsage />);
+    try {
+      await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+      expect(screen.getByRole("alert")).toHaveTextContent("Connected subscriptions could not be loaded");
+      fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
+      await act(async () => {});
+      expect(screen.getByText("21% used")).toBeVisible();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+    }
+  });
   it("rechecks native connection metadata on refresh and excludes disconnected accounts", async () => {
     const user = userEvent.setup();
     render(<SubscriptionUsage />);
@@ -165,7 +224,7 @@ describe("connected subscription usage", () => {
     const user = userEvent.setup();
     render(<SubscriptionUsage />);
     expect(await screen.findByText("Usage unavailable")).toBeInTheDocument();
-    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent("Try Refresh again");
     expect(screen.queryByText("0% used")).not.toBeInTheDocument();
     vi.mocked(listRuntimeBackends).mockResolvedValueOnce(null);
     await user.click(screen.getByRole("button", { name: "Refresh" }));

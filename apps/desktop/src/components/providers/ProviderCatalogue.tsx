@@ -378,7 +378,7 @@ export function ProviderCatalogue({
           {!onboarding && (
             <p className="provider-catalogue__status">
               {connectedCount
-                ? `${connectedCount} provider${connectedCount === 1 ? "" : "s"} connected`
+                ? `${connectedCount} ${connectedCount === 1 ? "provider" : "providers"} connected`
                 : "No providers connected"}
             </p>
           )}

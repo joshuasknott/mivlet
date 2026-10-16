@@ -6,8 +6,8 @@
   "nodeCommit": "80dc632040e6bada37aac1220dde9c79581c9c22",
   "checksumsUrl": "https://nodejs.org/dist/v22.23.3/SHASUMS256.txt",
   "source": {
-    "url": "https://nodejs.org/dist/v22.23.3/node-v22.23.3.tar.xz",
-    "sha256": "bd97093e1a1e9243338950c174a693a64d4e0926a9c6ce259962bc58d5e96909",
+    "url": "https://nodejs.org/dist/v22.23.3/node-v22.23.3.tar.gz",
+    "sha256": "9436c81b284889303d39f5b8bd629bf19e790c665ccb94b4994aa87220d9799a",
     "directory": "node-v22.23.3"
   },
   "distribution": {

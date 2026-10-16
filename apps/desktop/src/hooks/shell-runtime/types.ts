@@ -45,6 +45,14 @@ export interface ShellRuntime {
 
   agents: MivletAgentProfile[];
   activeAgentId: string;
+  /** New accounts finish this setup after provider readiness, before workspace access. */
+  firstAgentSetupRequired: boolean;
+  completeFirstAgentSetup: (setup: {
+    name: string;
+    instructions: string;
+    avatarSeed: string;
+    iconColor: string;
+  }) => Promise<void>;
   createAgent: (input: Omit<MivletAgentProfile, "id" | "threadId">) => MivletAgentProfile;
   updateAgent: (agentId: string, patch: Partial<Omit<MivletAgentProfile, "id">>) => void;
   removeAgent: (agentId: string) => void;

@@ -17,6 +17,17 @@ import {
 } from "../../runtime/domains/provider-usage";
 import "./provider-usage.css";
 
+async function boundedUsageRead<T>(request: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([request, new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error("Usage request timed out")), 10_000);
+    })]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export const connectedSubscriptions = (
   providers: BackendProvider[],
   connectedProviderIds?: string[],
@@ -80,6 +91,12 @@ export function SubscriptionUsage({
   const [error, setError] = useState("");
   const [now, setNow] = useState(Date.now);
   const generation = useRef(0);
+  // Model discovery and shell polling can replace these arrays without changing
+  // the connections. Such renders must not restart or starve an in-flight read.
+  const connectionKey = JSON.stringify([
+    providers?.map(({ id, authState, setup }) => [id, authState, setup?.kind]),
+    connectedProviderIds,
+  ]);
   const subscriptions = connectedSubscriptions(
     providers ?? inventory,
     connectedProviderIds,
@@ -91,7 +108,7 @@ export function SubscriptionUsage({
     setPhase(refresh ? "refreshing" : "loading");
     setError("");
     try {
-      const available = providers ?? (await listRuntimeBackends());
+      const available = providers ?? (await boundedUsageRead(listRuntimeBackends()));
       if (request !== generation.current) return;
       if (!available) throw new Error("Provider metadata unavailable");
       setInventory(available);
@@ -101,17 +118,24 @@ export function SubscriptionUsage({
             let report: ProviderAllowance | null = null;
             let failed = false;
             try {
-              report = await (
+              report = await boundedUsageRead((
                 refresh ? refreshProviderAllowance : readProviderAllowance
-              )(provider.id);
+              )(provider.id));
+              if (request !== generation.current) return;
+              // A new connection has no cached measurement yet. Opening Usage
+              // should collect it once, without adding polling to the composer.
+              if (!refresh && (!report || report.status === "unavailable"))
+                report = await boundedUsageRead(refreshProviderAllowance(provider.id));
             } catch {
-              failed = refresh;
+              failed = true;
             }
             if (request !== generation.current) return;
             setNow(Date.now());
             if (failed)
               setError(
-                "Some allowances could not be refreshed. Last measurements remain visible.",
+                refresh
+                  ? "Some allowances could not be refreshed. Last measurements remain visible. Try Refresh again."
+                  : "Some allowances could not be loaded. Try Refresh again.",
               );
             setReports((current) => ({
               ...current,
@@ -147,7 +171,7 @@ export function SubscriptionUsage({
       generation.current++;
       window.clearInterval(timer);
     };
-  }, [providers, connectedProviderIds]);
+  }, [connectionKey]);
   return (
     <div className="subscription-usage">
       <header>

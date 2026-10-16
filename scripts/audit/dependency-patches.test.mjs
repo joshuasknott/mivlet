@@ -207,14 +207,14 @@ test("patch verification rejects missing/tampered sources and expired review", (
     }
     const modulesFile = join(fixture, "node_modules/.modules.yaml");
     const modules = readFileSync(modulesFile, "utf8");
-    writeFileSync(
-      modulesFile,
-      modules.replace(
-        /^virtualStoreDirMaxLength: \d+$/m,
-        "virtualStoreDirMaxLength: 60",
-      ),
-    );
-    assert.doesNotThrow(() => verifyDependencyPatches(fixture));
+    for (const contents of ["virtualStoreDirMaxLength: 60\n", JSON.stringify({ virtualStoreDirMaxLength: 60 })]) {
+      writeFileSync(modulesFile, contents);
+      assert.doesNotThrow(() => verifyDependencyPatches(fixture));
+    }
+    for (const contents of ["virtualStoreDirMaxLength: nope\n", "{}", '{"virtualStoreDirMaxLength":"60"}']) {
+      writeFileSync(modulesFile, contents);
+      assert.throws(() => verifyDependencyPatches(fixture), /Missing or invalid/);
+    }
     writeFileSync(modulesFile, modules);
     const file = join(
       fixture,

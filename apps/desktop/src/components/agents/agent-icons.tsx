@@ -5,7 +5,7 @@ import type { AgentPresence } from "../../lib/agent-presence";
 import { AgentCharacter } from "./agent-character";
 import "./agent-presence.css";
 
-export const DEFAULT_AGENT_COLOR = "#865DFA";
+export const DEFAULT_AGENT_COLOR = AVATAR_COLOURS[0];
 type AvatarProps = {
   seed: string;
   color?: string;
@@ -28,7 +28,7 @@ function AvatarInstance({ seed, imageDataUrl, iconSize = 30, className = "", col
   const variant = avatarVariant(seed);
   const current = presence ?? (thinking ? "thinking" : "idle");
   const root = useRef<HTMLSpanElement>(null);
-  const visible = useAvatarVisibility(root, !imageDataUrl);
+  const visible = useAvatarVisibility(root, !imageDataUrl && motion === "expressive");
   const previous = useRef(current);
   const [entrance, setEntrance] = useState<AgentPresence | null>(null);
   const [acknowledging, setAcknowledging] = useState(false);
@@ -54,7 +54,7 @@ function AvatarInstance({ seed, imageDataUrl, iconSize = 30, className = "", col
     className={`agent-avatar ${imageDataUrl ? "agent-avatar--image" : "agent-avatar--generated"}${className ? ` ${className}` : ""}`}
     style={{ width: iconSize, height: iconSize, borderRadius: imageDataUrl ? "30%" : 0 }}>
     {imageDataUrl ? <img src={imageDataUrl} alt="" draggable={false} />
-      : <AgentCharacter variant={variant} color={shellColor} expression={expression} />}
+      : <AgentCharacter variant={variant} color={shellColor} />}
   </span>;
 }
 
@@ -74,7 +74,7 @@ function useAvatarVisibility(root: RefObject<HTMLSpanElement | null>, enabled: b
     update();
     return () => { observer?.disconnect(); document.removeEventListener("visibilitychange", update); };
   }, [enabled, root]);
-  return visible;
+  return enabled && visible;
 }
 
 export function ProfileAgentAvatar({ agent, ...props }: { agent: MivletAgentProfile } & Omit<AvatarProps, "seed" | "color" | "imageDataUrl">) {

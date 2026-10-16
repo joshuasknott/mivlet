@@ -69,11 +69,12 @@ export function useWorkspaceSnapshot(options: {
     snapshotWrites.current = next;
     return next;
   };
-  const flushSnapshot = async () => {
+  const flushSnapshot = async (state?: PersistedShellState) => {
     const identity = workspaceIdentityRef.current;
+    const workspaceId = activeWorkspaceScope?.workspaceId;
     if (
       !runtimeSnapshotReady ||
-      !activeWorkspaceScope ||
+      !workspaceId ||
       !identity ||
       hydratedWorkspaceRef.current !== identity
     )
@@ -83,9 +84,18 @@ export function useWorkspaceSnapshot(options: {
     snapshotTimerRef.current = null;
     pendingSnapshotRef.current = null;
     await writeSnapshot(
-      shellStateToRuntimeSnapshot(shellStateRef.current),
-      activeWorkspaceScope.workspaceId,
+      shellStateToRuntimeSnapshot(state ?? shellStateRef.current),
+      workspaceId,
     );
+    // A scope can change while the native write is in flight. Never let the
+    // caller commit UI state after that boundary has moved.
+    if (
+      workspaceIdentityRef.current !== identity ||
+      hydratedWorkspaceRef.current !== identity ||
+      callbacks.current.activeWorkspaceScope?.workspaceId !== workspaceId
+    ) {
+      throw new Error("The workspace changed before its settings could be saved.");
+    }
   };
 
   useEffect(() => {

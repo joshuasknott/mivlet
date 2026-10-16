@@ -282,6 +282,7 @@ export function AgentSidebar({
                     agent={agent}
                     iconSize={32}
                     presence={presence}
+                    motion={presence === "idle" ? "quiet" : "expressive"}
                   />
                   <span className="agent-row__copy">
                     <strong>{agent.name}</strong>

@@ -47,7 +47,11 @@ export function useWorkspaceNavigation(options: {
   const [contextOpen, setContextOpen] = useState(!narrow);
   const [projectDetailsId, setProjectDetailsId] = useState<string | null>(null);
   const [panelFocused, setPanelFocused] = useState(false);
-  const [panelRequest, setPanelRequest] = useState<RightPanelTab | null>(null);
+  const [panelRequest, setPanelRequestState] = useState<RightPanelTab | null>(null);
+  // Opening is an action even when a retained collection reuses its row object.
+  const setPanelRequest = useCallback((request: RightPanelTab | null) => {
+    setPanelRequestState(request ? { ...request } : null);
+  }, []);
   const [navWorkId, setNavWorkId] = useState<string | null>(null);
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [computer, setComputer] = useState<string | null>(null);

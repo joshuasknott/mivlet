@@ -8,7 +8,7 @@ export const appearance: ComponentProps<typeof ClerkProvider>["appearance"] = {
   options: {
     logoImageUrl: symbol,
     logoPlacement: "inside",
-    socialButtonsVariant: "iconButton",
+    socialButtonsVariant: "blockButton",
     socialButtonsPlacement: "top",
     animations: false,
   },
@@ -47,6 +47,8 @@ export const appearance: ComponentProps<typeof ClerkProvider>["appearance"] = {
 
 export const localization = {
   ...enUS,
+  socialButtonsBlockButton: "Continue with {{provider|titleize}}",
+  socialButtonsBlockButtonManyInView: "Continue with {{provider|titleize}}",
   signIn: {
     ...enUS.signIn,
     start: {

@@ -8,24 +8,22 @@ import {
 } from "react";
 import type {
   CollaborationWorkItem,
-  ConversationRoom,
-  MivletAgentProfile,
   LocalProject,
+  MivletAgentProfile,
 } from "@mivlet/protocol";
-import { ChatCircle } from "@phosphor-icons/react/dist/csr/ChatCircle";
-import { CalendarBlank } from "@phosphor-icons/react/dist/csr/CalendarBlank";
-import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
-import { Pulse } from "@phosphor-icons/react/dist/csr/Pulse";
-import { BookmarkSimple } from "@phosphor-icons/react/dist/csr/BookmarkSimple";
-import { Globe } from "@phosphor-icons/react/dist/csr/Globe";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
+import { ArrowsOutSimple } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple";
+import { ArrowsInSimple } from "@phosphor-icons/react/dist/csr/ArrowsInSimple";
+import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { X } from "@phosphor-icons/react/dist/csr/X";
-import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
-import { safeConversationLink } from "../../lib/safe-output";
-import { sideChatsFor } from "./work-order";
-import { reduceRightPanel, type RightPanelTab } from "./right-panel-state";
+import {
+  reduceRightPanel,
+  type PanelPage,
+  type RightPanelTab,
+} from "./right-panel-state";
+import type { PanelScope } from "./workspace-panel-data";
 import "./navigation.css";
 import "./right-panel.css";
 
@@ -35,21 +33,29 @@ export type NavContext =
   | { kind: "work"; item: CollaborationWorkItem }
   | null;
 
-/** Content remains in the workspace that owns it; hiding the panel never stops work. */
+const sections = [
+  { id: "activity", label: "Activity" },
+  { id: "files", label: "Files" },
+  { id: "memory", label: "Memory" },
+] as const;
+
+/** One content inspector; closing it returns to the preserved collection. */
 export function WorkspaceRightNav({
   context,
-  rooms,
+  title,
+  identity = "workspace",
+  scope = "chat",
+  ownerLabel,
+  onScopeChange,
   open,
   onClose,
-  onOpenConversation,
-  onNewSideChat,
-  sideChats,
-  schedules,
+  activity,
   library,
   memories,
   history,
   historyRequestId,
-  onSchedules,
+  sideChats,
+  schedules,
   request,
   renderTab,
   computer,
@@ -58,20 +64,20 @@ export function WorkspaceRightNav({
   onChatActiveChange,
 }: {
   context: NavContext;
-  rooms: ConversationRoom[];
-  work: CollaborationWorkItem[];
-  runtime: ShellRuntime;
+  title?: string;
+  identity?: string;
+  scope?: PanelScope;
+  ownerLabel?: string;
+  onScopeChange?: (scope: PanelScope) => void;
   open: boolean;
   onClose: () => void;
-  onOpenConversation: (id: string) => void;
-  onNewSideChat?: () => void;
-  sideChats?: ReactNode;
-  schedules?: ReactNode;
+  activity?: (navigate: (page: PanelPage) => void) => ReactNode;
   library?: ReactNode;
   memories?: ReactNode;
   history?: ReactNode;
   historyRequestId?: string | null;
-  onSchedules?: () => void;
+  sideChats?: ReactNode;
+  schedules?: ReactNode;
   request?: RightPanelTab | null;
   renderTab?: (tab: RightPanelTab, close: () => void) => ReactNode;
   computer?: ReactNode;
@@ -80,368 +86,322 @@ export function WorkspaceRightNav({
   onChatActiveChange?: (active: boolean) => void;
 }) {
   const panel = useRef<HTMLElement>(null);
-  const [address, setAddress] = useState("");
-  const [addressError, setAddressError] = useState("");
+  const more = useRef<HTMLDetailsElement>(null);
   const compact = useMediaQuery("(max-width: 850px)");
   useModalFocusTrap({ active: open && compact, containerRef: panel, onClose });
   const prefix = useId();
   const [state, dispatch] = useReducer(reduceRightPanel, {
-    tabs: [],
-    selected: "navigation",
+    page: "activity",
+    content: null,
+  });
+  const [expanded, setExpanded] = useState(false);
+  const [visited, setVisited] = useState<ReadonlySet<PanelPage>>(
+    () => new Set(["activity"]),
+  );
+  const scopeKey = identity + ":" + scope;
+  const previous = useRef({
+    identity,
+    scopeKey,
+    request: null as RightPanelTab | null | undefined,
   });
   useEffect(() => {
-    if (request) dispatch({ type: "open", tab: request });
-  }, [request]);
+    if (previous.current.identity !== identity) {
+      dispatch({ type: "reset" });
+      setVisited(new Set(["activity"]));
+    } else if (previous.current.scopeKey !== scopeKey)
+      dispatch({ type: "close" });
+    // An old request must not reopen a previous chat's inspector after navigation.
+    if (request && request !== previous.current.request)
+      dispatch({ type: "open", tab: request, scopeKey });
+    previous.current = { identity, scopeKey, request };
+  }, [identity, scopeKey, request]);
+  const navigate = (page: PanelPage) => {
+    onCloseComputer?.();
+    setVisited((current) => new Set([...current, page]));
+    dispatch({ type: "select", page });
+    if (more.current) more.current.open = false;
+  };
+  const lastHistory = useRef<string | null>(null);
   useEffect(() => {
-    if (historyRequestId) dispatch({ type: "select", id: "history" });
+    if (historyRequestId && historyRequestId !== lastHistory.current) {
+      setVisited((current) => new Set([...current, "history"]));
+      dispatch({ type: "select", page: "history" });
+    }
+    lastHistory.current = historyRequestId ?? null;
   }, [historyRequestId]);
+  const selected =
+    state.content?.scopeKey === scopeKey ? state.content.tab : undefined;
+  const inspecting = Boolean(selected || computerAgentId);
+  const activeSection = ["history", "chats", "schedules"].includes(state.page)
+    ? "activity"
+    : state.page;
+  const closeContent = () => {
+    onCloseComputer?.();
+    dispatch({ type: "close" });
+  };
   useEffect(() => {
-    const closeMcpAppTab = (event: Event) => {
-      const detail = (event as CustomEvent<unknown>).detail;
-      const id =
-        detail && typeof detail === "object"
-          ? (detail as Record<string, unknown>).id
-          : undefined;
-      if (typeof id === "string" && id.startsWith("mcp-app:"))
-        dispatch({ type: "close", id });
+    const closeApp = (event: Event) => {
+      if (selected?.kind === "mcp-app" && (event as CustomEvent<{ id?: string }>).detail?.id === selected.id)
+        dispatch({ type: "close" });
     };
-    window.addEventListener("mivlet:mcp-app-panel-closed", closeMcpAppTab);
-    return () =>
-      window.removeEventListener("mivlet:mcp-app-panel-closed", closeMcpAppTab);
+    window.addEventListener("mivlet:mcp-app-panel-closed", closeApp);
+    return () => window.removeEventListener("mivlet:mcp-app-panel-closed", closeApp);
+  }, [selected?.id, selected?.kind]);
+  useEffect(() => {
+    if (selected?.kind !== "mcp-app" || !open || computerAgentId) return;
+    const target = Array.from(panel.current?.querySelectorAll<HTMLElement>("[data-mcp-app-panel]") ?? [])
+      .find((candidate) => candidate.dataset.mcpAppPanel === selected.id);
+    if (target) window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-ready", { detail: { id: selected.id, target } }));
+  }, [selected?.id, selected?.kind, open, computerAgentId]);
+  const dockedApp = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    const next = selected?.kind === "mcp-app" && !computerAgentId ? selected.id : undefined;
+    const previousApp = dockedApp.current;
+    dockedApp.current = next;
+    if (previousApp && previousApp !== next)
+      window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id: previousApp } }));
+  }, [selected?.id, selected?.kind, computerAgentId]);
+  useEffect(() => () => {
+    if (dockedApp.current)
+      window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id: dockedApp.current } }));
   }, []);
-  const lastUtility = useRef("library");
-  const navigationOnly = !computerAgentId && state.selected === "navigation";
-  const lastSelection = useRef(state.selected);
+  const focusKey = inspecting ? (selected?.id ?? "computer") : state.page;
+  const lastFocus = useRef(focusKey);
   useEffect(() => {
-    if (lastSelection.current === state.selected) return;
-    lastSelection.current = state.selected;
+    if (lastFocus.current === focusKey) return;
+    lastFocus.current = focusKey;
     if (open)
-      (
-        (panel.current?.querySelector('[role="tab"][aria-selected="true"]') ??
-          panel.current?.querySelector(
-            navigationOnly
-              ? `[data-utility="${lastUtility.current}"]`
-              : ".right-panel__back",
-          )) as HTMLElement | null
-      )?.focus();
-  }, [state.selected, open, navigationOnly]);
-  const agentId =
-    context?.kind === "agent"
-      ? context.agent.id
-      : context?.kind === "work"
-        ? context.item.agentId
-        : undefined;
-  const project = context?.kind === "project" ? context.project : undefined;
-  const chats = sideChatsFor(
-    agentId
-      ? { kind: "agent", agentId }
-      : project
-        ? { kind: "project", project }
-        : null,
-    rooms,
-  );
-  const selected = state.tabs.find((tab) => tab.id === state.selected);
-  useEffect(() => {
-    if (!selected || selected.kind !== "mcp-app" || !open) return;
-    const target = Array.from(
-      panel.current?.querySelectorAll<HTMLElement>(
-        "[data-mcp-app-panel]",
-      ) ?? [],
-    ).find((candidate) => candidate.dataset.mcpAppPanel === selected.id);
-    if (!target) return;
-    window.dispatchEvent(
-      new CustomEvent("mivlet:mcp-app-panel-ready", {
-        detail: { id: selected.id, target },
-      }),
-    );
-  }, [selected?.id, selected?.kind, open]);
+      panel.current
+        ?.querySelector<HTMLElement>(
+          inspecting
+            ? ".right-panel__back"
+            : '[role="tab"][aria-selected="true"]',
+        )
+        ?.focus();
+  }, [focusKey, inspecting, open]);
   useEffect(() => {
     onChatActiveChange?.(open && !computerAgentId && selected?.kind === "chat");
-  }, [selected?.id, open, computerAgentId, onChatActiveChange]);
-  const select = (id: string) => {
-    onCloseComputer?.();
-    dispatch({ type: "select", id });
-  };
-  const closeTab = (id: string) => {
-    dispatch({ type: "close", id });
-    window.dispatchEvent(
-      new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id } }),
-    );
-  };
-  const utilities = [
-    { id: "library", label: "Files", Icon: FileText },
-    { id: "memories", label: "Memories", Icon: BookmarkSimple },
-    { id: "browser", label: "Browser", Icon: Globe },
-    { id: "chats", label: "Side chat", Icon: ChatCircle },
-    { id: "schedules", label: "Schedules", Icon: CalendarBlank },
-    { id: "history", label: "Activity", Icon: Pulse },
+  }, [open, computerAgentId, selected?.id, selected?.kind, onChatActiveChange]);
+  const contextName =
+    context?.kind === "project"
+      ? context.project.name
+      : context?.kind === "agent"
+        ? context.agent.name
+        : undefined;
+  const heading = title || contextName || "Workspace";
+  const pages: { id: PanelPage; content: ReactNode }[] = [
+    {
+      id: "activity",
+      content: activity?.(navigate) ?? (
+        <p className="right-panel__empty">
+          Choose a conversation to see its activity.
+        </p>
+      ),
+    },
+    {
+      id: "files",
+      content: library ?? (
+        <p className="right-panel__empty">
+          Files shared or created here will appear here.
+        </p>
+      ),
+    },
+    {
+      id: "memory",
+      content: memories ?? (
+        <p className="right-panel__empty">
+          Choose a conversation to manage its memory.
+        </p>
+      ),
+    },
+    {
+      id: "history",
+      content: (
+        <div className="right-panel__library">
+          <button
+            type="button"
+            className="workspace-panel__link"
+            onClick={() => navigate("activity")}
+          >
+            <ArrowLeft size={15} aria-hidden="true" />
+            Back to Activity
+          </button>
+          {history}
+        </div>
+      ),
+    },
+    {
+      id: "chats",
+      content: <div className="right-panel__library">{sideChats}</div>,
+    },
+    {
+      id: "schedules",
+      content: <div className="right-panel__library">{schedules}</div>,
+    },
   ];
   return (
     <aside
       ref={panel}
       className="workspace-context right-panel"
-      data-navigation-only={navigationOnly}
+      data-expanded={expanded}
       aria-label="Workspace panel"
       role={compact ? "dialog" : undefined}
       aria-modal={(compact && open) || undefined}
       hidden={!open}
     >
-      <header
-        className={
-          navigationOnly
-            ? "right-panel__navigation"
-            : "right-panel__destination"
-        }
-      >
-        {navigationOnly ? (
-          <>
-            <h2 className="right-panel__title">Workspace</h2>
-            <nav aria-label="Panel views">
-              {utilities.map(({ id, label, Icon }) => (
-                <button
-                  key={id}
-                  type="button"
-                  data-utility={id}
-                  onClick={() => {
-                    lastUtility.current = id;
-                    select(id);
-                    if (id === "schedules" && !schedules) onSchedules?.();
-                  }}
-                >
-                  <Icon size={17} />
-                  <span>{label}</span>
-                </button>
-              ))}
-            </nav>
-          </>
+      <header className="right-panel__header">
+        {inspecting ? (
+          <div className="right-panel__inspector-title">
+            <button
+              type="button"
+              className="right-panel__back"
+              onClick={closeContent}
+            >
+              <ArrowLeft size={17} aria-hidden="true" />
+              Back
+            </button>
+            <h2 title={selected?.title}>
+              {computerAgentId ? "Computer" : selected?.title}
+            </h2>
+          </div>
         ) : (
+          <div className="right-panel__heading">
+            <h2 title={heading}>{heading}</h2>
+            {onScopeChange && ownerLabel ? (
+              <select
+                aria-label="Panel scope"
+                value={scope}
+                onChange={(event) =>
+                  onScopeChange(event.target.value as PanelScope)
+                }
+              >
+                <option value="chat">This chat</option>
+                <option value="owner">All in {ownerLabel}</option>
+              </select>
+            ) : null}
+          </div>
+        )}
+        <div className="right-panel__controls">
+          {!inspecting && (sideChats || schedules) ? (
+            <details
+              ref={more}
+              className="right-panel__more"
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.currentTarget.open = false;
+                  event.currentTarget.querySelector("summary")?.focus();
+                  event.stopPropagation();
+                }
+              }}
+            >
+              <summary aria-label="More workspace options">
+                <DotsThree size={20} aria-hidden="true" />
+              </summary>
+              <div>
+                {sideChats ? (
+                  <button type="button" onClick={() => navigate("chats")}>
+                    Conversations
+                  </button>
+                ) : null}
+                {schedules ? (
+                  <button type="button" onClick={() => navigate("schedules")}>
+                    Schedules
+                  </button>
+                ) : null}
+              </div>
+            </details>
+          ) : null}
           <button
             type="button"
-            className="right-panel__back"
-            onClick={() => select("navigation")}
+            className="right-panel__expand"
+            aria-label={
+              expanded ? "Reduce workspace panel" : "Expand workspace panel"
+            }
+            aria-pressed={expanded}
+            onClick={() => setExpanded((value) => !value)}
           >
-            <ArrowLeft size={18} aria-hidden="true" />
-            Back
+            {expanded ? (
+              <ArrowsInSimple size={18} aria-hidden="true" />
+            ) : (
+              <ArrowsOutSimple size={18} aria-hidden="true" />
+            )}
           </button>
-        )}
-        <button
-          type="button"
-          className="right-panel__close"
-          aria-label="Close workspace panel"
-          onClick={onClose}
-        >
-          <svg
-            width="19"
-            height="19"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="1.5"
-            aria-hidden="true"
+          <button
+            type="button"
+            className="right-panel__close"
+            aria-label="Close workspace panel"
+            onClick={onClose}
           >
-            <rect x="3" y="4.5" width="18" height="15" rx="1" />
-            <path d="M9 4.5v15" />
-          </svg>
-        </button>
-      </header>
-      {state.tabs.length && selected && !computerAgentId ? (
-        <div
-          className="right-panel__tabs"
-          role="tablist"
-          aria-label="Open content"
-        >
-          {state.tabs.map((tab, index) => {
-            const Icon =
-              tab.kind === "artifact" ||
-              tab.kind === "file" ||
-              tab.kind === "output" ||
-              tab.kind === "mcp-app"
-                ? FileText
-                : tab.kind === "web"
-                  ? Globe
-                  : ChatCircle;
-            return (
-              <div
-                className="right-panel__tab"
-                key={tab.id}
-                data-active={!computerAgentId && state.selected === tab.id}
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  id={`${prefix}-tab-${index}`}
-                  aria-controls={`${prefix}-content`}
-                  aria-selected={!computerAgentId && state.selected === tab.id}
-                  tabIndex={
-                    state.selected === tab.id || (!selected && index === 0)
-                      ? 0
-                      : -1
-                  }
-                  onClick={() => select(tab.id)}
-                  onKeyDown={(event) => {
-                    let next: number | undefined;
-                    if (event.key === "ArrowRight")
-                      next = (index + 1) % state.tabs.length;
-                    if (event.key === "ArrowLeft")
-                      next =
-                        (index + state.tabs.length - 1) % state.tabs.length;
-                    if (event.key === "Home") next = 0;
-                    if (event.key === "End") next = state.tabs.length - 1;
-                    if (next !== undefined) {
-                      event.preventDefault();
-                      select(state.tabs[next].id);
-                      document.getElementById(`${prefix}-tab-${next}`)?.focus();
-                    }
-                    if (event.key === "Delete") {
-                      event.preventDefault();
-                      closeTab(tab.id);
-                      requestAnimationFrame(() =>
-                        (
-                          panel.current?.querySelector(
-                            '[role="tab"][tabindex="0"]',
-                          ) as HTMLElement | null
-                        )?.focus(),
-                      );
-                    }
-                  }}
-                >
-                  <Icon size={15} />
-                  <span>{tab.title}</span>
-                </button>
-                <button
-                  type="button"
-                  aria-label={`Close ${tab.title}`}
-                  onClick={() => closeTab(tab.id)}
-                >
-                  <X size={13} />
-                </button>
-              </div>
-            );
-          })}
+            <X size={19} aria-hidden="true" />
+          </button>
         </div>
-      ) : null}
-      <div
-        id={`${prefix}-content`}
-        className="right-panel__content"
-        hidden={!computerAgentId && state.selected === "navigation"}
-        role={selected && !computerAgentId ? "tabpanel" : undefined}
-        aria-labelledby={
-          selected && !computerAgentId
-            ? `${prefix}-tab-${state.tabs.indexOf(selected)}`
-            : undefined
-        }
-      >
-        {computerAgentId ? (
-          computer
-        ) : selected?.kind === "mcp-app" ? (
-          <div
-            className="right-panel__mcp-app"
-            data-mcp-app-panel={selected.id}
-            aria-label={`${selected.title} interactive result`}
-          />
-        ) : selected ? (
-          renderTab?.(selected, () => closeTab(selected.id))
-        ) : state.selected === "library" ? (
-          (library ?? (
-            <p className="right-panel__empty">Saved files will appear here.</p>
-          ))
-        ) : state.selected === "memories" ? (
-          (memories ?? (
-            <p className="right-panel__empty">
-              Choose a conversation to manage its memories.
-            </p>
-          ))
-        ) : state.selected === "history" ? (
-          <div className="right-panel__library">
-            <div className="right-panel__section-heading">
-              <h2>Activity</h2>
-            </div>
-            {history ?? (
-              <p className="right-panel__empty">
-                No activity for this conversation yet.
-              </p>
-            )}
-          </div>
-        ) : state.selected === "chats" ? (
-          <div className="right-panel__library">
-            {sideChats ?? (
-              <>
-                <div className="right-panel__section-heading">
-                  <h2>Side chats</h2>
-                  {onNewSideChat ? (
-                    <button type="button" onClick={onNewSideChat}>
-                      New chat
-                    </button>
-                  ) : null}
-                </div>
-                {chats.map((chat) => (
-                  <button
-                    className="right-panel__file"
-                    key={chat.id}
-                    onClick={() => onOpenConversation(chat.id)}
-                  >
-                    <ChatCircle size={18} />
-                    <span>{chat.title}</span>
-                  </button>
-                ))}
-                {!chats.length ? (
-                  <p className="right-panel__empty">
-                    A separate conversation, without losing your place.
-                  </p>
-                ) : null}
-              </>
-            )}
-          </div>
-        ) : state.selected === "schedules" ? (
-          <div className="right-panel__library">
-            {schedules ?? (
-              <p className="right-panel__empty">
-                Scheduled work for this conversation.
-              </p>
-            )}
-          </div>
-        ) : state.selected === "browser" ? (
-          <form
-            className="right-panel__browser"
-            onSubmit={(event) => {
-              event.preventDefault();
-              const value = address.trim();
-              const url = safeConversationLink(
-                /^[a-z][a-z0-9+.-]*:/i.test(value) ? value : `https://${value}`,
-              );
-              if (!url || !/^https?:/.test(url)) {
-                setAddressError("Enter a valid website address.");
-                return;
+      </header>
+      {!inspecting && (
+        <div
+          className="right-panel__sections"
+          role="tablist"
+          aria-label="Workspace sections"
+        >
+          {sections.map((section, index) => (
+            <button
+              key={section.id}
+              type="button"
+              role="tab"
+              id={prefix + "-" + section.id}
+              aria-selected={activeSection === section.id}
+              aria-controls={
+                prefix +
+                "-page-" +
+                (activeSection === section.id ? state.page : section.id)
               }
-              setAddressError("");
-              dispatch({
-                type: "open",
-                tab: {
-                  id: `web:${url}`,
-                  kind: "web",
-                  title: new URL(url).hostname,
-                  url,
-                },
-              });
-            }}
+              tabIndex={activeSection === section.id ? 0 : -1}
+              onClick={() => navigate(section.id)}
+              onKeyDown={(event) => {
+                const next =
+                  event.key === "ArrowRight"
+                    ? (index + 1) % sections.length
+                    : event.key === "ArrowLeft"
+                      ? (index + sections.length - 1) % sections.length
+                      : event.key === "Home"
+                        ? 0
+                        : event.key === "End"
+                          ? sections.length - 1
+                          : undefined;
+                if (next === undefined) return;
+                event.preventDefault();
+                navigate(sections[next].id);
+                document
+                  .getElementById(prefix + "-" + sections[next].id)
+                  ?.focus();
+              }}
+            >
+              {section.label}
+            </button>
+          ))}
+        </div>
+      )}
+      <div className="right-panel__content">
+        {pages.map(({ id, content }) => (
+          <div
+            key={id + ":" + scopeKey}
+            className="right-panel__page"
+            id={prefix + "-page-" + id}
+            role="tabpanel"
+            aria-labelledby={
+              sections.some((section) => section.id === id)
+                ? prefix + "-" + id
+                : prefix + "-activity"
+            }
+            hidden={inspecting || state.page !== id}
           >
-            <label htmlFor={`${prefix}-address`}>Website address</label>
-            <div>
-              <input
-                id={`${prefix}-address`}
-                type="text"
-                inputMode="url"
-                autoComplete="url"
-                placeholder="https://example.com"
-                value={address}
-                onChange={(event) => setAddress(event.target.value)}
-                required
-              />
-              <button type="submit">Open</button>
-            </div>
-            {addressError ? <p role="alert">{addressError}</p> : null}
-          </form>
-        ) : null}
+            {visited.has(id) ? content : null}
+          </div>
+        ))}
+        {computerAgentId
+          ? computer
+          : selected
+            ? renderTab?.(selected, closeContent)
+            : null}
       </div>
     </aside>
   );

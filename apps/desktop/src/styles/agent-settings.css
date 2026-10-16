@@ -16,7 +16,6 @@
 .agent-editor__appearance > summary { color: var(--ink-muted); font-size: 12px; cursor: pointer; padding-block: 8px; }
 .agent-editor-backdrop .agent-editor__appearance > summary { display: none; }
 .agent-settings-panel .agent-editor .agent-icon-picker { margin-top: 12px; }
-.agent-settings-panel .agent-shape-picker { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .agent-settings-panel .agent-editor__footer { position: static; flex-shrink: 0; margin: 0; padding: 16px 20px; gap: 8px; }
 .agent-settings-panel .agent-editor__footer > div { gap: 6px; }
 .agent-settings-panel .agent-editor__footer button { padding-inline: 10px; }

@@ -1,5 +1,10 @@
+// @vitest-environment node
 import { expect, it } from "vitest";
-import { compactStyleText, styleNameMap } from "./compact-style-names";
+import { compactStyleNames, compactStyleText, styleNameMap } from "./compact-style-names";
+import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { build } from "vite";
 const sources = (code: string) => [{ fileName: "component.tsx", code }];
 it("reserves the shortest names for frequent safe tokens", () => {
   const map = styleNameMap(
@@ -94,4 +99,35 @@ it("does not rename a variable also used as a computed class modifier", () => {
 it("preserves classes assembled by concatenation", () => {
   const map = styleNameMap(".window-controls__close{}", sources('const node = <div className={"window-controls__" + action} />; const other = <div className="window-controls__close" />;'));
   expect(map.has("window-controls__close")).toBe(false);
+});
+
+it("keeps imported CSS layers, custom properties and JSX consistent in a real build", async () => {
+  const fixture = await realpath(await mkdtemp(join(tmpdir(), "mivlet-style-build-")));
+  try {
+    const src = join(fixture, "src");
+    await mkdir(join(src, "layers"), { recursive: true });
+    await writeFile(join(fixture, "index.html"), '<script type="module" src="/src/main.tsx"></script>');
+    await writeFile(join(src, "main.tsx"), 'import "./styles.css"; window.fixture = <div className="imported-card" />;');
+    await writeFile(join(src, "styles.css"), '@import "./layers/card.css";');
+    await writeFile(join(src, "layers/card.css"), ':root { --card-colour: red; } .imported-card { color: var(--card-colour); }');
+    await build({
+      root: fixture,
+      configFile: false,
+      logLevel: "silent",
+      plugins: [compactStyleNames(src)],
+      build: { manifest: true, minify: false },
+    });
+    const manifest = JSON.parse(await readFile(join(fixture, "dist/.vite/manifest.json"), "utf8"));
+    const entry = manifest["index.html"];
+    const js = await readFile(join(fixture, "dist", entry.file), "utf8");
+    const css = await readFile(join(fixture, "dist", entry.css[0]), "utf8");
+    expect(js).toContain('className: "_0"');
+    expect(css).toContain("._0");
+    expect(css).toContain("--_0:");
+    expect(css).toContain("var(--_0)");
+    expect(css).not.toMatch(/imported-card|card-colour/);
+  } finally {
+    // mkdtemp created this exact directory; it contains only this test's files.
+    await rm(fixture, { recursive: true, force: true });
+  }
 });

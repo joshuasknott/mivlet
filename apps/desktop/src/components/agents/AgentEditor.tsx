@@ -8,9 +8,9 @@ import type { ProviderModelOption } from "../../lib/provider-models";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { AgentAvatar, DEFAULT_AGENT_COLOR } from "./agent-icons";
-import { AVATAR_SHAPES, AVATAR_COLOURS, avatarVariant, createAvatarSeed } from "../../lib/blob-avatar";
+import { AVATAR_COLOURS, avatarVariant, createAvatarSeed } from "../../lib/blob-avatar";
 
-import { AgentColourPicker } from "./AgentColourPicker";
+import { AgentAppearancePicker } from "./AgentAppearancePicker";
 const AgentLearningDialog = lazy(() => import("./AgentLearningDialog").then((module) => ({ default: module.AgentLearningDialog })));
 import { ModelPicker } from "../ModelPicker";
 
@@ -157,21 +157,20 @@ export function AgentEditor({
         <form onSubmit={(event) => { event.preventDefault(); if (draft.name.trim() && !imagePending) onSave({ ...draft, name: draft.name.trim(), instructions: draft.instructions.trim() }); }}>
           <div className="agent-editor__body">
           <div className="agent-editor__identity">
-            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={80} />
+            <AgentAvatar seed={draft.avatarSeed ?? "blob-v1:draft"} imageDataUrl={draft.iconImageDataUrl} color={draft.iconColor} iconSize={80} motion="expressive" />
             <label><span>Name</span><input ref={nameRef} required maxLength={80} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder="What should this agent be called?" /></label>
           </div>
 
           <details className="agent-editor__appearance" open={presentation === "modal" ? true : undefined}>
           <summary>Change appearance</summary>
+          <AgentAppearancePicker seed={draft.avatarSeed ?? "blob-v1:draft"} color={draft.iconColor} imageSelected={Boolean(draft.iconImageDataUrl)}
+            onChange={(appearance) => {
+              const changedIcon = appearance.avatarSeed !== draft.avatarSeed;
+              if (changedIcon) { imageRequestRef.current++; setImagePending(false); setImageError(""); }
+              setDraft({ ...draft, ...appearance, iconImageDataUrl: changedIcon ? undefined : draft.iconImageDataUrl });
+            }} />
           <fieldset className="agent-icon-picker">
             <legend className="agent-editor__sr-only">Agent image</legend>
-            <div className="agent-shape-picker" role="group" aria-label="Character shape">
-              {AVATAR_SHAPES.map((shape, index) => <button key={shape} type="button" aria-label={`${shape} character`}
-                aria-pressed={!draft.iconImageDataUrl && avatarVariant(draft.avatarSeed ?? "") === index}
-                onClick={() => { imageRequestRef.current++; setImagePending(false); setDraft({ ...draft, iconImageDataUrl: undefined, iconColor: AVATAR_COLOURS[index], avatarSeed: `robot-v3:${index}:${crypto.randomUUID()}` }); }}>
-                <AgentAvatar seed={`robot-v3:${index}:preview`} color={AVATAR_COLOURS[index]} iconSize={40} />
-              </button>)}
-            </div>
             <div className="agent-icon-picker__options">
               <div className="agent-image-upload">
                 <input
@@ -203,8 +202,7 @@ export function AgentEditor({
             {imageError ? <p className="agent-image-error" role="alert">{imageError}</p> : null}
           </fieldset>
 
-          <AgentColourPicker key={`${agent?.id ?? "new"}:${draft.avatarSeed}`} value={draft.iconColor} onChange={(iconColor) => setDraft({ ...draft, iconColor })} />
-          {draft.iconImageDataUrl && <small>Colour applies to the generated portrait when you remove the uploaded image.</small>}
+          {draft.iconImageDataUrl && <small>Colour applies when you choose a character.</small>}
           </details>
 
           <label className="agent-editor__field"><span>Instructions</span><textarea rows={3} value={draft.instructions} onChange={(event) => setDraft({ ...draft, instructions: event.target.value })} placeholder="How should this agent work with you?" /></label>

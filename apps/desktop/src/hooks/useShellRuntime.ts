@@ -55,7 +55,10 @@ import {
 
 import { isMivletProviderEnabled } from "../lib/provider-availability";
 import { isSupportedConnectorId } from "./shell-runtime/backend-normalization";
-import { defaultShellState } from "./shell-runtime/defaults";
+import {
+  defaultShellState,
+  FIRST_AGENT_ONBOARDING_VERSION,
+} from "./shell-runtime/defaults";
 import type {
   ShellRuntime,
   UseShellRuntimeOptions,
@@ -200,6 +203,18 @@ export function useShellRuntime(
   const [onboardingVersion, setOnboardingVersion] = useState(
     initialState.onboardingVersion ?? 0,
   );
+  const firstAgentSetupAttemptRef = useRef<{
+    generation: number;
+    pendingToken: number | null;
+    nextToken: number;
+  }>({ generation: workspaceScopeGeneration, pendingToken: null, nextToken: 0 });
+  useEffect(() => {
+    firstAgentSetupAttemptRef.current = {
+      generation: workspaceScopeGeneration,
+      pendingToken: null,
+      nextToken: firstAgentSetupAttemptRef.current.nextToken + 1,
+    };
+  }, [workspaceScopeGeneration]);
   // Composer model + permission picker selections, persisted so the next run
   // uses them. The model is re-validated against the connected backend's
   // available models before each run (see resolveSelectedModel).
@@ -312,7 +327,7 @@ export function useShellRuntime(
       setAgents(defaultShellState.agents ?? []);
       setActiveAgentId(defaultShellState.activeAgentId ?? "chief-of-staff");
       setOnboardingDismissed(false);
-      setOnboardingVersion(0);
+      setOnboardingVersion(FIRST_AGENT_ONBOARDING_VERSION);
       setPinnedSourceIds([]);
       setImportedKnowledgeSources([]);
       setImportStatus(null);
@@ -810,6 +825,13 @@ export function useShellRuntime(
         Boolean(identityStatus.authentication))
     ) || !activeWorkspaceScope;
 
+  // Version 2 is the first journey that asks for an original agent. A
+  // missing/zero version is deliberately treated as a legacy returning
+  // account, so upgrading never surprises an existing workspace.
+  const firstAgentSetupRequired =
+    onboardingVersion === FIRST_AGENT_ONBOARDING_VERSION &&
+    !onboardingDismissed;
+
   // Composer picker bindings: the model picker drives request.model on the next
   // agent run; the approval preset maps its label onto a PermissionMode that
   // gates tool execution in the agent loop.
@@ -854,8 +876,91 @@ export function useShellRuntime(
     setLastAction("Custom approvals updated");
   };
 
+  const completeFirstAgentSetup = async (setup: {
+    name: string;
+    instructions: string;
+    avatarSeed: string;
+    iconColor: string;
+  }) => {
+    const attempt = firstAgentSetupAttemptRef.current;
+    if (attempt.generation !== workspaceScopeGeneration) {
+      throw new Error("The workspace changed before your first agent could be saved.");
+    }
+    if (attempt.pendingToken !== null) {
+      throw new Error("Your first agent is still being saved.");
+    }
+    if (!firstAgentSetupRequired) {
+      throw new Error("Your first agent is already set up.");
+    }
+    if (!connectedAgentBackends.length) {
+      throw new Error("Connect a usable provider before continuing.");
+    }
+    const name = setup.name.trim();
+    if (!name) throw new Error("Give your agent a name before continuing.");
+    const original =
+      agents.find((agent) => agent.id === "chief-of-staff") ?? agents[0];
+    if (!original) throw new Error("Mivlet could not find your first agent.");
+    const updated: MivletAgentProfile = {
+      ...original,
+      name,
+      instructions: setup.instructions.trim(),
+      avatarSeed: setup.avatarSeed,
+      iconColor: /^#[0-9a-f]{6}$/i.test(setup.iconColor)
+        ? setup.iconColor.toUpperCase()
+        : original.iconColor,
+    };
+    const nextShellState: PersistedShellState = {
+      ...shellState,
+      agents: shellState.agents?.map((agent) =>
+        agent.id === original.id ? updated : agent,
+      ),
+      activeAgentId: original.id,
+      onboardingComplete: true,
+      onboardingVersion: FIRST_AGENT_ONBOARDING_VERSION,
+    };
+    const expectedIdentity = workspaceIdentityRef.current;
+    const expectedWorkspaceId = activeWorkspaceScope?.workspaceId;
+    if (
+      hasTauriRuntime() &&
+      (!snapshot.runtime.runtimeSnapshotReady ||
+        !expectedIdentity ||
+        !expectedWorkspaceId)
+    ) {
+      throw new Error("Wait for workspace settings to load.");
+    }
+    const token = ++attempt.nextToken;
+    attempt.pendingToken = token;
+    try {
+      if (hasTauriRuntime()) {
+        await snapshot.runtime.flushSnapshot(nextShellState);
+        if (
+          workspaceIdentityRef.current !== expectedIdentity ||
+          activeWorkspaceScope?.workspaceId !== expectedWorkspaceId
+        ) {
+          throw new Error(
+            "The workspace changed before your first agent could be saved.",
+          );
+        }
+      }
+      if (
+        firstAgentSetupAttemptRef.current !== attempt ||
+        firstAgentSetupAttemptRef.current.generation !== workspaceScopeGeneration ||
+        firstAgentSetupAttemptRef.current.pendingToken !== token
+      ) {
+        throw new Error("The workspace changed before your first agent could be saved.");
+      }
+      setAgents(nextShellState.agents ?? []);
+      setActiveAgentId(original.id);
+      setOnboardingDismissed(true);
+      setOnboardingVersion(FIRST_AGENT_ONBOARDING_VERSION);
+    } finally {
+      if (attempt.pendingToken === token) attempt.pendingToken = null;
+    }
+  };
+
   const createAgent = (input: Omit<MivletAgentProfile, "id" | "threadId">) => {
-    const id = `agent-${globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)}`;
+    // Keep identifier construction distinct from dynamic CSS class prefixes.
+    const id = ["agent", globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)].join("-");
     const created: MivletAgentProfile = {
       ...input,
       id,
@@ -921,6 +1026,8 @@ export function useShellRuntime(
 
     agents,
     activeAgentId,
+    firstAgentSetupRequired,
+    completeFirstAgentSetup,
     createAgent,
     updateAgent,
     removeAgent,

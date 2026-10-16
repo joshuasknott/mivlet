@@ -139,6 +139,13 @@ The existing `network:false` development-server `listen EACCES` is a separate
 policy/feature gap. A pipe namespace correction does not authorize a loopback
 exemption or satisfy that positive server acceptance case.
 
+The candidate CI workflow runs execution checks as a disposable standard Windows
+user. Its elevated setup step configures that user's execution ancestry; the
+test process retains the production restriction against elevated execution.
+The harness grants read access to the checkout and write access to a fresh
+diagnostic directory, bounds each test to three minutes, and requires an actual
+passing test before writing the acceptance receipt. It refuses local machines.
+
 ## Disposable-machine installer rehearsal
 
 On a clean Windows VM or CI runner:

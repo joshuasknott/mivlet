@@ -4,6 +4,12 @@ import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import "./workspace-memories.css";
+import {
+  memoryGroup,
+  panelMemories,
+  type PanelScope,
+} from "./workspace-panel-data";
+export { memoryGroup } from "./workspace-panel-data";
 
 type MemoryRuntime = Pick<
   ShellRuntime,
@@ -17,47 +23,21 @@ type MemoryRuntime = Pick<
   | "toggleMemoryRecordDisabled"
 >;
 
-/** Match the context inheritance contract; never expose a sibling chat here. */
-export function memoryGroup(
-  record: MemoryRecord,
-  room: ConversationRoom,
-): string | null {
-  if (
-    record.forgottenAt ||
-    record.approvalState === "rejected" ||
-    (record.workspaceId && record.workspaceId !== room.workspaceId)
-  )
-    return null;
-  const scope = record.scope;
-  if (scope?.level === "thread")
-    return scope.threadId === room.id ? "This chat" : null;
-  if (room.projectId)
-    return scope?.level === "project" && scope.projectId === room.projectId
-      ? "From this project"
-      : null;
-  if (!scope || scope.level === "global") return "Account-wide";
-  const owner =
-    room.chat?.ownerKind === "agent"
-      ? room.chat.ownerId
-      : (room.facilitatorId ??
-        (room.participants.length === 1
-          ? room.participants[0].agentId
-          : undefined));
-  return scope.level === "agent" && owner && scope.agentId === owner
-    ? "From this agent"
-    : null;
-}
-
 export function WorkspaceMemories({
   room,
   runtime,
+  scope = "chat",
 }: {
   room?: ConversationRoom;
   runtime: MemoryRuntime;
+  scope?: PanelScope;
 }) {
   const [query, setQuery] = useState("");
+  const [limit, setLimit] = useState(40);
   const refresh = runtime.refreshMemories;
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
   const [editor, setEditor] = useState<{
     record?: MemoryRecord;
     title: string;
@@ -84,34 +64,38 @@ export function WorkspaceMemories({
       setPending(false);
     }
   };
-  const records = room
-    ? runtime.managedMemoryRecords.flatMap((record) => {
-        const group = memoryGroup(record, room);
-        return group &&
-          `${record.title} ${record.value}`
-            .toLowerCase()
-            .includes(query.trim().toLowerCase())
-          ? [{ record, group }]
-          : [];
-      })
-    : [];
-  const suggested = records.filter(
+  const records = panelMemories(
+    runtime.managedMemoryRecords,
+    room,
+    scope,
+  ).filter(({ record }) =>
+    (record.title + " " + record.value)
+      .toLowerCase()
+      .includes(query.trim().toLowerCase()),
+  );
+  const visible = records.slice(0, limit);
+  const suggested = visible.filter(
     ({ record }) => record.approvalState === "suggested",
   );
-  const saved = records.filter(
+  const saved = visible.filter(
     ({ record }) => record.approved && record.approvalState !== "suggested",
   );
   return (
-    <section className="workspace-memories" aria-label="Memories">
+    <section className="workspace-memories" aria-label="Saved memory">
       <header className="workspace-library__heading">
         <div>
-          <h2>Memories</h2>
-          <p>{room?.title ?? "Choose a conversation"}</p>
+          <h2>Memory</h2>
+          {!room && <p>Choose a conversation</p>}
         </div>
         <button
           type="button"
           aria-label="Add memory"
-          disabled={!room || pending}
+          disabled={!room || pending || scope !== "chat"}
+          title={
+            scope === "owner"
+              ? "Switch to This chat to add a new memory."
+              : undefined
+          }
           onClick={() => {
             setEditor({ title: "", value: "" });
             setError("");
@@ -135,7 +119,10 @@ export function WorkspaceMemories({
             aria-label="Search memories"
             placeholder="Search memories"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => {
+              setQuery(event.target.value);
+              setLimit(40);
+            }}
           />
         </label>
       )}
@@ -345,6 +332,15 @@ export function WorkspaceMemories({
             ? "No memories match your search."
             : "No saved memories yet. Add a lasting decision, preference, or fact. Messages aren’t saved as memories automatically."}
         </p>
+      )}
+      {records.length > limit && (
+        <button
+          type="button"
+          className="workspace-panel__link"
+          onClick={() => setLimit((value) => value + 40)}
+        >
+          Show more memories ({records.length - limit})
+        </button>
       )}
       {error && <p role="alert">{error}</p>}
       {status && <p role="status">{status}</p>}

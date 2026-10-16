@@ -13,7 +13,7 @@ import { hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 import { runtimeAccountTheme } from "../runtime/domains/account";
 import { ActiveWorkspace } from "./ActiveWorkspace";
 import "./teammate-workspace.css";
-import { OnboardingPage } from "./workspace-lazy";
+import { FirstAgentOnboardingPage, OnboardingPage } from "./workspace-lazy";
 import {
   activeWorkspaceScope,
   teammateWorkspaceGate,
@@ -82,17 +82,31 @@ export function TeammateWorkspace() {
       </Suspense>
     );
   const scope = activeWorkspaceScope(account);
+  const originalAgent =
+    runtime.agents.find((agent) => agent.id === "chief-of-staff") ??
+    runtime.agents[0];
   return (
-    <ProviderOnboardingGate key={scope} runtime={runtime}><ActiveWorkspace
-      key={scope}
-      runtime={runtime}
-      approvals={approvals}
-      theme={theme}
-      onTheme={changeTheme}
-      priorClose={priorClose}
-      onService={(service) => {
-        current.current = service;
-      }}
-    /></ProviderOnboardingGate>
+    <ProviderOnboardingGate key={scope} runtime={runtime}>
+      {runtime.firstAgentSetupRequired && originalAgent ? (
+        <Suspense fallback={<main className="team-loading" role="status" aria-busy="true">Opening agent setup…</main>}>
+          <FirstAgentOnboardingPage
+            agent={originalAgent}
+            onSave={runtime.completeFirstAgentSetup}
+          />
+        </Suspense>
+      ) : (
+        <ActiveWorkspace
+          key={scope}
+          runtime={runtime}
+          approvals={approvals}
+          theme={theme}
+          onTheme={changeTheme}
+          priorClose={priorClose}
+          onService={(service) => {
+            current.current = service;
+          }}
+        />
+      )}
+    </ProviderOnboardingGate>
   );
 }

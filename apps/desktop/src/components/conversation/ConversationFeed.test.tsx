@@ -117,17 +117,16 @@ describe("conversation turns", () => {
     const view = render(<ConversationFeed {...props} state={initial} awaitingApprovalRunIds={["run-1"]} />);
     expect(screen.getByText("Waiting for your approval")).toBeVisible();
     view.rerender(<ConversationFeed {...props} state={initial} awaitingApprovalRunIds={["another-run"]} />);
-    expect(screen.getByText("Working")).toBeVisible();
+    expect(screen.getByText("Reading a file")).toBeVisible();
     expect(screen.queryByText("Waiting for your approval")).toBeNull();
   });
-  it("hides traces until clicked, shows a single flat disclosure, and collapses on completion", () => {
+  it("shows live summaries and tool activity without a click, then collapses on completion", () => {
     const state = { ...initial, startedAt: "2026-09-06T12:00:00Z", reasoningSummaries: { r1: "Comparing the evidence." } };
     const view = render(<ConversationFeed {...props} state={state} />);
-    expect(screen.queryByText("Comparing the evidence.")).toBeNull();
-    expect(screen.queryByText("I’ll check the files.")).toBeNull();
-    expect(screen.getByText("Reading a file")).toBeVisible();
-    fireEvent.click(screen.getByText("Working"));
     expect(screen.getByText("Comparing the evidence.")).toBeVisible();
+    expect(screen.getByText("I’ll check the files.")).toBeVisible();
+    expect(screen.getByText("Reading a file")).toBeVisible();
+    expect(screen.queryByText("Working")).toBeNull();
     expect(view.container.querySelectorAll("details")).toHaveLength(1);
     view.rerender(<ConversationFeed {...props} state={{ ...state, running: false, status: "completed", endedAt: "2026-09-06T12:00:06Z" }} />);
     expect(screen.getByText("Worked for 6s").closest("details")).not.toHaveAttribute("open");

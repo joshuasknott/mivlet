@@ -2,6 +2,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import * as account from "../../runtime/domains/account";
 import { useAccountWorkspace } from "./useAccountWorkspace";
+import { clearActiveRuntimeDataScope, getActiveRuntimeDataScope } from "../../runtime-scope";
 import { DEFAULT_ACCOUNT_WORKSPACE_STATUS, PREVIEW_ACCOUNT_WORKSPACE_STATUS, PREVIEW_IDENTITY_STATUS } from "./defaults";
 
 vi.mock("../../runtime/domains/account", () => ({
@@ -28,7 +29,21 @@ beforeEach(() => {
   vi.mocked(account.prepareRuntimeIdentitySignIn).mockResolvedValue("first");
   vi.mocked(account.cancelRuntimeIdentitySignIn).mockResolvedValue(true);
 });
-afterEach(() => { Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: undefined }); });
+afterEach(() => { clearActiveRuntimeDataScope(); Object.defineProperty(window, "__TAURI_INTERNALS__", { configurable: true, value: undefined }); });
+
+it("keeps the read cache scope on ordinary verification and replaces it when the verified owner changes", async () => {
+  const status = { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS, activeContextOwner: { internalUserId: "owner-a", memberId: "member-a" } };
+  vi.mocked(account.loadRuntimeIdentityStatus).mockResolvedValue(PREVIEW_IDENTITY_STATUS);
+  vi.mocked(account.loadRuntimeAccountWorkspaceStatus).mockResolvedValue(status);
+  const { result } = setup();
+  await waitFor(() => expect(result.current.runtime.accountWorkspacePending).toBe(false));
+  const first = getActiveRuntimeDataScope();
+  await act(async () => { await result.current.runtime.reconcileAccountWorkspace(); });
+  expect(getActiveRuntimeDataScope()).toBe(first);
+  vi.mocked(account.loadRuntimeAccountWorkspaceStatus).mockResolvedValue({ ...status, activeContextOwner: { internalUserId: "owner-b", memberId: "member-b" } });
+  await act(async () => { await result.current.runtime.reconcileAccountWorkspace(); });
+  expect(getActiveRuntimeDataScope()).not.toBe(first);
+});
 
 it("cancels the exact request, allows retry, and ignores an old completion", async () => {
   const first = deferred<typeof PREVIEW_IDENTITY_STATUS>();

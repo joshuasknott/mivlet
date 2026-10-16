@@ -27,6 +27,15 @@ credential custody remain authoritative. Focused regression coverage is in
 80 ms primary check with a 5,000 ms secondary. That timing demonstrates gating
 behavior under controlled responses, not measured live startup latency.
 
+Subscription usage opens from the account menu and reuses that shell's provider
+inventory. Provider discovery and cached usage reads run off the native window
+thread; renderer reads time out after ten seconds with an explicit retry. A timeout
+does not cancel native IPC. Tests cover stalled reads, late replies and equivalent
+provider inventories without restarting a pending read. The composer performs no
+usage polling. A connected provider without a cached allowance is checked once
+when Usage opens. Verified account-owned Codex sessions reconcile missing legacy
+connection metadata without invalidating existing measurements on each discovery.
+
 `useAccountWorkspace` owns account requests and scope transitions;
 `useWorkspaceSnapshot` owns hydration and identity-bound snapshot writes;
 `useWorkspaceApprovals` owns the queue, audit and decision bridge.
@@ -82,6 +91,11 @@ minification. Module lengths are diagnostic, not additive gzip estimates. This
 mode does not produce the required `check` result or replace full validation.
 Locally, the matching command is `pnpm --filter @mivlet/desktop exec vite build
 --config ../../scripts/perf/profile.vite.config.mjs --configLoader runner`.
+
+The October 16 integration keeps `assistant-stream` with the deferred
+assistant-ui graph and separates the generated-interface schema engine from
+eager vendor code. The schema chunk still counts against the common budget.
+Budget ceilings and asset accounting remain unchanged.
 
 While editing a renderer, run desktop typecheck and focused tests; for a package,
 run its build and tests. Run native checks for native changes. Use `pnpm check`
@@ -182,6 +196,11 @@ and retains all variants for indirect uses or unknown props. Context, re-exports
 and dynamic icon imports disable pruning. Package-format changes keep the original
 definitions; the bundle gate still checks the resulting size. The desktop suite
 tests the analysis and retained artwork against the installed icon package.
+
+The version-pinned Marked patch isolates its HTML API initialization so tokenizer-only
+imports can omit the unused renderer. `apps/desktop/scripts/marked-bundle.test.ts`
+checks the emitted tokenizer against the package's tokens and exercises the public
+APIs. Review or remove the patch when updating Marked; it does not change Markdown rules.
 
 The conversation upgrade is a separately measured deferred graph. `vite.config.ts`
 keeps assistant-ui, OpenUI, MCP Apps, conversation rendering, output preview and

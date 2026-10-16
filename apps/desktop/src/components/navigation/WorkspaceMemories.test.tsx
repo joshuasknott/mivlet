@@ -35,6 +35,41 @@ const runtime = (records = [record()]) => ({
 });
 
 describe("conversation memories", () => {
+  it("searches the entire memory collection while rendering a bounded page", () => {
+    const value = runtime(
+      Array.from({ length: 100 }, (_, index) =>
+        record({ id: "memory-" + index, title: "Saved fact " + index }),
+      ),
+    );
+    render(<WorkspaceMemories room={room} runtime={value} />);
+    expect(screen.queryByText("Saved fact 99")).toBeNull();
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "Saved fact 99" },
+    });
+    expect(screen.getByText("Saved fact 99")).toBeVisible();
+    expect(screen.queryByText("Saved fact 0")).toBeNull();
+  });
+
+  it("browses only the owner's shared memories without adding a chat memory into that scope", () => {
+    const value = runtime([
+      record(),
+      record({
+        id: "project-memory",
+        title: "Project style",
+        scope: { level: "project", projectId: "project" },
+      }),
+    ]);
+    render(
+      <WorkspaceMemories
+        room={{ ...room, projectId: "project" }}
+        runtime={value}
+        scope="owner"
+      />,
+    );
+    expect(screen.getByText("Project style")).toBeVisible();
+    expect(screen.queryByText("Decision")).toBeNull();
+    expect(screen.getByRole("button", { name: "Add memory" })).toBeDisabled();
+  });
   it("excludes sibling chats, unrelated agents, foreign workspaces and forgotten records", () => {
     for (const patch of [
       { scope: { level: "thread" as const, threadId: "sibling" } },

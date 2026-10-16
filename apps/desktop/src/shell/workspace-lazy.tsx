@@ -26,6 +26,11 @@ export const OnboardingPage = lazy(() =>
     default: module.OnboardingPage,
   })),
 );
+export const FirstAgentOnboardingPage = lazy(() =>
+  import("../components/pages/FirstAgentOnboardingPage").then((module) => ({
+    default: module.FirstAgentOnboardingPage,
+  })),
+);
 export const SettingsPage = lazy(() =>
   import("../components/pages/SettingsPage").then((module) => ({
     default: module.SettingsPage,

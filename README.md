@@ -67,7 +67,7 @@ a deployed or production-validated service.
   read-only reconciliation; credentials stay native. See the
   [PR workflow](docs/architecture/coding-workflow.md#pull-request-review-and-updates).
 - A Tauri 2 desktop app with a compact React conversation shell, named agent
-  profiles, persistent robot avatar identities or uploaded images, and model
+  profiles, animated coloured character icons or uploaded images, and model
   selection with supported reasoning levels. Clicking an agent's name opens
   its settings in the right panel. The composer keeps model selection and
   dictation visible, with uploads and a connected-plugin submenu under +.
@@ -80,7 +80,8 @@ a deployed or production-validated service.
   review before upload; it fills the draft without sending it. See the
   [speech guide](docs/architecture/voice-conversations.md).
 - Log in and Sign up account entry for signed-out users, followed by required
-  AI provider setup. Users with a usable provider open chat directly.
+  AI provider setup and first-agent name, icon and colour selection. Returning
+  users with a usable provider open chat directly.
   Provider setup uses native credential storage and existing connection checks.
 - One provider-driver registry with stable instance ids for ChatGPT/Codex,
   Claude, Google Antigravity, Grok, Cursor, OpenCode, and advanced direct API
@@ -162,14 +163,19 @@ a deployed or production-validated service.
   record recipient, owner and snapshot/live-reference semantics. Delegation uses
   the Codex, Claude SDK and native API routes that bridge Mivlet tools; provider-owned routes
   without that bridge cannot coordinate agents and show that prerequisite.
-- A collapsible right panel starts with Files, Memories, Browser, Side chat and
-  Schedules navigation, with Activity separated below. Each destination replaces
-  the menu; Back returns to it. Files lists available chat attachments, published
-  work outputs, project files and scoped agent workspace files with search and previews.
+- A collapsible right panel has Activity, Files and Memory sections. Activity
+  keeps current work, shared references and recent published files bounded;
+  completed work remains in searchable, paged history. The scope selector
+  browses this chat or its owning agent/project without changing model context
+  or permissions. Files lists chat attachments, published work outputs and shared
+  project files with search, collection filters and bounded pages. Agent workspace
+  files and repository/native execution setup are available in a closed disclosure.
   Add places files in the current conversation draft for review before sending.
-  Memories supports explicit chat-scoped additions, corrections, deletion, and
+  Memory supports explicit chat-scoped additions, corrections, deletion, and
   existing suggestion review, with inherited context labelled separately.
-  Open documents and side conversations retain closable content tabs. Collapsing it hides the entire panel except its window-bar
+  A document, web preview, side conversation or computer opens in the same panel;
+  Back restores the collection and its search. Conversations and Schedules remain
+  in the panel's secondary menu. Collapsing it hides the entire panel except its window-bar
   toggle; the desktop agent sidebar stays expanded. Created files, search previews and side conversations
   open alongside the main chat. Text, Markdown, JSON, images, PDFs and bounded
   Office content preview locally; published files also retain native Save/Open.
@@ -280,7 +286,7 @@ docs                maintained architecture, security, and operations notes
 ## Requirements
 
 - Node.js 22 or newer
-- pnpm 10 (the repository pins `pnpm@10.15.0`)
+- pnpm 10 (the repository pins `pnpm@10.34.7`)
 - Stable Rust and the Windows Tauri prerequisites
 - Windows WebView2
 - Official Codex app-server components for optional ChatGPT browser sign-in

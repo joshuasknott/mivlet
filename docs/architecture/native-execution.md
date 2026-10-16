@@ -195,6 +195,23 @@ credentials in the separate native publication adapter.
 
 ## Verification and references
 
+The Node AppContainer runtime acceptance workflow builds the pinned libuv
+backport on a Windows 2022 runner with Visual Studio 2022, one worker and
+BelowNormal priority. Its verified candidate is staged only for native tests;
+ordinary runtime preparation restores the pinned production source. The
+artifact includes build provenance and a separate acceptance receipt bound to
+the archive and executable digests. Compilation and native acceptance must
+pass before a candidate is promoted; a build recipe alone is insufficient.
+
+The new native pipe probe directly observes `CreateNamedPipeW`: the legacy
+namespace returns `ERROR_ACCESS_DENIED`, while `LOCAL` succeeds inside the
+actual AppContainer. A separate loopback isolation test requires either
+Windows `EACCES` at listen time or denial of a host connection, then confirms
+termination and closed output. It replaces the previous server test's incorrect
+expectation that a network-disabled job can always start a listener. Native
+process log/redaction and descendant Stop coverage remains in the persistent
+process acceptance test. These tests do not grant host-browser access.
+
 Prepare resources with `node apps/desktop/scripts/prepare-execution-runtime.mjs`.
 Run ordinary core tests/Clippy plus the desktop suites. On an unelevated configured
 machine, run `cargo test --manifest-path packages/windows-executor/Cargo.toml

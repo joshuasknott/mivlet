@@ -60,9 +60,16 @@ export function readPersistedShellState(defaultShellState: PersistedShellState):
       return defaultShellState;
     }
 
+    const parsed = JSON.parse(stored) as Partial<PersistedShellState>;
     const normalized = normalizePersistedShellState({
       ...defaultShellState,
-      ...JSON.parse(stored)
+      ...parsed,
+      // A pre-first-agent snapshot must remain a returning-user snapshot. Do
+      // not let the new default version silently opt an existing user into
+      // the new setup journey.
+      onboardingVersion: Object.prototype.hasOwnProperty.call(parsed, "onboardingVersion")
+        ? parsed.onboardingVersion
+        : 0,
     } as PersistedShellState);
     if (!currentStored && legacyStored) {
       // Copy forward without deleting the old key so downgrade/rollback remains safe.
@@ -136,7 +143,10 @@ export function shellStateFromRuntimeSnapshot(
     memoryRecords: snapshot.memoryRecords,
     connectedBackendIds: snapshot.connectedBackendIds,
     onboardingComplete: snapshot.onboardingComplete ?? defaultShellState.onboardingComplete,
-    onboardingVersion: snapshot.onboardingVersion ?? defaultShellState.onboardingVersion ?? 0,
+    // Missing means a legacy snapshot. The current default only applies when
+    // no snapshot exists at all; it must not turn an old account into a new
+    // first-run journey during recovery.
+    onboardingVersion: snapshot.onboardingVersion ?? 0,
     selectedModelId: snapshot.selectedModelId ?? defaultShellState.selectedModelId,
     hiddenModelIds: snapshot.hiddenModelIds ?? [],
     permissionMode: snapshot.permissionMode ?? defaultShellState.permissionMode,
@@ -198,7 +208,7 @@ function normalizeAgentProfiles(agents: MivletAgentProfile[] | undefined): Mivle
       reasoningEffort: typeof agent.reasoningEffort === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(agent.reasoningEffort) ? agent.reasoningEffort : undefined,
       icon: "agent",
       iconColor,
-      avatarSeed: typeof agent.avatarSeed === "string" && /^(?:blob-v1:|(?:robot-v3|rounded-v2|organic-v1):[0-7]:)/.test(agent.avatarSeed) && agent.avatarSeed.length <= 160
+      avatarSeed: typeof agent.avatarSeed === "string" && /^(?:blob-v1:|ink-v1:[0-5]:|robot-v3:[0-7]:|rounded-v2:[0-7]:|organic-v1:[0-7]:)/.test(agent.avatarSeed) && agent.avatarSeed.length <= 160
         ? agent.avatarSeed : `blob-v1:${agent.id}`,
       iconImageDataUrl,
       threadIds: [...new Set([

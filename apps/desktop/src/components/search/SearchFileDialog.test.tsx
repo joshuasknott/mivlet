@@ -7,6 +7,12 @@ vi.mock("../../runtime/domains/local-computer", () => ({ previewRuntimeLocalComp
 vi.mock("../conversation/PdfPreview", () => ({ PdfPreview: ({ base64 }: { base64: string }) => <section aria-label="PDF pages">{base64}</section> }));
 const target = { type: "artifact" as const, workspaceId: "workspace", agentId: "agent", relativePath: "Attachments/budget.xlsx", title: "Budget" };
 describe("uploaded Office preview", () => {
+  it("inspects a retained image inside the existing panel without opening a second dialog", () => {
+    const image = "data:image/png;base64,aGVsbG8=";
+    render(<SearchFileDialog title="Uploaded image" imageDataUrl={image} embedded onClose={() => {}} />);
+    expect(screen.getByRole("img", { name: "Uploaded image" })).toHaveAttribute("src", image);
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
   it("routes original PDF bytes to the lazy page viewer", async () => {
     vi.mocked(previewRuntimeLocalComputerFile).mockResolvedValue({ computerId: "computer", path: "Attachments/report.pdf", content: "PDF page preview", sizeBytes: 10, updatedAt: "now", truncated: false, pdfBase64: "native-pdf-bytes" });
     render(<SearchFileDialog target={{ ...target, relativePath: "Attachments/report.pdf" }} title="Report" onClose={() => {}} />);

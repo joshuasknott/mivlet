@@ -36,13 +36,13 @@ describe("conversation shell persistence", () => {
   });
   beforeEach(() => window.localStorage.clear());
 
-  it.each(["robot-v3", "rounded-v2", "organic-v1"])("preserves every selected %s portrait across persistence", (version) => {
+  it.each(["robot-v3", "rounded-v2", "organic-v1"])("preserves %s seeds and deterministically maps them to the six ink characters", (version) => {
     for (let variant = 0; variant < 8; variant++) {
       const avatarSeed = `${version}:${variant}:saved-agent`;
       const profile = { ...defaultShellState.agents![0], avatarSeed };
       const restored = shellStateFromRuntimeSnapshot(shellStateToRuntimeSnapshot({ ...defaultShellState, agents: [profile] }), defaultShellState);
       expect(restored.agents![0].avatarSeed).toBe(avatarSeed);
-      expect(avatarVariant(restored.agents![0].avatarSeed!)).toBe(variant);
+      expect(avatarVariant(restored.agents![0].avatarSeed!)).toBe(variant % 6);
     }
   });
 
@@ -106,5 +106,20 @@ describe("conversation shell persistence", () => {
     expect(stored.connectedBackendIds).toEqual(["xai"]);
     expect(JSON.stringify(stored)).not.toMatch(/apiKey|secret|credential/i);
     expect(stored).not.toHaveProperty("schedules");
+  });
+
+  it("keeps legacy browser state out of the first-agent setup journey", () => {
+    const legacy = { ...defaultShellState } as Record<string, unknown>;
+    delete legacy.onboardingVersion;
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(legacy));
+    expect(readPersistedShellState(defaultShellState).onboardingVersion).toBe(0);
+  });
+
+  it("treats a missing native onboarding version as a legacy snapshot", () => {
+    const snapshot = shellStateToRuntimeSnapshot(defaultShellState);
+    delete snapshot.onboardingVersion;
+    expect(
+      shellStateFromRuntimeSnapshot(snapshot, defaultShellState).onboardingVersion,
+    ).toBe(0);
   });
 });

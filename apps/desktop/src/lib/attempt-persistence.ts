@@ -13,6 +13,7 @@ export function createAttemptPersistence(
   let chain = Promise.resolve();
   let stopPromise: Promise<void> | null = null;
   let writer: DurableRunWriter | null = null;
+  let flushText: (() => void) | null = null;
   const enqueue = (work: () => Promise<unknown>) => {
     const result = chain.then(work).then(() => undefined);
     chain = result.catch(() => undefined);
@@ -30,6 +31,10 @@ export function createAttemptPersistence(
     },
     setWriter(value: DurableRunWriter | null) {
       writer = value;
+    },
+    /** Flush accepted screen text at the synchronous Stop boundary. */
+    setTextFlush(value: (() => void) | null) {
+      flushText = value;
     },
     save(snapshot: ExecutionAttempt) {
       return stopped ? Promise.resolve() : enqueue(() => saveAttempt(snapshot));
@@ -49,6 +54,11 @@ export function createAttemptPersistence(
       // Freeze before any await or provider cancellation callback can deliver
       // another event. Already accepted writes drain before this final flush.
       stopped = true;
+      try {
+        flushText?.();
+      } catch {
+        // Presentation failure cannot prevent authority revocation or durable Stop.
+      }
       if (!current) return Promise.resolve();
       const terminal: ExecutionAttempt = {
         ...current,

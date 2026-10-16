@@ -26,6 +26,9 @@ vi.mock("./ActiveWorkspace", () => ({
 
 vi.mock("./workspace-lazy", () => ({
   OnboardingPage: () => <div data-testid="onboarding">onboarding</div>,
+  FirstAgentOnboardingPage: ({ agent }: { agent: { name: string } }) => (
+    <div data-testid="first-agent-onboarding">setup {agent.name}</div>
+  ),
 }));
 
 import { TeammateWorkspace } from "./TeammateWorkspace";
@@ -56,12 +59,16 @@ function runtime(patch: Partial<ShellRuntime> = {}): ShellRuntime {
     runtimeSnapshotReady: true,
     runtimeSnapshotError: null,
     onboardingRequired: false,
+    firstAgentSetupRequired: false,
+    agents: [{ id: "chief-of-staff", name: "Chief of Staff" }],
+    activeAgentId: "chief-of-staff",
     accountWorkspaceStatus: account,
     identityStatus: identity,
     identityPending: false,
     connectedAgentBackends: ["codex"],
     signInIdentity: vi.fn(),
     reconcileAccountWorkspace: vi.fn(),
+    completeFirstAgentSetup: vi.fn(),
     ...patch,
   } as ShellRuntime;
 }
@@ -108,5 +115,14 @@ describe("TeammateWorkspace composition", () => {
       "light",
     );
     expect(document.documentElement.dataset.theme).toBe("light");
+  });
+
+  it("keeps first-agent setup between provider readiness and workspace entry", () => {
+    runtimeState.current = runtime({ firstAgentSetupRequired: true });
+    render(<TeammateWorkspace />);
+    expect(screen.getByTestId("first-agent-onboarding")).toHaveTextContent(
+      "setup Chief of Staff",
+    );
+    expect(screen.queryByTestId("active-workspace")).toBeNull();
   });
 });

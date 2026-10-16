@@ -30,7 +30,7 @@ prevent the audit gate from accepting an unpatched or unexpectedly modified inst
 
 ## Updating or retiring a patch
 
-Use the pinned pnpm 10.15.0. Keep patches under `patches/` registered through
+Use the pinned pnpm 10.34.7. Keep patches under `patches/` registered through
 `patchedDependencies` in `pnpm-workspace.yaml`, and regenerate `pnpm-lock.yaml`.
 When upstream publishes a fix, remove its patch registration and patch file,
 update the dependency resolution, then remove the corresponding policy entry,

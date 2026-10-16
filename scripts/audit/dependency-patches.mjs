@@ -37,9 +37,10 @@ export function verifyDependencyPatches(
     join(repositoryRoot, "node_modules/.modules.yaml"),
     "utf8",
   );
-  const maxLength = Number(
-    modules.match(/^virtualStoreDirMaxLength: (\d+)$/m)?.[1],
-  );
+  // Recent pnpm 10 releases write JSON (valid YAML) to this same path.
+  const maxLength = modules.trimStart().startsWith("{")
+    ? JSON.parse(modules).virtualStoreDirMaxLength
+    : Number(modules.match(/^virtualStoreDirMaxLength: (\d+)$/m)?.[1]);
   if (!Number.isInteger(maxLength) || maxLength < 40) {
     throw new Error("Missing or invalid pnpm virtual store directory limit");
   }

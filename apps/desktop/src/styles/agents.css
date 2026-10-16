@@ -528,10 +528,10 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 .agent-editor form { padding: 8px 24px 24px; gap: 24px; }
 .agent-editor__identity { grid-template-columns: 80px minmax(0, 1fr); align-items: center; gap: 20px; }
 .agent-editor__identity .agent-avatar { width: 80px; height: 80px; border-radius: 16px; }
-.agent-editor label > span, .agent-editor__field > span, .agent-colour legend { color: var(--ink); font-size: 12px; font-weight: 500; }
+.agent-editor label > span, .agent-editor__field > span { color: var(--ink); font-size: 12px; font-weight: 500; }
 .agent-editor input:not([type]), .agent-editor textarea { min-height: 42px; padding: 10px 12px; font-size: 13px; }
 .agent-editor textarea { min-height: 106px; }
-.agent-editor .agent-icon-picker { margin-top: -16px; }
+.agent-editor .agent-icon-picker { margin-top: 16px; }
 .agent-icon-picker__options { margin: 0; }
 .agent-image-upload button { background: transparent; border-color: transparent; padding-left: 0; font-size: 12px; }
 .agent-editor__sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
@@ -540,24 +540,16 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 .agent-editor__footer button { min-height: 40px; }
 .agent-editor :is(button, input, textarea):focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; }
 .agent-editor button:disabled { opacity: .45; cursor: not-allowed; }
-.agent-colour { min-width: 0; padding: 0; border: 0; margin: 0; }
-.agent-colour legend { margin-bottom: 10px; padding: 0; }
-.agent-colour__presets { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
-.agent-colour__swatch { display: grid; place-items: center; width: 42px; height: 44px; padding: 4px; border: 0; background: transparent; border-radius: 50%; cursor: pointer; }
-.agent-colour__swatch span { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; color: #202124; font-size: 17px; }
-.agent-colour__swatch[aria-pressed="true"] span { outline: 2px solid var(--ink-muted); outline-offset: 3px; }
 @media (max-width: 480px) {
   .agent-editor__header { padding: 20px 16px 12px; }
   .agent-editor form { padding: 8px 16px 16px; gap: 20px; }
   .agent-editor__identity { grid-template-columns: 64px minmax(0, 1fr); gap: 12px; }
   .agent-editor__footer { bottom: 0; margin: 0 -16px -16px; padding: 14px 16px; }
-  .agent-colour__presets { gap: 0; }
 }
 @media (max-width: 480px) {
   .agent-editor-backdrop { padding: 16px; }
   .agent-editor { width: min(560px, 100%); }
   .agent-editor__identity .agent-avatar { width: 64px !important; height: 64px !important; }
-  .agent-colour__swatch { width: 38px; }
 }
 
 .agent-sidebar[hidden], .desktop-frame--agents > .workspace[hidden] { display: none; }
@@ -574,11 +566,6 @@ button.local-computer-files__entry:disabled { opacity: .55; }
   .agent-row:hover .agent-status, .agent-row:focus-within .agent-status { display: block; }
 }
 
-.agent-shape-picker { display: grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 4px; margin-bottom: 12px; }
-.agent-shape-picker button { display: grid; place-items: center; min-height: 48px; padding: 2px; border: 1px solid transparent; border-radius: 12px; background: transparent; cursor: pointer; }
-.agent-shape-picker button:hover { background: var(--surface-hover); }
-.agent-shape-picker button[aria-pressed="true"] { border-color: var(--ink-muted); background: var(--surface-hover); }
-@media (max-width: 500px) { .agent-shape-picker { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
 
 /* Full-width writing area above a compact bottom toolbar. */
 .desktop-frame--agents .composer { display: flex; flex-direction: column; align-items: stretch; gap: 6px; min-height: 100px; padding: 12px 10px 6px; border-radius: 20px; border-color: var(--line); }
@@ -637,9 +624,6 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 .agent-sidebar .agent-row--active { background: var(--surface-hover); }
 .agent-sidebar .agent-row__preview { margin-top: 2px; font-size: 12px; line-height: 1.4; }
 .agent-sidebar .agent-avatar { aspect-ratio: 1; min-width: 0; min-height: 0; align-self: center; }
-.agent-sidebar .agent-avatar > svg { width: 100%; height: 100%; aspect-ratio: 1; }
-/* The robot silhouettes are broad; optically narrow sidebar artwork only. */
-.agent-sidebar .agent-avatar--generated > svg { transform: scaleX(.86); transform-origin: center; }
 .agent-sidebar .project-sidebar-row__icon { width: 42px; height: 34px; color: var(--ink); background: transparent; }
 .project-sidebar-row__avatars { position: relative; }
 .agent-sidebar .project-sidebar-row__avatars .agent-avatar { position: absolute; min-width: 0; min-height: 0; }

@@ -1,5 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
-import { defineConfig } from "vitest/config";
+import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { pruneUnusedIconWeights } from "./scripts/icon-weights";
 import { compactStyleNames } from "./scripts/compact-style-names";
@@ -71,13 +71,16 @@ export default defineConfig({
           // The PDF engine is loaded only when a verified PDF preview opens.
           if (/[/\\]node_modules[/\\]pdfjs-dist[/\\]/.test(id))
             return "pdf-renderer";
-          if (id.includes("@phosphor-icons")) return "icons";
+          if (id.includes("@phosphor-icons") || id === "\0mivlet-icon-wrapper") return "icons";
           // Conversation-only UI engines are reached through the lazy
           // ConversationPane boundary. Keeping their package graphs in
           // dedicated chunks prevents the shell's generic vendor chunk from
           // eagerly pulling OpenUI, assistant-ui, or MCP App code at startup.
           if (id.includes("vite/preload-helper")) return "feature-preload";
-          if (id.includes("@assistant-ui")) return "assistant-ui";
+          if (id.includes("@assistant-ui") || /[/\\]assistant-stream[/\\]/.test(id)) return "assistant-ui";
+          // Zod is used only by the generated-interface catalogues and their
+          // OpenUI runtime. Do not pull its schema engine into eager vendor.
+          if (/[/\\]zod[/\\]/.test(id)) return "interface-schema";
           if (id.includes("@openuidev")) return "intelligent-ui-runtime";
           if (
             /[/\\]node_modules[/\\](?:\.pnpm[/\\])?(?:@radix-ui|radix-ui|@floating-ui|d3-|internmap|lucide-react)/.test(
@@ -98,6 +101,9 @@ export default defineConfig({
   },
   envPrefix: ["VITE_", "TAURI_"],
   test: {
+    // Native build/profile directories can contain downloaded provider tests.
+    // They are runtime data, never part of the renderer's test suite.
+    exclude: [...configDefaults.exclude, "src-tauri/**"],
     server: { deps: { inline: ["@openuidev/react-ui"] } },
     environment: "jsdom",
     globals: true,
