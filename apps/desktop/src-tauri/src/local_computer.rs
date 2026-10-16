@@ -1,6 +1,7 @@
 //! Native Windows app control and bounded per-agent workspace files.
 pub(crate) mod activity;
 pub(crate) mod artifacts;
+pub(crate) mod attachment_images;
 pub(crate) mod authority;
 pub(crate) mod browser;
 pub(crate) mod coding;
@@ -622,8 +623,11 @@ fn attachment_type(name: &str) -> Result<(String, &'static str), String> {
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
         _ => return Err(
-            "Mivlet can stage text, Markdown, JSON, CSV, YAML, DOCX, XLSX, PPTX and passive PDF attachments."
+            "Mivlet can stage PNG, JPEG, WebP, text, Markdown, JSON, CSV, YAML, DOCX, XLSX, PPTX and passive PDF attachments."
                 .into(),
         ),
     };
@@ -680,7 +684,17 @@ fn write_staged_attachment(
     if bytes.is_empty() || bytes.len() > MAX_ATTACHMENT_BYTES {
         return Err("Choose a non-empty attachment smaller than 2 MB.".into());
     }
-    if office_inspection::is_office(&extension) {
+    if mime_type.starts_with("image/") {
+        if request.mime_type != mime_type {
+            return Err("The image format does not match its filename.".into());
+        }
+        crate::user_images::from_saved_bytes(
+            &request.attachment_id,
+            &request.name,
+            mime_type,
+            &bytes,
+        )?;
+    } else if office_inspection::is_office(&extension) {
         office_inspection::project(&bytes, &extension)?;
     } else if extension == "pdf" {
         artifacts::checked_pdf(&bytes)?;

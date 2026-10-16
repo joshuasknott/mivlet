@@ -9,6 +9,7 @@ import type { useLocalComputer } from "../hooks/useLocalComputer";
 import {
   stageRuntimeLocalComputerAttachment,
   discardRuntimeLocalComputerAttachmentBatch,
+  restoreRuntimeLocalComputerImageAttachment,
 } from "../runtime/domains/local-computer";
 
 function encodeAttachmentBytes(bytes: Uint8Array) {
@@ -22,7 +23,7 @@ function encodeAttachmentBytes(bytes: Uint8Array) {
 /** Reconstructs durable attachment inputs for a continued assignment whose
  * composer inputs are gone (restart or a released prior run). Workspace refs
  * carry the recorded path, size and content hash, which native code re-verifies
- * before dispatch; no staged receipt is invented. In-memory refs (images,
+ * before dispatch; no staged receipt is invented. Legacy in-memory refs (images,
  * unbound transient uploads) cannot be restored and fail closed. */
 export function restagedAttachmentRefs(
   work: Pick<CollaborationWorkItem, "attachments">,
@@ -140,7 +141,9 @@ export function attachmentRunInstructions(
   if (!attachments.length) return "";
   const lines = attachments.map((attachment) => {
     if (attachment.imageInput)
-      return `- ${attachment.name}: supplied directly as a transient image input; it has no workspace file path.`;
+      return attachment.workspaceFile || attachment.durableRef
+        ? `- ${attachment.name}: supplied directly as an image input from its verified saved attachment.`
+        : `- ${attachment.name}: supplied directly as a transient image input; it has no workspace file path.`;
     if (attachment.workspaceFile)
       return `- ${attachment.name}: exact uploaded bytes are readable with read-file at ${JSON.stringify(attachment.workspaceFile.relativePath)}.`;
     if (attachment.durableRef?.relativePath)
@@ -182,6 +185,44 @@ export function attachmentMessageMetadata(
   });
 }
 
+function stagedImagePayload(attachment: ComposerAttachment): string | undefined {
+  if (!attachment.imageInput || attachment.workspaceFile || attachment.durableRef) return undefined;
+  const prefix = `data:${attachment.type};base64,`;
+  if (!attachment.imageInput.dataUrl.startsWith(prefix))
+    throw new Error("The image payload does not match its attachment type.");
+  return attachment.imageInput.dataUrl.slice(prefix.length);
+}
+
+async function hydrateSavedImages(
+  attachments: readonly ComposerAttachment[],
+  node: LocalComputerSnapshot | null,
+  workspaceId: string,
+  agentId: string,
+  isCurrent: () => boolean,
+): Promise<ComposerAttachment[]> {
+  const hydrated: ComposerAttachment[] = [];
+  for (const attachment of attachments) {
+    if (!isCurrent()) throw new Error("The attachment target changed. Send again in the current chat.");
+    const ref = attachment.durableRef;
+    if (!attachment.type.startsWith("image/") || attachment.imageInput || !ref) {
+      hydrated.push(attachment);
+      continue;
+    }
+    if (!node || node.workspaceId !== workspaceId || node.agentId !== agentId || !ref.relativePath || !ref.sha256)
+      throw new Error(`The saved image ${attachment.name} is unavailable. Reattach it before continuing.`);
+    const imageInput = await restoreRuntimeLocalComputerImageAttachment({
+      workspaceId, agentId, expectedGeneration: node.generation,
+      attachmentId: ref.id, name: ref.name, mimeType: ref.mimeType,
+      relativePath: ref.relativePath, sizeBytes: ref.sizeBytes, sha256: ref.sha256,
+    });
+    if (!isCurrent()) throw new Error("The attachment target changed. Send again in the current chat.");
+    if (!imageInput || imageInput.id !== ref.id || imageInput.mediaType !== ref.mimeType || imageInput.sizeBytes !== ref.sizeBytes)
+      throw new Error(`The saved image ${attachment.name} could not be restored. Reattach it before continuing.`);
+    hydrated.push({ ...attachment, imageInput, previewUrl: imageInput.dataUrl });
+  }
+  return hydrated;
+}
+
 export async function prepareExecutionAttachments(
   attachments: readonly ComposerAttachment[],
   localComputer: Pick<
@@ -198,25 +239,26 @@ export async function prepareExecutionAttachments(
 }> {
   const stageable = attachments.filter(
     (attachment) =>
-      attachment.transientBytes && !attachment.type.startsWith("image/"),
+      !attachment.workspaceFile && !attachment.durableRef &&
+      (attachment.transientBytes || attachment.imageInput),
   );
   const requireStaging = () => {
     if (stageable.some((attachment) => !attachment.sourceId)) {
-      throw new Error("Mivlet could not prepare the attached file for this agent. Choose a readable DOCX, XLSX, PPTX or passive PDF up to 2 MB, or export text/CSV, then try again in the desktop app.");
+      throw new Error("Mivlet could not prepare the attached file for this agent. Use PNG/JPEG/WebP images totalling up to 1 MB, readable documents up to 2 MB, or text/CSV, then try again in the desktop app.");
     }
   };
   if (!stageable.length) {
     // Headless workers mount immediately before dispatch. The hook's first
     // render may still be loading, so resolve capabilities for this execution.
     const node = await localComputer.refresh().catch(() => null);
-    return {
-      attachments: [...attachments],
-      node:
-        isCurrent() &&
+    const scopedNode = isCurrent() &&
         node?.workspaceId === workspaceId &&
         node.agentId === agentId
           ? node
-          : null,
+          : null;
+    return {
+      attachments: await hydrateSavedImages(attachments, scopedNode, workspaceId, agentId, isCurrent),
+      node: scopedNode,
     };
   }
   let node;
@@ -239,7 +281,7 @@ export async function prepareExecutionAttachments(
         attachmentId: attachment.id,
         name: attachment.name,
         mimeType: attachment.type,
-        contentBase64: encodeAttachmentBytes(attachment.transientBytes!),
+        contentBase64: stagedImagePayload(attachment) ?? encodeAttachmentBytes(attachment.transientBytes!),
       });
       await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
     }
@@ -273,13 +315,14 @@ export async function prepareExecutionAttachments(
       return { attachments: [...attachments], node };
     }
     const staged = attachments.map((attachment) => {
-      if (!attachment.transientBytes || attachment.type.startsWith("image/"))
+      if (!stageable.some((input) => input.id === attachment.id))
         return attachment;
       const receipt = byId.get(attachment.id);
       if (
         !receipt ||
         receipt.computerId !== node.computerId ||
-        receipt.sizeBytes !== attachment.transientBytes.byteLength
+        receipt.sizeBytes !== (attachment.imageInput?.sizeBytes ?? attachment.transientBytes?.byteLength) ||
+        (attachment.imageInput && receipt.mimeType !== attachment.type)
       )
         throw new Error(
           "The staged attachment receipt did not match this upload.",
@@ -291,7 +334,7 @@ export async function prepareExecutionAttachments(
       };
     });
     void localComputer.refreshFiles();
-    return { attachments: staged, node, batch };
+    return { attachments: await hydrateSavedImages(staged, node, workspaceId, agentId, isCurrent), node, batch };
   } catch {
     if (!isCurrent()) return { attachments: [...attachments], node };
     requireStaging();

@@ -1,13 +1,13 @@
 //! Shared native validation for transient composer images. Provider adapters
 //! choose only their wire shape or temporary-file staging.
 use base64::{engine::general_purpose::STANDARD, Engine as _};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const MAX_USER_IMAGES: usize = 4;
 const MAX_USER_IMAGE_BYTES: usize = 1024 * 1024;
 const MAX_USER_IMAGE_DIMENSION: u32 = 8192;
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct UserImageInput {
     pub(crate) id: String,
@@ -23,6 +23,32 @@ pub(crate) struct ValidatedImage {
     pub(crate) media_type: String,
     pub(crate) extension: &'static str,
     pub(crate) bytes: Vec<u8>,
+}
+
+/// Reconstitute only a deliberately selected, hash-verified workspace upload.
+/// The returned pixels remain ephemeral and use the same provider input bounds.
+pub(crate) fn from_saved_bytes(
+    id: &str,
+    name: &str,
+    media_type: &str,
+    bytes: &[u8],
+) -> Result<UserImageInput, String> {
+    if bytes.is_empty() || bytes.len() > MAX_USER_IMAGE_BYTES {
+        return Err("Choose an image no larger than 1 MB.".into());
+    }
+    let (width, height) = image_dimensions(bytes, media_type)
+        .ok_or("The saved image does not match its declared format.")?;
+    let image = UserImageInput {
+        id: id.into(),
+        name: name.into(),
+        media_type: media_type.into(),
+        size_bytes: bytes.len(),
+        width,
+        height,
+        data_url: format!("data:{media_type};base64,{}", STANDARD.encode(bytes)),
+    };
+    validate_images(std::slice::from_ref(&image))?;
+    Ok(image)
 }
 
 /// Historical pixels never accompany a new request or replay.

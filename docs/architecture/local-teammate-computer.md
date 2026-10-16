@@ -405,8 +405,13 @@ adapters share the four-image, 1 MB total, 8192-pixel bounds, local base64 forma
 and declared byte/dimension checks. Claude sends inline `image.source` blocks in
 its initial SDK user message; Codex stages the same validated bytes for one turn.
 Historical pixels and unsupported managed routes fail before provider dispatch.
-Mivlet stores attachment metadata only; retries require reattachment. This path
-grants no screenshot tools. Claude Stop terminates its supervised turn directly,
+New uploads are saved in the exact agent workspace before submission. Work and
+conversation records retain metadata, relative paths and content hashes, never
+inline pixels. Deliberate continuation restores saved images only after native
+scope, size, SHA-256 and image-format validation under the current computer
+generation. Historical messages never automatically resend pixels. Older
+metadata-only image references and missing or changed files require reattachment.
+This path grants no screenshot tools. Claude Stop terminates its supervised turn directly,
 without waiting for a blocked stdin payload writer. Wire and real subprocess
 fixtures establish local framing and cancellation; live Claude account acceptance
 remains unverified. See the [SDK user-message transport](https://github.com/anthropics/claude-agent-sdk-python/blob/9c69ce7aced5cdf2aa1ac86fe62e877b4962de8b/src/claude_agent_sdk/_internal/query.py)
