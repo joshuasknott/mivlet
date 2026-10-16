@@ -7,13 +7,16 @@ mod commands;
 mod context;
 mod exchanges;
 pub(crate) mod external;
+mod goals;
 pub(crate) mod models;
 mod output_revisions;
 pub(crate) mod pr_watches;
 pub(crate) mod provider_continuation;
 pub(crate) mod provider_continuation_read;
 mod provider_resets;
+mod queue;
 mod schedules;
+mod steering;
 pub(crate) mod ui;
 mod work;
 pub(crate) use schedules::{
@@ -436,12 +439,29 @@ pub fn collaboration_load(
 }
 
 #[tauri::command]
-pub fn collaboration_command(
+pub async fn collaboration_command(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     request: Request,
 ) -> std::result::Result<Snapshot, String> {
     main_window(&window)?;
+    if let Command::LiveSteerWork {
+        id,
+        expected_generation,
+        event_id,
+        text,
+    } = &request.command
+    {
+        let (workspace, id, generation, event, text) = (
+            request.workspace_id.clone(),
+            id.clone(),
+            *expected_generation,
+            event_id.clone(),
+            text.clone(),
+        );
+        return tauri::async_runtime::spawn_blocking(move || steering::live(&app, &workspace, &id, generation, &event, &text)).await
+            .map_err(|_| "Live steering could not finish. Inspect the saved delivery state; do not resend it automatically.".to_string())?;
+    }
     let profiles = native_profiles(app.clone(), &request.workspace_id)?;
     let store = crate::store::try_global().ok_or("Mivlet's encrypted store is unavailable.")?;
     let computers = app
@@ -675,6 +695,9 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
         let ctx = Context { conn, store, scope: &scope, profiles: &[], time: &time };
         for mut item in ctx.all_work()? {
             if provider_resets::require_restart_review(&mut item) { ctx.work(&item)?; }
+            // Unstarted user requests have no provider or external outcome to
+            // replay. Keep their exact frozen inputs and queue position.
+            if queue::recoverable_unstarted(&ctx, &item)? { continue; }
             if item.status.active()
                 && !(crate::background_worker::owns_work(&item) && crate::background_worker::owner_alive())
             {

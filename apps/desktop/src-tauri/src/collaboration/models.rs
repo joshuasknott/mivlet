@@ -127,6 +127,14 @@ pub struct WorkAttachment {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_binding: Option<crate::local_computer::coding::RepositoryWorkBinding>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queue: Option<WorkQueue>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub outcome_goal: Option<OutcomeGoal>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub live_steering: Vec<LiveWorkSteering>,
     /// Native custody is persisted with the canonical Work, never in a second queue.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub execution_owner: Option<String>,
@@ -250,6 +258,51 @@ pub struct WorkSteering {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct WorkQueue {
+    pub held: bool,
+    pub order: u32,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OutcomeGoal {
+    pub objective: String,
+    pub success_criteria: String,
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub report: Option<GoalReport>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct OutcomeGoalInput {
+    pub objective: String,
+    pub success_criteria: String,
+    pub max_turns: u32,
+    pub max_tokens: u64,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct GoalReport {
+    pub status: String,
+    pub text: String,
+    pub run_id: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct LiveWorkSteering {
+    pub id: String,
+    pub text: String,
+    pub run_id: String,
+    pub delivery: String,
+    pub created_at: String,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ResetContinuation {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub connection_revision: Option<String>,
@@ -364,6 +417,10 @@ pub struct Snapshot {
     deny_unknown_fields
 )]
 pub enum AgentCommand {
+    GoalReport {
+        status: String,
+        text: String,
+    },
     Delegate {
         agent_id: String,
         prompt: String,
@@ -403,6 +460,40 @@ pub enum AgentCommand {
     deny_unknown_fields
 )]
 pub enum Command {
+    LiveSteerWork {
+        id: String,
+        expected_generation: u32,
+        event_id: String,
+        text: String,
+    },
+    EditQueuedWork {
+        id: String,
+        expected_generation: u32,
+        prompt: String,
+    },
+    SetWorkHeld {
+        id: String,
+        expected_generation: u32,
+        held: bool,
+    },
+    MoveQueuedWork {
+        id: String,
+        expected_generation: u32,
+        before_id: Option<String>,
+    },
+    SetOutcomeGoal {
+        id: String,
+        expected_generation: u32,
+        objective: String,
+        success_criteria: String,
+        max_turns: u32,
+        max_tokens: u64,
+    },
+    SetGoalPaused {
+        id: String,
+        expected_generation: u32,
+        paused: bool,
+    },
     StartProviderContinuation {
         id: String,
         input: super::provider_continuation::Input,
@@ -470,6 +561,8 @@ pub enum Command {
         share_history: bool,
     },
     StartWork {
+        #[serde(default)]
+        outcome_goal: Option<OutcomeGoalInput>,
         id: String,
         conversation_id: String,
         agent_id: String,
