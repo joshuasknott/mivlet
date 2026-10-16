@@ -107,7 +107,19 @@ export function useProviderConnections({
   // shell stays testable. Preview connections remain visibly synthetic, while
   // the same provider gate is enforced in preview and native builds.
   const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(
-    () => enabledMivletProviders(listBackendProviders()),
+    () => enabledMivletProviders(listBackendProviders()).map((provider) => {
+      // Browser fixtures have no native credential registry to hydrate from.
+      // Restore only their previously selected API providers; native readiness
+      // always comes from the verified native boundary below.
+      if (hasTauriRuntime() || provider.backendType !== "native-api" ||
+          !initialState.connectedBackendIds.includes(provider.id)) return provider;
+      return {
+        ...provider,
+        authState: "connected",
+        capabilities: resolveCapabilities(provider.backendType, "connected", true),
+        models: provider.models.map((model) => ({ ...model, available: true })),
+      };
+    }),
   );
 
   // Dynamically discovered model ids per native provider id, plus whether

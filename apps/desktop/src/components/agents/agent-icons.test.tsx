@@ -3,71 +3,61 @@ import { act, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import { AgentAvatar, ProfileAgentAvatar } from "./agent-icons";
-import { AVATAR_COLOURS } from "../../lib/blob-avatar";
+import { AVATAR_SHAPES } from "../../lib/blob-avatar";
 
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+const seed = "ink-v1:0:saved";
+describe("ink agent characters", () => {
+  it("renders all six artwork cells without stretching or sharing the selected cell", () => {
+    const view = render(<>{AVATAR_SHAPES.map((_, index) => <AgentAvatar key={index} seed={`ink-v1:${index}:saved`} />)}</>);
+    const characters = [...view.container.querySelectorAll<HTMLElement>(".ink-character__artwork")];
+    expect(characters).toHaveLength(6);
+    expect(new Set(characters.map((character) => character.style.backgroundPosition)).size).toBe(6);
+    for (const character of characters) expect(character.style.backgroundImage).toContain("agent-characters.webp");
+  });
 
-const seed = "robot-v3:0:saved";
-describe("vector agent characters", () => {
-  it("renders all eight distinct silhouettes with independent vector parts and no raster or filter", () => {
-    const view = render(<>{AVATAR_COLOURS.map((_, index) => <AgentAvatar key={index} seed={`robot-v3:${index}:saved`} />)}</>);
-    const characters = [...view.container.querySelectorAll(".agent-avatar__svg")];
-    expect(characters).toHaveLength(8);
-    expect(view.container.querySelector("img, image, foreignObject, filter")).toBeNull();
-    const silhouettes = characters.map((character) => {
-      expect(character.querySelector(".agent-avatar__head")).not.toBeNull();
-      expect(character.querySelector(".agent-avatar__accessory")).not.toBeNull();
-      expect(character.querySelectorAll(".agent-avatar__eye")).toHaveLength(2);
-      return character.querySelector("path.agent-avatar__shell")?.getAttribute("d");
-    });
-    expect(new Set(silhouettes).size).toBe(8);
-    const ids = [...view.container.querySelectorAll("[id]")].map((element) => element.id);
-    expect(new Set(ids).size).toBe(ids.length);
-    for (const element of view.container.querySelectorAll("[fill^='url(']")) {
-      expect(ids).toContain(element.getAttribute("fill")!.slice(5, -1));
+  it("recolours only the body, preserving pupils, white faces and transparency", () => {
+    const view = render(<AgentAvatar seed={seed} color="#3659E3" />);
+    const artwork = view.container.querySelector<HTMLElement>(".ink-character__artwork")!;
+    const position = artwork.style.backgroundPosition;
+    const values = () => view.container.querySelector("feColorMatrix")!.getAttribute("values")!.split(" ").map(Number);
+    const matrix = values();
+    for (let row = 0; row < 3; row++) {
+      expect(matrix[row * 5 + 4]).toBe(0); // Black stays black.
+      expect(matrix.slice(row * 5, row * 5 + 3).reduce((a, b) => a + b)).toBeCloseTo(1); // White stays white.
+      expect(matrix[row * 5] + matrix[row * 5 + 2]).toBeCloseTo([54, 89, 227][row] / 255);
     }
+    expect(matrix.slice(15)).toEqual([0, 0, 0, 1, 0]); // Alpha is unchanged.
+    expect((view.container.firstChild as HTMLElement).style.backgroundColor).toBe("");
+    view.rerender(<AgentAvatar seed={seed} color="#E4684B" presence="waiting" />);
+    expect(values()).not.toEqual(matrix);
+    expect(artwork.style.backgroundPosition).toBe(position);
   });
 
-  it("changes the shell colour directly while retaining identity and neutral display through expressions", () => {
-    const view = render(<AgentAvatar seed={seed} color="#91ADD7" presence="idle" />);
-    const shell = view.container.querySelector("path.agent-avatar__shell")!.getAttribute("d");
-    const screen = view.container.querySelector(".agent-avatar__screen")!.outerHTML;
-    const eyes = view.container.querySelector(".agent-avatar__eyes")!.innerHTML;
-    view.rerender(<AgentAvatar seed={seed} color="#FF994D" presence="waiting" />);
-    expect(view.container.querySelector('stop[stop-color="#FF994D"]')).not.toBeNull();
-    expect(view.container.querySelector("path.agent-avatar__shell")).toHaveAttribute("d", shell);
-    expect(view.container.querySelector(".agent-avatar__screen")!.outerHTML).toBe(screen);
-    expect(view.container.querySelector(".agent-avatar__eyes")!.innerHTML).not.toBe(eyes);
-  });
-
-  it("leaves uploaded portraits unaltered and never attaches generated movement or expressions", () => {
+  it("leaves uploaded portraits unaltered without generated motion or a colour background", () => {
     const upload = "data:image/png;base64,example";
     const view = render(<AgentAvatar seed={seed} imageDataUrl={upload} color="#F00000" presence="working" motion="expressive" />);
     expect(view.container.querySelector("img")).toHaveAttribute("src", upload);
-    expect(view.container.querySelector("img")!.style.filter).toBe("");
-    expect(view.container.querySelector("svg")).toBeNull();
+    expect(view.container.querySelector(".ink-character__head")).toBeNull();
     expect(view.container.firstChild).toHaveAttribute("data-animate", "false");
+    expect((view.container.firstChild as HTMLElement).style.backgroundColor).toBe("");
   });
 
-  it("uses speaking geometry only for confirmed speaking presence", () => {
-    const view = render(<AgentAvatar seed={seed} presence="working" />);
-    expect(view.container.querySelector(".agent-avatar__mouth")).toBeNull();
-    view.rerender(<AgentAvatar seed={seed} presence="speaking" />);
-    expect(view.container.querySelector(".agent-avatar__mouth")).not.toBeNull();
-    view.rerender(<AgentAvatar seed={seed} presence="paused" />);
-    expect(view.container.querySelector(".agent-avatar__mouth")).toBeNull();
+  it("uses safe defaults for malformed custom colours", () => {
+    const view = render(<AgentAvatar seed={seed} color="url(https://example.com)" />);
+    expect(view.container.querySelector("feColorMatrix")).not.toHaveAttribute("values", expect.stringContaining("NaN"));
   });
 
   it("acknowledges completion once, settles, and never replays an already completed mount", () => {
     vi.useFakeTimers();
-    const view = render(<AgentAvatar seed={seed} presence="done" />);
+    const view = render(<AgentAvatar seed={seed} presence="done" motion="expressive" />);
     expect(view.container.firstChild).toHaveAttribute("data-expression", "idle");
-    view.rerender(<AgentAvatar seed={seed} presence="working" />);
-    view.rerender(<AgentAvatar seed={seed} presence="done" />);
+    view.rerender(<AgentAvatar seed={seed} presence="working" motion="expressive" />);
+    view.rerender(<AgentAvatar seed={seed} presence="done" motion="expressive" />);
     expect(view.container.firstChild).toHaveAttribute("data-expression", "done");
     act(() => vi.advanceTimersByTime(901));
     expect(view.container.firstChild).toHaveAttribute("data-expression", "idle");
-    view.rerender(<AgentAvatar seed={seed} presence="done" color="#79E5C2" />);
+    view.rerender(<AgentAvatar seed={seed} presence="done" color="#79E5C2" motion="expressive" />);
     expect(view.container.firstChild).toHaveAttribute("data-expression", "idle");
     expect(view.container.firstChild).toHaveAttribute("data-presence", "done");
   });
@@ -83,19 +73,29 @@ describe("vector agent characters", () => {
   });
 
   it("does not inherit completion across conversation or attempt scope changes", () => {
-    const view = render(<AgentAvatar seed={seed} activityKey="thread-a:attempt-a" presence="working" />);
-    view.rerender(<AgentAvatar seed={seed} activityKey="thread-b:old-attempt" presence="done" />);
+    const view = render(<AgentAvatar seed={seed} activityKey="thread-a:attempt-a" presence="working" motion="expressive" />);
+    view.rerender(<AgentAvatar seed={seed} activityKey="thread-b:old-attempt" presence="done" motion="expressive" />);
     expect(view.container.firstChild).toHaveAttribute("data-expression", "idle");
-    view.rerender(<AgentAvatar seed={seed} activityKey="thread-b:old-attempt" presence="working" />);
-    view.rerender(<AgentAvatar seed={seed} activityKey="thread-b:new-attempt" presence="done" />);
+    view.rerender(<AgentAvatar seed={seed} activityKey="thread-b:old-attempt" presence="working" motion="expressive" />);
+    view.rerender(<AgentAvatar seed={seed} activityKey="thread-b:new-attempt" presence="done" motion="expressive" />);
     expect(view.container.firstChild).toHaveAttribute("data-expression", "idle");
   });
 
   it("fences agents even when both profiles use the same saved seed", () => {
     const profile = { id: "a", avatarSeed: seed } as MivletAgentProfile;
-    const view = render(<ProfileAgentAvatar agent={profile} presence="working" />);
-    view.rerender(<ProfileAgentAvatar agent={{ ...profile, id: "b" }} presence="done" />);
+    const view = render(<ProfileAgentAvatar agent={profile} presence="working" motion="expressive" />);
+    view.rerender(<ProfileAgentAvatar agent={{ ...profile, id: "b" }} presence="done" motion="expressive" />);
     expect(view.container.firstChild).toHaveAttribute("data-expression", "idle");
+  });
+
+  it("does not subscribe static picker icons to visibility observers", () => {
+    const observer = vi.fn();
+    vi.stubGlobal("IntersectionObserver", observer);
+    const listen = vi.spyOn(document, "addEventListener");
+    const view = render(<AgentAvatar seed={seed} motion="quiet" />);
+    expect(observer).not.toHaveBeenCalled();
+    expect(listen).not.toHaveBeenCalledWith("visibilitychange", expect.any(Function));
+    expect(view.container.firstChild).toHaveAttribute("data-animate", "false");
   });
 
   it("suspends hidden/offscreen timelines and consumes hidden completions without replay on return", () => {

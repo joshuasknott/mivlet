@@ -1,6 +1,16 @@
 # Memory and bounded conversation context
 
-The operator surface is **Settings → Memory**. There is no Knowledge settings
+The conversation surface is **right panel → Memory**: users can search, add
+chat-scoped memories, correct or delete saved memories, and save or dismiss
+existing suggestions. Inherited project, agent, and account memories are labelled
+separately using the same inheritance boundaries below. New messages are not
+automatically promoted. Add, correction, approval, and forgetting use native
+persistence; an unavailable native store reports an error rather than a saved state.
+The panel defaults to this chat. Its owner scope shows only the owning agent or
+project's shared memories, never sibling-chat memories. Browsing does not widen
+context or access. New additions remain explicitly chat-scoped; collections are
+searched in full and rendered in bounded pages.
+**Settings → Memory** retains account-wide management. There is no Knowledge settings
 tab. `packages/knowledge` is the ingest/retrieve library for sources and
 compaction; durable facts live as Memory records. Persisted sidebar ids
 `Knowledge`, `Plugins`, `Connectors`, `Automations`, and `Schedules` reopen

@@ -2,7 +2,10 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as runtime0 from "../runtime/domains/account";
+import * as memoryRuntime from "../runtime/domains/memory";
 import { MivletQueryProvider } from "../lib/query-client";
+import { STORAGE_KEY } from "../lib/constants";
+import { defaultShellState } from "./shell-runtime/defaults";
 import { clearActiveRuntimeDataScope } from "../runtime-scope";
 import { useShellRuntime } from "./useShellRuntime";
 
@@ -11,6 +14,22 @@ function wrapper({ children }: PropsWithChildren) {
 }
 
 describe("conversation shell runtime", () => {
+  it("saves only an explicit new chat memory and uses the native merged result", async () => {
+    const save = vi.spyOn(memoryRuntime, "saveRuntimeMemoryState").mockImplementation(async state => state);
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    await act(async () => result.current.addChatMemory("chat", " Decision ", " Keep it simple "));
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ records: [expect.objectContaining({ title: "Decision", value: "Keep it simple", scope: { level: "thread", threadId: "chat" }, approved: true, provenance: { origin: "manual", note: "Saved explicitly in this chat" } })] }));
+    expect(result.current.managedMemoryRecords).toHaveLength(1);
+  });
+  it("does not report a saved memory when native persistence is unavailable", async () => {
+    vi.spyOn(memoryRuntime, "saveRuntimeMemoryState").mockResolvedValue(null);
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    const before = result.current.managedMemoryRecords;
+    await expect(result.current.addChatMemory("chat", "Decision", "Keep it simple")).rejects.toThrow("requires the desktop app");
+    expect(result.current.managedMemoryRecords).toEqual(before);
+  });
   afterEach(() => vi.restoreAllMocks());
   beforeEach(() => {
     window.localStorage.clear();
@@ -60,6 +79,82 @@ describe("conversation shell runtime", () => {
     expect(result.current.identityStatus.state).toBe("signed-in");
     expect(result.current.connectedBackendIds).toEqual([]);
     expect(result.current.onboardingRequired).toBe(false);
+  });
+
+  it("requires first-agent setup for a fresh account and updates the original profile", async () => {
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() =>
+      expect(result.current.accountWorkspaceStatus.state).toBe("ready"),
+    );
+    await act(async () => {
+      await result.current.connectBackend("xai", "xai-test-key");
+    });
+    expect(result.current.firstAgentSetupRequired).toBe(true);
+    const originalId = result.current.agents[0]!.id;
+    await act(async () => {
+      await result.current.completeFirstAgentSetup({
+        name: "Mira",
+        instructions: "Turn priorities into next steps.",
+        avatarSeed: "ink-v1:1:original",
+        iconColor: "#2CC663",
+      });
+    });
+    expect(result.current.firstAgentSetupRequired).toBe(false);
+    expect(result.current.agents).toHaveLength(1);
+    expect(result.current.agents[0]).toMatchObject({
+      id: originalId,
+      name: "Mira",
+      instructions: "Turn priorities into next steps.",
+      avatarSeed: "ink-v1:1:original",
+      iconColor: "#2CC663",
+    });
+  });
+
+  it("restores a completed preview agent and its synthetic provider after reload", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      ...defaultShellState,
+      connectedBackendIds: ["xai"],
+      onboardingComplete: true,
+      agents: [{ ...defaultShellState.agents![0], name: "Mira", avatarSeed: "ink-v1:2:saved", iconColor: "#227C70" }],
+    }));
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    expect(result.current.firstAgentSetupRequired).toBe(false);
+    expect(result.current.connectedAgentBackends.map((provider) => provider.id)).toContain("xai");
+    expect(result.current.agents).toHaveLength(1);
+    expect(result.current.agents[0]).toMatchObject({ name: "Mira", avatarSeed: "ink-v1:2:saved", iconColor: "#227C70" });
+  });
+
+  it("keeps first-agent setup pending until a usable provider exists", async () => {
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() =>
+      expect(result.current.accountWorkspaceStatus.state).toBe("ready"),
+    );
+    await expect(
+      result.current.completeFirstAgentSetup({
+        name: "Mira",
+        instructions: "",
+        avatarSeed: "ink-v1:0:original",
+        iconColor: "#B8CCFF",
+      }),
+    ).rejects.toThrow("Connect a usable provider");
+    expect(result.current.firstAgentSetupRequired).toBe(true);
+  });
+
+  it("skips first-agent setup for a legacy saved profile", async () => {
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({
+        ...defaultShellState,
+        onboardingVersion: 0,
+        onboardingComplete: true,
+      }),
+    );
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() =>
+      expect(result.current.accountWorkspaceStatus.state).toBe("ready"),
+    );
+    expect(result.current.firstAgentSetupRequired).toBe(false);
   });
 
   it("requires authentication when the account is signed out", async () => {

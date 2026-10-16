@@ -3,6 +3,9 @@ import { DEFAULT_CUSTOM_APPROVAL_SETTINGS } from "@mivlet/connectors";
 import { knowledgeSources, memoryRecords } from "../../data/workspace";
 import { DEFAULT_PERMISSION_LABEL } from "../../lib/agent-run";
 import type { PersistedShellState } from "../../lib/types";
+
+/** Version marker for the first-agent setup journey. Legacy snapshots use 0. */
+export const FIRST_AGENT_ONBOARDING_VERSION = 2 as const;
 export const defaultShellState: PersistedShellState = {
   activeItem: "new-chat",
   composerValue: "",
@@ -18,7 +21,8 @@ export const defaultShellState: PersistedShellState = {
       instructions: "Coordinate my work, keep priorities clear, and help me move from decision to execution.",
       modelId: "",
       icon: "agent",
-      iconColor: "#865DFA",
+      iconColor: "#3659E3",
+      avatarSeed: "ink-v1:0:chief-of-staff",
       connectorIds: [],
       knowledgeSourceIds: [],
       permissionLabel: DEFAULT_PERMISSION_LABEL
@@ -31,7 +35,7 @@ export const defaultShellState: PersistedShellState = {
   memoryRecords,
   connectedBackendIds: [],
   onboardingComplete: false,
-  onboardingVersion: 0,
+  onboardingVersion: FIRST_AGENT_ONBOARDING_VERSION,
   // "" lets Mivlet pick the first available model. Ask Me is the default
   // approval preset.
   selectedModelId: "",

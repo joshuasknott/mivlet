@@ -1,5 +1,15 @@
-import { WorkspaceLibrary } from "../components/navigation/WorkspaceLibrary";
-import { lazy, Suspense } from "react";
+import { WorkspaceFileUpload } from "../components/navigation/WorkspaceFileUpload";
+import { lazy, Suspense, useState } from "react";
+import { WorkspaceActivity } from "../components/navigation/WorkspaceActivity";
+import {
+  agentChatOwner,
+  panelFiles,
+  panelMemories,
+  panelRooms,
+  panelWork,
+  type PanelOwner,
+  type PanelScope,
+} from "../components/navigation/workspace-panel-data";
 import {
   PanelArtifact,
   PanelWebPreview,
@@ -28,6 +38,16 @@ const WorkspaceHistory = lazy(() =>
     default: Component,
   })),
 );
+const WorkspaceLibrary = lazy(() =>
+  import("../components/navigation/WorkspaceLibrary").then((module) => ({
+    default: module.WorkspaceLibrary,
+  })),
+);
+const WorkspaceMemories = lazy(() =>
+  import("../components/navigation/WorkspaceMemories").then((module) => ({
+    default: module.WorkspaceMemories,
+  })),
+);
 
 export function WorkspaceContextPanel({
   hidden,
@@ -37,7 +57,6 @@ export function WorkspaceContextPanel({
   state,
   projects,
   renderConversation,
-  onNewSideChat,
 }: {
   hidden: boolean;
   nav: WorkspaceNavigation;
@@ -54,20 +73,62 @@ export function WorkspaceContextPanel({
   const navProject = nav.navProject;
   const navAgent = nav.navAgent;
   const navTeam = nav.navTeam;
+  const room = nav.activeRoom;
+  const project = room?.projectId
+    ? projects.projects.find((entry) => entry.id === room.projectId)
+    : navProject;
+  const agentId = room ? agentChatOwner(room) : navAgent?.id;
+  const agent = runtime.agents.find((entry) => entry.id === agentId);
+  const owner: PanelOwner | undefined = project
+    ? { kind: "project", id: project.id, name: project.name }
+    : agent
+      ? { kind: "agent", id: agent.id, name: agent.name }
+      : undefined;
+  const identity = workspaceId + ":" + (room?.id ?? owner?.id ?? "empty");
+  const [browsing, setBrowsing] = useState<{
+    identity: string;
+    scope: PanelScope;
+  }>({ identity, scope: "chat" });
+  const scope = browsing.identity === identity ? browsing.scope : "chat";
+  const scopeKey = identity + ":" + scope;
+  const rooms = panelRooms(
+    workspaceId,
+    room,
+    state.data.conversations,
+    owner,
+    scope,
+  );
+  const work = panelWork(workspaceId, rooms, state.data.work);
+  const files = panelFiles({
+    workspaceId,
+    work,
+    project,
+    sources: runtime.workspaceKnowledgeSources,
+  });
+  const memories = panelMemories(runtime.managedMemoryRecords, room, scope);
+  const historyContext = identity + ":" + (nav.navWorkId ?? "");
+  const [historySelection, setHistorySelection] = useState<{
+    id: string | null;
+    version: number;
+    context: string;
+  }>({ id: null, version: 0, context: "" });
   return (
     <WorkspaceRightNav
       onChatActiveChange={nav.setPanelFocused}
       context={navContext}
-      rooms={state.data.conversations}
-      work={state.data.work}
-      runtime={runtime}
+      title={scope === "owner" ? owner?.name : room?.title}
+      identity={identity}
+      scope={scope}
+      ownerLabel={room ? owner?.name : undefined}
+      onScopeChange={(next) => {
+        nav.setComputer(null);
+        setBrowsing({ identity, scope: next });
+      }}
       open={!hidden && (nav.contextOpen || Boolean(nav.computer))}
       onClose={() => {
         nav.setComputer(null);
         nav.setContextOpen(false);
       }}
-      onOpenConversation={nav.openPanelChat}
-      onNewSideChat={onNewSideChat}
       request={nav.panelRequest}
       renderTab={(tab, close) => {
         if (tab.kind === "artifact")
@@ -87,6 +148,7 @@ export function WorkspaceContextPanel({
               target={tab.target}
               title={tab.title}
               text={tab.text}
+              imageDataUrl={tab.imageDataUrl}
               onClose={close}
               embedded
             />
@@ -118,12 +180,80 @@ export function WorkspaceContextPanel({
         );
       }}
       historyRequestId={nav.navWorkId}
+      activity={(navigate) => (
+        <WorkspaceActivity
+          workspaceId={workspaceId}
+          work={work}
+          agents={runtime.agents}
+          files={files}
+          memories={memories}
+          memoryDisabled={runtime.memoryDisabled}
+          onInspect={(id) =>
+            setHistorySelection((current) => ({
+              id,
+              version: current.version + 1,
+              context: historyContext,
+            }))
+          }
+          onStop={(id) => service.stop(id)}
+          onOpen={nav.setPanelRequest}
+          onNavigate={navigate}
+        />
+      )}
       history={
-        <Suspense fallback={<p role="status">Loading history…</p>}>
-          <WorkspaceHistory key={nav.activeRoom?.id ?? "empty"} room={nav.activeRoom} runtime={runtime} service={service} state={state} selectedWorkId={nav.navWorkId} onOpenConversation={nav.open} />
+        <Suspense fallback={<p role="status">Loading activity…</p>}>
+          <WorkspaceHistory
+            key={
+              scopeKey + ":" + historySelection.version + ":" + nav.navWorkId
+            }
+            room={room}
+            runtime={runtime}
+            service={service}
+            state={state}
+            workItems={work}
+            selectedWorkId={
+              historySelection.context === historyContext
+                ? historySelection.id
+                : nav.navWorkId
+            }
+            onOpenConversation={nav.open}
+          />
         </Suspense>
       }
-      library={<WorkspaceLibrary key={workspaceId} workspaceId={workspaceId} agents={runtime.agents} onOpen={nav.setPanelRequest} />}
+      memories={
+        <Suspense fallback={<p role="status">Loading memory…</p>}>
+          <WorkspaceMemories
+            key={scopeKey}
+            room={room}
+            runtime={runtime}
+            scope={scope}
+          />
+        </Suspense>
+      }
+      library={
+        <Suspense fallback={<p role="status">Loading files…</p>}>
+          <WorkspaceLibrary
+            key={scopeKey}
+            workspaceId={workspaceId}
+            agents={runtime.agents.filter((agent) =>
+              navProject
+                ? navTeam?.participantIds.includes(agent.id)
+                : !navAgent || agent.id === navAgent.id,
+            )}
+            room={room}
+            files={files}
+            work={state.data.work}
+            project={navProject}
+            sources={runtime.workspaceKnowledgeSources}
+            addFiles={
+              room && scope === "chat" ? (
+                <WorkspaceFileUpload room={room} runtime={runtime} />
+              ) : undefined
+            }
+            onOpen={nav.setPanelRequest}
+          />
+        </Suspense>
+      }
       sideChats={
         navContext && navContext.kind !== "work" ? (
           <SideChatList

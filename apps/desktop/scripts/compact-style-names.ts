@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
-import type { Plugin } from "vite";
+import type { CSSOptions, Plugin } from "vite";
 
 interface Source {
   fileName: string;
@@ -137,6 +137,35 @@ export function compactStyleNames(sourceRoot: string): Plugin {
     name: "mivlet-compact-style-names",
     enforce: "pre",
     apply: "build",
+    config() {
+      // Vite resolves CSS @imports inside PostCSS, after source transforms.
+      // Compact the resolved rules so imported layers and JSX use the
+      // same names. Run before CSS minification and content hashing.
+      const css: CSSOptions = {
+        postcss: {
+          plugins: [
+            {
+              postcssPlugin: "mivlet-compact-imported-styles",
+              Once(sheet) {
+                sheet.walk((node) => {
+                  const file = node.source?.input.file?.replaceAll("\\", "/");
+                  if (!file?.startsWith(`${root}/`)) return;
+                  if (node.type === "rule")
+                    node.selector = compactStyleText(node.selector, names);
+                  if (node.type === "decl") {
+                    node.prop = compactStyleText(node.prop, names);
+                    node.value = compactStyleText(node.value, names);
+                  }
+                  if (node.type === "atrule")
+                    node.params = compactStyleText(node.params, names);
+                });
+              },
+            },
+          ],
+        },
+      };
+      return { css };
+    },
     buildStart() {
       const paths = files(sourceRoot);
       names = styleNameMap(
@@ -160,7 +189,7 @@ export function compactStyleNames(sourceRoot: string): Plugin {
     transform(code, id) {
       if (
         !id.replaceAll("\\", "/").startsWith(`${root}/`) ||
-        !/\.(?:css|[jt]sx?)(?:\?|$)/.test(id)
+        !/\.[jt]sx?(?:\?|$)/.test(id)
       )
         return null;
       const transformed = compactStyleText(code, names);

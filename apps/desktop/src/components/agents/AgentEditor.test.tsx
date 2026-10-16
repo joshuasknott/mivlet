@@ -39,27 +39,27 @@ it("edits from a non-modal right panel and saves the notification preference wit
 });
 
 describe("agent portrait ownership", () => {
-  it("selects the new character's native colour and keeps recolouring separate from shape", async () => {
+  it("keeps icon colour independent when selecting a different character", async () => {
     const user = userEvent.setup();
     const onSave = vi.fn();
     const view = render(<AgentEditor {...props} open agent={profile} onSave={onSave} />);
-    await user.click(screen.getByRole("button", { name: "Lens character" }));
-    expect(screen.getByRole("button", { name: "Blue" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Pilot character" }));
+    expect(screen.getByLabelText("Icon hex colour")).toHaveValue("#865DFA");
     expect(view.container.querySelector(".agent-editor__identity .agent-avatar")).toHaveAttribute("data-character", "1");
-    await user.click(screen.getByRole("button", { name: "Orange" }));
-    expect(screen.getByRole("button", { name: "Lens character" })).toHaveAttribute("aria-pressed", "true");
+    await user.click(screen.getByRole("button", { name: "Amber" }));
+    expect(screen.getByRole("button", { name: "Pilot character" })).toHaveAttribute("aria-pressed", "true");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#FF994D", avatarSeed: expect.stringMatching(/^robot-v3:1:/) }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#D69A32", avatarSeed: expect.stringMatching(/^ink-v1:1:/) }));
   });
   it("previews and persists the selected colour through editing", async () => {
     const onSave = vi.fn();
     const view = render(<AgentEditor {...props} open agent={profile} onSave={onSave} />);
-    await userEvent.click(screen.getByRole("button", { name: "Mint" }));
-    expect(view.container.querySelector(".agent-editor__identity linearGradient stop")).toHaveAttribute("stop-color", expect.any(String));
+    await userEvent.click(screen.getByRole("button", { name: "Jade" }));
+    expect(view.container.querySelector(".agent-editor__identity .agent-avatar") as HTMLElement).toHaveStyle({ backgroundColor: "" });
     await userEvent.click(screen.getByRole("button", { name: "Save changes" }));
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#79E5C2" }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#008577" }));
     view.rerender(<AgentEditor {...props} open agent={onSave.mock.calls[0][0]} onSave={onSave} />);
-    expect(screen.getByRole("button", { name: "Mint" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Jade" })).toHaveAttribute("aria-pressed", "true");
   });
   it("saves the exact generated portrait shown during creation and gives the next agent a fresh seed", async () => {
     const user = userEvent.setup();
@@ -130,15 +130,16 @@ describe("agent portrait ownership", () => {
   });
 });
 
-it("keeps character preview colours distinct when changing the selected colour", async () => {
+it("keeps character choices stable and accepts a custom icon colour", async () => {
   const user = userEvent.setup(); const onSave = vi.fn();
   const view = render(<AgentEditor {...props} open agent={profile} onSave={onSave} />);
-  const variants = () => [...view.container.querySelectorAll('.agent-shape-picker > button .agent-avatar')].map((node) => node.getAttribute('data-character'));
+  const variants = () => [...view.container.querySelectorAll('.character-options > button .agent-avatar')].map((node) => node.getAttribute('data-character'));
   const before = variants();
-  expect(new Set(before).size).toBe(8);
-  await user.click(screen.getByRole("button", { name: "Cyan" }));
+  expect(new Set(before).size).toBe(6);
+  await user.clear(screen.getByLabelText("Icon hex colour"));
+  await user.type(screen.getByLabelText("Icon hex colour"), "#123ABC");
   expect(variants()).toEqual(before);
-  expect(screen.queryByRole("button", { name: "Custom" })).not.toBeInTheDocument();
+  expect(screen.getByLabelText("Choose custom icon colour")).toHaveValue("#123abc");
   await user.click(screen.getByRole("button", { name: "Save changes" }));
-  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#57D5F4" }));
+  expect(onSave).toHaveBeenCalledWith(expect.objectContaining({ iconColor: "#123ABC" }));
 });

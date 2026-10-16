@@ -17,3 +17,4 @@ overrides:
 patchedDependencies:
   braces@3.0.3: patches/braces@3.0.3.patch
   http-cache-semantics@4.2.0: patches/http-cache-semantics@4.2.0.patch
+  marked@18.0.11: patches/marked@18.0.11.patch

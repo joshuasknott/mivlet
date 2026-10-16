@@ -17,6 +17,8 @@ describe("shell runtime defaults", () => {
       composerValue: "",
       voiceEnabled: true,
       connectedBackendIds: [],
+      onboardingComplete: false,
+      onboardingVersion: 2,
       selectedModelId: "",
       permissionMode: "trusted-scope"
     });

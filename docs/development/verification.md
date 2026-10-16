@@ -138,6 +138,11 @@ and dynamic icon imports disable pruning. Package-format changes keep the origin
 definitions; the bundle gate still checks the resulting size. The desktop suite
 tests the analysis and retained artwork against the installed icon package.
 
+The version-pinned Marked patch isolates its HTML API initialization so tokenizer-only
+imports can omit the unused renderer. `apps/desktop/scripts/marked-bundle.test.ts`
+checks the emitted tokenizer against the package's tokens and exercises the public
+APIs. Review or remove the patch when updating Marked; it does not change Markdown rules.
+
 Inspect the actual application entry point when verifying UI. Use the native app
 for account-owned storage, conversation navigation, provider setup, approvals and
 computer control; the browser entry is a runtime-limited rendering of that same

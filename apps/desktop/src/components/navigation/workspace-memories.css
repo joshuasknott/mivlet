@@ -1,0 +1,25 @@
+.workspace-memories { padding: 22px 24px; overflow: auto; }
+.workspace-memories__group { margin-top: 28px; }
+.workspace-memories__group h3 { margin: 0 0 10px; color: var(--team-muted); font-size: 12px; font-weight: 500; }
+.workspace-memories__record { padding: 18px 0; border-bottom: 1px solid var(--team-border); overflow-wrap: anywhere; }
+.workspace-memories__record-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+.workspace-memories__record strong { font-size: 14px; font-weight: 550; }
+.workspace-memories__record p { margin: 8px 0 14px; color: var(--ink-muted); white-space: pre-wrap; line-height: 1.6; }
+.workspace-memories__record small { color: var(--team-muted); font-size: 11px; }
+.workspace-memories__record details { position: relative; flex-shrink: 0; }
+.workspace-memories__record summary { cursor: pointer; list-style: none; padding: 0 8px; min-width: 32px; min-height: 32px; text-align: center; }
+.workspace-memories__record summary::-webkit-details-marker { display: none; }
+.workspace-memories__actions { position: absolute; right: 0; top: 28px; z-index: 2; min-width: 120px; padding: 5px; border: 1px solid var(--team-border); border-radius: 8px; background: var(--surface); box-shadow: 0 6px 20px #0001; }
+.workspace-memories button { color: var(--ink); font: inherit; cursor: pointer; }
+.workspace-memories button:disabled { opacity: .5; cursor: default; }
+.workspace-memories__actions button { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 10px; border-radius: 4px; }
+.workspace-memories__actions button:hover { background: var(--surface-hover); }
+.workspace-memories__editor { padding: 16px 0; border-bottom: 1px solid var(--team-border); }
+.workspace-memories__editor p, .workspace-memories__notice { color: var(--team-muted); line-height: 1.6; }
+.workspace-memories__editor label { display: grid; gap: 8px; margin-bottom: 14px; }
+.workspace-memories__editor input, .workspace-memories__editor textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--team-border); border-radius: 6px; background: var(--surface); color: var(--ink); padding: 10px; font: inherit; }
+.workspace-memories__editor textarea { resize: vertical; }
+.workspace-memories__editor > div, .workspace-memories__suggestion-actions { display: flex; gap: 10px; margin-top: 12px; }
+.workspace-memories__editor button, .workspace-memories__suggestion-actions button { padding: 8px 10px; border: 1px solid var(--team-border); background: transparent; border-radius: 6px; }
+.workspace-memories :is(button, summary, input, textarea):focus-visible { outline: 2px solid var(--ink-soft); outline-offset: 2px; }
+@media (pointer: coarse) { .workspace-memories summary, .workspace-memories button { min-height: 44px; } }

@@ -1,7 +1,7 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import type { PropsWithChildren } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { AccountWorkspaceStatus, RuntimeSnapshot } from "@mivlet/protocol";
+import type { AccountWorkspaceStatus, BackendProvider, RuntimeSnapshot } from "@mivlet/protocol";
 import { createApprovalGate } from "@mivlet/connectors/native-api/tool-executor";
 import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
 import { MivletQueryProvider } from "../lib/query-client";
@@ -12,11 +12,15 @@ import { defaultShellState } from "./shell-runtime/defaults";
 import { shellStateToRuntimeSnapshot } from "../lib/persistence";
 import { resolveApprovalFallback } from "../lib/approval-fallbacks";
 import type { ApprovalResolutionRequest, ApprovalResolutionResponse } from "@mivlet/protocol";
+import { resolveNativeProvider } from "@mivlet/connectors";
 
 const mocks = vi.hoisted(() => ({ status: null as AccountWorkspaceStatus | null,
   resolveApproval: vi.fn<(request: ApprovalResolutionRequest) => Promise<ApprovalResolutionResponse>>(),
   loadSnapshot: vi.fn<() => Promise<RuntimeSnapshot | null>>(async () => null),
   saveSnapshot: vi.fn(async (_snapshot: RuntimeSnapshot, _workspaceId?: string) => null),
+  listBackends: vi.fn<() => Promise<BackendProvider[] | null>>(async () => null),
+  connectBackend: vi.fn(async () => "stored"),
+  verifyBackend: vi.fn(async (providerId: string) => ({ providerId, outcome: "ready" as const })),
 }));
 vi.mock("../runtime/domains/account", async (original) => ({
 ...await original<typeof import("../runtime/domains/account")>(),
@@ -27,6 +31,12 @@ vi.mock("../runtime/domains/workspace", async (original) => ({
 ...await original<typeof import("../runtime/domains/workspace")>(),
 loadRuntimeSnapshot: mocks.loadSnapshot,
 saveRuntimeSnapshot: mocks.saveSnapshot
+}));
+vi.mock("../runtime/domains/providers", async (original) => ({
+  ...await original<typeof import("../runtime/domains/providers")>(),
+  listRuntimeBackends: mocks.listBackends,
+  connectRuntimeBackend: mocks.connectBackend,
+  verifyRuntimeBackend: mocks.verifyBackend,
 }));
 vi.mock("../runtime/domains/approvals", async (original) => ({
 ...await original<typeof import("../runtime/domains/approvals")>(),
@@ -61,6 +71,9 @@ describe("approval queue workspace hydration", () => {
     clearActiveRuntimeDataScope();
     mocks.loadSnapshot.mockReset().mockResolvedValue(null);
     mocks.saveSnapshot.mockClear();
+    mocks.listBackends.mockReset().mockResolvedValue(null);
+    mocks.connectBackend.mockReset().mockResolvedValue("stored");
+    mocks.verifyBackend.mockReset().mockImplementation(async (providerId: string) => ({ providerId, outcome: "ready" as const }));
     mocks.resolveApproval.mockReset().mockImplementation(async (request) => resolveApprovalFallback(request));
     mocks.status = { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS, activeWorkspace: { ...PREVIEW_ACCOUNT_WORKSPACE_STATUS.activeWorkspace, localWorkspaceId: "local-default" }, activeContextOwner: { internalUserId: "owner-a" } };
   });
@@ -198,6 +211,52 @@ describe("approval queue workspace hydration", () => {
     await act(async () => finish({ ...shellStateToRuntimeSnapshot(defaultShellState), activeItem: "old-owner-private-item" }));
     expect(result.current.activeItem).toBe(defaultShellState.activeItem);
     expect(result.current.runtimeSnapshotError).toBeNull();
+  });
+
+  it("rejects a delayed first-agent save when the account owner changes", async () => {
+    mocks.listBackends.mockResolvedValue([resolveNativeProvider("openai", "connected")]);
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    await waitFor(() => expect(result.current.connectedAgentBackends.some((provider) => provider.id === "openai")).toBe(true));
+    mocks.saveSnapshot.mockClear();
+    let finishSave!: () => void;
+    mocks.saveSnapshot.mockImplementationOnce(
+      async () => new Promise<null>((resolve) => { finishSave = () => resolve(null); }),
+    );
+
+    const completion = result.current.completeFirstAgentSetup({
+      name: "Mira",
+      instructions: "Keep the old workspace private.",
+      avatarSeed: "ink-v1:1:mira",
+      iconColor: "#2CC663",
+    });
+    await waitFor(() => expect(mocks.saveSnapshot).toHaveBeenCalledTimes(1));
+
+    mocks.status = { ...mocks.status!, activeContextOwner: { internalUserId: "owner-b" } };
+    await act(async () => { await result.current.reconcileAccountWorkspace(); });
+    finishSave();
+
+    await expect(completion).rejects.toThrow("workspace changed");
+    expect(result.current.firstAgentSetupRequired).toBe(true);
+    expect(result.current.agents).toHaveLength(1);
+    expect(result.current.agents[0]).toMatchObject({ id: "chief-of-staff", name: "Chief of Staff" });
+  });
+
+  it("keeps first-agent setup pending when native persistence fails", async () => {
+    mocks.listBackends.mockResolvedValue([resolveNativeProvider("openai", "connected")]);
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    await waitFor(() => expect(result.current.connectedAgentBackends.some((provider) => provider.id === "openai")).toBe(true));
+    mocks.saveSnapshot.mockClear().mockRejectedValueOnce(new Error("native save unavailable"));
+
+    await expect(result.current.completeFirstAgentSetup({
+      name: "Mira",
+      instructions: "",
+      avatarSeed: "ink-v1:0:mira",
+      iconColor: "#B8CCFF",
+    })).rejects.toThrow("native save unavailable");
+    expect(result.current.firstAgentSetupRequired).toBe(true);
+    expect(result.current.agents[0]).toMatchObject({ id: "chief-of-staff", name: "Chief of Staff" });
   });
 
   it("flushes the final pending settings to their workspace on unmount", async () => {

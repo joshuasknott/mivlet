@@ -612,6 +612,9 @@ fn normalize_runtime_agents(
             .filter(|seed| {
                 seed.len() <= 160
                     && (seed.starts_with("blob-v1:")
+                        || seed
+                            .strip_prefix("ink-v1:")
+                            .is_some_and(|rest| matches!(rest.as_bytes(), [b'0'..=b'5', b':', ..]))
                         || ["robot-v3:", "rounded-v2:", "organic-v1:"]
                             .iter()
                             .any(|prefix| {
@@ -802,6 +805,9 @@ mod tests {
     #[test]
     fn selected_avatar_versions_survive_native_snapshot_roundtrip() {
         let mut seeds = vec!["blob-v1:legacy".to_string()];
+        for variant in 0..6 {
+            seeds.push(format!("ink-v1:{variant}:saved-agent"));
+        }
         for version in ["robot-v3", "rounded-v2", "organic-v1"] {
             for variant in 0..8 {
                 seeds.push(format!("{version}:{variant}:saved-agent"));
@@ -831,6 +837,8 @@ mod tests {
     #[test]
     fn invalid_avatar_seeds_use_the_stable_native_fallback() {
         for seed in [
+            "ink-v1:6:invalid".to_string(),
+            "ink-v1:missing".into(),
             "robot-v3:8:invalid".to_string(),
             "robot-v3:missing".into(),
             "unknown:3:invalid".into(),
