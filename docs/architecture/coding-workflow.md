@@ -11,7 +11,16 @@ actions through Mivlet's existing approval system.
 The native service copies the selected repository's committed HEAD into private
 workspace/agent storage on a new `mivlet/<id>` branch. Uncommitted source work is
 not included. The source repository, its index and its branches are untouched.
-Each agent has one selected repository; older copies remain on disk. Library →
+Each agent has one selected repository; older copies remain on disk. New tasks
+retain the selected copy's immutable identity at admission. Selecting a different
+copy later does not move queued work: repository status, file operations, commands,
+checkpoints and approved publication continue against the task's original copy.
+These operations save that copy without changing the selection shown in Library.
+Tasks started without a repository, and legacy tasks without a saved binding,
+must start a fresh request after attachment before using repository tools. This
+binding adds no file or command permission and does not create another copy.
+PR watches still require the task's copy to be selected when configured.
+Library →
 Repository → Retained copies inventories copies across this account, including
 ownership, source repository, account-relative managed path, branch/HEAD, current
 dirty state, logical file bytes and linked Work. Choose the owning agent in the
@@ -47,8 +56,10 @@ is required to retry. Cleanup never resumes automatically after restart.
 
 This baseline has no retained-copy checkpoint status service or detached-command
 supervisor. The inventory labels those limits; unknown per-copy metadata protects
-cleanup. Work records do not carry exact repository-copy IDs, so unfinished Work
-protects all of that agent's copies. Integrating checkpoint, PR or detached-job
+cleanup. New Work records carry exact repository-copy IDs, so unfinished bound
+Work protects its own copy. Legacy, missing or malformed bindings still protect
+all of that agent's copies. Active or recoverable provider attempts without exact
+attribution retain their conservative guard. Integrating checkpoint, PR or detached-job
 services must replace these conservative guards with their canonical status
 evidence under this same lock; do not remove guards based on missing evidence.
 Exact cleanup inspection is limited to 200,000 entries and 2 GiB of file bytes;

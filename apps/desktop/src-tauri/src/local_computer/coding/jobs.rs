@@ -16,6 +16,7 @@ pub(super) fn start(
     ticket: OperationTicket,
     jobs: Arc<ScopeJobs>,
     arguments: Value,
+    task: Option<task_binding::TaskRepository>,
 ) -> Result<String, String> {
     let input: Start =
         serde_json::from_value(arguments).map_err(|_| "Invalid persistent repository command.")?;
@@ -31,7 +32,8 @@ pub(super) fn start(
                 let _guard = mutex.try_lock().map_err(|_| {
                     "A repository operation is running. Wait or Stop it before starting a job."
                 })?;
-                let mut repo = load(&directory)?.ok_or("Attach a repository in Library first.")?;
+                let mut repo = task_repository(&directory, task.as_ref())?
+                    .ok_or("Attach a repository in Library first.")?;
                 if repo.id != input.repository_id {
                     return Err("Repository selection changed. Request a fresh approval.".into());
                 }

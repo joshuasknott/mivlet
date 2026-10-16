@@ -8,7 +8,7 @@ pub(crate) mod retention;
 mod storage;
 #[cfg(test)]
 mod tests;
-use super::{checkout, git, save, Input, OperationTicket, Repository};
+use super::{checkout, git, save_repository as save, Input, OperationTicket, Repository};
 use mivlet_windows_executor::{repository_files as files, Limits};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -41,6 +41,7 @@ pub(super) fn execute(
     tool: &str,
     input: &Input,
     request_id: &str,
+    task: Option<&super::task_binding::TaskRepository>,
 ) -> Result<Value, String> {
     ticket.check()?;
     storage::storage(directory, repo)?;
@@ -102,9 +103,13 @@ pub(super) fn execute(
                 ticket.execution_binding(),
                 || ticket.check().is_ok(),
             )?;
-            // Recheck selected ownership and HEAD immediately before the short
+            // Recheck exact retained-copy identity and HEAD before the short
             // atomic rename fence. Repository custody excludes all native writers.
-            if super::load(directory)?.is_none_or(|selected| selected.id != repo.id)
+            let current = super::task_repository(directory, task)?
+                .ok_or("Repository ownership changed; request a fresh restore review.")?;
+            if current.id != repo.id
+                || current.branch != repo.branch
+                || current.base != repo.base
                 || storage::storage(directory, repo)?.join("checkout") != root
                 || git::run(directory, repo, &["rev-parse", "HEAD"], ticket)?
                     != input.expected_head.as_deref().unwrap()

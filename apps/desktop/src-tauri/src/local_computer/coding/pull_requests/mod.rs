@@ -155,6 +155,16 @@ pub(super) fn execute(
     tool: &str,
     arguments: Value,
 ) -> Result<String, String> {
+    execute_for_task(directory, ticket, tool, arguments, None)
+}
+
+pub(super) fn execute_for_task(
+    directory: &Path,
+    ticket: &OperationTicket,
+    tool: &str,
+    arguments: Value,
+    task: Option<&super::task_binding::TaskRepository>,
+) -> Result<String, String> {
     let input: Request = serde_json::from_value(arguments).map_err(|_| "Invalid PR arguments.")?;
     let lock = super::lock(directory)?;
     let _guard = if tool == "repository-pr-action" {
@@ -163,7 +173,7 @@ pub(super) fn execute(
     } else {
         review_lock(&lock, ticket)?
     };
-    let mut repo = super::load(directory)?.ok_or("Attach a repository first.")?;
+    let mut repo = super::task_repository(directory, task)?.ok_or("Attach a repository first.")?;
     if repo.id != input.repository_id {
         return Err("Repository selection changed. Refresh first.".into());
     }
