@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Renderer } from "@openuidev/react-lang";
 import type { InterfaceInteraction } from "./catalogue";
 import { RichOwner, richInterfaceLibrary } from "./rich-catalogue";
@@ -19,17 +19,20 @@ export default function RichInterfaceRenderer({
   streaming,
   interaction,
   owner,
+  onError,
 }: {
   code: string;
   streaming: boolean;
   interaction: InterfaceInteraction;
   owner: { workspaceId: string; agentId: string; generation?: number };
+  onError?: (message: string) => void;
 }) {
   const checked = useMemo(
     () => validateRichInterface(code, components, streaming),
     [code, streaming],
   );
   const [error, setError] = useState("");
+  useEffect(() => { onError?.(checked.error || error); }, [checked.error, error, onError]);
   const latest = useRef(interaction);
   latest.current = interaction;
   const initial = useMemo(() => {

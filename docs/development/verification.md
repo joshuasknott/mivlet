@@ -109,6 +109,18 @@ assistant-ui graph and separates the generated-interface schema engine from
 eager vendor code. The schema chunk still counts against the common budget.
 Budget ceilings and asset accounting remain unchanged.
 
+Generated-response regressions exercise the shipped provider-prompt example
+through extraction, the production AST guard, rendering, saved state and a
+deliberate follow-up. `ui:check` regenerates actual component signatures while
+applying Mivlet's supported language profile; generic upstream capabilities must
+not leak into provider instructions. HTML and saved-state limits use native
+UTF-8 byte bounds. Preview registration and guest loading have bounded recovery,
+and stale native registrations are released. Artifact preview tests cover saved
+output restoration and late editor results after the source changes. These
+mocked-native checks do not establish live provider or native guest rendering;
+capture and inspect the actual result at desktop and narrow widths when doing
+browser/native acceptance, and record console failures alongside screenshots.
+
 While editing a renderer, run desktop typecheck and focused tests; for a package,
 run its build and tests. Run native checks for native changes. Use `pnpm check`
 for release candidates and broad integration work, not every intermediate edit.

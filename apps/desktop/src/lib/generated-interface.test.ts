@@ -4,6 +4,14 @@ import {
   validateGeneratedInterface,
 } from "./generated-interface";
 describe("bounded OpenUI profile", () => {
+  it("recovers raw programs and rich replies using the old fence without treating ordinary prose as UI", () => {
+    const code = 'root = Stack([answer])\n$people = 4\nanswer = TextContent("Each: " + @Round(80 / $people, 2))';
+    expect(extractGeneratedInterface(code)).toMatchObject({ profile: "mivlet-v2", code, complete: true });
+    expect(extractGeneratedInterface(`\`\`\`openui  \n${code}\n\`\`\``)).toMatchObject({ profile: "mivlet-v2", complete: true });
+    expect(extractGeneratedInterface("The root = Stack is part of the syntax.")).toBeNull();
+    expect(extractGeneratedInterface('root = TextContent("literal ``` inside text")')).toBeNull();
+    expect(extractGeneratedInterface('```openui-v2\nroot = TextContent("literal ``` inside text")\n```')?.code).toContain('literal ``` inside text');
+  });
   it("accepts multiline literal tables and canonicalizes a sole display component", () => {
     const table = `reading = Table("Reading sessions", ["Session", "Notes"], [\n${Array.from({ length: 30 }, (_, i) => JSON.stringify([String(i + 1), 'A note with (brackets), a comma, and a "quote".'])).join(",\n")}\n])`;
     const result = validateGeneratedInterface(table);

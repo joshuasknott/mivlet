@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState, type ComponentProps } from "react";
 import type { LocalComputerArtifactPreview } from "@mivlet/protocol";
 import {
   parseComputerArtifact,
@@ -7,6 +7,7 @@ import {
 import type { OutputDocument, OutputFormat } from "../../lib/output-revisions";
 import {
   ensureRuntimeOutput,
+  getRuntimeOutput,
 } from "../../runtime/domains/outputs";
 import { ComputerArtifacts } from "../ComputerArtifacts";
 import { MessageMarkdown } from "./MessageMarkdown";
@@ -23,7 +24,16 @@ const PdfPreview = lazy(() =>
   import("./PdfPreview").then((module) => ({ default: module.PdfPreview })),
 );
 
-export function ArtifactPreview({
+// A source change remounts every editor and invalidates pending reads before any
+// content from the previous workspace, branch or generation can be displayed.
+export function ArtifactPreview(props: ComponentProps<typeof ArtifactPreviewContent>) {
+  return <ArtifactPreviewContent key={JSON.stringify([
+    props.workspaceId, props.agentId, props.generation, props.conversationId,
+    props.messageId, props.branchId, props.sourceRevisionId, props.output,
+  ])} {...props} />;
+}
+
+function ArtifactPreviewContent({
   output,
   workspaceId,
   agentId,
@@ -61,6 +71,16 @@ export function ArtifactPreview({
     null,
   );
   const [editError, setEditError] = useState("");
+  const [openingEditor, setOpeningEditor] = useState(false);
+  const mounted = useRef(true);
+  const outputEpoch = useRef(0);
+  const ownsOutput = (document: OutputDocument) => document.source.conversationId === conversationId
+    && document.source.artifactId === artifact?.id && document.source.agentId === agentId
+    && document.source.branchId === branchId;
+  useEffect(() => {
+    mounted.current = true;
+    return () => { mounted.current = false; };
+  }, []);
   const [narrow, setNarrow] = useState(
     () => window.matchMedia("(max-width: 900px)").matches,
   );
@@ -116,11 +136,29 @@ export function ArtifactPreview({
     };
   }, [artifact?.id, workspaceId, agentId, generation]);
   useEffect(() => {
+    if (!artifact || !conversationId) return;
+    let cancelled = false;
+    const version = outputEpoch.current;
+    void getRuntimeOutput(`output-${artifact.id}`, workspaceId).then((document) => {
+      if (cancelled || version !== outputEpoch.current || !document) return;
+      if (!ownsOutput(document)) {
+        setEditError("This saved output belongs to another source. Open its originating conversation to edit it.");
+        return;
+      }
+      setOutputDocument(document);
+    }).catch(() => {
+      if (!cancelled && version === outputEpoch.current) setEditError("Saved revisions could not be loaded. Choose Edit output to try again.");
+    });
+    return () => { cancelled = true; };
+  }, [artifact?.id, workspaceId, conversationId, agentId, branchId]);
+  useEffect(() => {
     if (!conversationId) return;
     return subscribeOutputRevisionApplied((event) => {
       if (event.conversationId !== conversationId) return;
-      if (outputDocument && event.outputId === outputDocument.id)
+      if (outputDocument && event.outputId === outputDocument.id && ownsOutput(event.output)) {
+        ++outputEpoch.current;
         setOutputDocument(event.output);
+      }
     });
   }, [conversationId, outputDocument?.id]);
   const format = (mimeType: string): OutputFormat =>
@@ -140,7 +178,9 @@ export function ArtifactPreview({
                   ? "presentation"
                   : "document";
   const beginEditing = async () => {
-    if (!conversationId || !preview?.text || !artifact) return;
+    if (!conversationId || preview?.text == null || preview.truncated || !artifact || openingEditor) return;
+    setOpeningEditor(true);
+    ++outputEpoch.current;
     setEditError("");
     try {
       const outputId = `output-${artifact.id}`;
@@ -164,16 +204,23 @@ export function ArtifactPreview({
         },
         workspaceId,
       );
+      if (!mounted.current) return;
+      if (!ownsOutput(document))
+        throw new Error("This saved output belongs to another source. Open its originating conversation to edit it.");
       setOutputDocument(document);
       setEditing(true);
     } catch (failure) {
+      if (!mounted.current) return;
       setEditError(
         failure instanceof Error
           ? failure.message
           : "This output could not be opened for editing.",
       );
+    } finally {
+      if (mounted.current) setOpeningEditor(false);
     }
   };
+  const savedText = outputDocument?.revisions.find((revision) => revision.id === outputDocument.currentRevisionId)?.content;
   if (!artifact) return null;
   return (
     <aside
@@ -242,6 +289,7 @@ export function ArtifactPreview({
           <>
             {editing && outputDocument ? (
               <OutputEditor
+                key={outputDocument.id}
                 output={outputDocument}
                 source={{
                   conversationId: conversationId!,
@@ -265,9 +313,9 @@ export function ArtifactPreview({
                 }
               />
             ) : artifact.mimeType === "text/markdown" ? (
-              <MessageMarkdown content={preview.text} />
+              <MessageMarkdown content={savedText ?? preview.text} />
             ) : (
-              <pre tabIndex={0}>{preview.text || "This file is empty."}</pre>
+              <pre tabIndex={0}>{(savedText ?? preview.text) || "This file is empty."}</pre>
             )}
             {preview.truncated ? (
               <p className="turn-notice">
@@ -293,9 +341,10 @@ export function ArtifactPreview({
           <button
             type="button"
             className="artifact-preview__edit"
+            disabled={openingEditor}
             onClick={() => void beginEditing()}
           >
-            Edit output
+            {openingEditor ? "Opening editor…" : "Edit output"}
           </button>
         ) : null}
         {editError ? <p role="alert">{editError}</p> : null}
