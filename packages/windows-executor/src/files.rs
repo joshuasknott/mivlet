@@ -64,12 +64,28 @@ pub(crate) fn regular_file(file: &File) -> Result<(), String> {
             return Err("Execution files cannot be reparse points or hard links.".into());
         }
     }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        if file
+            .metadata()
+            .map_err(|_| "Cannot inspect execution file.")?
+            .nlink()
+            != 1
+        {
+            return Err("Execution files cannot be hard links.".into());
+        }
+    }
     Ok(())
 }
 pub(crate) fn read(path: &Path, max: u64) -> Result<Vec<u8>, String> {
     read_current(path, max, &|| true)
 }
-fn read_current(path: &Path, max: u64, current: &dyn Fn() -> bool) -> Result<Vec<u8>, String> {
+pub(crate) fn read_current(
+    path: &Path,
+    max: u64,
+    current: &dyn Fn() -> bool,
+) -> Result<Vec<u8>, String> {
     if !current() {
         return Err("Native execution stopped while reading files.".into());
     }
@@ -99,7 +115,7 @@ fn read_current(path: &Path, max: u64, current: &dyn Fn() -> bool) -> Result<Vec
     }
     Ok(bytes)
 }
-fn relative(path: &Path) -> Result<String, String> {
+pub(crate) fn relative(path: &Path) -> Result<String, String> {
     let text = path
         .to_str()
         .ok_or("Execution filenames must be Unicode.")?

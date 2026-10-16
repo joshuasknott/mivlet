@@ -1,6 +1,7 @@
 import { useId, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import type { SettingsRuntime } from "./settings-runtime";
+import { EventAutomations } from "./EventAutomations";
 import { resolveProviderModelOption } from "../../lib/provider-models";
 import { permissionModeFor } from "../../lib/agent-run";
 import { supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
@@ -50,7 +51,7 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
         else await createLocalSchedule({ ...input, projectId: project?.id, workspaceId, id: crypto.randomUUID(), status: "enabled" });
         setEditing(null); setCreating(false);
       }, editing ? "Schedule updated." : "Schedule created.")} /> : null}
-    {schedules.data?.filter((schedule) => schedule.status !== "cancelled" && (!project || schedule.projectId === project.id) && (!filterAgentId || schedule.agentId === filterAgentId)).map((schedule) => <article className="profile-section" key={schedule.id}>
+    {schedules.data?.filter((schedule) => schedule.trigger.kind !== "event" && schedule.status !== "cancelled" && (!project || schedule.projectId === project.id) && (!filterAgentId || schedule.agentId === filterAgentId)).map((schedule) => <article className="profile-section" key={schedule.id}>
       <strong>{runtime.agents.find((agent) => agent.id === schedule.agentId)?.name ?? "Unavailable agent"}</strong>
       <p className="local-schedules__prompt">{schedule.prompt}</p>
       <small>{describeTrigger(schedule.trigger)} · {schedule.timezone} · {schedule.status === "paused" ? "Paused" : schedule.nextRunAt ? `Next: ${new Date(schedule.nextRunAt).toLocaleString()}` : "No future run"}</small>
@@ -65,6 +66,7 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
     </article>)}
     {schedules.data && !schedules.data.some((schedule) => schedule.status !== "cancelled" && (!project || schedule.projectId === project.id) && (!filterAgentId || schedule.agentId === filterAgentId)) ? <p>No schedules yet.</p> : null}
     {status ? <p role="status">{status}</p> : null}
+    {!project ? <EventAutomations runtime={runtime} workspaceId={workspaceId} schedules={schedules.data ?? []} initialAgentId={filterAgentId} onOpenResult={onOpenResult} /> : null}
   </div>;
 }
 
@@ -82,12 +84,12 @@ function ScheduleResults({ workspaceId, scheduleId, onOpenResult }: { workspaceI
 }
 
 type EditorInput = Pick<LocalSchedule, "agentId" | "providerId" | "model" | "reasoningEffort" | "prompt" | "timezone" | "trigger" | "executionKind" | "permissionMode">;
-export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, initialAgentId }: { runtime: SettingsRuntime; project?: { id: string; name: string; participantIds: string[] }; initialAgentId?: string; schedule: LocalSchedule | null; pending: boolean; onSave: (input: EditorInput) => void; onCancel: () => void }) {
+function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, initialAgentId }: { runtime: SettingsRuntime; project?: { id: string; name: string; participantIds: string[] }; initialAgentId?: string; schedule: LocalSchedule | null; pending: boolean; onSave: (input: EditorInput) => void; onCancel: () => void }) {
   const [agentId, setAgentId] = useState(schedule?.agentId ?? initialAgentId ?? "");
   const [executionKind, setExecutionKind] = useState<"research" | "agent">(schedule ? schedule.executionKind ?? "research" : "agent");
   const [prompt, setPrompt] = useState(schedule?.prompt ?? "");
-  const [kind, setKind] = useState<LocalScheduleTrigger["kind"]>(schedule?.trigger.kind ?? "daily");
-  const [time, setTime] = useState(schedule?.trigger.kind !== "once" ? schedule?.trigger.localTime ?? "09:00" : "09:00");
+  const [kind, setKind] = useState<Exclude<LocalScheduleTrigger["kind"], "event">>(schedule?.trigger.kind !== "event" ? schedule?.trigger.kind ?? "daily" : "daily");
+  const [time, setTime] = useState(schedule?.trigger.kind === "daily" || schedule?.trigger.kind === "weekly" ? schedule.trigger.localTime : "09:00");
   const [dateTime, setDateTime] = useState(schedule?.trigger.kind === "once" ? schedule.trigger.localDateTime : "");
   const [weekday, setWeekday] = useState(schedule?.trigger.kind === "weekly" ? schedule.trigger.weekday : "monday");
   const [timezone, setTimezone] = useState(schedule?.timezone ?? Intl.DateTimeFormat().resolvedOptions().timeZone);
@@ -119,7 +121,7 @@ export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, i
     {executionKind === "agent" && agent ? <small>Uses this agent's connections and enabled tools. {schedule?.executionKind === "agent" ? "Keeps the saved permission ceiling." : `Permission level: ${agent.permissionLabel}.`} Any required approval waits in Activity.</small> : null}
     {supported ? <><label>Reasoning effort<select className="input" value={reasoningEffort ?? ""} onChange={(event) => setEffort(event.target.value)}><option value="">Provider default</option>{levels.map(level => <option key={level} value={level}>{level.charAt(0).toUpperCase() + level.slice(1)}</option>)}{!effortValid ? <option value={reasoningEffort}>{reasoningEffort} — unavailable</option> : null}</select></label><small>Saved with this schedule. Later agent settings do not change it.</small></> : null}
     <label>Task<textarea className="input" required maxLength={32000} value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="What should the agent do?" /></label>
-    <label>Repeat<select className="input" value={kind} onChange={(event) => setKind(event.target.value as LocalScheduleTrigger["kind"])}><option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
+    <label>Repeat<select className="input" value={kind} onChange={(event) => setKind(event.target.value as Exclude<LocalScheduleTrigger["kind"], "event">)}><option value="once">Once</option><option value="daily">Daily</option><option value="weekly">Weekly</option></select></label>
     {kind === "weekly" ? <label>Day<select className="input" value={weekday} onChange={(event) => setWeekday(event.target.value)}>{weekdays.map((day) => <option key={day} value={day}>{day}</option>)}</select></label> : null}
     {kind === "once" ? <label>Date and time<input className="input" type="datetime-local" required value={dateTime} onChange={(event) => setDateTime(event.target.value)} /></label> : <label>Time<input className="input" type="time" required value={time} onChange={(event) => setTime(event.target.value)} /></label>}
     <label>Time zone<input className="input" required list={timezoneListId} value={timezone} placeholder="Search by city, such as London" onChange={(event) => { setTimezone(event.target.value); setInvalid(""); }} /></label><datalist id={timezoneListId}>{timezones.map(zone => <option key={zone} value={zone}>{zone.replaceAll("_", " ")}</option>)}</datalist>
@@ -130,5 +132,6 @@ export function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, i
 }
 
 function describeTrigger(trigger: LocalScheduleTrigger) {
+  if (trigger.kind === "event") return "On authenticated event";
   return trigger.kind === "once" ? trigger.localDateTime.replace("T", " ") : trigger.kind === "daily" ? `Daily at ${trigger.localTime}` : `${trigger.weekday} at ${trigger.localTime}`;
 }

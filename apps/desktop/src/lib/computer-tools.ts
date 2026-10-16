@@ -1,5 +1,5 @@
 import type { NativeToolSpec, BackendModel, BackendProvider, BuiltinPlugins, LocalComputerSnapshot } from "@mivlet/protocol";
-import { registeredToolSpecs } from "@mivlet/connectors/native-api/tools";
+import { registeredToolSpecs, isProtectedSecretTool } from "@mivlet/connectors/native-api/tools";
 import { computerVisionUnavailableReason, supportsSharedComputerTools } from "@mivlet/connectors/native-api/computer-vision";
 import type { DesktopToolExecutorOptions } from "./desktop-tool-options";
 
@@ -14,6 +14,8 @@ export function computerAuthorityCurrent(
 }
 
 const COMPUTER_TOOLS = new Set([
+  "repository-start", "workspace-start", "command-jobs", "command-output", "command-stop",
+  "repository-checkpoint-list", "repository-checkpoint-capture", "repository-checkpoint-preview", "repository-checkpoint-restore", "repository-checkpoint-delete",
   "repository-status", "repository-read", "repository-write", "repository-run", "repository-commit", "repository-publish", "repository-recover",
   "read-file", "write-file", "workspace-run", "create-spreadsheet", "create-document", "create-presentation", "create-pdf", "computer-artifact",
   "local-app-list", "local-app-select", "local-app-observe", "local-app-action",
@@ -28,15 +30,15 @@ export function computerToolsReady(computer: LocalComputerSnapshot | null | unde
 }
 
 export function isLocalComputerTool(name: string, _argumentsJson: string): boolean {
-  return COMPUTER_TOOLS.has(name);
+  return COMPUTER_TOOLS.has(name) || isProtectedSecretTool(name);
 }
 
 /** Merge computer and connector tools without re-enabling unrelated runtimes. */
 export function conversationComputerTools(connectedTools: NativeToolSpec[], ready: boolean, visualSupported = false, plugins: BuiltinPlugins = { computer: false }, imageApiConnected = false, runtimeAvailable = true): NativeToolSpec[] {
-  const permitted = (name: string) => ready && (!IMAGE_TOOLS.has(name) || imageApiConnected) && plugins.computer && (visualSupported || !name.startsWith("local-desktop-")) && (runtimeAvailable || (!name.startsWith("local-app-") && !name.startsWith("local-desktop-") && !name.startsWith("local-browser-")));
-  const tools = new Map(connectedTools.filter((tool) => (!tool.name.startsWith("local-browser") || COMPUTER_TOOLS.has(tool.name)) && tool.name !== "run-shell" && (!COMPUTER_TOOLS.has(tool.name) || permitted(tool.name))).map((tool) => [tool.name, tool]));
+  const permitted = (name: string) => ready && (isProtectedSecretTool(name) || ((!IMAGE_TOOLS.has(name) || imageApiConnected) && plugins.computer && (visualSupported || !name.startsWith("local-desktop-")) && (runtimeAvailable || (!name.startsWith("local-app-") && !name.startsWith("local-desktop-") && !name.startsWith("local-browser-")))));
+  const tools = new Map(connectedTools.filter((tool) => (!tool.name.startsWith("local-browser") || COMPUTER_TOOLS.has(tool.name)) && tool.name !== "run-shell" && (!isLocalComputerTool(tool.name, "") || permitted(tool.name))).map((tool) => [tool.name, tool]));
   for (const tool of registeredToolSpecs()) {
-    if (tool.name === "web-fetch" || (COMPUTER_TOOLS.has(tool.name) && permitted(tool.name))) tools.set(tool.name, tool);
+    if (tool.name === "web-fetch" || (isLocalComputerTool(tool.name, "") && permitted(tool.name))) tools.set(tool.name, tool);
   }
   return [...tools.values()];
 }

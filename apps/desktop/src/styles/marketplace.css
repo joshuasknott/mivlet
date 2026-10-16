@@ -28,7 +28,6 @@
 
 .marketplace-page-header {
   display: grid;
-  grid-template-columns: minmax(0, 1fr);
   align-items: start;
   gap: 20px;
 }
@@ -160,8 +159,6 @@
 .marketplace-see-more__icons > svg { width: 18px; height: 18px; padding: 1px; background: var(--surface); }
 .connector-guide { padding: 16px 0 24px; }
 .connector-guide h3 { margin: 18px 0 12px; font-size: 14px; }
-.connector-guide__examples { display: grid; gap: 8px; }
-.connector-guide__examples p { margin: 0; padding: 14px 16px; background: var(--surface-hover); border-radius: 12px; font-size: 13px; }
 .connector-guide ol { padding-left: 20px; color: var(--ink-muted); line-height: 1.7; }
 .connector-guide li { margin-bottom: 8px; padding-left: 4px; }
 .connector-guide > p { color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
@@ -192,35 +189,15 @@
   color: #a259ff;
 }
 
-.marketplace-connector-icon--gitlab {
-  color: #fc6d26;
-}
-
-
-
-
-
-
-.marketplace-connector-icon--dropbox,
-.marketplace-connector-icon--box {
-  color: #0061ff;
-}
-
 .marketplace-connector-icon--canva {
   color: #7d5cff;
 }
 
-.marketplace-connector-icon--commerce {
-  color: #5b8c3a;
-}
-
-.marketplace-connector-icon--finance,
-.marketplace-connector-icon--analytics {
+.marketplace-connector-icon--finance {
   color: #3b7f6d;
 }
 
-.marketplace-connector-icon--security,
-.marketplace-connector-icon--compliance {
+.marketplace-connector-icon--security {
   color: #6d5bd0;
 }
 
@@ -429,33 +406,6 @@
 }
 .connector-detail pre { max-height: 320px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .connector-detail input:not([type="checkbox"]), .connector-detail textarea, .connector-detail select { box-sizing: border-box; max-width: 100%; min-height: 40px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
-.token-plugin-form {
-  display: grid;
-  gap: 16px;
-  margin-block: 22px;
-}
-.token-plugin-form label {
-  display: grid;
-  gap: 7px;
-  font-size: 13px;
-}
-.token-plugin-form input {
-  box-sizing: border-box;
-  width: 100%;
-  min-width: 0;
-  min-height: 42px;
-  padding: 10px 12px;
-  color: inherit;
-  background: transparent;
-  border: 1px solid var(--border, #444);
-  border-radius: 8px;
-}
-.token-plugin-form .connector-detail__actions {
-  grid-column: 1;
-  grid-row: auto;
-  flex-direction: row;
-}
-.token-plugin-form .connector-detail__actions button { min-height: 44px; }
 .marketplace-page-header { grid-template-columns: minmax(0, 1fr) auto; }
 .marketplace-page-header .connections-search { grid-column: 1 / -1; }
 .marketplace-add-custom { display: inline-flex; align-items: center; gap: 7px; min-height: 36px; }

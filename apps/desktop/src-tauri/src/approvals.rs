@@ -507,9 +507,22 @@ pub(crate) fn resolve_approval_for_mint(
 }
 
 fn high_risk_permit_dialog_copy(request: &ApprovalRequest) -> String {
+    let details = request
+        .data_used
+        .iter()
+        .filter(|value| !value.starts_with("proposal fingerprint:"))
+        .cloned()
+        .collect::<Vec<_>>()
+        .join("\n");
+    let bounded: String = details.chars().take(2_048).collect();
+    let details = if bounded.len() < details.len() {
+        format!("{bounded}\nFurther details are shown in the conversation approval.")
+    } else {
+        bounded
+    };
     format!(
-        "{}\n\n{} — {}\n\nConfirm in this system dialog. Repeating the phrase from the app window cannot mint this permit.",
-        request.consequence, request.service, request.action
+        "{} — {}\n\n{}\n\n{}\n\nApprove this exact action once?",
+        request.service, request.action, request.consequence, details
     )
 }
 
@@ -525,39 +538,157 @@ fn native_high_risk_permit_confirmed(request: &ApprovalRequest) -> Result<bool, 
     ))
 }
 
+async fn resolve_without_blocking_ui(
+    request: ApprovalResolutionRequest,
+    native_confirm: impl FnOnce(&ApprovalRequest) -> Result<bool, String> + Send + 'static,
+) -> Result<ApprovalResolutionResponse, String> {
+    // An OS dialog can remain open while the user reviews an action. Keep the
+    // event loop and native Stop/account commands responsive throughout that
+    // wait. The ordinary exact-proposal checks still run when the permit is
+    // consumed; a late dialog answer cannot revive a stopped generation.
+    tauri::async_runtime::spawn_blocking(move || resolve_approval_for_mint(request, native_confirm))
+        .await
+        .map_err(|_| "The native approval dialog could not finish.".to_string())?
+}
+
+fn persist_approval_resolution_in_store(
+    store: &crate::store::Store,
+    expected: &crate::clerk_identity::NativeIdentityGenerationSnapshot,
+    audit_path: &Path,
+    rules_path: Option<&Path>,
+    execution_path: &Path,
+    response: ApprovalResolutionResponse,
+) -> Result<ApprovalResolutionResponse, String> {
+    let scope = DataScope::workspace(crate::store::repos::scope::DEFAULT_WORKSPACE_ID)
+        .map_err(|error| error.to_string())?;
+    store
+        .transaction_with_native_identity(expected, |tx, store| {
+            let audit_entry = normalize_approval_audit_entry(response.audit_entry.clone())?;
+            let mut audit_entries: Vec<ApprovalAuditEntry> =
+                crate::store::read_document_in_transaction(tx, store, audit_path, &scope)?
+                    .unwrap_or_default();
+            audit_entries = append_approval_audit_entry(audit_entries, audit_entry.clone());
+            crate::store::write_document_in_transaction(
+                tx,
+                store,
+                audit_path,
+                &scope,
+                &audit_entries,
+            )?;
+
+            let grant = match response.grant {
+                Some(grant) if grant.scope == "rule" => {
+                    let path = rules_path.ok_or_else(|| {
+                        "Mivlet approval rule storage is unavailable.".to_string()
+                    })?;
+                    let mut rules: Vec<ApprovalGrant> =
+                        crate::store::read_document_in_transaction::<Vec<ApprovalGrant>>(
+                            tx, store, path, &scope,
+                        )?
+                        .unwrap_or_default()
+                        .into_iter()
+                        .map(normalize_approval_grant)
+                        .collect::<Result<_, _>>()?;
+                    let grant = normalize_approval_grant(grant)?;
+                    rules.retain(|existing| {
+                        !(existing.service == grant.service
+                            && existing.action == grant.action
+                            && existing.mode == grant.mode)
+                    });
+                    rules.insert(0, grant.clone());
+                    rules.truncate(MAX_APPROVAL_RULES);
+                    crate::store::write_document_in_transaction(tx, store, path, &scope, &rules)?;
+                    Some(grant)
+                }
+                grant => grant,
+            };
+
+            let mut execution_records: Vec<crate::execution_approvals::ExecutionApproval> =
+                crate::store::read_document_in_transaction(tx, store, execution_path, &scope)?
+                    .unwrap_or_default();
+            let persisted_response = ApprovalResolutionResponse {
+                persisted: true,
+                audit_entry,
+                effective_request: response.effective_request,
+                dismissed: response.dismissed,
+                grant,
+            };
+            crate::execution_approvals::record_execution_decision_in_records(
+                &mut execution_records,
+                &persisted_response,
+            )?;
+            crate::store::write_document_in_transaction(
+                tx,
+                store,
+                execution_path,
+                &scope,
+                &execution_records,
+            )?;
+            Ok(persisted_response)
+        })
+        .map_err(|error| error.to_string())
+}
+
 #[tauri::command]
-pub fn resolve_approval_request(
+pub async fn resolve_approval_request(
     app: tauri::AppHandle,
     request: ApprovalResolutionRequest,
 ) -> Result<ApprovalResolutionResponse, String> {
     let req = request.request.clone();
     let decision = request.decision.clone();
-    let response = resolve_approval_for_mint(request, native_high_risk_permit_confirmed)?;
+    let account_generation = crate::clerk_identity::native_identity_generation_snapshot()?;
+    let response = resolve_without_blocking_ui(request, native_high_risk_permit_confirmed).await?;
+    crate::account_session::ensure_current()?;
+    // Resolve account paths before the account-bound commit. Production uses
+    // one connection-first transaction so the generation fence spans every
+    // durable approval record through commit.
     let audit_path = approval_audit_path(&app)?;
-    let audit = persist_approval_audit_entry(&audit_path, response.audit_entry)?;
-    let grant = match response.grant {
-        Some(grant) if grant.scope == "rule" => {
-            let path = approval_rules_path(&app)?;
-            Some(persist_approval_rule(&path, grant)?)
-        }
-        grant => grant,
+    let rules_path = match response.grant.as_ref() {
+        Some(grant) if grant.scope == "rule" => Some(approval_rules_path(&app)?),
+        _ => None,
+    };
+    let execution_path = execution_approvals_path(&app)?;
+    let persisted_response = if let Some(store) = crate::store::try_global() {
+        persist_approval_resolution_in_store(
+            store,
+            &account_generation,
+            &audit_path,
+            rules_path.as_deref(),
+            &execution_path,
+            response,
+        )?
+    } else {
+        // Preserve path-backed fixtures and isolated development stores. No
+        // SQLite connection exists on this branch, so the identity guard can
+        // safely cover the fallback writes directly.
+        let _identity_guard =
+            crate::clerk_identity::lock_native_identity_generation(&account_generation)?;
+        let audit = persist_approval_audit_entry(&audit_path, response.audit_entry)?;
+        let grant = match response.grant {
+            Some(grant) if grant.scope == "rule" => {
+                let path = rules_path
+                    .as_deref()
+                    .ok_or_else(|| "Mivlet approval rule storage is unavailable.".to_string())?;
+                Some(persist_approval_rule(path, grant)?)
+            }
+            grant => grant,
+        };
+        let persisted_response = ApprovalResolutionResponse {
+            persisted: true,
+            audit_entry: audit.entry,
+            effective_request: response.effective_request,
+            dismissed: response.dismissed,
+            grant,
+        };
+        record_execution_decision(&execution_path, &persisted_response)?;
+        persisted_response
     };
 
-    // Capture the audit-note + decision time before they are moved into the
-    // persisted response, so the unified action-history recorder can observe the
-    // resolution (observation only; the typed approval table + execution permit
-    // remain the authority).
-    let audit_note = audit.entry.note.clone();
-    let audit_decided_at = audit.entry.decided_at.clone();
+    // Action history is observation only and deliberately follows the atomic
+    // typed approval/permit commit.
+    let audit_note = persisted_response.audit_entry.note.clone();
+    let audit_decided_at = persisted_response.audit_entry.decided_at.clone();
 
-    let persisted_response = ApprovalResolutionResponse {
-        persisted: true,
-        audit_entry: audit.entry,
-        effective_request: response.effective_request,
-        dismissed: response.dismissed,
-        grant,
-    };
-    record_execution_decision(&execution_approvals_path(&app)?, &persisted_response)?;
     crate::action_history::Recorder::new(
         crate::action_history::categories::APPROVAL,
         &req.service,
@@ -668,5 +799,39 @@ mod tests {
             panic!("deny must not open a native confirm dialog")
         })
         .expect("deny is not a high-risk mint");
+    }
+
+    #[tokio::test]
+    async fn native_confirmation_never_blocks_the_command_thread() {
+        let command_thread = std::thread::current().id();
+        resolve_without_blocking_ui(resolution(high_risk_request(), None), move |_| {
+            assert_ne!(std::thread::current().id(), command_thread);
+            Ok(true)
+        })
+        .await
+        .expect("a confirmed dialog resolves off the command thread");
+
+        let error =
+            resolve_without_blocking_ui(resolution(high_risk_request(), None), |_| Ok(false))
+                .await
+                .expect_err("moving the dialog cannot bypass denial");
+        assert!(error.contains("native dialog"));
+    }
+
+    #[test]
+    fn native_dialog_shows_the_proposed_action_and_bounds_unicode() {
+        let mut request = high_risk_request();
+        request.data_used = vec![
+            "destination: draft.md".into(),
+            "content: A quiet afternoon".into(),
+            "proposal fingerprint: opaque-hash".into(),
+            "茶".repeat(3_000),
+        ];
+        let copy = high_risk_permit_dialog_copy(&request);
+        assert!(copy.contains("destination: draft.md"));
+        assert!(copy.contains("content: A quiet afternoon"));
+        assert!(copy.contains("Further details"));
+        assert!(!copy.contains("opaque-hash"));
+        assert!(copy.chars().count() < 2_400);
     }
 }

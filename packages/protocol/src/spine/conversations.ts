@@ -122,6 +122,8 @@ export interface ThreadMessageHead {
   /** Zero only while the thread contains no messages. */
   lastSequence: number;
   lastMessageId?: MessageId;
+  /** The persisted leaf shown after an explicit branch switch. */
+  selectedHeadId?: MessageId;
 }
 
 /** A workspace-owned conversation. */
@@ -197,6 +199,8 @@ type MessageRecord = Readonly<Omit<ConversationRecordMetadata, "deletedAt">> &
     readonly threadId: ThreadId;
     readonly sequence: number;
     readonly previousMessageId?: MessageId;
+    /** Parent in the durable branch tree. Legacy rows use previousMessageId. */
+    readonly parentMessageId?: MessageId | null;
     readonly idempotencyKey: string;
     readonly correlationKey?: string;
     readonly currentRevisionId: MessageRevisionId;
@@ -271,6 +275,10 @@ export type MessageAppendInput = MessageExecutionLink &
     expectedLastSequence: number;
     sequence: number;
     previousMessageId?: MessageId;
+    parentMessageId?: MessageId;
+    /** User message whose alternative is being submitted. Native authority
+     * resolves its parent, including an explicit root, before append. */
+    editSourceMessageId?: MessageId;
     idempotencyKey: string;
     correlationKey?: string;
     initialRevision: InitialMessageRevisionInput;

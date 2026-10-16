@@ -102,7 +102,12 @@ export function createDesktopCodexAppServer(
           providerId: provider.id,
           threadId: turn.threadId.startsWith("pending-") ? null : turn.threadId,
           request: turn.request,
-          options: turn.options
+          options: {
+            contextPrefix: turn.options.contextPrefix,
+            permissionMode: turn.options.permissionMode,
+            runId: turn.options.attemptId,
+            computer: turn.options.computer
+          }
         });
         while (!finished || queue.length > 0) {
           if (queue.length > 0) {

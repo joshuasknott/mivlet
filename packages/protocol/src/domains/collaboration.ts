@@ -16,7 +16,7 @@ export interface ConversationParticipant {
   name: string;
 }
 
-export type ObjectReference = { workspaceId: string; kind: "agent" | "project" | "conversation" | "work" | "memory" | "file" | "message"; id: string };
+export type ObjectReference = { workspaceId: string; kind: "agent" | "project" | "conversation" | "work" | "decision" | "memory" | "file" | "message"; id: string };
 export interface ChatBinding { role: "main" | "side"; ownerKind: "agent" | "project"; ownerId: string }
 /** Explicit sharing never conveys authority. Snapshots retain selected bytes;
  * live references resolve again under the current account on each deliberate use. */
@@ -58,6 +58,10 @@ export interface ProjectTeam {
 export interface WorkOutput {
   runId: string;
   conversationId: string;
+  /** Exact saved assistant source used when reopening this result. */
+  branchId?: string;
+  messageId?: string;
+  sourceRevisionId?: string;
   text: string;
   /** An agent report is evidence of the report, not a verified external outcome. */
   evidence: "agent-report";
@@ -92,10 +96,23 @@ export interface WorkAttachment {
   sha256?: string;
 }
 export interface CollaborationWorkItem {
+  executionOwner?: "native-background";
+  continuation?: import("./provider-continuation").ProviderContinuation;
   /** Frozen occurrence metadata; carries no claim token or execution authority. */
-  schedule?: { occurrenceId: string; reasoningEffort?: string };
+  schedule?: {
+    occurrenceId: string;
+    reasoningEffort?: string;
+    event?: {
+      deliveryId: string;
+      source: import("./event-automations.js").AutomationEventSource;
+      receivedAt: string;
+      expiresAt: string;
+      selectedFields: Record<string, string | number | boolean>;
+    };
+  };
   /** Frozen native context captured at admission. Absent legacy Work requires outcome review. */
   capturedContext?: CapturedWorkContext;
+  resetContinuation?: import("./provider-usage").ProviderResetContinuation;
   steering?: WorkSteering[];
   messages?: TaskMessage[];
   deliveredMessageCount?: number;
@@ -103,11 +120,15 @@ export interface CollaborationWorkItem {
   /** Durable attachment references recorded at submission and refreshed at dispatch. */
   attachments?: WorkAttachment[];
   /** Where the request came from. Absent legacy Work predates origins (chat). */
-  origin?: "chat" | "schedule";
+  origin?: "chat" | "schedule" | "external-client";
+  /** Native client grant identity; never an OAuth credential or approval. */
+  externalClient?: { grantId: string; clientName: string };
   permissionMode: import("./approvals").PermissionMode;
   id: string;
   workspaceId: string;
   conversationId: string;
+  /** Canonical user message that owns an edited or regenerated branch. */
+  parentMessageId?: string;
   projectId?: string;
   rootId: string;
   parentId?: string;
@@ -154,6 +175,12 @@ export interface ProjectFact {
   status: "current" | "superseded" | "stale" | "forgotten";
   conversationId: string;
   runId?: string;
+  /** Exact conversation source for deep navigation; absent on legacy records. */
+  branchId?: string;
+  messageId?: string;
+  sourceRevisionId?: string;
+  /** User-pinned decisions remain discoverable without changing context authority. */
+  pinned?: boolean;
   source: string;
   supersedesId?: string;
   createdAt: string;
@@ -172,6 +199,9 @@ export type WorkspaceView =
       agentId: string;
       output: string;
       title: string;
+      /** Exact tool-message source for provenance and output editing. */
+      messageId?: string;
+      sourceRevisionId?: string;
     };
 
 export type ConversationLayoutNode =
@@ -204,6 +234,7 @@ export interface CollaborationSnapshot {
 
 /** Exact native operation inputs. Agent operations additionally require a live bound attempt. */
 export type CollaborationCommand =
+  | { action: "start-provider-continuation"; id: string; input: import("./provider-continuation").ProviderContinuationInput; fingerprint: string; reconcile: true }
   | { action: "steer-work"; id: string; expectedGeneration: number; eventId: string; text: string }
   | { action: "reply-work"; id: string; expectedGeneration: number; eventId: string; text: string }
   | { action: "open-main-chat"; agentId: string }
@@ -266,6 +297,8 @@ export type CollaborationCommand =
       agentId: string;
       prompt: string;
       discussion: boolean;
+      /** Optional canonical message that owns an edited or regenerated branch. */
+      parentMessageId?: string;
       /** Explicit workspace recipients; IDs come from the composer, never model text. */
       recipientIds?: string[];
       /** Composer-level attachment references captured with the request. */
@@ -289,6 +322,9 @@ export type CollaborationCommand =
       expectedGeneration: number;
       reconcile: true;
     }
+  | { action: "arm-provider-reset"; id: string; expectedGeneration: number; opportunityId: string; reconcile: true }
+  | { action: "cancel-provider-reset"; id: string; expectedGeneration: number }
+  | { action: "dispatch-provider-resets" }
   | {
       action: "work-status";
       id: string;
@@ -319,6 +355,12 @@ export type CollaborationCommand =
       id: string;
       projectId: string;
       status: "stale" | "forgotten";
+    }
+  | {
+      action: "pin-fact";
+      id: string;
+      projectId: string;
+      pinned: boolean;
     }
   | { action: "save-layout"; layout: ConversationLayout };
 

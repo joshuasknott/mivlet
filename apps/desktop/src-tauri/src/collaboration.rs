@@ -1,12 +1,20 @@
 //! Account-private teammates and durable coordination. Membership and
 //! contributions never grant provider, connector, file or computer authority.
+pub(crate) mod background;
 mod capture_summary;
 mod chats;
 mod commands;
 mod context;
 mod exchanges;
+pub(crate) mod external;
 pub(crate) mod models;
+mod output_revisions;
+pub(crate) mod pr_watches;
+pub(crate) mod provider_continuation;
+pub(crate) mod provider_continuation_read;
+mod provider_resets;
 mod schedules;
+pub(crate) mod ui;
 mod work;
 pub(crate) use schedules::{
     bind_schedule, check_schedule, finish_schedule, stage_schedule, validate_schedule_project,
@@ -16,7 +24,9 @@ mod tests;
 
 use crate::authorized_scope::{self, AuthorizedCommandScope, ScopeAccess};
 use crate::models::MivletAgentProfile;
-use crate::store::repos::{collaboration as repo, collaboration::Kind, local_project, thread};
+use crate::store::repos::{
+    collaboration as repo, collaboration::Kind, local_project, message, thread,
+};
 use crate::store::{Store, StoreError};
 use chrono::{SecondsFormat, Utc};
 use models::*;
@@ -234,6 +244,56 @@ impl Context<'_> {
         repo::list(self.conn, self.store, &self.scope.private, Kind::Work)
     }
     fn snapshot(&self) -> Result<Snapshot> {
+        let mut work = self.all_work()?;
+        // Resolve legacy records in memory so reopening an existing workspace
+        // immediately gains exact navigation without inventing new IDs or
+        // replaying any work. Newly written records already carry this data.
+        for item in &mut work {
+            if !item.outputs.iter().any(|output| {
+                output.message_id.is_none()
+                    || output.source_revision_id.is_none()
+                    || output.branch_id.is_none()
+            }) {
+                continue;
+            }
+            let rows = message::list(
+                self.conn,
+                self.store,
+                &self.scope.data,
+                &item.conversation_id,
+            )?;
+            for output in &mut item.outputs {
+                if output.message_id.is_some()
+                    && output.source_revision_id.is_some()
+                    && output.branch_id.is_some()
+                {
+                    continue;
+                }
+                if let Some(source) = rows
+                    .iter()
+                    .filter(|row| {
+                        row.run_id.as_deref() == Some(output.run_id.as_str())
+                            && row.kind == "assistant"
+                            && row.current_revision_state != "redacted"
+                    })
+                    .max_by_key(|row| row.sequence)
+                {
+                    output.message_id = Some(source.id.clone());
+                    output.source_revision_id = Some(source.current_revision_id.clone());
+                    output.branch_id = Some(source.id.clone());
+                }
+            }
+        }
+        let mut facts: Vec<Fact> =
+            repo::list(self.conn, self.store, &self.scope.private, Kind::Fact)?;
+        for fact in &mut facts {
+            if fact.branch_id.is_none()
+                || fact.message_id.is_none()
+                || fact.source_revision_id.is_none()
+            {
+                let _ = commands::hydrate_fact_source(self, fact, false);
+            }
+        }
         Ok(Snapshot {
             conversations: repo::list(
                 self.conn,
@@ -243,8 +303,8 @@ impl Context<'_> {
             )?,
             authors: repo::list(self.conn, self.store, &self.scope.private, Kind::Author)?,
             teams: repo::list(self.conn, self.store, &self.scope.private, Kind::Team)?,
-            work: self.all_work()?,
-            facts: repo::list(self.conn, self.store, &self.scope.private, Kind::Fact)?,
+            work,
+            facts,
             layout: repo::get(
                 self.conn,
                 self.store,
@@ -420,7 +480,14 @@ pub fn collaboration_command(
                     refs,
                 )?;
             }
+            let new_work = match &request.command {
+                Command::StartWork { id, .. } => Some(id.clone()),
+                _ => None,
+            };
             commands::apply(&ctx, request.command)?;
+            if let Some(id) = new_work {
+                background::admit(&ctx, &id)?;
+            }
             ctx.snapshot()
         })
         .map_err(|e| e.to_string())
@@ -607,7 +674,10 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
         let time = now();
         let ctx = Context { conn, store, scope: &scope, profiles: &[], time: &time };
         for mut item in ctx.all_work()? {
-            if item.status.active() {
+            if provider_resets::require_restart_review(&mut item) { ctx.work(&item)?; }
+            if item.status.active()
+                && !(crate::background_worker::owns_work(&item) && crate::background_worker::owner_alive())
+            {
                 item.status = WorkStatus::AwaitingUser;
                 item.generation += 1;
                 item.updated_at = time.clone();
@@ -635,7 +705,10 @@ pub(crate) fn fence_orphaned_executing_work(
         time,
     };
     for mut item in ctx.all_work()? {
-        if item.status.executing() {
+        if item.status.executing()
+            && !(crate::background_worker::owns_work(&item)
+                && crate::background_worker::owner_alive())
+        {
             item.status = WorkStatus::AwaitingUser;
             item.generation += 1;
             item.current_run_id = None;
@@ -690,6 +763,25 @@ pub(crate) fn suspend_account(
 }
 
 /// Canonical messages and journal writes must still belong to a live assignment.
+pub(crate) fn ensure_conversation_idle(
+    conn: &Connection,
+    store: &Store,
+    conversation: &str,
+) -> Result<()> {
+    let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
+    let work: Vec<Work> = repo::list(conn, store, &scope.private, Kind::Work)?;
+    if work
+        .iter()
+        .any(|item| item.conversation_id == conversation && item.status.active())
+    {
+        return Err(invalid(
+            "Stop or finish current work before switching conversation alternatives.",
+        ));
+    }
+    Ok(())
+}
+
+/// Canonical messages and journal writes must still belong to a live assignment.
 /// Legacy runs have no work binding and keep their existing behavior.
 pub(crate) fn ensure_run_current(
     conn: &Connection,
@@ -719,6 +811,14 @@ pub(crate) fn ensure_run_current(
     }
     let root = repo::get::<Work>(conn, store, &scope.private, Kind::Work, &item.root_id)?
         .ok_or_else(|| invalid("The parent request is unavailable."))?;
+    crate::mcp_server::repository::check_work(
+        conn,
+        store,
+        &scope,
+        &root,
+        &item.agent_id,
+        &item.permission_mode,
+    )?;
     check_schedule(conn, store, &scope.private, &root, &now(), true)?;
     Ok(())
 }

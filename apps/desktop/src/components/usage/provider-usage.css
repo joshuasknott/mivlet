@@ -1,0 +1,422 @@
+.provider-allowance-indicator {
+  border: 0;
+  background: transparent;
+  color: var(--ink-muted);
+  font: inherit;
+  font-size: 11px;
+  padding: 6px 8px;
+  min-height: 32px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.provider-allowance-indicator:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+.provider-usage-dialog {
+  max-height: calc(100vh - 48px);
+  overflow: auto;
+  color: var(--ink);
+  background: var(--surface-overlay);
+  box-shadow: 0 12px 80px #0003;
+}
+.provider-usage-dialog > header,
+.provider-usage-allowance > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.provider-usage-details {
+  display: grid;
+  gap: 20px;
+  font-size: 13px;
+}
+.provider-usage-details p {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.provider-usage-details h3 {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+.provider-usage-details button,
+.provider-usage-dialog > header button,
+.provider-reset-control button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 6px 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.provider-usage-details button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.provider-usage-details select,
+.provider-usage-details input {
+  min-height: 36px;
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  padding: 6px;
+  font: inherit;
+}
+.provider-usage-details label {
+  display: grid;
+  gap: 6px;
+}
+.provider-usage-filter {
+  max-width: 240px;
+}
+.provider-usage-intro,
+.provider-usage-details small {
+  color: var(--ink-muted);
+}
+.provider-usage-totals {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin: 0;
+}
+.provider-usage-totals dt {
+  font-size: 12px;
+}
+.provider-usage-totals dd {
+  font-size: 22px;
+  margin: 4px 0 0;
+}
+.provider-usage-allowance {
+  border-top: 1px solid var(--line);
+  padding: 16px 0;
+}
+.provider-usage-allowance[data-status="stale"] progress {
+  opacity: 0.45;
+}
+.provider-usage-window {
+  display: grid;
+  gap: 6px;
+  margin: 12px 0;
+}
+.provider-usage-window progress {
+  width: 100%;
+  height: 6px;
+  accent-color: currentColor;
+}
+.provider-usage-models {
+  display: grid;
+  gap: 6px;
+}
+.provider-usage-models button {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  text-align: left;
+}
+.provider-usage-models strong,
+.provider-usage-models small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.provider-usage-model-detail dl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+}
+.provider-usage-model-detail dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.provider-usage-price-fields {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+.provider-usage-details form {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+.provider-reset-control {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+.provider-reset-control label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  cursor: pointer;
+}
+.provider-reset-control input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+@media (max-width: 520px) {
+  .account-dialog .settings-modal__close {
+    width: 44px;
+    height: 44px;
+  }
+  .provider-allowance-indicator,
+  .provider-usage-details button,
+  .provider-usage-details input,
+  .provider-usage-details select,
+  .provider-reset-control button,
+  .provider-usage-dialog > header button {
+    min-height: 44px;
+  }
+  .provider-usage-models button {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .provider-usage-price-fields {
+    grid-template-columns: 1fr;
+  }
+  .provider-usage-totals dd {
+    font-size: 18px;
+  }
+}
+.provider-usage-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 24%);
+}
+
+.account-dialog.account-dialog--usage,
+.provider-usage-dialog {
+  position: relative;
+  width: min(940px, 100%);
+  padding: 36px 40px 20px;
+  border-radius: 18px;
+}
+.provider-usage-dialog {
+  width: min(940px, calc(100vw - 24px));
+}
+.account-dialog.account-dialog--usage h2,
+.provider-usage-dialog h2 {
+  margin: 0 160px 8px 0;
+  font-size: 28px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+.account-dialog--usage .settings-modal__close {
+  top: 20px;
+  right: 22px;
+  width: 44px;
+  height: 44px;
+}
+.provider-usage-dialog > header > button {
+  position: absolute;
+  top: 20px;
+  right: 22px;
+  width: 44px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  color: var(--ink-muted);
+}
+.subscription-usage {
+  font-size: 20px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.subscription-usage > header > p {
+  margin: 0 0 36px;
+  color: var(--ink-muted);
+  line-height: 1.4;
+}
+.subscription-usage button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.subscription-usage button:disabled {
+  opacity: 0.65;
+  cursor: wait;
+}
+.subscription-usage button:hover:enabled {
+  background: var(--surface-hover);
+}
+.subscription-usage button:focus-visible {
+  outline: 2px solid var(--ink-muted);
+  outline-offset: 3px;
+}
+.subscription-usage__refresh {
+  position: absolute;
+  top: 28px;
+  right: 92px;
+}
+.subscription-usage__provider {
+  padding: 0 0 24px;
+  margin: 0 0 24px;
+  border-bottom: 1px solid var(--line);
+}
+.subscription-usage__provider > header {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  margin-bottom: 24px;
+}
+.subscription-usage__provider > header > svg,
+.subscription-usage__provider > header > img {
+  flex-shrink: 0;
+}
+.subscription-usage__provider h3 {
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.2;
+  margin: 0 0 4px;
+}
+.subscription-usage__provider > header p {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 0;
+  font-size: 18px;
+  color: var(--ink-muted);
+  line-height: 1.2;
+}
+.subscription-usage__provider > header p > svg {
+  color: var(--positive);
+  flex-shrink: 0;
+}
+.subscription-usage__window {
+  display: grid;
+  gap: 8px;
+}
+.subscription-usage__window + .subscription-usage__window {
+  margin-top: 24px;
+}
+.subscription-usage__window > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+}
+.subscription-usage__window strong {
+  font-weight: 500;
+  text-align: right;
+}
+.subscription-usage__window progress {
+  appearance: none;
+  width: 100%;
+  height: 18px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9999px;
+  background: var(--line);
+  color: var(--positive);
+  accent-color: var(--positive);
+}
+.subscription-usage__window progress::-webkit-progress-bar {
+  background: var(--line);
+  border-radius: 9999px;
+}
+.subscription-usage__window progress::-webkit-progress-value {
+  background: var(--positive);
+  border-radius: 9999px;
+}
+.subscription-usage__window progress::-moz-progress-bar {
+  background: var(--positive);
+  border-radius: 9999px;
+}
+.subscription-usage__window small,
+.subscription-usage__note {
+  font-size: 16px;
+  color: var(--ink-muted);
+  line-height: 1.4;
+}
+.account-dialog--usage .subscription-usage__window small {
+  font-size: 16px;
+  line-height: 1.4;
+}
+.subscription-usage__provider[data-status="stale"] progress {
+  opacity: 0.6;
+}
+.subscription-usage footer,
+.account-dialog--usage .subscription-usage footer {
+  justify-content: flex-start;
+  margin-top: -12px;
+}
+.subscription-usage footer button,
+.account-dialog--usage .subscription-usage footer button {
+  justify-content: flex-start;
+  padding: 8px 0;
+  border: 0;
+  border-radius: 4px;
+  color: var(--positive);
+  min-height: 44px;
+  font-size: 18px;
+}
+@media (max-width: 520px) {
+  .account-dialog.account-dialog--usage,
+  .provider-usage-dialog {
+    padding: 24px 18px 16px;
+  }
+  .account-dialog.account-dialog--usage h2,
+  .provider-usage-dialog h2 {
+    margin-right: 44px;
+    font-size: 26px;
+  }
+  .account-dialog--usage .settings-modal__close,
+  .provider-usage-dialog > header > button {
+    top: 16px;
+    right: 12px;
+  }
+  .subscription-usage {
+    font-size: 16px;
+  }
+  .subscription-usage__refresh {
+    position: static;
+    margin: 0 0 28px;
+  }
+  .subscription-usage > header > p {
+    margin-bottom: 16px;
+  }
+  .subscription-usage__provider > header {
+    gap: 16px;
+  }
+  .subscription-usage__provider h3 {
+    font-size: 20px;
+  }
+  .subscription-usage__provider > header p {
+    font-size: 14px;
+    gap: 8px;
+  }
+  .subscription-usage__provider[data-status="stale"]
+    .subscription-usage__window
+    > div {
+    flex-direction: column;
+    gap: 4px;
+  }
+  .subscription-usage__provider[data-status="stale"]
+    .subscription-usage__window
+    strong {
+    text-align: left;
+  }
+}

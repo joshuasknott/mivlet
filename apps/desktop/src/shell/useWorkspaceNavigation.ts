@@ -6,6 +6,7 @@ import { useConversationDrag } from "../hooks/useConversationDrag";
 import { useMediaQuery } from "../hooks/useMediaQuery";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import { parseComputerArtifact } from "../lib/computer-artifacts";
+import type { OutputSource } from "../lib/output-revisions";
 import {
   emptyLayout,
   reduceLayout,
@@ -16,6 +17,14 @@ import type {
   WorkspaceExecution,
   WorkspaceExecutionState,
 } from "../lib/workspace-execution";
+
+/** A pending deep link from a saved output back to its owning conversation. */
+export interface ConversationOriginNavigation {
+  conversationId: string;
+  branchId?: string;
+  messageId?: string;
+  sourceRevisionId?: string;
+}
 
 /** Owns view layout and navigation only. Closing or restoring a view never owns execution. */
 export function useWorkspaceNavigation(options: {
@@ -42,6 +51,50 @@ export function useWorkspaceNavigation(options: {
   const [navWorkId, setNavWorkId] = useState<string | null>(null);
   const [mobileNavigation, setMobileNavigation] = useState(false);
   const [computer, setComputer] = useState<string | null>(null);
+  const [conversationOrigin, setConversationOrigin] =
+    useState<ConversationOriginNavigation | null>(null);
+  useEffect(() => {
+    const openMcpAppPanel = (event: Event) => {
+      const detail = (event as CustomEvent<unknown>).detail;
+      if (!detail || typeof detail !== "object") return;
+      const request = detail as Record<string, unknown>;
+      if (
+        typeof request.workspaceId !== "string" ||
+        typeof request.conversationId !== "string" ||
+        typeof request.resultId !== "string" ||
+        typeof request.generation !== "number" ||
+        !Number.isSafeInteger(request.generation) ||
+        typeof request.title !== "string"
+      )
+        return;
+      const current = callbacks.current;
+      const workspaceId =
+        current.runtime.accountWorkspaceStatus.activeWorkspace
+          .localWorkspaceId;
+      if (
+        request.workspaceId !== workspaceId ||
+        !current.state.data.conversations.some(
+          (room) => room.id === request.conversationId,
+        )
+      )
+        return;
+      const id = `mcp-app:${request.workspaceId}:${request.conversationId}:${request.resultId}:${request.generation}`;
+      setPanelRequest({
+        id,
+        kind: "mcp-app",
+        title: request.title.slice(0, 160),
+      });
+      setComputer(null);
+      setContextOpen(true);
+      setPanelFocused(false);
+    };
+    window.addEventListener("mivlet:mcp-app-expand", openMcpAppPanel);
+    return () => window.removeEventListener("mivlet:mcp-app-expand", openMcpAppPanel);
+  }, []);
+  const clearConversationOrigin = useCallback(
+    () => setConversationOrigin(null),
+    [],
+  );
   const activeView = layout.views.find(
     (view) => view.id === layout.active[layout.activePane],
   );
@@ -126,7 +179,10 @@ export function useWorkspaceNavigation(options: {
     callbacks.current.onNavigate();
     setMobileNavigation(false);
   };
-  const open = (id: string) => {
+  const navigate = (
+    id: string,
+    origin?: Pick<OutputSource, "branchId" | "messageId" | "sourceRevisionId">,
+  ) => {
     if (
       !service.getSnapshot().data.conversations.some((room) => room.id === id)
     ) {
@@ -137,6 +193,16 @@ export function useWorkspaceNavigation(options: {
       );
       return;
     }
+    setConversationOrigin(
+      origin
+        ? {
+            conversationId: id,
+            branchId: origin.branchId,
+            messageId: origin.messageId,
+            sourceRevisionId: origin.sourceRevisionId,
+          }
+        : null,
+    );
     setNavWorkId(null);
     actLayout({
       type: "navigate",
@@ -148,6 +214,13 @@ export function useWorkspaceNavigation(options: {
     });
     if (narrow) setContextOpen(false);
   };
+  /** Existing navigation callbacks accept an optional new-tab flag. Keep that
+   * contract stable; origin links use the explicit helper below. */
+  const open = (id: string, _newTab?: boolean) => navigate(id);
+  const openConversation = (
+    id: string,
+    origin: Pick<OutputSource, "branchId" | "messageId" | "sourceRevisionId">,
+  ) => navigate(id, origin);
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -180,16 +253,36 @@ export function useWorkspaceNavigation(options: {
     setContextOpen(true);
     setPanelFocused(false);
   }, []);
-  const openPanelArtifact = (output: string, agentId: string) => {
+  const openPanelArtifact = (
+    output: string,
+    agentId: string,
+    conversationId?: string,
+    messageId?: string,
+    sourceRevisionId?: string,
+  ) => {
     const artifact = parseComputerArtifact(output);
     if (!artifact) return;
     setPanelFocused(false);
     setPanelRequest({
-      id: `artifact:${agentId}:${artifact.id}`,
+      id: `artifact:${conversationId ?? "workspace"}:${agentId}:${artifact.id}`,
       kind: "artifact",
       title: artifact.title,
       output,
       agentId,
+      conversationId,
+      messageId,
+      sourceRevisionId,
+    });
+    setComputer(null);
+    setContextOpen(true);
+  };
+  const openPanelOutput = (outputId: string, title: string) => {
+    setPanelFocused(false);
+    setPanelRequest({
+      id: `output:${outputId}`,
+      kind: "output",
+      title,
+      outputId,
     });
     setComputer(null);
     setContextOpen(true);
@@ -216,12 +309,15 @@ export function useWorkspaceNavigation(options: {
   );
   const selectNavWork = (id: string | null) => {
     if (id) {
-      const item = state.data.work.find(work => work.id === id);
+      const item = state.data.work.find((work) => work.id === id);
       if (!item) return;
       open(item.conversationId);
     }
     setNavWorkId(id);
-    if (id) { setComputer(null); setContextOpen(true); }
+    if (id) {
+      setComputer(null);
+      setContextOpen(true);
+    }
   };
 
   return {
@@ -242,6 +338,8 @@ export function useWorkspaceNavigation(options: {
     setMobileNavigation,
     computer,
     setComputer,
+    conversationOrigin,
+    clearConversationOrigin,
     activeView,
     activeRoom,
     activeProfile,
@@ -253,10 +351,12 @@ export function useWorkspaceNavigation(options: {
     navTeam,
     actLayout,
     open,
+    openConversation,
     onConversationPointerDown,
     selectNavWork,
     openPanelWeb,
     openPanelArtifact,
+    openPanelOutput,
     openPanelChat,
   };
 }

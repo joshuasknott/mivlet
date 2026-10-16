@@ -300,9 +300,18 @@ pub(in crate::local_computer) fn native_run(
     timeout: u64,
     files: bool,
     ticket: &OperationTicket,
+    mut session: Option<&mut super::super::command_jobs::JobSession>,
 ) -> Result<(CommandResult, mivlet_windows_executor::CompletedRun), String> {
     ticket.check()?;
-    let completed = mivlet_windows_executor::run(
+    let persistent = session
+        .as_ref()
+        .map(|s| s.snapshot())
+        .transpose()?
+        .is_some_and(|s| s.persistent);
+    let output = session
+        .as_ref()
+        .map_or_else(super::super::command_jobs::safe_output, |s| s.output());
+    let result = mivlet_windows_executor::run_with_output(
         &execution_resources()?,
         root,
         script,
@@ -314,12 +323,36 @@ pub(in crate::local_computer) fn native_run(
             mivlet_windows_executor::Limits::CODING
         },
         ticket.execution_binding(),
+        if persistent {
+            mivlet_windows_executor::ExecutionMode::Persistent
+        } else {
+            mivlet_windows_executor::ExecutionMode::Command
+        },
+        output.clone(),
         || ticket.check().is_ok(),
-        |launch| ticket.with_current(launch),
-    )?;
+        |launch| {
+            ticket.with_current(launch)?;
+            if let Some(session) = &session {
+                session.running()?;
+            }
+            Ok(())
+        },
+    );
+    let completed = match result {
+        Ok(completed) => completed,
+        Err(error) => {
+            if let Some(session) = session.as_mut() {
+                session.fail(&error)?;
+            }
+            return Err(error);
+        }
+    };
     let receipt = completed.receipt();
+    if let Some(session) = session {
+        session.complete(receipt)?;
+    }
     let safe = crate::secret_redaction::redact_secret_text_or_omit(&receipt.output);
-    let redacted = safe != receipt.output;
+    let redacted = output.read(0)?.redacted || safe != receipt.output;
     let mut metadata =
         serde_json::to_value(receipt).map_err(|_| "Invalid native execution receipt.")?;
     if let Some(object) = metadata.as_object_mut() {

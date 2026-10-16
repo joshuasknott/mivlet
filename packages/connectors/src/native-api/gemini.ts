@@ -27,7 +27,7 @@ interface GeminiChunk {
     content?: { role?: string; parts?: GeminiPart[] };
     finishReason?: string;
   }>;
-  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+  usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; cachedContentTokenCount?: number; thoughtsTokenCount?: number };
   /** Present when the prompt itself was blocked before any candidate existed. */
   promptFeedback?: { blockReason?: string };
   error?: { message?: string };
@@ -161,11 +161,13 @@ export function parseGeminiLine(
   }
   if (chunk.usageMetadata) {
     const input = chunk.usageMetadata.promptTokenCount ?? 0;
-    const output = chunk.usageMetadata.candidatesTokenCount ?? 0;
+    const output = (chunk.usageMetadata.candidatesTokenCount ?? 0) + (chunk.usageMetadata.thoughtsTokenCount ?? 0);
     events.push({
       type: "usage",
       inputTokens: input,
       outputTokens: output,
+      cachedInputTokens: chunk.usageMetadata.cachedContentTokenCount,
+      reasoningTokens: chunk.usageMetadata.thoughtsTokenCount,
       costUsd: priceFor(providerId, input, output),
       costEstimated: true,
       costUnknown: !hasKnownPrice(providerId)

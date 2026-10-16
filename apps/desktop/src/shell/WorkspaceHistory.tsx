@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { CollaborationWorkItem, ConversationRoom } from "@mivlet/protocol";
+import type { CollaborationWorkItem, ConversationRoom, WorkOutput } from "@mivlet/protocol";
 import { panelWork } from "../components/navigation/workspace-panel-data";
 import { CoordinationActivity } from "../components/work/CoordinationActivity";
 import { WorkDetails } from "../components/work/WorkDetails";
@@ -26,7 +26,7 @@ export function WorkspaceHistory({
   service: WorkspaceExecution;
   state: WorkspaceExecutionState;
   selectedWorkId: string | null;
-  onOpenConversation: (id: string) => void;
+  onOpenConversation: (id: string, source?: Pick<WorkOutput, "branchId" | "messageId" | "sourceRevisionId">) => void;
   workItems?: CollaborationWorkItem[];
 }) {
   const [selection, setSelection] = useState(selectedWorkId);
@@ -90,6 +90,7 @@ export function WorkspaceHistory({
         key={selected.id}
         item={selected}
         onOpen={onOpenConversation}
+        onProviderReset={(command) => service.command(command)}
         onStop={(id) => service.stop(id)}
         onContinue={async (id, generation) => {
           await service.command({

@@ -54,7 +54,7 @@ export const PERMISSION_PROFILES: readonly PermissionProfile[] = [
   },
   {
     label: "Work Freely",
-    description: "Your agent works without approval prompts. You can stop it or take control at any time.",
+    description: "Your agent usually works without prompts; Mivlet still asks before some high-risk or account-bound actions. You can stop it or take control at any time.",
     mode: "full-access"
   },
   {
@@ -120,6 +120,10 @@ export interface BuildContextPrefixForRunInput {
 export interface KnowledgeRunContext {
   /** Shared rooms do not inherit private conversational memory. */
   excludePrivateMemory?: boolean;
+  /** Native Work capture already owns summary scope and memory exclusions. */
+  excludeDerivedSummaries?: boolean;
+  /** Exclusions frozen in the native admitted work capture. */
+  excludedKnowledgeSourceIds?: readonly string[];
   /** Canonical conversation being assembled; avoids the legacy shell thread. */
   threadId?: string;
   /** Exact connected accounts this teammate may read from; grants nothing. */

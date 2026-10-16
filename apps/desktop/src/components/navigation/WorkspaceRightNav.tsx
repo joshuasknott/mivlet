@@ -138,7 +138,22 @@ export function WorkspaceRightNav({
   const closeContent = () => {
     onCloseComputer?.();
     dispatch({ type: "close" });
+    if (selected?.kind === "mcp-app") window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id: selected.id } }));
   };
+  useEffect(() => {
+    const closeApp = (event: Event) => {
+      if (selected?.kind === "mcp-app" && (event as CustomEvent<{ id?: string }>).detail?.id === selected.id)
+        dispatch({ type: "close" });
+    };
+    window.addEventListener("mivlet:mcp-app-panel-closed", closeApp);
+    return () => window.removeEventListener("mivlet:mcp-app-panel-closed", closeApp);
+  }, [selected?.id, selected?.kind]);
+  useEffect(() => {
+    if (selected?.kind !== "mcp-app" || !open || computerAgentId) return;
+    const target = Array.from(panel.current?.querySelectorAll<HTMLElement>("[data-mcp-app-panel]") ?? [])
+      .find((candidate) => candidate.dataset.mcpAppPanel === selected.id);
+    if (target) window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-ready", { detail: { id: selected.id, target } }));
+  }, [selected?.id, selected?.kind, open, computerAgentId]);
   const focusKey = inspecting ? (selected?.id ?? "computer") : state.page;
   const lastFocus = useRef(focusKey);
   useEffect(() => {

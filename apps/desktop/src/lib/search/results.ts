@@ -5,6 +5,7 @@ const KIND_LABELS: Record<SearchObjectKind, string> = {
   project: "Project",
   conversation: "Chat",
   work: "Work",
+  decision: "Decision",
   file: "File",
 };
 
@@ -51,6 +52,12 @@ export function describeSearchContext(result: SearchResult): string {
       return ["Work", context.agentName, context.workStatus]
         .filter((part): part is string => Boolean(part))
         .join(" · ");
+    case "decision": {
+      const parts = ["Decision"];
+      if (context.projectName) parts.push(context.projectName);
+      if (context.messageId) parts.push("source match");
+      return parts.join(" · ");
+    }
     case "file":
       return context.fileKind === "artifact"
         ? `Artifact · ${context.agentName ?? "Agent"}`

@@ -1,0 +1,82 @@
+.context-inspector {
+  font-size: 12px;
+  color: var(--ink-muted);
+  max-width: 100%;
+  margin: 4px 0 10px;
+}
+.context-inspector > summary {
+  width: fit-content;
+  padding: 6px 8px;
+  min-height: 32px;
+  border-radius: 6px;
+  cursor: pointer;
+}
+.context-inspector > summary:hover {
+  background: var(--surface-hover);
+}
+.context-inspector__body {
+  padding: 14px 16px;
+  margin: 6px 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  max-height: 420px;
+  overflow: auto;
+  background: var(--surface);
+}
+.context-inspector h3 {
+  font-size: 13px;
+  color: var(--ink);
+  margin: 8px 0;
+}
+.context-inspector h4 {
+  font-size: 12px;
+  margin: 14px 0 4px;
+}
+.context-inspector p {
+  line-height: 1.6;
+  margin: 8px 0;
+}
+.context-inspector fieldset {
+  border: 0;
+  padding: 0;
+  margin: 12px 0;
+}
+.context-inspector legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.context-inspector label {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 6px 0;
+  min-height: 32px;
+}
+.context-inspector small {
+  display: block;
+  font-size: 11px;
+  opacity: 0.85;
+}
+.context-inspector pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 220px;
+  overflow: auto;
+  font-size: 11px;
+}
+.context-inspector details {
+  margin: 10px 0;
+}
+.context-inspector__note {
+  font-size: 11px;
+}
+.context-inspector :focus-visible {
+  outline: 2px solid var(--accent, #9284d9);
+  outline-offset: 2px;
+}
+@media (max-width: 600px) {
+  .context-inspector > summary,
+  .context-inspector label {
+    min-height: 44px;
+  }
+}

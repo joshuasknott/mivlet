@@ -144,6 +144,7 @@ export interface LocalComputerOfficePreview {
   kind: "document" | "spreadsheet" | "presentation";
   sections: readonly {
     name: string;
+    sourceEntry?: string;
     blocks: readonly (
       | { type: "paragraph"; text: string; style: "title" | "heading" | "paragraph" }
       | { type: "table"; rows: readonly (readonly string[])[] }

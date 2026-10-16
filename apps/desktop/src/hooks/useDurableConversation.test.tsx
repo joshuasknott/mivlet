@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   listThreads: vi.fn(),
   getThread: vi.fn(),
   listMessages: vi.fn(),
+  listMessagesPage: vi.fn(),
   loadDraft: vi.fn(),
   deleteThread: vi.fn(),
   createThread: vi.fn(),
@@ -17,6 +18,7 @@ listRuntimeConversationThreads: mocks.listThreads,
 getRuntimeConversationThread: mocks.getThread,
 updateRuntimeConversationThread: vi.fn(),
 listRuntimeConversationMessages: mocks.listMessages,
+listRuntimeConversationMessagesPage: mocks.listMessagesPage,
 appendRuntimeConversationMessage: vi.fn(),
 reviseRuntimeConversationMessage: vi.fn(),
 loadRuntimeConversationDraft: mocks.loadDraft,
@@ -39,6 +41,7 @@ describe("useDurableConversation", () => {
     mocks.listThreads.mockResolvedValue([]);
     mocks.getThread.mockResolvedValue(null);
     mocks.listMessages.mockResolvedValue([]);
+    mocks.listMessagesPage.mockResolvedValue({ messages: [], hasOlderMessages: false });
     mocks.loadDraft.mockResolvedValue(null);
     mocks.deleteThread.mockReset().mockResolvedValue(undefined);
     mocks.createThread.mockReset().mockResolvedValue(thread("created"));

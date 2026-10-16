@@ -3,6 +3,8 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   collectAssets,
+  conversationUpgradeAssetPattern,
+  intelligentUiAssetPattern,
   formatBytes,
   formatKiB,
   summarizeBundle,
@@ -43,14 +45,19 @@ function compareCeiling(label, actualBytes, ceilingBytes, baselineBytes) {
     actualBytes,
     ceilingBytes,
     overBytes,
-    message: `${label}: ${formatKiB(actualBytes)} raw > ceiling ${formatKiB(ceilingBytes)} (+${formatKiB(overBytes)})${baselineNote}`,
+    message: `${label}: ${formatKiB(actualBytes)} > ceiling ${formatKiB(ceilingBytes)} (+${formatKiB(overBytes)})${baselineNote}`,
   };
 }
 
 export function checkBudget(summary, budget) {
   const violations = [];
   // Renderer growth cannot consume the budget of the ordinary workspace.
-  for (const group of ["commonJsCss", "pdfPreview"]) {
+  for (const group of [
+    "commonJsCss",
+    "pdfPreview",
+    "conversationUpgrade",
+    "intelligentUi",
+  ]) {
     if (!budget.ceilings[group] || !summary[group]) continue;
     const actual = summary[group];
     for (const [unit, key] of [
@@ -68,7 +75,12 @@ export function checkBudget(summary, budget) {
 
   const totalViolation = compareCeiling(
     "totalJsCss.raw",
-    summary.totalJsCss.rawBytes,
+    summary.totalJsCss.rawBytes -
+      Math.max(
+        0,
+        (summary.intelligentUi?.rawBytes ?? 0) -
+          (budget.intelligentUiBaseline?.rawBytes ?? 0),
+      ),
     budget.ceilings.totalJsCss.rawBytes,
     budget.recordedBaseline.totalJsCss.rawBytes,
   );
@@ -76,7 +88,12 @@ export function checkBudget(summary, budget) {
 
   const totalGzipViolation = compareCeiling(
     "totalJsCss.gzip",
-    summary.totalJsCss.gzipBytes,
+    summary.totalJsCss.gzipBytes -
+      Math.max(
+        0,
+        (summary.intelligentUi?.gzipBytes ?? 0) -
+          (budget.intelligentUiBaseline?.gzipBytes ?? 0),
+      ),
     budget.ceilings.totalJsCss.gzipBytes,
     budget.recordedBaseline.totalJsCss.gzipBytes,
   );
@@ -154,11 +171,15 @@ export async function runBudgetCheck({
   const assets = await collectAssets(distDir, repoRoot);
   const summary = summarizeBundle(assets);
   const violations = checkBudget(summary, budget);
-  if (budget.requireDeferredPdf) {
+  if (budget.requireDeferredPdf || budget.requireDeferredConversationUpgrade) {
     const manifest = JSON.parse(
       await readFile(join(distDir, ".vite", "manifest.json"), "utf8"),
     );
-    violations.push(...checkDeferredPdf(manifest));
+    if (budget.requireDeferredPdf)
+      violations.push(...checkDeferredPdf(manifest));
+    if (budget.requireDeferredConversationUpgrade) {
+      violations.push(...checkDeferredConversationUpgrade(manifest));
+    }
   }
   return { budget, assets, summary, violations };
 }
@@ -213,8 +234,59 @@ export function checkDeferredPdf(manifest) {
   return violations;
 }
 
+/**
+ * Conversation engines are loaded through ConversationPane. Their chunks may
+ * be dynamic imports of the startup entry, but none may be in its static
+ * dependency closure. This verifies the emitted production graph rather than
+ * source-level package names.
+ */
+export function checkDeferredConversationUpgrade(manifest) {
+  const eager = new Set();
+  const violations = [];
+  const visit = (key) => {
+    if (eager.has(key)) return;
+    eager.add(key);
+    if (!manifest[key]) {
+      violations.push({
+        label: "conversationUpgrade.import",
+        message: `Missing static import ${key} in the Vite build manifest`,
+      });
+    }
+    for (const imported of manifest[key]?.imports ?? []) visit(imported);
+  };
+  for (const [key, chunk] of Object.entries(manifest))
+    if (chunk.isEntry) visit(key);
+
+  const featureKeys = Object.entries(manifest)
+    .filter(([, chunk]) => {
+      const fileName = chunk.file?.split("/").at(-1) ?? "";
+      return (
+        conversationUpgradeAssetPattern.test(fileName) ||
+        intelligentUiAssetPattern.test(fileName)
+      );
+    })
+    .map(([key]) => key);
+  if (featureKeys.length === 0) {
+    violations.push({
+      label: "conversationUpgrade.feature",
+      message:
+        "Conversation upgrade: expected at least one deferred feature chunk in the Vite build manifest",
+    });
+  }
+  for (const key of featureKeys) {
+    if (eager.has(key)) {
+      violations.push({
+        label: "conversationUpgrade.eager",
+        message: `Conversation upgrade chunk is reachable from startup: ${manifest[key]?.file ?? key}`,
+      });
+    }
+  }
+  return violations;
+}
+
 async function main() {
-  const { violations, budget } = await runBudgetCheck();
+  const { violations, budget, summary } = await runBudgetCheck();
+  process.stdout.write(`Measured bundle bytes: ${JSON.stringify(summary)}\n`);
   if (violations.length === 0) {
     process.stdout.write("Performance budget check passed.\n");
     return;

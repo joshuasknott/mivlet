@@ -121,6 +121,7 @@ export function ComputerInspector({
                 : null
             }
             confirmationText={runtime.approvalConfirmationText}
+            pendingNativeApprovalIds={runtime.pendingNativeApprovalIds}
             onDecision={runtime.requestApprovalDecision}
             onStartModify={runtime.startApprovalModify}
             onUpdateModification={runtime.setApprovalModificationDraft}

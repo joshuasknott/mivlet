@@ -24,16 +24,44 @@ describe("search result navigation targets", () => {
     expect(
       navigationTargetFor(
         result("conversation", "thread-1", {
-          conversationId: "thread-1",
-          messageId: "message-9",
-        }),
+        conversationId: "thread-1",
+        messageId: "message-9",
+        branchId: "message-9",
+        sourceRevisionId: "revision-9",
+      }),
       ),
     ).toEqual({
       type: "conversation",
       workspaceId: "ws",
       conversationId: "thread-1",
       messageId: "message-9",
+      branchId: "message-9",
+      sourceRevisionId: "revision-9",
     });
+  });
+
+  it("resolves decisions to their conversation source without guessing", () => {
+    expect(
+      navigationTargetFor(
+        result("decision", "decision-1", {
+          conversationId: "thread-3",
+          messageId: "message-3",
+          branchId: "message-3",
+          sourceRevisionId: "revision-3",
+        }),
+      ),
+    ).toEqual({
+      type: "decision",
+      workspaceId: "ws",
+      decisionId: "decision-1",
+      conversationId: "thread-3",
+      messageId: "message-3",
+      branchId: "message-3",
+      sourceRevisionId: "revision-3",
+    });
+    expect(
+      navigationTargetFor(result("decision", "decision-2")),
+    ).toBeNull();
   });
 
   it("resolves projects to their proven thread and work to its chat", () => {

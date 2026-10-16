@@ -11,7 +11,7 @@ use crate::models::{ApprovalRequest, ApprovalResolutionResponse};
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct ExecutionApproval {
+pub(crate) struct ExecutionApproval {
     request_id: String,
     request_fingerprint: String,
     decision: String,
@@ -131,23 +131,31 @@ pub(crate) fn record_execution_decision(
     path: &Path,
     response: &ApprovalResolutionResponse,
 ) -> Result<(), String> {
-    let fingerprint = request_fingerprint(&response.effective_request)?;
     mutate_records(path, |records| {
-        records.retain(|record| record.request_id != response.effective_request.id);
-        records.insert(
-            0,
-            ExecutionApproval {
-                request_id: response.effective_request.id.clone(),
-                request_fingerprint: fingerprint,
-                decision: response.audit_entry.decision.clone(),
-                decided_at: response.audit_entry.decided_at.clone(),
-                consumed_at: None,
-                invalidated_at: None,
-            },
-        );
-        records.truncate(500);
+        record_execution_decision_in_records(records, response)?;
         Ok(())
     })
+}
+
+pub(crate) fn record_execution_decision_in_records(
+    records: &mut Vec<ExecutionApproval>,
+    response: &ApprovalResolutionResponse,
+) -> Result<(), String> {
+    let fingerprint = request_fingerprint(&response.effective_request)?;
+    records.retain(|record| record.request_id != response.effective_request.id);
+    records.insert(
+        0,
+        ExecutionApproval {
+            request_id: response.effective_request.id.clone(),
+            request_fingerprint: fingerprint,
+            decision: response.audit_entry.decision.clone(),
+            decided_at: response.audit_entry.decided_at.clone(),
+            consumed_at: None,
+            invalidated_at: None,
+        },
+    );
+    records.truncate(500);
+    Ok(())
 }
 
 /// Revoke approval permits that belonged to an interrupted attempt.

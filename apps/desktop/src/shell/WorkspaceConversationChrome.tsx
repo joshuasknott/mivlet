@@ -1,5 +1,10 @@
 import type { ConversationRoom, LocalProject, WorkspaceView } from "@mivlet/protocol";
-import { Suspense, type MutableRefObject, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  type MutableRefObject,
+  type ReactNode,
+} from "react";
 import { ConversationGrid } from "../components/conversation/ConversationGrid";
 interface NewAction { id: string; label: string; run: () => void; }
 import type { ConversationDraft } from "../components/projects/ConversationDialogs";
@@ -11,10 +16,18 @@ import {
   type WorkspaceExecution,
   type WorkspaceExecutionState,
 } from "../lib/workspace-execution";
-import { ConversationPane } from "./ConversationPane";
 import { MarketplacePage } from "./workspace-lazy";
 import { continueConversationDraft } from "./workspace-presentation";
-import type { WorkspaceNavigation } from "./useWorkspaceNavigation";
+import type {
+  ConversationOriginNavigation,
+  WorkspaceNavigation,
+} from "./useWorkspaceNavigation";
+
+const ConversationPane = lazy(() =>
+  import("./ConversationPane").then(({ ConversationPane: Component }) => ({
+    default: Component,
+  })),
+);
 
 function WorkspaceConversationView({
   view,
@@ -35,6 +48,9 @@ function WorkspaceConversationView({
   onProjectUpdate,
   onDraftReady,
   onNew,
+  origin,
+  onOriginConsumed,
+  onInspectWork,
 }: {
   view: WorkspaceView;
   room: ConversationRoom;
@@ -46,7 +62,7 @@ function WorkspaceConversationView({
   profileName: string;
   onAgentSettings: (id: string) => void;
   onClose: () => void;
-  onArtifact: (output: string, agentId: string) => void;
+  onArtifact: (output: string, agentId: string, conversationId?: string, messageId?: string, sourceRevisionId?: string) => void;
   onEdit: () => void;
   onComputer: (agentId: string) => void;
   onPlugins: (id?: string) => void;
@@ -57,29 +73,37 @@ function WorkspaceConversationView({
   ) => Promise<void>;
   onDraftReady: (append: (text: string) => void) => void;
   onNew: (draft?: string) => Promise<string | void>;
+  origin?: ConversationOriginNavigation | null;
+  onOriginConsumed?: () => void;
+  onInspectWork?: (id: string) => void;
 }) {
   return (
-    <ConversationPane
-      key={view.id}
-      view={view}
-      room={room}
-      project={project}
-      runtime={runtime}
-      service={service}
-      state={state}
-      active={active}
-      profileName={profileName}
-      onAgentSettings={onAgentSettings}
-      onClose={onClose}
-      onArtifact={onArtifact}
-      onEdit={onEdit}
-      onComputer={onComputer}
-      onPlugins={onPlugins}
-      onProviders={onProviders}
-      onProjectUpdate={onProjectUpdate}
-      onDraftReady={onDraftReady}
-      onNew={onNew}
-    />
+    <Suspense fallback={<p role="status">Loading conversation…</p>}>
+      <ConversationPane
+        key={view.id}
+        view={view}
+        room={room}
+        project={project}
+        runtime={runtime}
+        service={service}
+        state={state}
+        active={active}
+        profileName={profileName}
+        onAgentSettings={onAgentSettings}
+        onClose={onClose}
+        onArtifact={onArtifact}
+        onEdit={onEdit}
+        onComputer={onComputer}
+        onPlugins={onPlugins}
+        onProviders={onProviders}
+        onProjectUpdate={onProjectUpdate}
+        onDraftReady={onDraftReady}
+        onNew={onNew}
+        origin={origin}
+        onOriginConsumed={onOriginConsumed}
+        onInspectWork={onInspectWork}
+      />
+    </Suspense>
   );
 }
 
@@ -153,6 +177,13 @@ export function buildConversationRenderer(input: {
           continued.seedText,
         );
       }}
+      origin={
+        input.nav.conversationOrigin?.conversationId === room.id
+          ? input.nav.conversationOrigin
+          : null
+      }
+      onOriginConsumed={input.nav.clearConversationOrigin}
+      onInspectWork={input.nav.selectNavWork}
     />
   );
 }

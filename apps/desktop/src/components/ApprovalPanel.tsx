@@ -1,6 +1,8 @@
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
 import { ShieldWarning } from "@phosphor-icons/react/dist/csr/ShieldWarning";
 import { XCircle } from "@phosphor-icons/react/dist/csr/XCircle";
+import { LockKey } from "@phosphor-icons/react/dist/csr/LockKey";
+import "./protected-approval.css";
 import type {
   ApprovalAuditEntry,
   ApprovalDecision,
@@ -13,6 +15,7 @@ import type {
   PendingApprovalConfirmation
 } from "../lib/types";
 import {
+  actionLabel,
   actionSummary,
   decisionDescription,
   decisionLabel,
@@ -43,6 +46,10 @@ import {
 
 const DECISION_ORDER: ApprovalDecision[] = ["once", "session", "rule", "modify", "deny"];
 
+function isApprovalReference(value: string): boolean {
+  return /^proposal fingerprint\s*:/i.test(value.trim());
+}
+
 export function ApprovalPanel({
   compact = false,
   previews = {},
@@ -54,6 +61,7 @@ export function ApprovalPanel({
   modificationDraft,
   pendingConfirmation,
   confirmationText,
+  pendingNativeApprovalIds = new Set<string>(),
   onDecision,
   onStartModify,
   onUpdateModification,
@@ -73,6 +81,7 @@ export function ApprovalPanel({
   modificationDraft: ApprovalModificationDraft;
   pendingConfirmation: PendingApprovalConfirmation | null;
   confirmationText: string;
+  pendingNativeApprovalIds?: ReadonlySet<string>;
   onDecision: (request: ApprovalRequest, decision: ApprovalDecision) => void;
   onStartModify: (request: ApprovalRequest) => void;
   onUpdateModification: (draft: ApprovalModificationDraft) => void;
@@ -98,14 +107,25 @@ export function ApprovalPanel({
             const tone = riskTone(approval.riskLevel);
             const isEditing = editingApprovalId === approval.id;
             const isConfirming = pendingConfirmation?.request.id === approval.id;
+            const protectedEntry = compact && approval.action.split(" ", 1)[0] === "request-secret";
+            const isNativePending = pendingNativeApprovalIds.has(approval.id);
+            const approvalReferences = approval.dataUsed.filter(isApprovalReference);
+            const visibleDataUsed = approval.dataUsed.filter((item) => !isApprovalReference(item));
             return (
               <article
-                className={`approval-card approval-card--${tone}`}
+                className={`approval-card approval-card--${tone}${protectedEntry ? " approval-card--protected-entry" : ""}`}
                 key={approval.id}
                 data-risk={tone}
               >
                 <header className="approval-card__header">
-                  <span className="approval-card__summary">{actionSummary(approval)}</span>
+                  {protectedEntry ? <>
+                    <span className="protected-entry__icon" aria-hidden="true"><LockKey size={24} /></span>
+                    <div className="protected-entry__heading">
+                      <span className="protected-entry__eyebrow">Protected secret</span>
+                      <span className="approval-card__summary">{actionLabel(approval)}</span>
+                      <span className="protected-entry__provider">{serviceLabel(approval.service)}</span>
+                    </div>
+                  </> : <span className="approval-card__summary">{actionSummary(approval)}</span>}
                   {!compact ? <span className={`approval-risk approval-risk--${tone}`}>
                     {isHighRisk(approval.mode, approval.riskLevel) ? (
                       <ShieldWarning size={14} aria-hidden="true" />
@@ -117,7 +137,7 @@ export function ApprovalPanel({
                 </header>
                 {previews[approval.id] ? <p className="approval-card__context">{previews[approval.id].summary.split("\n").slice(0, 3).join(" · ")}</p> : compact ? <p className="approval-card__context">{approval.consequence}</p> : null}
                 {!compact ? <p className="approval-card__why">{whyApprovalIsNeeded(approval)}</p> : null}
-                <details className="approval-inspection" open={compact ? undefined : true}>
+                <details className="approval-inspection" open={Boolean(previews[approval.id]) || !compact}>
                 <summary>{compact ? "View action details" : "Action details"}</summary>
                 {previews[approval.id] ? <pre className="approval-card__payload">{previews[approval.id].summary}{"\n\n"}{previews[approval.id].details}</pre> : null}
                 <dl className="approval-details">
@@ -138,7 +158,21 @@ export function ApprovalPanel({
                   </div>
                   <div>
                     <dt>Information used</dt>
-                    <dd>{approval.dataUsed.join(", ")}</dd>
+                    <dd>
+                      {visibleDataUsed.length > 1 ? (
+                        <ul className="approval-details__list">
+                          {visibleDataUsed.map((item) => <li key={item}>{item}</li>)}
+                        </ul>
+                      ) : visibleDataUsed[0] ?? "No additional data listed."}
+                      {approvalReferences.length > 0 ? (
+                        <details className="approval-details__reference">
+                          <summary>Approval reference</summary>
+                          <ul className="approval-details__list">
+                            {approvalReferences.map((item) => <li key={item}>{item}</li>)}
+                          </ul>
+                        </details>
+                      ) : null}
+                    </dd>
                   </div>
                   <div>
                     <dt>What will happen</dt>
@@ -151,7 +185,25 @@ export function ApprovalPanel({
                 </dl>
                 </details>
 
-                {isEditing ? (
+                {isNativePending ? (
+                  <>
+                    <p className="approval-card__waiting" role="status">
+                      Waiting for native confirmation…
+                    </p>
+                    <div className="approval-actions">
+                      {approval.decisions.includes("deny") ? (
+                        <button
+                          type="button"
+                          className="approval-action approval-action--deny"
+                          onClick={() => onDecision(approval, "deny")}
+                        >
+                          <XCircle size={15} aria-hidden="true" />
+                          Deny
+                        </button>
+                      ) : null}
+                    </div>
+                  </>
+                ) : isEditing ? (
                   <ApprovalModifyForm
                     approval={approval}
                     draft={modificationDraft}
@@ -173,7 +225,7 @@ export function ApprovalPanel({
                     {DECISION_ORDER.filter(
                       (decision) =>
                         approval.decisions.includes(decision) &&
-                        (!compact || decision === "once" || decision === "deny") &&
+                        (!compact || decision === "once" || decision === "deny" || decision === "modify") &&
                         !(
                           isHighRisk(approval.mode, approval.riskLevel) &&
                           (decision === "session" || decision === "rule")
@@ -201,6 +253,7 @@ export function ApprovalPanel({
                         {compact && decision === "once" ? "Approve" : decisionLabel(decision)}
                       </button>
                     ))}
+                    {protectedEntry ? <small className="protected-entry__scope">One request only</small> : null}
                   </div>
                 )}
               </article>

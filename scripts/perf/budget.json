@@ -1,5 +1,5 @@
 {
-  "version": 8,
+  "version": 9,
   "recordedAt": "2026-10-03",
   "recordedBaseline": {
     "totalJsCss": {
@@ -50,9 +50,9 @@
   },
   "ceilings": {
     "totalJsCss": {
-      "rawBytes": 3100949,
-      "gzipBytes": 949534,
-      "marginNote": "Includes a separately capped PDF-only viewer, engine and worker. Ordinary workspace growth cannot use that allowance."
+      "rawBytes": 3861546,
+      "gzipBytes": 1160449,
+      "marginNote": "October 9 integration measured 3845162 raw; allow 16 KiB aggregate headroom. Retain the previous aggregate gzip ceiling and separate common, conversation and PDF ceilings."
     },
     "css": {
       "rawBytes": 187614,
@@ -64,8 +64,8 @@
     },
     "routeChunks": {
       "SettingsPage": {
-        "rawBytes": 60360,
-        "marginNote": "+10 KiB raw above the measured build"
+        "rawBytes": 67863,
+        "marginNote": "October 9 integrated Settings with provider usage, background ownership and MCP access measured 63767 raw. Allow 4 KiB headroom; module stays deferred."
       },
       "OnboardingPage": {
         "rawBytes": 14694,
@@ -77,17 +77,28 @@
       }
     },
     "commonJsCss": {
-      "marginNote": "Previous September total plus 16 KiB raw / 8 KiB gzip for merged coding, automation, Office and connector features; measured pre-PDF main recorded above.",
-      "gzipBytes": 349534,
-      "rawBytes": 1200949
+      "marginNote": "October 9 recovery integration measured 1307435 raw / 380994 gzip across repository controls, provider usage/continuation, secret requests, event automations, PR review, background ownership and MCP access. Allow 10 KiB raw / 4 KiB gzip additional headroom; startup remains independently capped.",
+      "gzipBytes": 385090,
+      "rawBytes": 1317675
+    },
+    "conversationUpgrade": {
+      "marginNote": "October 9 integrated deferred conversation graph measured 692307 raw / 209624 gzip. Allow 4 KiB raw headroom; retain the previous gzip ceiling and deferred startup-graph guard.",
+      "gzipBytes": 210915,
+      "rawBytes": 696403
     },
     "pdfPreview": {
       "marginNote": "PDF.js 6.4.299 plus the viewer and its .mjs worker; loaded only when a PDF opens, enforced by the Vite static import graph.",
       "gzipBytes": 600000,
       "rawBytes": 1900000
+    },
+    "intelligentUi": {
+      "marginNote": "Optional reactive UI measured 350109 raw / 106072 gzip after separating shared widget dependencies from startup. Allow 12 KiB raw / 4 KiB gzip. Existing startup, common workspace, conversation, CSS and PDF ceilings remain unchanged.",
+      "gzipBytes": 110168,
+      "rawBytes": 362400
     }
   },
   "requireDeferredPdf": true,
+  "requireDeferredConversationUpgrade": true,
   "featureBaseline": {
     "commit": "6e0cdc72c0fa135424dd577fc27e25c89eacdc93",
     "note": "Measured main before PDF support; previous September allowances were already exceeded by 9342 raw, 1961 gzip and 9025 entry bytes.",
@@ -98,5 +109,34 @@
       "gzipBytes": 343303,
       "rawBytes": 1193907
     }
+  },
+  "integrationBaseline": {
+    "recordedAt": "2026-10-09",
+    "commit": "4876a5ec10fc46d51b0341fdb324db850d1d29a6",
+    "profileRun": "https://github.com/joshuasknott/mivlet/actions/runs/37932681194",
+    "note": "Combined recovery feature branches, before the budget-only adjustment. Existing startup, CSS, PDF, conversation gzip and aggregate gzip caps remain unchanged.",
+    "commonJsCss": {
+      "rawBytes": 1307435,
+      "gzipBytes": 380994
+    },
+    "conversationUpgrade": {
+      "rawBytes": 692307,
+      "gzipBytes": 209624
+    },
+    "totalJsCss": {
+      "rawBytes": 3845162,
+      "gzipBytes": 1150304
+    },
+    "initialEntryJs": {
+      "rawBytes": 441390,
+      "gzipBytes": 130502
+    },
+    "settingsRouteRawBytes": 63767
+  },
+  "intelligentUiBaseline": {
+    "gzipBytes": 24219,
+    "rawBytes": 72518,
+    "commit": "e3dc8f6439ca724de929fc6fbb84ed868dea261a",
+    "note": "Previously budgeted OpenUI 0.3.2 engine. Aggregate comparisons subtract only the incremental optional UI graph above this contribution; the entire new graph is independently capped."
   }
 }

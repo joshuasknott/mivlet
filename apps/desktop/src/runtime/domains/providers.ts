@@ -279,7 +279,12 @@ export type RuntimeCodexEvent =
       type: "usage";
       inputTokens: number;
       outputTokens: number;
-      costUsd?: number;
+      costUsd?: number | null;
+      costEstimated?: boolean;
+      costUnknown?: boolean;
+      cachedInputTokens?: number;
+      cacheWriteTokens?: number;
+      reasoningTokens?: number;
     }
   | { type: "done"; finishReason: "stop" | "tool-calls" | "length" | "error" }
   | { type: "error"; message: string }

@@ -316,7 +316,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                     const discovery = discoveries[server.id];
                     const draft = enablementDrafts[server.id];
                     return <div className="mcp-settings__server" key={server.id}>
-                      <div className="provider-access-row">
+                      <div className="provider-access-row mcp-settings__server-header">
                         <span>
                           <strong>{server.displayName}</strong>
                           <small>{server.disabled ? "Off" : `${server.transport === "stdio" ? "Saved locally" : "Remote HTTPS"} · No tools enabled by default`}</small>

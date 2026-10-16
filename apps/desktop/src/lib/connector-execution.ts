@@ -6,6 +6,18 @@ import { assertConnectorToolSucceeded } from "./connector-errors";
 import type { DesktopToolExecutorOptions } from "./desktop-tool-options";
 import { runConnectedApp } from "./connected-app-cancellation";
 
+function appResourceUri(tool: Record<string, unknown>): string | undefined {
+  const meta = tool._meta;
+  if (!meta || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+  const ui = (meta as Record<string, unknown>).ui;
+  const uri = ui && typeof ui === "object" && !Array.isArray(ui)
+    ? (ui as Record<string, unknown>).resourceUri
+    : (meta as Record<string, unknown>)["ui/resourceUri"];
+  return typeof uri === "string" && uri.startsWith("ui://") && uri.length <= 2_048 && !/[\u0000-\u001f\u007f]/u.test(uri)
+    ? uri
+    : undefined;
+}
+
 export async function runOfficialConnector(
   gate: ApprovalGate, operation: string, parsed: Record<string, unknown>, options: DesktopToolExecutorOptions,
   checkProviderCall: () => Promise<void>,
@@ -50,6 +62,14 @@ export async function runOfficialConnector(
     const result = await connection.transport.executeAuthorizedToolCall(proposal, permit.permitId);
     requireCurrent();
     assertConnectorToolSucceeded(result);
-    return JSON.stringify(result);
+    // Keep the app descriptor alongside the bounded, untrusted result so a
+    // saved conversation can reopen the UI without another model call. The
+    // descriptor never contains credentials or arbitrary server metadata.
+    const resourceUri = resourceRead ? undefined : appResourceUri(
+      enabledTools.find((candidate) => candidate.name === toolName) as unknown as Record<string, unknown>,
+    );
+    return JSON.stringify(resourceUri && result && typeof result === "object" && !Array.isArray(result)
+      ? { ...(result as Record<string, unknown>), mcpApp: { connectorId, toolName, resourceUri } }
+      : result);
   });
 }

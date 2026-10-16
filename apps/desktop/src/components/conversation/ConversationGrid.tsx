@@ -19,6 +19,8 @@ export function ConversationGrid({
         key={node.pane}
         className="conversation-dock"
         data-conversation-pane={node.pane}
+        hidden={compact && node.pane !== layout.activePane}
+        style={compact && node.pane !== layout.activePane ? { display: "none" } : undefined}
       >
         {renderPane(node.pane)}
       </div>
@@ -26,7 +28,7 @@ export function ConversationGrid({
       <div
         className={`conversation-grid-split conversation-grid-split--${node.axis}`}
         style={
-          node.axis === "row"
+          compact ? { display: "contents" } : node.axis === "row"
             ? {
                 gridTemplateColumns: `minmax(0, ${node.ratio}fr) 5px minmax(0, ${1 - node.ratio}fr)`,
               }
@@ -37,6 +39,7 @@ export function ConversationGrid({
       >
         {render(node.children[0], [...path, 0])}
         <PaneDivider
+          hidden={compact}
           axis={node.axis}
           ratio={node.ratio}
           onResize={(ratio) => onAction({ type: "resize", path, ratio })}
@@ -46,7 +49,9 @@ export function ConversationGrid({
     );
   return (
     <div className="conversation-panes">
-      {compact ? renderPane(layout.activePane) : render(layout.tree, [])}
+      {/* Keep pane identity across breakpoints: remounting loses drafts,
+          selection, reading position and live interactive-result sessions. */}
+      {render(layout.tree, [])}
     </div>
   );
 }
@@ -55,14 +60,17 @@ export function PaneDivider({
   ratio,
   onResize,
   axis = "row",
+  hidden = false,
 }: {
   ratio: number;
   onResize: (ratio: number) => void;
   axis?: "row" | "column";
+  hidden?: boolean;
 }) {
   return (
     <div
       className={`conversation-divider conversation-divider--${axis}`}
+      hidden={hidden}
       role="separator"
       tabIndex={0}
       aria-label="Resize conversation panes"

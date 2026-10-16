@@ -1,0 +1,17 @@
+.assistant-message-tools { width: 100%; min-width: 0; }
+.assistant-message-actions { display: flex; gap: 4px; opacity: 0; }
+.conversation-response:hover .assistant-message-actions,
+.conversation-message--user:hover .assistant-message-actions,
+.assistant-message-tools:focus-within .assistant-message-actions { opacity: 1; }
+.assistant-message-tools button { min-height: 36px; border: 0; border-radius: 6px; padding: 6px 10px; background: transparent; color: var(--ink-muted); font: inherit; font-size: 12px; cursor: pointer; }
+.assistant-message-tools button:hover { background: var(--surface-hover); color: var(--ink); }
+.assistant-message-tools button:disabled { opacity: .5; cursor: default; }
+.assistant-message-tools :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.message-edit-form { display: grid; gap: 8px; width: min(680px, 100%); margin-block: 12px; padding: 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.message-edit-form textarea { width: 100%; min-height: 90px; max-height: 320px; padding: 10px; resize: vertical; border: 1px solid var(--line); border-radius: 8px; background: var(--surface-raised); color: var(--ink); font: inherit; line-height: 1.6; }
+.message-edit-form p { margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
+.message-edit-form > div { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+@media (hover: none), (max-width: 700px) {
+  .assistant-message-actions { opacity: 1; }
+  .assistant-message-tools button { min-height: 44px; }
+}

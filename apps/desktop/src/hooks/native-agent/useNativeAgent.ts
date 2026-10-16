@@ -14,6 +14,10 @@ import {
   CONVERSATION_STYLE_INSTRUCTIONS,
   toolActivity,
 } from "../../lib/conversation-presentation";
+import {
+  GENERATED_UI_INSTRUCTIONS,
+  loadGeneratedUiInstructions,
+} from "../../lib/generated-interface";
 import type { AgentBackend } from "@mivlet/connectors";
 import { cancelNativeAgentRun } from "./cancellation";
 import { nativeAgentContextScope } from "./context";
@@ -151,9 +155,19 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
       attemptToRetry: ExecutionAttempt,
       tools: AgentTurnRequest["tools"] = [],
       permissionMode: PermissionMode = "read-only",
-      instructions: string = CONVERSATION_STYLE_INSTRUCTIONS,
+      instructions: string = `${CONVERSATION_STYLE_INSTRUCTIONS}\n\n${GENERATED_UI_INSTRUCTIONS}`,
       control?: NativeAgentRunControl,
     ) => {
+      const requestedThread = threadIdRef.current;
+      const requestedScope = JSON.stringify(contextScopeRef.current);
+      if (instructions.includes(GENERATED_UI_INSTRUCTIONS))
+        instructions = `${instructions}\n${await loadGeneratedUiInstructions()}`;
+      if (
+        requestedThread !== threadIdRef.current ||
+        requestedScope !== JSON.stringify(contextScopeRef.current) ||
+        shouldCancelRef.current?.()
+      )
+        return;
       const blocked = describeRetryBlock(attemptToRetry, {
         threadId: threadIdRef.current,
         models: modelsRef.current,

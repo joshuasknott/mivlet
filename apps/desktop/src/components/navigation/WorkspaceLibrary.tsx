@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   CollaborationWorkItem,
@@ -10,11 +10,15 @@ import type {
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { listRuntimeLocalComputerFiles } from "../../runtime/domains/local-computer";
-import { RepositoryFiles } from "./RepositoryFiles";
 import { NativeExecutionSetup } from "./NativeExecutionSetup";
+import { NativeCommandJobs } from "./NativeCommandJobs";
+import { listRuntimeOutputs } from "../../runtime/domains/outputs";
+import { subscribeOutputPinned } from "../../lib/output-revision-events";
 import { PanelFileRow } from "./PanelFileRow";
 import { panelFiles, type PanelFile } from "./workspace-panel-data";
 import type { RightPanelTab } from "./right-panel-state";
+
+const RepositoryFiles = lazy(() => import("./RepositoryFiles").then((module) => ({ default: module.RepositoryFiles })));
 
 export function WorkspaceLibrary({
   workspaceId,
@@ -41,7 +45,16 @@ export function WorkspaceLibrary({
   const [origin, setOrigin] = useState("all");
   const [limit, setLimit] = useState(40);
   const [technical, setTechnical] = useState(false);
-  const files =
+  const pinned = useQuery({
+    queryKey: ["workspace-pinned-outputs", workspaceId],
+    enabled: Boolean(workspaceId),
+    retry: false,
+    queryFn: () => listRuntimeOutputs({ includeUnpinned: false, expectedWorkspaceId: workspaceId }),
+  });
+  useEffect(() => subscribeOutputPinned((event) => {
+    if (event.workspaceId === workspaceId) void pinned.refetch();
+  }), [workspaceId, pinned.refetch]);
+  const scopedFiles =
     suppliedFiles ??
     panelFiles({
       workspaceId,
@@ -52,6 +65,10 @@ export function WorkspaceLibrary({
       project,
       sources,
     });
+  const files: PanelFile[] = [...scopedFiles, ...(pinned.data ?? []).map((output) => ({
+    id: "pinned:" + output.id, title: output.title, detail: "Pinned output", origin: "created" as const,
+    updatedAt: output.updatedAt, tab: { id: "output:" + output.id, kind: "output" as const, title: output.title, outputId: output.id },
+  }))];
   const search = query.trim().toLowerCase();
   const filtered = files.filter(
     (file) =>
@@ -176,7 +193,10 @@ export function WorkspaceLibrary({
         {technical && (
           <>
             <NativeExecutionSetup />
-            <RepositoryFiles workspaceId={workspaceId} agents={agents} />
+            <NativeCommandJobs workspaceId={workspaceId} agents={agents} />
+            <Suspense fallback={<p role="status">Loading repository…</p>}>
+              <RepositoryFiles workspaceId={workspaceId} agents={agents} />
+            </Suspense>
             <h3>Agent workspace files</h3>
             {listing.isFetching && <p role="status">Loading files…</p>}
             {listing.data

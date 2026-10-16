@@ -1,4 +1,5 @@
 import type { ToolApprovalGate } from "@mivlet/connectors";
+import { redactSecretsFromObject } from "@mivlet/connectors/agent-runtime";
 import type {
   ActionHistoryEvent,
   ApprovalAuditEntry,
@@ -6,6 +7,7 @@ import type {
   ApprovalGrant,
   ApprovalModification,
   ApprovalRequest,
+  ApprovalResolutionRequest,
   PermissionMode,
 } from "@mivlet/protocol";
 import type { RefObject } from "react";
@@ -73,6 +75,13 @@ export function useWorkspaceApprovals(options: {
     useState<PendingApprovalConfirmation | null>(null);
   const [approvalConfirmationText, setApprovalConfirmationText] = useState("");
   const connectorApprovalRequests = useRef(new Map<string, ApprovalRequest>());
+  const approvalResolutions = useRef(new Map<string, Promise<void>>());
+  const cancelledApprovalIds = useRef(new Set<string>());
+  const [pendingNativeApprovalIds, setPendingNativeApprovalIds] = useState<
+    string[]
+  >([]);
+  const mcpAppResolvers = useRef(new Map<string, (resolution: ApprovalResolutionRequest | null) => void>());
+  const mcpAppTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const openApprovals = useMemo(
     () =>
       backendToolApprovals.filter(
@@ -185,7 +194,21 @@ export function useWorkspaceApprovals(options: {
 
   const clearBackendToolApprovals = (ids?: readonly string[]) => {
     if (ids) {
-      for (const id of ids) connectorApprovalRequests.current.delete(id);
+      for (const id of ids) {
+        if (approvalResolutions.current.has(id))
+          cancelledApprovalIds.current.add(id);
+        // Stop and scope teardown must release the executor immediately. The
+        // native promise may still settle later, but its result is fenced by
+        // cancelledApprovalIds and can never grant this tool call.
+        if (approvalGateRef.current?.hasPending(id))
+          approvalGateRef.current.resolveDeny(id);
+        connectorApprovalRequests.current.delete(id);
+        const timer = mcpAppTimers.current.get(id);
+        if (timer) clearTimeout(timer);
+        mcpAppTimers.current.delete(id);
+        mcpAppResolvers.current.get(id)?.(null);
+        mcpAppResolvers.current.delete(id);
+      }
       setBackendToolApprovals((current) =>
         current.filter((approval) => !ids.includes(approval.id)),
       );
@@ -197,6 +220,15 @@ export function useWorkspaceApprovals(options: {
       return;
     }
     connectorApprovalRequests.current.clear();
+    for (const id of approvalResolutions.current.keys()) {
+      cancelledApprovalIds.current.add(id);
+      if (approvalGateRef.current?.hasPending(id))
+        approvalGateRef.current.resolveDeny(id);
+    }
+    for (const resolve of mcpAppResolvers.current.values()) resolve(null);
+    for (const timer of mcpAppTimers.current.values()) clearTimeout(timer);
+    mcpAppResolvers.current.clear();
+    mcpAppTimers.current.clear();
     setBackendToolApprovals([]);
     setApprovalPreviews({});
   };
@@ -220,7 +252,7 @@ export function useWorkspaceApprovals(options: {
     setApprovalConfirmationText("");
   };
 
-  const resolveApprovalDecision = async (
+  const resolveApprovalDecisionInternal = async (
     approval: ApprovalRequest,
     decision: ApprovalDecision,
     modification?: ApprovalModification,
@@ -244,13 +276,18 @@ export function useWorkspaceApprovals(options: {
         "Approvals require the desktop runtime.",
       );
 
+      if (cancelledApprovalIds.current.has(approval.id)) {
+        if (gate?.hasPending(approval.id)) gate.resolveDeny(approval.id);
+        return;
+      }
+
       // A permission change, cancellation, or workspace switch while native
       // persistence is pending must never release an obsolete tool call.
       if (
         identity !== workspaceIdentityRef.current ||
         gate !== approvalGateRef.current
       ) {
-        gate?.resolveDeny(approval.id);
+        if (gate?.hasPending(approval.id)) gate.resolveDeny(approval.id);
         return;
       }
       if (
@@ -258,7 +295,7 @@ export function useWorkspaceApprovals(options: {
         (permissionModeRef.current !== "full-access" ||
           !gate?.hasPending(approval.id))
       ) {
-        gate?.resolveDeny(approval.id);
+        if (gate?.hasPending(approval.id)) gate.resolveDeny(approval.id);
         return;
       }
 
@@ -306,6 +343,15 @@ export function useWorkspaceApprovals(options: {
       );
       connectorApprovalRequests.current.delete(approval.id);
 
+      const mcpResolver = mcpAppResolvers.current.get(approval.id);
+      if (mcpResolver) {
+        mcpAppResolvers.current.delete(approval.id);
+        const timer = mcpAppTimers.current.get(approval.id);
+        if (timer) clearTimeout(timer);
+        mcpAppTimers.current.delete(approval.id);
+        mcpResolver(decision === "deny" ? null : request);
+      }
+
       clearApprovalInteraction();
       setLastAction(
         decision === "modify"
@@ -313,7 +359,20 @@ export function useWorkspaceApprovals(options: {
           : `${decision} recorded for ${approval.service}`,
       );
     } catch (error) {
-      if (automatic) gate?.resolveDeny(approval.id);
+      if (cancelledApprovalIds.current.has(approval.id)) {
+        if (gate?.hasPending(approval.id)) gate.resolveDeny(approval.id);
+        return;
+      }
+      const mcpResolver = mcpAppResolvers.current.get(approval.id);
+      if (mcpResolver) {
+        mcpAppResolvers.current.delete(approval.id);
+        const timer = mcpAppTimers.current.get(approval.id);
+        if (timer) clearTimeout(timer);
+        mcpAppTimers.current.delete(approval.id);
+        mcpResolver(null);
+      }
+      if (automatic && gate?.hasPending(approval.id))
+        gate.resolveDeny(approval.id);
       if (
         identity !== workspaceIdentityRef.current ||
         gate !== approvalGateRef.current
@@ -325,6 +384,50 @@ export function useWorkspaceApprovals(options: {
           : "Mivlet could not resolve that approval.",
       );
     }
+  };
+
+  const resolveApprovalDecision = (
+    approval: ApprovalRequest,
+    decision: ApprovalDecision,
+    modification?: ApprovalModification,
+    automatic = false,
+  ): Promise<void> => {
+    const existing = approvalResolutions.current.get(approval.id);
+    if (existing) {
+      if (decision === "deny") {
+        cancelledApprovalIds.current.add(approval.id);
+        if (approvalGateRef.current?.hasPending(approval.id))
+          approvalGateRef.current.resolveDeny(approval.id);
+        clearBackendToolApprovals([approval.id]);
+        clearApprovalInteraction();
+        setLastAction("Denied while native confirmation was pending.");
+      } else {
+        setLastAction("Waiting for native confirmation…");
+      }
+      return existing;
+    }
+
+    const resolution = (async () => {
+      setPendingNativeApprovalIds((current) =>
+        current.includes(approval.id) ? current : [...current, approval.id],
+      );
+      try {
+        await resolveApprovalDecisionInternal(
+          approval,
+          decision,
+          modification,
+          automatic,
+        );
+      } finally {
+        approvalResolutions.current.delete(approval.id);
+        cancelledApprovalIds.current.delete(approval.id);
+        setPendingNativeApprovalIds((current) =>
+          current.filter((id) => id !== approval.id),
+        );
+      }
+    })();
+    approvalResolutions.current.set(approval.id, resolution);
+    return resolution;
   };
 
   const requestApprovalDecision = (
@@ -361,7 +464,64 @@ export function useWorkspaceApprovals(options: {
     void resolveApprovalDecision(approval, decision, modification);
   };
 
+  const requestMcpAppApproval = (preview: {
+    request: ApprovalRequest;
+    toolName: string;
+    arguments: Record<string, unknown>;
+    owner: { workspaceId: string; conversationId: string; resultId: string; generation: number };
+  }) => {
+    // The pane fence is intentionally repeated here at the shared approval
+    // boundary. The account hook stores workspace, account owner and member in
+    // this identity; checking the workspace component prevents a stale guest
+    // from enqueueing a request during a scope switch/unmount race.
+    const identity = workspaceIdentityRef.current;
+    let activeWorkspaceId: string | undefined;
+    if (identity) {
+      try {
+        const decoded: unknown = JSON.parse(identity);
+        if (Array.isArray(decoded) && typeof decoded[0] === "string")
+          activeWorkspaceId = decoded[0];
+      } catch {
+        activeWorkspaceId = undefined;
+      }
+    }
+    // The browser preview has no account identity ref during its initial
+    // seeded render; the conversation hook still enforces its exact
+    // workspace:conversation:generation fence there. Once native account
+    // scope is established, require the shared boundary to agree too.
+    if (identity && (!activeWorkspaceId || activeWorkspaceId !== preview.owner.workspaceId))
+      return Promise.resolve(null);
+    return new Promise<ApprovalResolutionRequest | null>((resolve) => {
+    // MCP permits bind the exact native proposal. Changing its display copy is
+    // not a new proposal; the app must request a fresh action to change inputs.
+    const approval = { ...preview.request, decisions: preview.request.decisions.filter((decision) => decision !== "modify") };
+    mcpAppResolvers.current.set(approval.id, resolve);
+    mcpAppTimers.current.set(approval.id, setTimeout(() => {
+      if (mcpAppResolvers.current.get(approval.id) !== resolve) return;
+      mcpAppResolvers.current.delete(approval.id);
+      mcpAppTimers.current.delete(approval.id);
+      connectorApprovalRequests.current.delete(approval.id);
+      setBackendToolApprovals((current) => current.filter((candidate) => candidate.id !== approval.id));
+      resolve(null);
+    }, 120_000));
+    connectorApprovalRequests.current.set(approval.id, approval);
+    setApprovalPreviews((current) => ({
+      ...current,
+      [approval.id]: {
+        summary: `Interactive MCP App request: ${preview.toolName}\nTo change parameters, deny this request and submit a new action from the app.`,
+        details: JSON.stringify({ owner: preview.owner, arguments: redactSecretsFromObject(preview.arguments) }, null, 2).slice(0, 12_000),
+      },
+    }));
+    setBackendToolApprovals((current) => current.some((candidate) => candidate.id === approval.id) ? current : [...current, approval]);
+    setLastAction(`MCP App requests approval for ${preview.toolName}`);
+    });
+  };
+
   const startApprovalModify = (approval: ApprovalRequest) => {
+    if (mcpAppResolvers.current.has(approval.id)) {
+      setLastAction("Deny this request and submit a new action from the app to change its parameters.");
+      return;
+    }
     setPendingApprovalConfirmation(null);
     setApprovalConfirmationText("");
     setEditingApprovalId(approval.id);
@@ -429,9 +589,11 @@ export function useWorkspaceApprovals(options: {
       approvalModificationDraft,
       pendingApprovalConfirmation,
       approvalConfirmationText,
+      pendingNativeApprovalIds: new Set(pendingNativeApprovalIds),
       setApprovalModificationDraft,
       setApprovalConfirmationText,
       requestApprovalDecision,
+      requestMcpAppApproval,
       startApprovalModify,
       saveApprovalModify,
       confirmApprovalDecision,

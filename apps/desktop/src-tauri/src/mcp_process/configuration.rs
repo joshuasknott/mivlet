@@ -838,7 +838,7 @@ pub fn prepare_mcp_tool_call(proposal: McpToolProposal) -> Result<PreparedMcpToo
     let context = validate_tool_proposal(&proposal)?;
     let approval = approval_for_tool_proposal(
         &proposal,
-        &context.proposal_fingerprint,
+        &context,
         random_session_id()?.replacen("mcp-", "approval-mcp-tool-", 1),
         chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
     );
@@ -857,7 +857,7 @@ pub fn authorize_mcp_tool_call(
     let context = validate_tool_proposal(&request.proposal)?;
     let expected = approval_for_tool_proposal(
         &request.proposal,
-        &context.proposal_fingerprint,
+        &context,
         request.resolution.request.id.clone(),
         request.resolution.request.requested_at.clone(),
     );

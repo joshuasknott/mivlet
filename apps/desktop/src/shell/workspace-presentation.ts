@@ -344,7 +344,15 @@ export function projectEditorDraft(
 
 export type SearchOpenPlan =
   | { kind: "unavailable" }
-  | { kind: "conversation"; conversationId: string }
+  | {
+      kind: "conversation";
+      conversationId: string;
+      origin?: {
+        branchId?: string;
+        messageId?: string;
+        sourceRevisionId?: string;
+      };
+    }
   | { kind: "project"; threadId: string }
   | { kind: "work"; conversationId: string; workId: string }
   | { kind: "agent-room"; conversationId: string }
@@ -361,7 +369,33 @@ export function planSearchOpen(input: {
   if (!target || target.workspaceId !== input.workspaceId)
     return { kind: "unavailable" };
   if (target.type === "conversation")
-    return { kind: "conversation", conversationId: target.conversationId };
+    return {
+      kind: "conversation",
+      conversationId: target.conversationId,
+      ...(target.branchId || target.messageId || target.sourceRevisionId
+        ? {
+            origin: {
+              branchId: target.branchId,
+              messageId: target.messageId,
+              sourceRevisionId: target.sourceRevisionId,
+            },
+          }
+        : {}),
+    };
+  if (target.type === "decision")
+    return {
+      kind: "conversation",
+      conversationId: target.conversationId,
+      ...(target.branchId || target.messageId || target.sourceRevisionId
+        ? {
+            origin: {
+              branchId: target.branchId,
+              messageId: target.messageId,
+              sourceRevisionId: target.sourceRevisionId,
+            },
+          }
+        : {}),
+    };
   if (target.type === "project")
     return { kind: "project", threadId: target.threadId };
   if (target.type === "work")

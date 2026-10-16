@@ -7,6 +7,7 @@ export type SearchObjectKind =
   | "project"
   | "conversation"
   | "work"
+  | "decision"
   | "file";
 
 /** Which part of an object matched the query tokens. */
@@ -38,6 +39,9 @@ export interface SearchResultContext {
   conversationTitle?: string;
   threadId?: string;
   messageId?: string;
+  /** Branch anchor and immutable message revision for exact deep links. */
+  branchId?: string;
+  sourceRevisionId?: string;
   messageSequence?: number;
   workId?: string;
   workStatus?: string;
@@ -71,6 +75,8 @@ export interface SearchScanSummary {
   projectsScanned: number;
   agentsScanned: number;
   filesScanned: number;
+  /** Decision records are optional for backwards-compatible preview fixtures. */
+  decisionsScanned?: number;
 }
 
 export interface SearchResponse {
@@ -92,5 +98,6 @@ export const SEARCH_OBJECT_KINDS: readonly SearchObjectKind[] = [
   "project",
   "conversation",
   "work",
+  "decision",
   "file",
 ];

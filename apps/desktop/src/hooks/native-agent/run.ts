@@ -191,14 +191,16 @@ export async function runNativeAgentTurn(
     modelsRef.current.find((model) => model.id === request.model) ??
     backend.backend.models.find((model) => model.id === request.model);
   const planned = await planAttemptContext({
-    history,
+    history: [...(control?.historyPrefix ?? []), ...history],
     request,
     contextPrefix: prepared.systemPrefix,
     selectedModel,
+    contextWindowLimit: control?.contextWindowLimit,
     provider,
     backendType: provider?.backendType ?? backend.backend.backendType,
     requestThreadId,
-    historyEntries,
+    // Recompaction cannot silently replace the explicitly reviewed transfer.
+    historyEntries: control?.historyPrefix?.length ? [] : historyEntries,
     isCurrentScope,
     isCurrentThread,
   });
@@ -446,6 +448,9 @@ export async function runNativeAgentTurn(
         await persistence.record({
           kind: "user",
           content: exchange.content,
+          ...(index === userExchanges.length - 1 && control?.parentMessageId
+            ? { parentMessageId: control.parentMessageId }
+            : {}),
           ...(index === userExchanges.length - 1 && control?.attachments?.length
             ? { attachments: control.attachments }
             : {}),

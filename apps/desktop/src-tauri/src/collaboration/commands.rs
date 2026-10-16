@@ -1,7 +1,129 @@
 use super::*;
+use crate::store::repos::{message, thread};
+use rusqlite::OptionalExtension;
+
+/// Fill source metadata from the canonical conversation rows. Renderer fact
+/// commands identify the owning conversation only; native code chooses the
+/// current branch and, for agent records, the terminal assistant message for
+/// the exact run. Legacy records remain valid when no source can be recovered.
+pub(super) fn hydrate_fact_source(
+    ctx: &Context<'_>,
+    fact: &mut Fact,
+    capture_current_head: bool,
+) -> Result<()> {
+    let thread_row = thread::get(ctx.conn, ctx.store, &ctx.scope.data, &fact.conversation_id)?
+        .ok_or_else(|| invalid("The source conversation is unavailable."))?;
+    let rows = message::list(ctx.conn, ctx.store, &ctx.scope.data, &fact.conversation_id)?;
+    let source = if let Some(message_id) = fact.message_id.as_deref() {
+        Some(
+            rows.iter()
+                .find(|row| row.id == message_id)
+                .ok_or_else(|| invalid("The fact source message is unavailable."))?,
+        )
+    } else if let Some(run_id) = fact.run_id.as_deref() {
+        rows.iter()
+            .filter(|row| {
+                row.run_id.as_deref() == Some(run_id)
+                    && row.kind == "assistant"
+                    && row.current_revision_state != "redacted"
+            })
+            .max_by_key(|row| row.sequence)
+    } else {
+        None
+    };
+    if let Some(row) = source {
+        if row.current_revision_state == "redacted" {
+            return Err(invalid(
+                "A redacted message cannot be used as fact provenance.",
+            ));
+        }
+        fact.message_id = Some(row.id.clone());
+        if fact.source_revision_id.is_none() {
+            fact.source_revision_id = Some(row.current_revision_id.clone());
+        }
+        if fact.branch_id.is_none() {
+            // A message is also a valid branch head and guarantees that the
+            // exact source remains reachable even if the user later switches
+            // the conversation's selected branch.
+            fact.branch_id = Some(row.id.clone());
+        }
+    }
+    if capture_current_head && fact.branch_id.is_none() {
+        fact.branch_id = thread_row.selected_head_id.or(thread_row.last_message_id);
+    }
+    if capture_current_head && fact.message_id.is_none() && fact.run_id.is_none() {
+        if let Some(branch_id) = fact.branch_id.as_deref() {
+            if let Some(row) = rows.iter().find(|row| row.id == branch_id) {
+                if row.current_revision_state != "redacted" {
+                    fact.message_id = Some(row.id.clone());
+                    fact.source_revision_id = Some(row.current_revision_id.clone());
+                }
+            }
+        }
+    }
+    if fact.message_id.is_none() {
+        if let Some(revision_id) = fact.source_revision_id.as_deref() {
+            fact.message_id = ctx
+                .conn
+                .query_row(
+                    "SELECT m.id FROM message_revision r JOIN message m ON m.id=r.message_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND r.id=?3 AND m.deleted_at IS NULL",
+                    rusqlite::params![ctx.scope.data.workspace_id(), fact.conversation_id, revision_id],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if fact.message_id.is_none() {
+                return Err(invalid("The fact source revision is unavailable."));
+            }
+        }
+    }
+    for branch_id in [fact.branch_id.as_deref(), fact.message_id.as_deref()]
+        .into_iter()
+        .flatten()
+    {
+        id(branch_id)?;
+        if !rows.iter().any(|row| row.id == branch_id) {
+            return Err(invalid(
+                "The fact source does not belong to its conversation.",
+            ));
+        }
+    }
+    if let Some(revision_id) = fact.source_revision_id.as_deref() {
+        id(revision_id)?;
+        let belongs: bool = ctx.conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM message_revision r JOIN message m ON m.id=r.message_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND r.id=?3 AND (?4 IS NULL OR m.id=?4) AND m.deleted_at IS NULL)",
+            rusqlite::params![ctx.scope.data.workspace_id(), fact.conversation_id, revision_id, fact.message_id.as_deref()],
+            |row| row.get(0),
+        )?;
+        if !belongs {
+            return Err(invalid(
+                "The fact source revision does not belong to its message.",
+            ));
+        }
+    }
+    Ok(())
+}
 
 pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
     match command {
+        Command::ArmProviderReset {
+            id,
+            expected_generation,
+            opportunity_id,
+            reconcile,
+        } => {
+            super::provider_resets::arm(ctx, &id, expected_generation, &opportunity_id, reconcile)?
+        }
+        Command::CancelProviderReset {
+            id,
+            expected_generation,
+        } => super::provider_resets::cancel(ctx, &id, expected_generation)?,
+        Command::DispatchProviderResets => super::provider_resets::dispatch(ctx)?,
+        Command::StartProviderContinuation {
+            id,
+            input,
+            fingerprint,
+            reconcile,
+        } => provider_continuation::start(ctx, &id, &input, &fingerprint, reconcile)?,
         Command::SteerWork {
             id: key,
             expected_generation,
@@ -27,6 +149,10 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 ));
             }
             let uncertain = !item.run_ids.is_empty();
+            super::provider_resets::require_review(
+                &mut item,
+                "Work was steered. Review saved outcomes before choosing a new continuation.",
+            );
             item.generation += 1;
             item.current_run_id = None;
             item.steering.push(WorkSteering {
@@ -252,6 +378,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             agent_id,
             prompt,
             discussion,
+            parent_message_id,
             recipient_ids,
             attachments,
         } => {
@@ -264,7 +391,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                         "The primary agent must be the first explicit workspace recipient.",
                     ));
                 }
-                work::start_for_recipients(
+                work::start_for_recipients_with_parent(
                     ctx,
                     id,
                     conversation_id,
@@ -273,10 +400,11 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                     prompt,
                     discussion,
                     None,
+                    parent_message_id.as_deref(),
                     attachments.as_deref(),
                 )?;
             } else {
-                work::start(
+                work::start_with_parent(
                     ctx,
                     id,
                     conversation_id,
@@ -284,6 +412,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                     prompt,
                     discussion,
                     None,
+                    parent_message_id.as_deref(),
                     attachments.as_deref(),
                 )?;
             }
@@ -354,24 +483,8 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             {
                 return Err(invalid("Inspect the latest saved results and reconcile external effects before continuing."));
             }
-            let room = ctx.room(&item.conversation_id)?;
+            let room = continuation_context(ctx, &item)?;
             let agent = profile(ctx.profiles, &item.agent_id)?;
-            if !item.workspace_recipient
-                && !room
-                    .participants
-                    .iter()
-                    .any(|p| p.agent_id == item.agent_id)
-            {
-                return Err(invalid("This teammate is no longer a participant. Create a new assignment for a current participant."));
-            }
-            let root = ctx.item(&item.root_id)?;
-            if root.id != item.id
-                && matches!(root.status, WorkStatus::Cancelled | WorkStatus::Completed)
-            {
-                return Err(invalid(
-                    "Start a new request; this assignment's parent has ended.",
-                ));
-            }
             if item.captured_context.is_none() {
                 item.captured_context = Some(super::context::capture(ctx, &room, agent)?);
             }
@@ -392,6 +505,13 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             // An explicit, reconciled continuation is ordinary user Work. The
             // completed occurrence must never grant a fresh automation claim.
             item.schedule = None;
+            // Reconciliation is a new user-authorized foreground attempt; a
+            // crashed native attempt is never resurrected automatically.
+            item.execution_owner = None;
+            super::provider_resets::require_review(
+                &mut item,
+                "An ordinary continuation replaced the reset request.",
+            );
             item.conversation_generation = room.generation;
             item.context_revision = room
                 .project_id
@@ -483,6 +603,10 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                 status: "current".into(),
                 conversation_id,
                 run_id: None,
+                branch_id: None,
+                message_id: None,
+                source_revision_id: None,
+                pinned: false,
                 source,
                 supersedes_id,
                 created_at: ctx.time.into(),
@@ -512,12 +636,48 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             ctx.fact(&fact)?;
             bump_context(ctx, &project_id, None)?;
         }
+        Command::PinFact {
+            id,
+            project_id,
+            pinned,
+        } => {
+            ctx.project_team(&project_id)?;
+            let mut fact: Fact =
+                repo::get(ctx.conn, ctx.store, &ctx.scope.private, Kind::Fact, &id)?
+                    .ok_or_else(|| invalid("This fact is unavailable."))?;
+            if fact.project_id != project_id || fact.status == "forgotten" {
+                return Err(invalid("This fact cannot be pinned in this project."));
+            }
+            fact.pinned = pinned;
+            ctx.fact(&fact)?;
+        }
         Command::SaveLayout { layout } => {
             validate_layout(ctx, &layout)?;
             ctx.put(Kind::Layout, "workspace", None, None, &layout)?;
         }
     }
     Ok(())
+}
+
+/// Shared admission prerequisite for ordinary and reset continuations.
+pub(super) fn continuation_context(ctx: &Context<'_>, item: &Work) -> Result<Conversation> {
+    let room = ctx.room(&item.conversation_id)?;
+    profile(ctx.profiles, &item.agent_id)?;
+    if !item.workspace_recipient
+        && !room
+            .participants
+            .iter()
+            .any(|p| p.agent_id == item.agent_id)
+    {
+        return Err(invalid("This agent is no longer a participant. Create a new assignment for a current participant."));
+    }
+    let root = ctx.item(&item.root_id)?;
+    if root.id != item.id && matches!(root.status, WorkStatus::Cancelled | WorkStatus::Completed) {
+        return Err(invalid(
+            "Start a new request; this assignment's parent has ended.",
+        ));
+    }
+    Ok(room)
 }
 
 fn invalidate_room(ctx: &Context<'_>, room: &str, reason: &str) -> Result<()> {
@@ -572,6 +732,7 @@ pub(super) fn save_fact(ctx: &Context<'_>, mut fact: Fact, sender: Option<&str>)
             "A shared fact must originate in a conversation in this project.",
         ));
     }
+    hydrate_fact_source(ctx, &mut fact, true)?;
     if !["fact", "decision"].contains(&fact.kind.as_str()) {
         return Err(invalid("Choose a fact or a decision."));
     }

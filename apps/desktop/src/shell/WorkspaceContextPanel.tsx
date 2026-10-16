@@ -12,6 +12,7 @@ import {
 } from "../components/navigation/workspace-panel-data";
 import {
   PanelArtifact,
+  PanelOutput,
   PanelWebPreview,
 } from "../components/navigation/PanelContent";
 import { WorkspaceRightNav } from "../components/navigation/WorkspaceRightNav";
@@ -138,6 +139,9 @@ export function WorkspaceContextPanel({
               output={tab.output}
               agentId={tab.agentId}
               workspaceId={workspaceId}
+              conversationId={tab.conversationId}
+              messageId={tab.messageId}
+              sourceRevisionId={tab.sourceRevisionId}
               onClose={close}
             />
           );
@@ -153,8 +157,33 @@ export function WorkspaceContextPanel({
               embedded
             />
           );
+        if (tab.kind === "output")
+          return (
+            <PanelOutput
+              key={tab.id}
+              outputId={tab.outputId}
+              workspaceId={workspaceId}
+              onOpenConversation={(conversationId, source) => {
+                nav.openConversation(conversationId, {
+                  branchId: source.branchId,
+                  messageId: source.messageId,
+                  sourceRevisionId: source.sourceRevisionId,
+                });
+              }}
+              onClose={close}
+            />
+          );
         if (tab.kind === "web")
           return <PanelWebPreview key={tab.id} url={tab.url} />;
+        if (tab.kind === "mcp-app")
+          return (
+            <div
+              key={tab.id}
+              className="right-panel__mcp-app"
+              data-mcp-app-panel={tab.id}
+              aria-label={`${tab.title} interactive result`}
+            />
+          );
         const room = state.data.conversations.find(
           (entry) => entry.id === tab.roomId,
         );
@@ -216,7 +245,11 @@ export function WorkspaceContextPanel({
                 ? historySelection.id
                 : nav.navWorkId
             }
-            onOpenConversation={nav.open}
+            onOpenConversation={(conversationId, source) =>
+              source?.messageId || source?.branchId || source?.sourceRevisionId
+                ? nav.openConversation(conversationId, source)
+                : nav.open(conversationId)
+            }
           />
         </Suspense>
       }

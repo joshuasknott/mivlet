@@ -14,6 +14,30 @@ function wrapper({ children }: PropsWithChildren) {
 }
 
 describe("conversation shell runtime", () => {
+  it("requires a fresh MCP App proposal instead of offering unsupported approval modification", async () => {
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    const request = { id: "app-approval", service: "mcp", action: "get-time", mode: "read-only" as const, riskLevel: "low" as const, dataUsed: [], consequence: "Read the local clock", requestedAt: new Date().toISOString(), decisions: ["once", "modify", "deny"] as const };
+    let resolution: Promise<unknown>;
+    act(() => { resolution = result.current.requestMcpAppApproval({ request: { ...request, decisions: [...request.decisions] }, toolName: "get-time", arguments: {}, owner: { workspaceId: "preview-default", conversationId: "test-chat", resultId: "test-result", generation: 1 } }); });
+    expect(result.current.openApprovals.find(item => item.id === request.id)?.decisions).toEqual(["once", "deny"]);
+    act(() => result.current.startApprovalModify({ ...request, decisions: [...request.decisions] }));
+    expect(result.current.editingApprovalId).toBeNull();
+    act(() => result.current.clearBackendToolApprovals([request.id]));
+    await expect(resolution!).resolves.toBeNull();
+  });
+  it("enforces frozen file exclusions in the actual request context assembly", async () => {
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    let sourceId: string | null = null;
+    await act(async () => { sourceId = await result.current.importKnowledgeFile(new File(["Orchard plan: plant exactly twelve apple trees."], "orchard.md", { type: "text/markdown" }), "Orchard plan: plant exactly twelve apple trees."); });
+    expect(sourceId).toBeTruthy();
+    const included = await result.current.assembleConversationContext("orchard apple trees", { allowedKnowledgeSourceIds: [sourceId!], excludePrivateMemory: true, excludeDerivedSummaries: true });
+    expect(included.systemPrefix).toContain("twelve apple trees");
+    const excluded = await result.current.assembleConversationContext("orchard apple trees", { allowedKnowledgeSourceIds: [sourceId!], excludedKnowledgeSourceIds: [sourceId!], excludePrivateMemory: true, excludeDerivedSummaries: true });
+    expect(excluded.systemPrefix).not.toContain("twelve apple trees");
+    expect(excluded.receipt.citations).toEqual([]);
+  });
   it("saves only an explicit new chat memory and uses the native merged result", async () => {
     const save = vi.spyOn(memoryRuntime, "saveRuntimeMemoryState").mockImplementation(async state => state);
     const { result } = renderHook(() => useShellRuntime(), { wrapper });

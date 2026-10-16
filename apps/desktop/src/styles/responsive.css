@@ -10,7 +10,6 @@
     min-height: 100dvh;
   }
 
-  .context-panel--split,
   .connector-search {
     grid-template-columns: 1fr;
   }
@@ -130,12 +129,6 @@
     font-size: var(--text-15);
   }
 
-  .composer-control-anchor--permissions .composer-menu {
-    right: 12px;
-    left: 12px;
-    border-radius: 16px;
-  }
-
   .composer-control-anchor--model .composer-menu {
     right: 12px;
     left: 12px;
@@ -218,10 +211,6 @@
   .provider-access-row {
     grid-template-columns: 32px minmax(0, 1fr);
     gap: 10px 12px;
-  }
-
-  .settings-local-storage {
-    padding-top: 28px;
   }
 
   .toggle-row {

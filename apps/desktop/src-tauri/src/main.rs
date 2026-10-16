@@ -6,6 +6,19 @@ fn main() {
     // turns retain an inert helper so expired sessions cannot open a browser.
     let mut args = std::env::args().skip(1);
     match args.next().as_deref() {
+        Some("--mivlet-background-worker") => {
+            let Some(account) = args
+                .next()
+                .filter(|value| value.starts_with("bootstrap_") && value.len() <= 128)
+            else {
+                std::process::exit(2);
+            };
+            if args.next().is_some() {
+                std::process::exit(2);
+            }
+            mivlet_desktop_lib::run_background_worker(account);
+            return;
+        }
         #[cfg(windows)]
         Some("--mivlet-execution-setup") => {
             let owner = args.next().unwrap_or_default();

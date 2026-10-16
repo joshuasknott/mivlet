@@ -1,0 +1,37 @@
+.conversation-recap {
+  margin: 12px 0;
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.conversation-recap summary {
+  padding: 8px 0;
+  cursor: pointer;
+}
+.conversation-recap ul {
+  padding-left: 18px;
+}
+.conversation-recap li {
+  margin: 12px 0;
+}
+.conversation-recap p {
+  margin: 4px 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.conversation-recap button {
+  display: block;
+  margin-top: 6px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  padding: 6px 9px;
+  min-height: 32px;
+  cursor: pointer;
+}
+.conversation-recap :focus-visible {
+  outline: 2px solid var(--accent, #9284d9);
+  outline-offset: 2px;
+}

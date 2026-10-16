@@ -24,6 +24,8 @@ struct Intent {
     previous_id: String,
     output_id: String,
     acknowledged: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    checkpoint_id: Option<String>,
 }
 pub struct Prepared {
     parent: PathBuf,
@@ -42,6 +44,7 @@ pub struct Recovery {
     pub output_id: String,
     pub outcome: String,
     pub previous: Option<PathBuf>,
+    pub checkpoint_id: Option<String>,
 }
 fn hex_id(value: &str, length: usize) -> bool {
     value.len() == length && value.bytes().all(|b| b.is_ascii_hexdigit())
@@ -104,6 +107,10 @@ fn read_intent(destination: &Path, scope: &str) -> Result<Option<Prepared>, Stri
         || intent.binding.generation == 0
         || intent.binding.operation_id == 0
         || !hex_id(&intent.run_id, 48)
+        || intent
+            .checkpoint_id
+            .as_ref()
+            .is_some_and(|id| !hex_id(id, 48))
         || !intent
             .transaction
             .starts_with(&format!("native-import-{}-", intent.run_id))
@@ -156,21 +163,110 @@ pub(crate) fn prepare(
     receipt: &Receipt,
     current: &dyn Fn() -> bool,
 ) -> Result<Prepared, String> {
+    let origin = ImportSource {
+        id: &receipt.run_id,
+        binding: &receipt.binding,
+        operation_id: &receipt.command_id,
+        input_id: &receipt.input_id,
+        output_id: receipt
+            .output_id
+            .as_deref()
+            .ok_or("Import needs a sealed output.")?,
+        checkpoint_id: None,
+    };
+    prepare_source(source, destination, limits, origin, None, current)
+}
+
+struct ImportSource<'a> {
+    id: &'a str,
+    binding: &'a Binding,
+    operation_id: &'a str,
+    input_id: &'a str,
+    output_id: &'a str,
+    checkpoint_id: Option<&'a str>,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_restore(
+    source: &Path,
+    destination: &Path,
+    limits: Limits,
+    checkpoint_id: &str,
+    expected_current: &str,
+    expected_output: &str,
+    binding: Binding,
+    current: &dyn Fn() -> bool,
+) -> Result<Prepared, String> {
+    use sha2::{Digest, Sha256};
+    if !hex_id(checkpoint_id, 48)
+        || !hex_id(expected_current, 64)
+        || !hex_id(expected_output, 64)
+        || !hex_id(&binding.scope_id, 64)
+        || binding.generation == 0
+        || binding.operation_id == 0
+    {
+        return Err("Invalid checkpoint restore binding.".into());
+    }
+    let mut nonce = [0u8; 24];
+    getrandom::fill(&mut nonce).map_err(|_| "Cannot identify checkpoint restore.")?;
+    let restore_id = hex::encode(nonce);
+    let operation_id = hex::encode(Sha256::digest(format!(
+        "checkpoint-restore:{checkpoint_id}:{expected_current}:{expected_output}"
+    )));
+    let origin = ImportSource {
+        id: &restore_id,
+        binding: &binding,
+        operation_id: &operation_id,
+        input_id: expected_current,
+        output_id: expected_output,
+        checkpoint_id: Some(checkpoint_id),
+    };
+    prepare_source(
+        source,
+        destination,
+        limits,
+        origin,
+        Some(expected_current),
+        current,
+    )
+}
+
+fn prepare_source(
+    source: &Path,
+    destination: &Path,
+    limits: Limits,
+    origin: ImportSource<'_>,
+    expected_current: Option<&str>,
+    current: &dyn Fn() -> bool,
+) -> Result<Prepared, String> {
     let (parent, target) = location(destination)?;
     if present(&parent.join(JOURNAL))? {
         return Err("Recover the previous import before another command.".into());
     }
     let previous_id = files::tree_id_current(&target, limits, current)?;
+    if expected_current.is_some_and(|expected| expected != previous_id) {
+        return Err(
+            "Repository changed after restore review. Preview again; nothing restored.".into(),
+        );
+    }
     let transaction = tempfile::Builder::new()
-        .prefix(&format!("native-import-{}-", receipt.run_id))
+        .prefix(&format!("native-import-{}-", origin.id))
         .tempdir_in(&parent)
         .map_err(|_| "Cannot stage repository import.")?;
     let staged = transaction.path().join("staged");
     fs::create_dir(&staged).map_err(|_| "Cannot stage repository import.")?;
     let output_id = files::copy_tree_current(source, &staged, limits, current)?;
-    if receipt.output_id.as_ref() != Some(&output_id) {
+    if origin.output_id != output_id {
         return Err(
             "The sealed command snapshot changed during import. No changes imported.".into(),
+        );
+    }
+    if expected_current.is_some()
+        && files::tree_id_current(&target, limits, current)? != previous_id
+    {
+        return Err(
+            "Repository changed during restore preparation. Preview again; nothing restored."
+                .into(),
         );
     }
     if !current() {
@@ -185,13 +281,14 @@ pub(crate) fn prepare(
             .unwrap()
             .to_string_lossy()
             .into_owned(),
-        run_id: receipt.run_id.clone(),
-        binding: receipt.binding.clone(),
-        command_id: receipt.command_id.clone(),
-        input_id: receipt.input_id.clone(),
+        run_id: origin.id.to_owned(),
+        binding: origin.binding.clone(),
+        command_id: origin.operation_id.to_owned(),
+        input_id: origin.input_id.to_owned(),
         previous_id,
         output_id,
         acknowledged: false,
+        checkpoint_id: origin.checkpoint_id.map(str::to_owned),
     };
     // Retain custody before publishing the intent. An early host death can leave
     // a staging directory, but can never move the checkout without this journal.
@@ -339,6 +436,7 @@ pub fn recover(
         input_id: prepared.intent.input_id.clone(),
         output_id: prepared.intent.output_id.clone(),
         outcome: outcome.into(),
+        checkpoint_id: prepared.intent.checkpoint_id.clone(),
         previous: Some(if target == after && old == before && new.is_none() {
             previous.clone()
         } else {
@@ -381,6 +479,9 @@ pub fn recover(
                 || saved["inputId"] != recovery.input_id
                 || saved["previousId"] != recovery.previous_id
                 || saved["outputId"] != recovery.output_id
+                || saved["checkpointId"]
+                    != serde_json::to_value(&recovery.checkpoint_id)
+                        .map_err(|_| "Invalid checkpoint provenance.")?
             {
                 return Err("Import recovery receipt identity changed.".into());
             }
@@ -485,6 +586,93 @@ mod tests {
         assert_eq!(fs::read(destination.join("data")).unwrap(), b"new");
     }
     #[test]
+    fn checkpoint_restore_rejects_stale_trees_and_has_distinct_transaction_provenance() {
+        let root = tempfile::tempdir().unwrap();
+        let (source, destination, receipt) = fixture(root.path());
+        let before = files::tree_id(&destination, Limits::ANALYSIS).unwrap();
+        let output = receipt.output_id.as_deref().unwrap();
+        let checkpoint = "f".repeat(48);
+        assert!(prepare_restore(
+            &source,
+            &destination,
+            Limits::ANALYSIS,
+            &checkpoint,
+            &"0".repeat(64),
+            output,
+            receipt.binding.clone(),
+            &|| true
+        )
+        .is_err());
+        assert!(!root.path().join(JOURNAL).exists());
+        assert!(prepare_restore(
+            &source,
+            &destination,
+            Limits::ANALYSIS,
+            &checkpoint,
+            &before,
+            output,
+            receipt.binding.clone(),
+            &|| false
+        )
+        .is_err());
+        let prepared = prepare_restore(
+            &source,
+            &destination,
+            Limits::ANALYSIS,
+            &checkpoint,
+            &before,
+            output,
+            receipt.binding.clone(),
+            &|| true,
+        )
+        .unwrap();
+        let first_id = prepared.intent.run_id.clone();
+        assert_eq!(
+            prepared.intent.checkpoint_id.as_deref(),
+            Some(checkpoint.as_str())
+        );
+        drop(prepared); // Stop before commit: recovery must keep the current tree.
+        let recovered = recover(
+            &destination,
+            Limits::ANALYSIS,
+            &receipt.binding.scope_id,
+            || true,
+            |action| action(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            recovered.checkpoint_id.as_deref(),
+            Some(checkpoint.as_str())
+        );
+        assert_eq!(fs::read(destination.join("data")).unwrap(), b"previous");
+        acknowledge_recovery(
+            &destination,
+            Limits::ANALYSIS,
+            &receipt.binding.scope_id,
+            || true,
+        )
+        .unwrap();
+        let second = prepare_restore(
+            &source,
+            &destination,
+            Limits::ANALYSIS,
+            &checkpoint,
+            &before,
+            output,
+            receipt.binding,
+            &|| true,
+        )
+        .unwrap();
+        assert_ne!(first_id, second.intent.run_id);
+        second
+            .commit()
+            .unwrap()
+            .acknowledge(Limits::ANALYSIS, &|| true)
+            .unwrap();
+        assert_eq!(fs::read(destination.join("data")).unwrap(), b"new");
+    }
+    #[test]
     #[ignore = "Only invoked in a disposable import crash supervisor"]
     fn import_crash_probe() {
         let root = PathBuf::from(std::env::var_os("MIVLET_IMPORT_CRASH_ROOT").unwrap());
@@ -493,8 +681,22 @@ mod tests {
             .parse()
             .unwrap();
         let (source, destination, receipt) = fixture(&root);
-        prepare(&source, &destination, Limits::ANALYSIS, &receipt, &|| true)
+        let prepared = if std::env::var("MIVLET_IMPORT_CRASH_CHECKPOINT").as_deref() == Ok("1") {
+            prepare_restore(
+                &source,
+                &destination,
+                Limits::ANALYSIS,
+                &"f".repeat(48),
+                &files::tree_id(&destination, Limits::ANALYSIS).unwrap(),
+                receipt.output_id.as_deref().unwrap(),
+                receipt.binding.clone(),
+                &|| true,
+            )
             .unwrap()
+        } else {
+            prepare(&source, &destination, Limits::ANALYSIS, &receipt, &|| true).unwrap()
+        };
+        prepared
             .commit_at(|boundary| {
                 if boundary == phase {
                     fs::write(root.join("boundary-ready"), boundary.to_string()).unwrap();
@@ -505,8 +707,43 @@ mod tests {
         panic!("Crash supervisor failed to terminate probe");
     }
     #[test]
+    fn checkpoint_restore_refuses_edits_made_while_staging_before_publishing_intent() {
+        let root = tempfile::tempdir().unwrap();
+        let (source, destination, receipt) = fixture(root.path());
+        let before = files::tree_id(&destination, Limits::ANALYSIS).unwrap();
+        let changed = std::cell::Cell::new(false);
+        let error = prepare_restore(
+            &source,
+            &destination,
+            Limits::ANALYSIS,
+            &"f".repeat(48),
+            &before,
+            receipt.output_id.as_deref().unwrap(),
+            receipt.binding,
+            &|| {
+                let staged = fs::read_dir(root.path())
+                    .unwrap()
+                    .filter_map(Result::ok)
+                    .any(|entry| entry.path().join("staged/data").exists());
+                if staged && !changed.replace(true) {
+                    fs::write(destination.join("data"), b"newer editor change").unwrap();
+                }
+                true
+            },
+        )
+        .err()
+        .expect("an edit during staging must refuse the restore");
+        assert!(changed.get());
+        assert!(error.contains("changed during restore preparation"));
+        assert_eq!(
+            fs::read(destination.join("data")).unwrap(),
+            b"newer editor change"
+        );
+        assert!(!root.path().join(JOURNAL).exists());
+    }
+    #[test]
     fn abrupt_host_death_at_both_rename_boundaries_reconciles_without_replay() {
-        for phase in [1u8, 2] {
+        for (phase, checkpoint) in [(1u8, false), (2, false), (1, true), (2, true)] {
             let root = tempfile::tempdir().unwrap();
             let mut child = Command::new(std::env::current_exe().unwrap())
                 .args([
@@ -517,6 +754,10 @@ mod tests {
                 ])
                 .env("MIVLET_IMPORT_CRASH_ROOT", root.path())
                 .env("MIVLET_IMPORT_CRASH_PHASE", phase.to_string())
+                .env(
+                    "MIVLET_IMPORT_CRASH_CHECKPOINT",
+                    if checkpoint { "1" } else { "0" },
+                )
                 .stdin(Stdio::null())
                 .stdout(Stdio::null())
                 .stderr(Stdio::null())
@@ -545,6 +786,8 @@ mod tests {
             .unwrap()
             .unwrap();
             assert_eq!(recovery.binding.generation, 1);
+            assert_eq!(recovery.checkpoint_id, checkpoint.then(|| "f".repeat(48)));
+            let recovery_id = recovery.run_id.clone();
             assert_eq!(
                 fs::read(destination.join("data")).unwrap(),
                 if phase == 1 {
@@ -563,7 +806,7 @@ mod tests {
             );
             assert!(root
                 .path()
-                .join(format!("native-import-recovery-{}.json", "a".repeat(48)))
+                .join(format!("native-import-recovery-{recovery_id}.json"))
                 .exists());
             // Restart inspection is idempotent. It never consumes staged bytes.
             assert!(recover(

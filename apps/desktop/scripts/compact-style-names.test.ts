@@ -6,6 +6,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { build } from "vite";
 const sources = (code: string) => [{ fileName: "component.tsx", code }];
+it("reserves the shortest names for frequent safe tokens", () => {
+  const map = styleNameMap(
+    ".a-card{} .z-card{} :root{--aaa:red;--zzz:blue} .z-card{color:var(--zzz);background:var(--zzz)}",
+    sources('<div className="a-card z-card" /><div className="z-card" />'),
+  );
+  expect(map.get("z-card")).toBe("_0");
+  expect(map.get("--zzz")).toBe("--_0");
+});
 it("compacts exclusively static class names consistently", () => {
   const map = styleNameMap(
     ".work-card__title {} .work-card__title--active {}",
@@ -26,6 +34,32 @@ it("preserves protocol values and opaque selector strings", () => {
     ),
   );
   expect(map.has("local-computer")).toBe(false);
+});
+it("compacts class tokens without changing longer opaque IDs or ARIA references", () => {
+  const code =
+    '<section className="dialog-panel" aria-labelledby="dialog-panel-title"><h2 id="dialog-panel-title" /></section>';
+  const map = styleNameMap(
+    ".dialog-panel #dialog-panel-title {}",
+    sources(code),
+  );
+  expect(compactStyleText(code, map)).toContain('className="_0"');
+  expect(compactStyleText(code, map)).toContain(
+    'aria-labelledby="dialog-panel-title"',
+  );
+  expect(compactStyleText(code, map)).toContain('id="dialog-panel-title"');
+  expect(compactStyleText(".dialog-panel #dialog-panel-title {}", map)).toBe(
+    "._0 #dialog-panel-title {}",
+  );
+});
+it("still preserves exact tokens inside imports and opaque selectors", () => {
+  const map = styleNameMap(
+    ".dialog-panel {} .menu-panel {}",
+    sources(
+      'import "./dialog-panel.css"; const selector = ".menu-panel:hover"; const ui = <><div className="dialog-panel" /><div className="menu-panel" /></>;',
+    ),
+  );
+  expect(map.has("dialog-panel")).toBe(false);
+  expect(map.has("menu-panel")).toBe(false);
 });
 it("preserves classes assembled from dynamic prefixes", () => {
   const map = styleNameMap(

@@ -1,9 +1,18 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import { describe, expect, it, vi } from "vitest";
 import type { BackendProvider } from "@mivlet/protocol";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import { SettingsPage } from "./SettingsPage";
+import { getMcpServerStatus, startMcpServer } from "../../runtime/domains/mcp-server";
+
+vi.mock("../../runtime/domains/mcp-server", () => ({
+  getMcpServerStatus: vi.fn(),
+  startMcpServer: vi.fn(),
+  stopMcpServer: vi.fn(),
+  decideMcpClient: vi.fn(),
+  revokeMcpClient: vi.fn()
+}));
 
 function stubRuntime(overrides: Partial<ShellRuntime> = {}): ShellRuntime {
   return {
@@ -85,8 +94,42 @@ function renderTab(activeTab: React.ComponentProps<typeof SettingsPage>["activeT
 }
 
 describe("SettingsPage", () => {
-  it("keeps local workspace storage separate from account administration", () => {
+  it("polls external access only while its disclosure is open without starting the server", async () => {
+    vi.useFakeTimers();
+    vi.mocked(getMcpServerStatus).mockResolvedValue({
+      endpoint: "http://127.0.0.1:39440/mcp",
+      pending: [], grants: [], history: [], shareableWork: []
+    });
+    const view = renderTab("general", stubRuntime({ agents: [] }));
+    try {
+      const disclosure = screen.getByText("Manage MCP server and client access").closest("details")!;
+      expect(getMcpServerStatus).not.toHaveBeenCalled();
+      await act(async () => {
+        disclosure.open = true;
+        fireEvent(disclosure, new Event("toggle"));
+      });
+      expect(screen.getByText("Running")).toBeVisible();
+      expect(getMcpServerStatus).toHaveBeenCalledTimes(1);
+      await act(() => vi.advanceTimersByTimeAsync(3000));
+      expect(getMcpServerStatus).toHaveBeenCalledTimes(2);
+      await act(async () => {
+        disclosure.open = false;
+        fireEvent(disclosure, new Event("toggle"));
+      });
+      await act(() => vi.advanceTimersByTimeAsync(6000));
+      expect(screen.queryByRole("button", { name: "Stop server" })).toBeNull();
+      expect(getMcpServerStatus).toHaveBeenCalledTimes(2);
+      expect(startMcpServer).not.toHaveBeenCalled();
+    } finally {
+      view.unmount();
+      vi.useRealTimers();
+      vi.clearAllMocks();
+    }
+  });
+
+  it("keeps local workspace storage separate from account administration", async () => {
     const view = renderTab("general");
+    await screen.findByText("Requires the installed Windows app");
 
     expect(screen.getByRole("heading", { name: "General" })).toBeInTheDocument();
     expect(screen.getByText("Joshua's workspace")).toBeInTheDocument();
@@ -167,15 +210,17 @@ describe("SettingsPage", () => {
     const runtime = stubRuntime();
     const view = renderTab("general", runtime);
     fireEvent.click(screen.getByRole("button", { name: "Light" }));
-    expect(screen.getByRole("status")).toHaveTextContent("Light theme applied.");
+    expect(screen.getByRole("status", { name: "Settings update" })).toHaveTextContent("Light theme applied.");
+    expect(screen.getByRole("status", { name: "Background execution" })).toBeVisible();
     view.rerender(<SettingsPage runtime={runtime} theme="light" onThemeChange={() => {}} activeTab="providers" workspaceName="Joshua's workspace" />);
     expect(screen.queryByText("Light theme applied.")).not.toBeInTheDocument();
   });
 });
 
-it("keeps the existing custom policy until a preset is explicitly selected", () => {
+it("keeps the existing custom policy until a preset is explicitly selected", async () => {
   const runtime = stubRuntime({ permissionLabel: "Custom" });
   renderTab("general", runtime);
+  await screen.findByText("Requires the installed Windows app");
   const select = screen.getByRole("combobox", { name: "Approvals" });
   expect(select).toHaveValue("Custom");
   expect(runtime.selectPermissionLabel).not.toHaveBeenCalled();

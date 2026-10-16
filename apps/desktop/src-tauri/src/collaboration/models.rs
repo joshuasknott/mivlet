@@ -92,6 +92,12 @@ pub struct Team {
 pub struct Output {
     pub run_id: String,
     pub conversation_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_revision_id: Option<String>,
     pub text: String,
     pub evidence: String,
     pub created_at: String,
@@ -121,6 +127,15 @@ pub struct WorkAttachment {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
+    /// Native custody is persisted with the canonical Work, never in a second queue.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub execution_owner: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reset_continuation: Option<ResetContinuation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub continuation: Option<super::provider_continuation::Continuation>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub external_client: Option<crate::mcp_server::ExternalWorkContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub schedule: Option<ScheduledWorkContext>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,6 +159,9 @@ pub struct Work {
     pub id: String,
     pub workspace_id: String,
     pub conversation_id: String,
+    /// Canonical user message that owns an edited or regenerated branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_message_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_id: Option<String>,
     pub root_id: String,
@@ -197,6 +215,8 @@ pub struct Work {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ScheduledWorkContext {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<crate::local_schedules::events::models::EventWorkOrigin>,
     pub occurrence_id: String,
     pub reasoning_effort: Option<String>,
 }
@@ -229,6 +249,21 @@ pub struct WorkSteering {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ResetContinuation {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection_revision: Option<String>,
+    pub opportunity_id: String,
+    pub resets_at: String,
+    pub provider_id: String,
+    pub identity: String,
+    pub generation: u32,
+    pub run_id: String,
+    pub state: String,
+    pub reason: Option<String>,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskMessage {
     pub id: String,
@@ -256,6 +291,14 @@ pub struct Fact {
     pub conversation_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub branch_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_revision_id: Option<String>,
+    #[serde(default)]
+    pub pinned: bool,
     pub source: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub supersedes_id: Option<String>,
@@ -360,6 +403,12 @@ pub enum AgentCommand {
     deny_unknown_fields
 )]
 pub enum Command {
+    StartProviderContinuation {
+        id: String,
+        input: super::provider_continuation::Input,
+        fingerprint: String,
+        reconcile: bool,
+    },
     SteerWork {
         id: String,
         expected_generation: u32,
@@ -426,6 +475,8 @@ pub enum Command {
         agent_id: String,
         prompt: String,
         discussion: bool,
+        #[serde(default)]
+        parent_message_id: Option<String>,
         /// Stable workspace agent IDs explicitly addressed by this request.
         /// When present, each ID receives an isolated assignment in the same
         /// effort while conversation membership remains unchanged.
@@ -469,6 +520,17 @@ pub enum Command {
         expected_generation: u32,
         reconcile: bool,
     },
+    ArmProviderReset {
+        id: String,
+        expected_generation: u32,
+        opportunity_id: String,
+        reconcile: bool,
+    },
+    CancelProviderReset {
+        id: String,
+        expected_generation: u32,
+    },
+    DispatchProviderResets,
     WorkStatus {
         id: String,
         generation: u32,
@@ -496,6 +558,11 @@ pub enum Command {
         id: String,
         project_id: String,
         status: String,
+    },
+    PinFact {
+        id: String,
+        project_id: String,
+        pinned: bool,
     },
     SaveLayout {
         layout: Layout,

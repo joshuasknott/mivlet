@@ -10,6 +10,20 @@ gates execution. Future synchronization must not replace local authority implici
   require a project.
 - A thread belongs to one workspace and may point to one project.
 - Messages and their immutable revisions belong to a thread.
+- Editable outputs have a stable identity linked to their source conversation
+  and immutable, owner-qualified revisions. Restoring an earlier revision
+  appends a new revision; it never rewrites history or replays tool effects.
+- A message may point to an immutable parent message. `thread.selected_head_id`
+  records the visible branch head; branch switches are durable presentation
+  state and never re-execute completed work.
+- Work results and project facts retain optional exact source metadata
+  (`branchId`, `messageId`, `sourceRevisionId`) so saved outcomes and decisions
+  can reopen the owning branch without guessing. Newly created facts capture
+  the selected thread head at write time. Older encrypted records are resolved
+  from their saved run/message metadata; records without those exact anchors
+  remain unresolved for review rather than falling back to the current thread
+  head. Project facts may be user-pinned for discoverability; pinning changes
+  presentation only and never expands model context or authority.
 - A named agent profile is independent of its private conversation IDs. A
   conversation record adds selected participants and a facilitator to a thread.
   A project team assigns its lead to an existing agent and owns multiple related

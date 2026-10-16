@@ -25,6 +25,7 @@ export function CoordinationActivity({ work, agents, onInspect, onStop, onFollow
         return <li key={item.id}>
           <div className="coordination-assignee">{profile ? <ProfileAgentAvatar agent={profile} iconSize={23} /> : null}<strong>{item.agentName}</strong><WorkStatusBadge item={item} /></div>
           <p>{displayWorkspaceMentions(item.prompt)}</p>
+          {item.parentId ? <details><summary>Handoff from {work.find(parent => parent.id === item.parentId)?.agentName ?? "the requesting agent"} to {item.agentName}</summary><p>This assignment receives the originating request and its frozen shared conversation context. Private conversations are excluded.</p>{item.capturedContext ? <p>Context revision {item.capturedContext.sourceRevision}, captured {new Date(item.capturedContext.capturedAt).toLocaleString()}. Open Details to inspect the exact snapshot.</p> : <p>No captured context is available for this historical assignment.</p>}</details> : null}
           {item.reason ? <p className="coordination-blocker">{item.reason}</p> : null}
           {item.messages?.length ? <details><summary>{item.messages.length} task messages</summary><ol>{item.messages.map(message => <li key={message.id}>
             <strong>{agents.find(agent => agent.id === message.fromAgentId)?.name ?? "Historical agent"}{message.question ? " asked" : " replied"}</strong>

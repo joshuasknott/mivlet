@@ -150,6 +150,9 @@ function applyUsage(
   const usage = {
     inputTokens: event.inputTokens,
     outputTokens: event.outputTokens,
+    cachedInputTokens: event.cachedInputTokens,
+    cacheWriteTokens: event.cacheWriteTokens,
+    reasoningTokens: event.reasoningTokens,
     costUsd: event.costUsd,
     costEstimated: event.costEstimated,
     costUnknown: event.costUnknown,

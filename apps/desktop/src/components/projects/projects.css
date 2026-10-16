@@ -86,15 +86,6 @@
   color: var(--ink-muted);
   font-size: var(--text-11);
 }
-.agent-sidebar__section-label {
-  flex: 0 0 auto;
-  min-height: 31px;
-  padding: 12px 9px 5px;
-  color: var(--ink-muted);
-  font-size: var(--text-11);
-  letter-spacing: 0.055em;
-  text-transform: uppercase;
-}
 
 .project-picker-search {
   display: flex;

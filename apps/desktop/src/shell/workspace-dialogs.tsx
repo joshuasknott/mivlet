@@ -1,6 +1,5 @@
 import type {
   CollaborationWorkItem,
-  ExecutionAttempt,
   LocalProject,
   SearchResult,
 } from "@mivlet/protocol";
@@ -56,7 +55,6 @@ export function WorkspaceDialogs({
   setSchedules,
   accountDialog,
   setAccountDialog,
-  usage,
   createRoom,
   updateProject,
   selectAgent,
@@ -85,7 +83,6 @@ export function WorkspaceDialogs({
   setSchedules: (value: { agentId?: string; projectId?: string } | null) => void;
   accountDialog: "usage" | "sign-out" | null;
   setAccountDialog: (value: "usage" | "sign-out" | null) => void;
-  usage: NonNullable<ExecutionAttempt["usage"]>[];
   createRoom: (
     draft: ConversationDraft,
     projectId?: string,
@@ -137,7 +134,10 @@ export function WorkspaceDialogs({
               }
               setSearchOpen(false);
               setMarketplace(null);
-              if (plan.kind === "conversation") nav.open(plan.conversationId);
+              if (plan.kind === "conversation") {
+                if (plan.origin) nav.openConversation(plan.conversationId, plan.origin);
+                else nav.open(plan.conversationId);
+              }
               else if (plan.kind === "project") nav.open(plan.threadId);
               else if (plan.kind === "work") {
                 nav.open(plan.conversationId);
@@ -165,9 +165,13 @@ export function WorkspaceDialogs({
             runtime={runtime}
             service={service}
             onClose={() => nav.setProjectDetailsId(null)}
-            onOpen={(id) => {
+            onOpen={(id, source) => {
               nav.setProjectDetailsId(null);
-              nav.open(id);
+              if (source?.messageId || source?.branchId || source?.sourceRevisionId) {
+                nav.openConversation(id, source);
+              } else {
+                nav.open(id);
+              }
             }}
             onEdit={() => {
               nav.setProjectDetailsId(null);
@@ -325,7 +329,13 @@ export function WorkspaceDialogs({
           <AccountDialog
             kind={accountDialog}
             name={profileName}
-            records={usage}
+            providers={runtime.backendProviders}
+            connectedProviderIds={runtime.connectedBackendIds}
+            onOpenBreakdowns={() => {
+              setAccountDialog(null);
+              setSettingsTab("usage");
+              setSettings(true);
+            }}
             onClose={() => setAccountDialog(null)}
             onSignOut={async () => {
               for (const work of service

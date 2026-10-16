@@ -167,6 +167,23 @@ export async function* runAgentLoop(
     : [...request.messages];
   const seenCallIds = new Set<string>();
   let toolCallCount = 0;
+  type Usage = Extract<BackendAgentEvent, { type: "usage" }>;
+  let completedUsage: Usage | undefined;
+  const accumulateUsage = (previous: Usage | undefined, current: Usage): Usage => {
+    const category = (name: "cachedInputTokens" | "cacheWriteTokens" | "reasoningTokens") =>
+      previous?.[name] === undefined && current[name] === undefined ? undefined : (previous?.[name] ?? 0) + (current[name] ?? 0);
+    return {
+      type: "usage",
+      inputTokens: (previous?.inputTokens ?? 0) + current.inputTokens,
+      outputTokens: (previous?.outputTokens ?? 0) + current.outputTokens,
+      cachedInputTokens: category("cachedInputTokens"),
+      cacheWriteTokens: category("cacheWriteTokens"),
+      reasoningTokens: category("reasoningTokens"),
+      costUsd: (previous?.costUsd ?? 0) + current.costUsd,
+      costEstimated: Boolean(previous?.costEstimated || current.costEstimated),
+      costUnknown: Boolean(previous?.costUnknown || current.costUnknown)
+    };
+  };
 
   const bindApproval = (callId: string, approval: ApprovalRequest): ApprovalRequest => ({
     ...approval,
@@ -193,6 +210,7 @@ export async function* runAgentLoop(
     let finishReason: FinishReason = "stop";
     const pendingToolCalls: PendingToolCall[] = [];
     let rejectedToolCall = false;
+    let turnUsage: Usage | undefined;
 
     try {
       for await (const event of stream) {
@@ -206,6 +224,13 @@ export async function* runAgentLoop(
         }
         if (event.type === "error") {
           finishReason = "error";
+        }
+        if (event.type === "usage") {
+          // Streaming frames replace this turn's snapshot; only distinct
+          // completed tool turns are additive in the canonical attempt.
+          turnUsage = event;
+          yield accumulateUsage(completedUsage, event);
+          continue;
         }
         if (event.type === "tool-call") {
           const invalidReason =
@@ -274,6 +299,7 @@ export async function* runAgentLoop(
       return;
     }
 
+    if (turnUsage) completedUsage = accumulateUsage(completedUsage, turnUsage);
     if (rejectedToolCall) {
       yield { type: "done", finishReason: "error" };
       return;

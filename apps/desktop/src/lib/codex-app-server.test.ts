@@ -84,6 +84,10 @@ describe("desktop Codex app-server client", () => {
 
     const delta = events.next();
     await vi.waitFor(() => expect(runtimeMocks.startRuntimeCodexTurn).toHaveBeenCalledOnce());
+    expect(runtimeMocks.startRuntimeCodexTurn).toHaveBeenCalledWith(expect.objectContaining({
+      providerId: "codex",
+      options: expect.objectContaining({ runId: "attempt-1", permissionMode: "read-only" })
+    }));
     runtimeMocks.emit({ type: "text-delta", text: "Hello" });
     await expect(delta).resolves.toEqual({
       done: false,

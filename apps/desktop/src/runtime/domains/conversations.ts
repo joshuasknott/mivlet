@@ -1,4 +1,5 @@
 import type { Spine } from "@mivlet/protocol";
+import type { ConversationMessagePageRequest } from "../../lib/conversation-runtime";
 import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
 
 // ---------------------------------------------------------------------------
@@ -31,6 +32,13 @@ export interface RuntimeConversationMessageView {
   currentRevision: ConversationRevision;
 }
 
+export interface RuntimeConversationMessagePage {
+  messages: RuntimeConversationMessageView[];
+  olderCursor?: string;
+  hasOlderMessages: boolean;
+  branchHeads?: string[];
+}
+
 export interface RuntimeConversationDraft {
   draftKey: string;
   threadId?: string;
@@ -50,6 +58,7 @@ interface NativeConversationThreadRow {
   lifecycle: "active" | "archived";
   lastSequence: number;
   lastMessageId: string | null;
+  selectedHeadId?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +67,7 @@ interface NativeConversationMessageRow {
   id: string;
   threadId: string;
   sequence: number;
+  parentMessageId?: string | null;
   kind: ConversationMessage["kind"];
   runId: string | null;
   detail: unknown;
@@ -204,6 +214,10 @@ function fromNativeThread(
     messageHead: {
       lastSequence: row.lastSequence,
       lastMessageId: (row.lastMessageId as never) ?? undefined,
+      selectedHeadId:
+        (row.selectedHeadId as never) ??
+        (row.lastMessageId as never) ??
+        undefined,
     },
   } as ConversationThread;
 }
@@ -219,6 +233,7 @@ function fromNativeMessage(
     id: row.id,
     threadId: row.threadId,
     sequence: row.sequence,
+    parentMessageId: row.parentMessageId ?? null,
     kind: row.kind,
     ...(row.runId ? { runId: row.runId } : {}),
     ...detail,
@@ -358,6 +373,60 @@ export async function updateRuntimeConversationThread(
   return fromNativeThread(result, scope.workspaceId);
 }
 
+export async function selectRuntimeConversationBranch(
+  threadId: string,
+  headId?: string,
+  expected?: { headId?: string; lastSequence: number },
+) {
+  const scope = conversationScopeOrThrow();
+  if (!hasTauriRuntime()) {
+    const store = previewConversationStore(scope.workspaceId);
+    const index = store.threads.findIndex((thread) => thread.id === threadId);
+    if (index < 0)
+      throw new Error("Conversation thread was not found in this workspace.");
+    const previous = store.threads[index];
+    if (
+      expected &&
+      (previous.messageHead.lastSequence !== expected.lastSequence ||
+        (previous.messageHead.selectedHeadId ??
+          previous.messageHead.lastMessageId) !== expected.headId)
+    )
+      throw new Error(
+        "The selected conversation changed. Reload before switching alternatives.",
+      );
+    const valid =
+      !headId ||
+      store.messages.some(
+        (view) =>
+          view.message.threadId === threadId && view.message.id === headId,
+      );
+    if (!valid)
+      throw new Error(
+        "Selected branch head does not belong to this conversation.",
+      );
+    const next = {
+      ...previous,
+      messageHead: { ...previous.messageHead, selectedHeadId: headId as never },
+      updatedAt: new Date().toISOString(),
+      revision: previous.revision + 1,
+    } as ConversationThread;
+    store.threads[index] = next;
+    return next;
+  }
+  if (!expected)
+    throw new Error("Reload the conversation before switching alternatives.");
+  const result = await invoke<unknown>("conversation_select_branch", {
+    input: {
+      threadId,
+      headId: headId ?? null,
+      expectedHeadId: expected.headId ?? null,
+      expectedLastSequence: expected.lastSequence,
+    },
+  });
+  assertNativeThread(result);
+  return fromNativeThread(result, scope.workspaceId);
+}
+
 export async function listRuntimeConversationMessages(threadId: string) {
   const scope = conversationScopeOrThrow();
   if (!hasTauriRuntime()) {
@@ -372,6 +441,58 @@ export async function listRuntimeConversationMessages(threadId: string) {
     throw new Error("Malformed conversation message list response.");
   result.forEach(assertNativeMessage);
   return result.map((message) => fromNativeMessage(message, scope.workspaceId));
+}
+
+/** Read a bounded newest-first window while keeping the cursor opaque to UI. */
+export async function listRuntimeConversationMessagesPage(
+  threadId: string,
+  request: ConversationMessagePageRequest = {},
+): Promise<RuntimeConversationMessagePage> {
+  const scope = conversationScopeOrThrow();
+  const limit = Math.max(1, Math.min(200, Math.floor(request.limit ?? 80)));
+  const beforeSequence = request.beforeSequence;
+  if (!hasTauriRuntime()) {
+    const all = previewConversationStore(scope.workspaceId)
+      .messages.filter((view) => view.message.threadId === threadId)
+      .filter(
+        (view) =>
+          beforeSequence === undefined ||
+          view.message.sequence < beforeSequence,
+      )
+      .sort((left, right) => left.message.sequence - right.message.sequence);
+    const messages = all.slice(Math.max(0, all.length - limit));
+    const { branchHeads: deriveBranchHeads } =
+      await import("../../lib/conversation-branches");
+    const branchHeads = deriveBranchHeads(all);
+    return {
+      messages,
+      branchHeads,
+      olderCursor:
+        messages.length && all.length > messages.length
+          ? String(messages[0]!.message.sequence)
+          : undefined,
+      hasOlderMessages: all.length > messages.length,
+    };
+  }
+  const result = await invoke<unknown>("conversation_list_messages_page", {
+    input: { threadId, limit, beforeSequence },
+  });
+  if (!isRecord(result) || !Array.isArray(result.messages))
+    throw new Error("Malformed conversation message page response.");
+  result.messages.forEach(assertNativeMessage);
+  return {
+    messages: result.messages.map((message) =>
+      fromNativeMessage(message, scope.workspaceId),
+    ),
+    branchHeads: Array.isArray(result.branchHeads)
+      ? (result.branchHeads.filter(
+          (head) => typeof head === "string",
+        ) as unknown as string[])
+      : undefined,
+    olderCursor:
+      typeof result.olderCursor === "string" ? result.olderCursor : undefined,
+    hasOlderMessages: result.hasOlderMessages === true,
+  };
 }
 
 export async function appendRuntimeConversationMessage(
@@ -423,6 +544,7 @@ export async function appendRuntimeConversationMessage(
   const { initialRevision, ...message } = input;
   const nativeInput = {
     ...message,
+    parentMessageId: input.parentMessageId ?? null,
     detail: "detail" in input ? input.detail : null,
     revisionId: initialRevision.revisionId,
     state: initialRevision.state,

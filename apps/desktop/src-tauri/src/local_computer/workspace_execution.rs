@@ -202,10 +202,86 @@ pub(crate) fn execute(
 ) -> Result<String, String> {
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let root = state.tool_workspace_root(workspace, agent)?;
-    execute_in(&root, ticket, arguments)
+    let jobs = state.command_jobs(workspace, agent)?;
+    execute_observed(&root, ticket, arguments, Some(&jobs))
 }
 
+/// Selected-input jobs retain only their private copy; they have no declared
+/// outputs and never enter the workspace import transaction.
+pub(crate) fn start(
+    state: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    arguments: Value,
+) -> Result<String, String> {
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase", deny_unknown_fields)]
+    struct Start {
+        command: String,
+        inputs: Vec<String>,
+        network: bool,
+        timeout_seconds: u64,
+    }
+    let input: Start =
+        serde_json::from_value(arguments).map_err(|_| "Invalid persistent workspace command.")?;
+    super::command_jobs::validate_start(&input.command, input.timeout_seconds)?;
+    // Reuse all selected-input path and count validation with the ordinary
+    // command's short timeout. The persistent lifetime was validated above.
+    self::input(
+        json!({"command": input.command, "inputs": input.inputs, "outputs": [], "network": input.network, "timeoutSeconds": 1}),
+    )?;
+    let ticket = state.begin_agent_operation(workspace, agent, generation)?;
+    let root = state.tool_workspace_root(workspace, agent)?;
+    let jobs = state.command_jobs(workspace, agent)?;
+    let mut session = jobs.start(
+        &ticket,
+        None,
+        &input.command,
+        input.network,
+        input.timeout_seconds,
+        true,
+    )?;
+    let snapshot = session.snapshot()?;
+    std::thread::Builder::new()
+        .name("mivlet-workspace-job".into())
+        .spawn(move || {
+            let run = || -> Result<(), String> {
+                let scratch = tempfile::Builder::new()
+                    .prefix("workspace-job-")
+                    .tempdir_in(root.parent().ok_or("Invalid workspace directory.")?)
+                    .map_err(|_| "Cannot prepare workspace job.")?;
+                copy_inputs(&root, scratch.path(), &input.inputs, &ticket)?;
+                let _completed = coding::process::native_run(
+                    scratch.path(),
+                    &input.command,
+                    input.network,
+                    input.timeout_seconds,
+                    true,
+                    &ticket,
+                    Some(&mut session),
+                )?;
+                Ok(())
+            };
+            let mut run = run;
+            if let Err(error) = run() {
+                let _ = session.fail(&error);
+            }
+        })
+        .map_err(|_| "Cannot start native command owner.")?;
+    serde_json::to_string(&json!({"job": snapshot, "notice": "Selected copies only; all writes discarded. Use command-output and command-stop. Stop and timeout terminate all descendants; no automatic replay."})).map_err(|_| "Invalid job receipt.".into())
+}
+
+#[cfg(test)]
 fn execute_in(root: &Path, ticket: OperationTicket, arguments: Value) -> Result<String, String> {
+    execute_observed(root, ticket, arguments, None)
+}
+fn execute_observed(
+    root: &Path,
+    ticket: OperationTicket,
+    arguments: Value,
+    jobs: Option<&std::sync::Arc<super::command_jobs::ScopeJobs>>,
+) -> Result<String, String> {
     ticket.check()?;
     let input = input(arguments)?;
     let scratch = tempfile::Builder::new()
@@ -216,6 +292,18 @@ fn execute_in(root: &Path, ticket: OperationTicket, arguments: Value) -> Result<
         )
         .map_err(|_| "Cannot prepare workspace execution.")?;
     copy_inputs(root, scratch.path(), &input.inputs, &ticket)?;
+    let mut session = jobs
+        .map(|jobs| {
+            jobs.start(
+                &ticket,
+                None,
+                &input.command,
+                input.network,
+                input.timeout_seconds,
+                false,
+            )
+        })
+        .transpose()?;
     let (result, completed) = coding::process::native_run(
         scratch.path(),
         &input.command,
@@ -223,6 +311,7 @@ fn execute_in(root: &Path, ticket: OperationTicket, arguments: Value) -> Result<
         input.timeout_seconds,
         true,
         &ticket,
+        session.as_mut(),
     )?;
     ticket.check()?;
     let receipt = |outputs| {

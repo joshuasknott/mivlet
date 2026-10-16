@@ -1,0 +1,7 @@
+.output-editor__csv-wrap { overflow: auto; max-height: 28rem; border: 1px solid var(--border-subtle, #d9dee8); border-radius: .6rem; }
+.output-editor__csv { border-collapse: collapse; min-width: 100%; font-size: .84rem; }
+.output-editor__csv td { border-bottom: 1px solid var(--border-subtle, #d9dee8); border-right: 1px solid var(--border-subtle, #d9dee8); padding: 0; min-width: 8rem; }
+.output-editor__csv input { width: 100%; border: 0; background: transparent; color: inherit; padding: .55rem; font: inherit; }
+.output-editor__csv input:focus, .output-editor__csv-cell--selected { outline: 2px solid var(--accent, #4263eb); outline-offset: -2px; }
+.output-editor__csv-pages { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .55rem; font-size: .78rem; color: var(--muted-foreground, #667085); }
+.output-editor__csv-pages button { min-height: 2.25rem; border: 1px solid var(--border-subtle, #d9dee8); border-radius: .45rem; background: var(--surface, #fff); color: inherit; padding: .35rem .6rem; }

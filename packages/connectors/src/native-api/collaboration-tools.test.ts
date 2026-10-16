@@ -71,5 +71,7 @@ describe("workspace collaboration tool contracts", () => {
       ]),
     );
     expect(ordinary).not.toContain("project-record");
+    expect(ordinary).not.toContain("continuation-read");
+    expect(collaborationToolSpecs(false, true).map(tool => tool.name)).toContain("continuation-read");
   });
 });

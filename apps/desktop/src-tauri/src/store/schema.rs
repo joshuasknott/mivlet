@@ -9,7 +9,68 @@
 
 /// The current schema version. Bumped on every breaking schema change; each
 /// version has a forward migration registered in [`super::migrations`].
-pub const CURRENT_SCHEMA_VERSION: u32 = 42;
+pub const CURRENT_SCHEMA_VERSION: u32 = 45;
+
+/// Account-private interactive answers and next-turn context choices. All user
+/// content is encrypted; opaque owning thread IDs provide deletion cascades.
+pub const SCHEMA_V44_TO_V45: &str = r#"
+CREATE TABLE IF NOT EXISTS conversation_ui (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  conversation_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+  id TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,conversation_id,id)
+);
+"#;
+
+/// Forward schema step `v43 -> v44`: adds the encrypted, account-owned output
+/// workspace. Output identity and revision counters remain query-safe; title,
+/// source details and content are sealed with the authenticated owner scope.
+pub const SCHEMA_V43_TO_V44: &str = r#"
+CREATE TABLE IF NOT EXISTS output_record (
+  workspace_id TEXT NOT NULL REFERENCES workspace(id) ON DELETE CASCADE,
+  owner_subject TEXT NOT NULL,
+  id TEXT NOT NULL,
+  format TEXT NOT NULL,
+  mime_type TEXT NOT NULL,
+  source_conversation_id TEXT NOT NULL REFERENCES thread(id) ON DELETE CASCADE,
+  current_revision_id TEXT NOT NULL,
+  current_revision_number INTEGER NOT NULL CHECK(current_revision_number >= 1),
+  pinned INTEGER NOT NULL DEFAULT 0 CHECK(pinned IN (0,1)),
+  pinned_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,id),
+  UNIQUE(workspace_id,owner_subject,id,current_revision_id)
+);
+CREATE INDEX IF NOT EXISTS idx_output_record_source
+  ON output_record(workspace_id,owner_subject,source_conversation_id,updated_at);
+CREATE INDEX IF NOT EXISTS idx_output_record_pinned
+  ON output_record(workspace_id,owner_subject,pinned,updated_at);
+
+CREATE TABLE IF NOT EXISTS output_revision (
+  workspace_id TEXT NOT NULL,
+  owner_subject TEXT NOT NULL,
+  output_id TEXT NOT NULL,
+  id TEXT NOT NULL,
+  revision_number INTEGER NOT NULL CHECK(revision_number >= 1),
+  base_revision_number INTEGER NOT NULL CHECK(base_revision_number >= 0),
+  author TEXT NOT NULL CHECK(author IN ('user','agent','system')),
+  created_at TEXT NOT NULL,
+  payload BLOB NOT NULL,
+  payload_nonce BLOB NOT NULL,
+  PRIMARY KEY(workspace_id,owner_subject,output_id,id),
+  UNIQUE(workspace_id,owner_subject,output_id,revision_number),
+  FOREIGN KEY(workspace_id,owner_subject,output_id)
+    REFERENCES output_record(workspace_id,owner_subject,id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_output_revision_order
+  ON output_revision(workspace_id,owner_subject,output_id,revision_number);
+"#;
 
 /// Typed coordination records use one encrypted repository. Relationship keys
 /// are query-safe; prompts, names, membership, provenance and layout are sealed.
@@ -1004,6 +1065,7 @@ CREATE TABLE IF NOT EXISTS thread (
   lifecycle TEXT NOT NULL DEFAULT 'active',
   last_sequence INTEGER NOT NULL DEFAULT 0,
   last_message_id TEXT,
+  selected_head_id TEXT,
   authority TEXT NOT NULL DEFAULT 'local',
   visibility TEXT NOT NULL DEFAULT 'member-private',
   owner_member_id TEXT,
@@ -1027,6 +1089,7 @@ CREATE TABLE IF NOT EXISTS message (
   detail_kind TEXT NOT NULL DEFAULT '',
   seq INTEGER NOT NULL,
   previous_message_id TEXT,
+  parent_message_id TEXT,
   idempotency_key TEXT NOT NULL DEFAULT '',
   correlation_key TEXT,
   current_revision_id TEXT NOT NULL DEFAULT '',

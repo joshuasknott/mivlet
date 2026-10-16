@@ -1,216 +1,203 @@
-import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { describe, expect, it, vi } from "vitest";
 import { OfficePreview } from "./OfficePreview";
 
-describe("Office content previews", () => {
-  const pixel =
-    "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
-
-  it("renders native thumbnails and literal alt text in slide order", () => {
-    const { container } = render(
-      <OfficePreview
-        truncated={false}
-        office={{
-          kind: "presentation",
-          sections: [
-            {
-              name: "Slide 1",
-              blocks: [
-                { type: "paragraph", text: "Results", style: "title" },
-                {
-                  type: "image",
-                  dataUrl: pixel,
-                  alt: "<script>Chart</script>",
-                  width: 1,
-                  height: 1,
-                },
-                { type: "paragraph", text: "After image", style: "paragraph" },
-              ],
-            },
-            {
-              name: "Slide 2",
-              blocks: [{ type: "paragraph", text: "Next", style: "title" }],
-            },
+const office = {
+  kind: "spreadsheet" as const,
+  sections: [
+    {
+      name: "Budget",
+      sourceEntry: "xl/worksheets/sheet7.xml",
+      blocks: [
+        {
+          type: "table" as const,
+          rows: [
+            ["Item", "Cost"],
+            ["Rent", "900"],
           ],
-        }}
-      />,
-    );
-    const image = screen.getByRole("img", { name: "<script>Chart</script>" });
-    expect(image).toHaveAttribute("src", pixel);
-    expect(
-      image.compareDocumentPosition(screen.getByText("After image")) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
-    expect(container.querySelector("script")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Slide 2" }));
-    expect(screen.queryByRole("img")).toBeNull();
-    expect(screen.getByRole("heading", { name: "Next" })).toBeVisible();
-  });
+        },
+      ],
+    },
+  ],
+};
 
-  it.each([
-    ["https://example.test/image.png", 32, 32],
-    ["data:image/svg+xml;base64,PHN2Zy8+", 32, 32],
-    [pixel, 4096, 32],
-    [pixel, NaN, 32],
-    ["data:image/png;base64," + "a".repeat(1_500_000), 32, 32],
-  ])(
-    "refuses external, active or out-of-bounds image projections",
-    (dataUrl, width, height) => {
-      render(
-        <OfficePreview
-          truncated={false}
-          office={{
-            kind: "presentation",
-            sections: [
-              {
-                name: "Slide 1",
-                blocks: [
-                  {
-                    type: "image",
-                    dataUrl: String(dataUrl),
-                    alt: "Unsupported",
-                    width: Number(width),
-                    height: Number(height),
-                  },
-                ],
-              },
-            ],
-          }}
-        />,
-      );
-      expect(screen.queryByRole("img")).toBeNull();
-      expect(
-        screen.getByText("Open the file to view this image."),
-      ).toBeVisible();
-    },
-  );
-  it.each(["column", "line"] as const)(
-    "shows signed %s charts and accessible literal data without active markup",
-    (kind) => {
-      const { container } = render(
-        <OfficePreview
-          truncated={false}
-          office={{
-            kind: "spreadsheet",
-            sections: [
-              {
-                name: "Results",
-                blocks: [
-                  {
-                    type: "chart",
-                    kind,
-                    title: "Net <2026>",
-                    categories: ["<script>never run</script>", "Feb"],
-                    series: [{ name: "Net", values: [12, -8] }],
-                  },
-                ],
-              },
-            ],
-          }}
-        />,
-      );
-      expect(
-        screen.getByRole("img", { name: `Net <2026>, ${kind} chart` }),
-      ).toBeVisible();
-      expect(screen.getByText(/Cached worksheet values/)).toBeVisible();
-      fireEvent.click(screen.getByText("Chart data"));
-      expect(screen.getByRole("cell", { name: "-8" })).toBeVisible();
-      expect(
-        screen.getByRole("cell", { name: "<script>never run</script>" }),
-      ).toBeVisible();
-      expect(container.querySelector("script")).toBeNull();
-      for (const element of container.querySelectorAll("rect"))
-        expect(Number(element.getAttribute("height"))).toBeGreaterThanOrEqual(
-          0,
-        );
-      expect(container.querySelector("polyline") !== null).toBe(
-        kind === "line",
-      );
-    },
-  );
-  it("refuses nonfinite or mismatched chart projections", () => {
+describe("OfficePreview", () => {
+  it("lets a user target a spreadsheet cell before requesting an agent change", () => {
+    const request = vi.fn();
     render(
       <OfficePreview
+        office={office}
         truncated={false}
-        office={{
-          kind: "spreadsheet",
-          sections: [
-            {
-              name: "Results",
-              blocks: [
-                {
-                  type: "chart",
-                  kind: "column",
-                  title: "Invalid",
-                  categories: ["A", "B"],
-                  series: [{ name: "Net", values: [Infinity] }],
-                },
-              ],
-            },
-          ],
-        }}
+        onRequestRevision={request}
       />,
     );
-    expect(screen.queryByRole("img")).toBeNull();
-    expect(screen.getByText("Open the file to view this chart.")).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: /select budget row 2 column 2/i }),
+    );
+    expect(screen.getByText(/Selected cell B2: 900/)).toBeVisible();
+    fireEvent.click(
+      screen.getByRole("button", { name: "Request agent change" }),
+    );
+    expect(request).toHaveBeenCalledWith({
+      section: "Budget",
+      sourceEntry: "xl/worksheets/sheet7.xml",
+      sectionIndex: 0,
+      row: 1,
+      column: 1,
+      value: "900",
+    });
   });
-  it("renders document blocks in order as escaped content", () => {
-    const { container } = render(
+
+  it("exposes exact contextual actions for a selected spreadsheet cell", async () => {
+    const action = vi.fn().mockResolvedValue(undefined);
+    render(
       <OfficePreview
+        office={office}
         truncated={false}
+        onSelectionAction={action}
+      />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /select budget row 2 column 2/i }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Quote / ask" }));
+    await waitFor(() => expect(action).toHaveBeenCalledWith(
+      {
+        section: "Budget",
+        sourceEntry: "xl/worksheets/sheet7.xml",
+        sectionIndex: 0,
+        row: 1,
+        column: 1,
+        value: "900",
+      },
+      "quote",
+    ));
+    expect(screen.getByRole("button", { name: "Save to memory" })).toBeEnabled();
+  });
+
+  it("saves an existing spreadsheet cell through the direct edit boundary", async () => {
+    const edit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <OfficePreview office={office} truncated={false} onEditCell={edit} />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /select budget row 2 column 2/i }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit cell" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Replacement cell value" }), {
+      target: { value: "950" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save edited copy" }));
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(
+      { section: "Budget", sourceEntry: "xl/worksheets/sheet7.xml", row: 1, column: 1, value: "900" },
+      "950",
+    ));
+  });
+
+  it("allows clearing a selected spreadsheet string or cell value", async () => {
+    const edit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <OfficePreview office={office} truncated={false} onEditCell={edit} />,
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: /select budget row 2 column 2/i }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit cell" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Replacement cell value" }), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save edited copy" }));
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(
+      { section: "Budget", sourceEntry: "xl/worksheets/sheet7.xml", row: 1, column: 1, value: "900" },
+      "",
+    ));
+  });
+
+  it("exposes bounded paragraph editing for DOCX previews", async () => {
+    const edit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <OfficePreview
         office={{
           kind: "document",
-          sections: [
-            {
-              name: "Document",
-              blocks: [
-                { type: "paragraph", style: "title", text: "Review" },
-                { type: "table", rows: [["<script>alert(1)</script>", "26"]] },
-                {
-                  type: "paragraph",
-                  style: "paragraph",
-                  text: "After the table",
-                },
-              ],
-            },
-          ],
+          sections: [{ name: "Document", sourceEntry: "word/document.xml", blocks: [{ type: "paragraph", style: "paragraph", text: "Old" }] }],
         }}
+        truncated={false}
+        onEditParagraph={edit}
       />,
     );
-    expect(screen.getByRole("heading", { name: "Review" })).toBeVisible();
-    expect(
-      screen.getByRole("cell", { name: "<script>alert(1)</script>" }),
-    ).toBeVisible();
-    expect(container.querySelector("script")).toBeNull();
-    expect(
-      screen
-        .getByRole("table")
-        .compareDocumentPosition(screen.getByText("After the table")) &
-        Node.DOCUMENT_POSITION_FOLLOWING,
-    ).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Edit paragraph" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Replacement paragraph text" }), {
+      target: { value: "New" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save edited copy" }));
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(
+      { section: "Document", sectionIndex: 0, sourceEntry: "word/document.xml", paragraph: 0, value: "Old" },
+      "New",
+    ));
   });
-  it("retains cell positions and switches sheets without implying complete formatting", () => {
+
+  it("exposes contextual actions for a selected paragraph", async () => {
+    const action = vi.fn().mockResolvedValue(undefined);
     render(
       <OfficePreview
-        truncated
         office={{
-          kind: "spreadsheet",
-          sections: [
-            {
-              name: "Totals",
-              blocks: [{ type: "table", rows: [[], ["", "", "26"]] }],
-            },
-            { name: "Notes", blocks: [{ type: "table", rows: [["Details"]] }] },
-          ],
+          kind: "document",
+          sections: [{ name: "Document", sourceEntry: "word/document.xml", blocks: [{ type: "paragraph", style: "paragraph", text: "Old" }] }],
         }}
+        truncated={false}
+        onEditParagraph={vi.fn().mockResolvedValue(undefined)}
+        onSelectionAction={action}
       />,
     );
-    expect(screen.getByRole("columnheader", { name: "C" })).toBeVisible();
-    expect(screen.getByRole("cell", { name: "26" })).toBeVisible();
-    expect(screen.getByText(/Content preview/)).toBeVisible();
-    expect(screen.getByText(/preview is truncated/)).toBeVisible();
-    fireEvent.click(screen.getByRole("button", { name: "Notes" }));
-    expect(screen.getByRole("cell", { name: "Details" })).toBeVisible();
-    expect(screen.queryByRole("cell", { name: "26" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Edit paragraph" }));
+    fireEvent.click(screen.getByRole("button", { name: "Explain" }));
+    await waitFor(() => expect(action).toHaveBeenCalledWith(
+      {
+        section: "Document",
+        sectionIndex: 0,
+        sourceEntry: "word/document.xml",
+        paragraph: 0,
+        value: "Old",
+      },
+      "explain",
+    ));
+  });
+
+  it("allows clearing a selected paragraph", async () => {
+    const edit = vi.fn().mockResolvedValue(undefined);
+    render(
+      <OfficePreview
+        office={{
+          kind: "document",
+          sections: [{ name: "Document", sourceEntry: "word/document.xml", blocks: [{ type: "paragraph", style: "paragraph", text: "Old" }] }],
+        }}
+        truncated={false}
+        onEditParagraph={edit}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Edit paragraph" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Replacement paragraph text" }), {
+      target: { value: "" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save edited copy" }));
+    await waitFor(() => expect(edit).toHaveBeenCalledWith(
+      { section: "Document", sectionIndex: 0, sourceEntry: "word/document.xml", paragraph: 0, value: "Old" },
+      "",
+    ));
+  });
+
+  it("does not expose direct cell editing when the native source entry is absent", () => {
+    render(
+      <OfficePreview
+        office={{
+          kind: "spreadsheet",
+          sections: [{ name: "Budget", blocks: [{ type: "table", rows: [["900"]] }] }],
+        }}
+        truncated={false}
+        onEditCell={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /select budget row 1 column 1/i }));
+    expect(screen.queryByRole("button", { name: "Edit cell" })).not.toBeInTheDocument();
   });
 });

@@ -107,9 +107,25 @@ export function isHighRisk(
   return mode === "full-access" || riskLevel === "high" || riskLevel === "critical";
 }
 
+/** Readable action label; never changes the canonical approval payload. */
+export function actionLabel(approval: ApprovalRequest): string {
+  // Presentation only: retain the exact action and argument digest for native
+  // approval validation. Raw tool syntax remains available in action details.
+  const protectedActions: Record<string, string> = {
+    "request-secret": "Request a webhook signing secret",
+    "secret-request-status": "Check protected request status",
+    "webhook-signing-install": "Install a webhook verification key",
+    "webhook-signing-status": "Check webhook key status",
+    "webhook-signing-verify": "Check a webhook signature",
+    "webhook-signing-remove": "Remove a webhook verification key"
+  };
+  const tool = approval.action.split(" ", 1)[0];
+  return Object.hasOwn(protectedActions, tool) ? protectedActions[tool] : approval.action;
+}
+
 /** Short action summary: "Service · Action". */
 export function actionSummary(approval: ApprovalRequest): string {
-  return `${serviceLabel(approval.service)} · ${approval.action}`;
+  return `${serviceLabel(approval.service)} · ${actionLabel(approval)}`;
 }
 
 /**
@@ -117,6 +133,11 @@ export function actionSummary(approval: ApprovalRequest): string {
  * hard-to-undo actions; otherwise states Mivlet asks before running.
  */
 export function whyApprovalIsNeeded(approval: ApprovalRequest): string {
+  if (approval.service.toLowerCase().includes("mcp")) {
+    return isHighRisk(approval.mode, approval.riskLevel)
+      ? "An MCP tool can run operations defined by its connected server. Review the server, tool, and validated arguments before allowing it to run."
+      : "Mivlet asks before calling this connected MCP tool so you can review the server, tool, and validated arguments."
+  }
   const high = isHighRisk(approval.mode, approval.riskLevel);
   if (approval.riskLevel === "critical") {
     return "This is a consequential action that can't be undone, so Mivlet asks you first.";

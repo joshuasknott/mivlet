@@ -811,12 +811,12 @@ captions are a product/behavior issue, not a custody bug.
 `apps/desktop/src-tauri/src/diagnostics.rs` does not decrypt payloads. Keep it
 that way for support bundles.
 
-### L14 — rustls was recently patched; rustsec exception remains for `quick-xml`
+### L14 — rustls patched and notification RustSec exception retired
 
-`04cb8a16` updates rustls to 0.23.45. `docs/security/rustsec-policy.md`
-documents a reachability exception for `quick-xml` via notifications until
-2026-10-31. That exception is reviewed in-gate; it is not a product network
-parser.
+`04cb8a16` updates rustls to 0.23.45. The October 12 notification dependency
+update removes the vulnerable transitive quick-xml 0.37.5 and its temporary
+exceptions. `docs/security/rustsec-policy.md` now requires a clean vulnerability
+report; malformed reports and any reintroduced advisory fail the gate.
 
 ---
 

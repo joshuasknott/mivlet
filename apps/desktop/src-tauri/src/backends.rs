@@ -978,6 +978,49 @@ pub(crate) fn native_provider_route_boundary(provider_id: &str) -> String {
     )
 }
 
+/// Pin the configured native route for a headless caller using the same current
+/// observations and boundary checks as renderer-selected routes. No fallback.
+pub(crate) fn select_native_background_route(
+    provider_id: &str,
+    model: &str,
+) -> Result<crate::models::ProviderRouteExecutionBinding, String> {
+    let owner = require_current_internal_user()?;
+    let store = crate::store::try_global().ok_or("Account storage is unavailable.")?;
+    let (id, observation) = store
+        .with_conn(|conn| {
+            let id = validate_account_native_provider_model(conn, &owner, provider_id, model)
+                .map_err(crate::store::StoreError::Invalid)?;
+            let observations =
+                crate::store::repos::provider_route_observation::summaries(conn, store, &owner)?;
+            let observation = observations
+                .get(&id)
+                .map(provider_route_observation_snapshot);
+            Ok((id, observation))
+        })
+        .map_err(|e| e.to_string())?;
+    let result = crate::models::ProviderRouteExecutionBinding {
+        workspace_id: crate::store::repos::scope::DEFAULT_WORKSPACE_ID.into(),
+        selection: crate::models::ProviderRouteSelection {
+            provider_route_id: id,
+            selected_at: chrono::Utc::now().to_rfc3339(),
+            reason: native_provider_route_reason_with_evidence(
+                provider_id,
+                model,
+                observation.as_ref(),
+                None,
+                None,
+            )?,
+            boundary_policy_ref: Some(native_provider_route_boundary(provider_id)),
+            fallback_from_provider_route_id: None,
+            observation,
+            quality: None,
+            cost: None,
+        },
+    };
+    validate_current_native_provider_route(provider_id, model, &result)?;
+    Ok(result)
+}
+
 pub(crate) fn validate_current_native_provider_route(
     provider_id: &str,
     model: &str,

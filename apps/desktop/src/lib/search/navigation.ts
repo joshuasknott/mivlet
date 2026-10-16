@@ -9,6 +9,8 @@ export type SearchNavigationTarget =
       workspaceId: string;
       conversationId: string;
       messageId?: string;
+      branchId?: string;
+      sourceRevisionId?: string;
     }
   | { type: "agent"; workspaceId: string; agentId: string }
   | {
@@ -22,6 +24,15 @@ export type SearchNavigationTarget =
       workspaceId: string;
       workId: string;
       conversationId: string;
+    }
+  | {
+      type: "decision";
+      workspaceId: string;
+      decisionId: string;
+      conversationId: string;
+      messageId?: string;
+      branchId?: string;
+      sourceRevisionId?: string;
     }
   | {
       type: "artifact";
@@ -54,6 +65,21 @@ export function navigationTargetFor(
         workspaceId,
         conversationId,
         messageId: context.messageId,
+        branchId: context.branchId,
+        sourceRevisionId: context.sourceRevisionId,
+      };
+    }
+    case "decision": {
+      const conversationId = context.conversationId;
+      if (!conversationId) return null;
+      return {
+        type: "decision",
+        workspaceId,
+        decisionId: result.reference.id,
+        conversationId,
+        messageId: context.messageId,
+        branchId: context.branchId,
+        sourceRevisionId: context.sourceRevisionId,
       };
     }
     case "agent": {

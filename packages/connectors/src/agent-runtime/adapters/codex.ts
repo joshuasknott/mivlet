@@ -67,13 +67,17 @@ async function* mapCodexEvents(
           : { output: redactSecretsFromString(event.output) })
       };
     } else if (event.type === "usage") {
+      const measuredCost = typeof event.costUsd === "number" && Number.isFinite(event.costUsd) && event.costUsd >= 0;
       yield {
         type: "usage",
         inputTokens: event.inputTokens,
         outputTokens: event.outputTokens,
-        costUsd: event.costUsd ?? 0,
-        costEstimated: event.costUsd === undefined,
-        costUnknown: event.costUsd === undefined
+        cachedInputTokens: event.cachedInputTokens ?? undefined,
+        cacheWriteTokens: event.cacheWriteTokens ?? undefined,
+        reasoningTokens: event.reasoningTokens ?? undefined,
+        costUsd: measuredCost ? event.costUsd! : 0,
+        costEstimated: event.costEstimated ?? !measuredCost,
+        costUnknown: !measuredCost || event.costUnknown === true
       };
     } else if (event.type === "approval-request") {
       if (++toolCalls > maxToolCalls) {

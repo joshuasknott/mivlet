@@ -113,6 +113,29 @@ describe("conversation runtime", () => {
     expect(hydrated?.messages.map((view) => view.message.id)).toEqual(["first", "later"]);
   });
 
+  it("hydrates bounded pages with the durable cursor and preserves thread scope", async () => {
+    const transport = transportFixture();
+    const page = vi.fn(async (_threadId: string, request: { beforeSequence?: number }) => ({
+      messages: [
+        { message: { id: "older", threadId: "thread-1", sequence: 1 }, currentRevision: { threadId: "thread-1" } },
+      ] as ConversationMessageView[],
+      olderCursor: request.beforeSequence === 3 ? "1" : undefined,
+      hasOlderMessages: request.beforeSequence === 3,
+    }));
+    transport.listMessagesPage = page;
+
+    const hydrated = await createConversationRuntime(transport).hydratePage("thread-1", {
+      limit: 80,
+      beforeSequence: 3,
+    });
+
+    expect(page).toHaveBeenCalledWith("thread-1", { limit: 80, beforeSequence: 3 });
+    expect(hydrated?.thread.id).toBe("thread-1");
+    expect(hydrated?.messages.map((view) => view.message.id)).toEqual(["older"]);
+    expect(hydrated?.olderCursor).toBe("1");
+    expect(hydrated?.hasOlderMessages).toBe(true);
+  });
+
   it("writes checkpointed assistant state with deterministic run keys", async () => {
     const transport = transportFixture();
     const writer = createDurableRunWriter(transport, "thread-1", "run-1");
@@ -131,6 +154,26 @@ describe("conversation runtime", () => {
     }] });
     expect(transport.views[1].currentRevision.content).toBe("Complete");
     expect(transport.views[1].currentRevision.reason).toBe("completion");
+  });
+
+  it("anchors an edited request to its canonical parent without replaying history", async () => {
+    const transport = transportFixture();
+    const writer = createDurableRunWriter(transport, "thread-1", "run-branch");
+    await writer.record({ kind: "user", content: "Revise the answer", parentMessageId: "message-original" });
+    expect(transport.views[0].message).toMatchObject({ editSourceMessageId: "message-original" });
+    expect(transport.views[0].message.previousMessageId).toBeUndefined();
+  });
+
+  it("continues the selected branch while keeping the global sequence fence", async () => {
+    const transport = transportFixture();
+    transport.getThread = vi.fn(async () => thread({ messageHead: {
+      lastSequence: 5, lastMessageId: "newest-other-branch" as never, selectedHeadId: "chosen-branch" as never,
+    } }));
+    const writer = createDurableRunWriter(transport, "thread-1", "run-selected");
+    await writer.record({ kind: "user", content: "Continue here" });
+    expect(transport.views[0].message.parentMessageId).toBe("chosen-branch");
+    expect(transport.views[0].message.previousMessageId).toBe("newest-other-branch");
+    expect(transport.views[0].message.sequence).toBe(6);
   });
 
   it("appends from the thread head without loading historical messages", async () => {

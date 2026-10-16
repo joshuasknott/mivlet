@@ -1,12 +1,14 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
-import type { CSSOptions, Plugin } from "vite";
+import type { Plugin } from "vite";
 
 interface Source {
   fileName: string;
   code: string;
 }
+const styleToken =
+  /(?<![a-zA-Z0-9_-])(?:--[a-z][a-z0-9-]*|[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*)/g;
 function safeModifier(node: ts.Expression | undefined): boolean {
   if (!node) return false;
   if (ts.isStringLiteralLike(node))
@@ -40,6 +42,16 @@ export function styleNameMap(
     ).filter((name) => name.includes("-") || name.includes("__")),
   );
   const seen = new Set<string>();
+  // Give the shortest names to the most frequent tokens across CSS and code.
+  // This reduces actual output bytes without changing which tokens are safe.
+  const frequency = new Map<string, number>();
+  for (const text of [css, ...sources.map((source) => source.code)]) {
+    for (const match of text.matchAll(/(?:--)?[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*/g)) {
+      frequency.set(match[0], (frequency.get(match[0]) ?? 0) + 1);
+    }
+  }
+  const byFrequency = (a: string, b: string) =>
+    (frequency.get(b) ?? 0) - (frequency.get(a) ?? 0) || a.localeCompare(b);
   const opaque = new Set<string>();
   const dynamic: string[] = [];
   const modifierVariables = new Set<string>();
@@ -68,13 +80,16 @@ export function styleNameMap(
           parent = parent.parent;
         }
         const text = node.text;
+        // Use the same token boundaries as replacement. A longer opaque ID
+        // such as dialog-panel-title does not use (or rewrite) dialog-panel.
+        const tokens = new Set(text.match(styleToken) ?? []);
         if (classAttribute && /^--[a-z][a-z0-9-]*$/.test(text)) modifierVariables.add(text);
         if (ts.isBinaryExpression(node.parent) && node.parent.operatorToken.kind === ts.SyntaxKind.PlusToken) {
           const suffix = /[a-z][a-z0-9_-]*$/.exec(text)?.[0];
           if (suffix) dynamic.push(suffix);
         }
         for (const name of candidates) {
-          if (text.includes(name)) (classAttribute ? seen : opaque).add(name);
+          if (tokens.has(name)) (classAttribute ? seen : opaque).add(name);
         }
         if (ts.isTemplateHead(node) || ts.isTemplateMiddle(node)) {
           const suffix = /[a-z][a-z0-9_-]*$/.exec(text)?.[0];
@@ -107,13 +122,13 @@ export function styleNameMap(
         !opaque.has(name) &&
         !dynamic.some((prefix) => name.startsWith(prefix)),
     )
-    .sort()
+    .sort(byFrequency)
     .forEach((name, index) => names.set(name, `_${index.toString(36)}`));
   const variables = Array.from(
     new Set(
       Array.from(css.matchAll(/(--[a-z][a-z0-9-]*)\s*:/g), (match) => match[1]),
     ),
-  ).sort();
+  ).sort(byFrequency);
   variables.filter(name => !modifierVariables.has(name)).forEach((name, index) =>
     names.set(name, `--_${index.toString(36)}`),
   );
@@ -125,47 +140,26 @@ export function compactStyleText(
   names: ReadonlyMap<string, string>,
 ): string {
   return text.replace(
-    /(?<![a-zA-Z0-9_-])(?:--[a-z][a-z0-9-]*|[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*)/g,
+    styleToken,
     (token) => names.get(token) ?? token,
   );
 }
 
 export function compactStyleNames(sourceRoot: string): Plugin {
   let names: Map<string, string>;
-  const root = sourceRoot.replaceAll("\\", "/");
+  // Vite resolves imported files through real paths, including Windows short
+  // paths and junctions. Accept both spellings of this same source directory.
+  const roots = [sourceRoot, realpathSync.native(sourceRoot)].map((path) =>
+    path.replaceAll("\\", "/"),
+  );
+  const inSource = (path: string) =>
+    roots.some((root) => path.replaceAll("\\", "/").startsWith(`${root}/`));
   return {
     name: "mivlet-compact-style-names",
-    enforce: "pre",
+    // Vite expands CSS @imports before normal transforms. Running as a pre
+    // transform misses those selectors while still renaming their JSX uses.
+    // Keep this before Vite's CSS emission so all imported layers share the map.
     apply: "build",
-    config() {
-      // Vite resolves CSS @imports inside PostCSS, after source transforms.
-      // Compact the resolved rules so imported layers and JSX use the
-      // same names. Run before CSS minification and content hashing.
-      const css: CSSOptions = {
-        postcss: {
-          plugins: [
-            {
-              postcssPlugin: "mivlet-compact-imported-styles",
-              Once(sheet) {
-                sheet.walk((node) => {
-                  const file = node.source?.input.file?.replaceAll("\\", "/");
-                  if (!file?.startsWith(`${root}/`)) return;
-                  if (node.type === "rule")
-                    node.selector = compactStyleText(node.selector, names);
-                  if (node.type === "decl") {
-                    node.prop = compactStyleText(node.prop, names);
-                    node.value = compactStyleText(node.value, names);
-                  }
-                  if (node.type === "atrule")
-                    node.params = compactStyleText(node.params, names);
-                });
-              },
-            },
-          ],
-        },
-      };
-      return { css };
-    },
     buildStart() {
       const paths = files(sourceRoot);
       names = styleNameMap(
@@ -187,11 +181,16 @@ export function compactStyleNames(sourceRoot: string): Plugin {
       );
     },
     transform(code, id) {
-      if (
-        !id.replaceAll("\\", "/").startsWith(`${root}/`) ||
-        !/\.[jt]sx?(?:\?|$)/.test(id)
-      )
-        return null;
+      if (!/\.(?:css|[jt]sx?)(?:\?|$)/.test(id)) return null;
+      if (!inSource(id)) {
+        // A resolved junction can retain a short spelling of an ancestor.
+        // Canonicalize unmatched files before deciding they are outside src.
+        try {
+          if (!inSource(realpathSync.native(id.split("?")[0]))) return null;
+        } catch {
+          return null;
+        }
+      }
       const transformed = compactStyleText(code, names);
       return transformed === code ? null : { code: transformed, map: null };
     },

@@ -1,7 +1,24 @@
 use super::super::authority::ComputerAuthority;
 use super::*;
 
-fn fixture() -> (
+#[test]
+fn separate_repository_lock_instances_cannot_overlap() {
+    let root = tempfile::tempdir().unwrap();
+    let first = RepositoryLock {
+        directory: root.path().to_path_buf(),
+        local: Mutex::new(()),
+    };
+    let second = RepositoryLock {
+        directory: root.path().to_path_buf(),
+        local: Mutex::new(()),
+    };
+    let guard = first.try_lock().unwrap();
+    assert!(second.try_lock().is_err());
+    drop(guard);
+    assert!(second.try_lock().is_ok());
+}
+
+pub(super) fn fixture() -> (
     tempfile::TempDir,
     PathBuf,
     Arc<ComputerAuthority>,
@@ -46,6 +63,82 @@ fn fixture() -> (
 }
 fn call(directory: &Path, ticket: &OperationTicket, tool: &str, args: Value) -> Value {
     serde_json::from_str(&execute_in(directory, ticket, tool, args).unwrap()).unwrap()
+}
+
+#[test]
+#[ignore = "Real native job and repository authority; needs prepared runtime and execution setup"]
+fn native_persistent_repository_job_lifecycle_acceptance() {
+    use crate::local_computer::command_jobs::{JobManager, JobStatus};
+    use std::{
+        sync::atomic::Ordering,
+        time::{Duration, Instant},
+    };
+    let (temp, directory, authority, repo) = fixture();
+    let manager = JobManager::default();
+    let jobs = manager.scope(&temp.path().join("authority")).unwrap();
+    let ticket = authority.begin_agent(1).unwrap();
+    let cancelled = ticket.cancellation();
+    let result: Value = serde_json::from_str(&jobs::start(directory.clone(), ticket, jobs.clone(),
+        json!({"repositoryId":repo.id,"command":"node -e \"require('fs').writeFileSync('persistent-only.txt','discard');console.log('native owned job');setTimeout(()=>{},60000)\"", "network":false,"timeoutSeconds":60})).unwrap()).unwrap();
+    let id = result["job"]["id"].as_str().unwrap();
+    let deadline = Instant::now() + Duration::from_secs(180);
+    loop {
+        let current = jobs
+            .list()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == id)
+            .unwrap();
+        if current.status == JobStatus::Running {
+            break;
+        }
+        if current.finished_at.is_some() || Instant::now() >= deadline {
+            cancelled.store(true, Ordering::Release);
+            panic!("Persistent job did not start: {current:?}");
+        }
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(
+        lock(&directory).unwrap().try_lock().is_err(),
+        "Repository lock was released while the job was running"
+    );
+    let edit_ticket = authority.begin_agent(1).unwrap();
+    assert!(execute_in(
+        &directory,
+        &edit_ticket,
+        "repository-write",
+        json!({"repositoryId":repo.id,"path":"blocked.txt","content":"no"})
+    )
+    .is_err());
+    cancelled.store(true, Ordering::Release);
+    let stopped = Instant::now() + Duration::from_secs(30);
+    loop {
+        let job = jobs
+            .list()
+            .unwrap()
+            .into_iter()
+            .find(|r| r.id == id)
+            .unwrap();
+        if job.finished_at.is_some() && lock(&directory).unwrap().try_lock().is_ok() {
+            assert_eq!(job.status, JobStatus::Stopped);
+            println!("Native persistent job {} returned before exit, retained its repository lock, and stopped with receipt {:?}.", job.id, job.execution_id);
+            break;
+        }
+        assert!(
+            Instant::now() < stopped,
+            "Persistent repository job did not finish Stop and cleanup"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    assert!(!checkout(&directory, &repo)
+        .unwrap()
+        .join("persistent-only.txt")
+        .exists());
+    assert!(!checkout(&directory, &repo)
+        .unwrap()
+        .join("blocked.txt")
+        .exists());
+    assert!(temp.path().join("source/unrelated.txt").exists());
 }
 #[test]
 fn real_checkout_diff_commit_preserves_original_and_rejects_changed_review() {
@@ -193,7 +286,7 @@ fn recovery_and_repository_lock_are_visible() {
         .operation
         .starts_with("publication"));
     let mutex = lock(&directory).unwrap();
-    let _guard = mutex.lock().unwrap();
+    let _guard = mutex.try_lock().unwrap();
     assert_eq!(status(&directory, &ticket).unwrap()["busy"], true);
     assert!(execute_in(
         &directory,
@@ -354,6 +447,7 @@ fn native_repository_import_recovery_acceptance() {
             20,
             false,
             &ticket,
+            None,
         )
         .unwrap();
         let prepared = completed

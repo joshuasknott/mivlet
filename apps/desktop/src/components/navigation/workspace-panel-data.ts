@@ -155,6 +155,9 @@ export function panelFiles({
           title: artifact.title,
           output: output.text,
           agentId: item.agentId,
+          conversationId: output.conversationId ?? item.conversationId,
+          messageId: output.messageId,
+          sourceRevisionId: output.sourceRevisionId,
         },
       });
     }
