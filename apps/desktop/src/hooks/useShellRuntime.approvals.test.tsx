@@ -341,6 +341,37 @@ describe("approval queue workspace hydration", () => {
     expect(result.current.agents[0]).toMatchObject({ id: "chief-of-staff", name: "Chief of Staff" });
   });
 
+  it.each(["owner", "workspace"] as const)("rejects a first-agent save after leaving and returning to the same %s", async (change) => {
+    mocks.listBackends.mockResolvedValue([resolveNativeProvider("openai", "connected")]);
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    await waitFor(() => expect(result.current.connectedAgentBackends.some(provider => provider.id === "openai")).toBe(true));
+    let finishSave!: () => void;
+    mocks.saveSnapshot.mockClear().mockImplementationOnce(
+      async () => new Promise<null>(resolve => { finishSave = () => resolve(null); }),
+    );
+    const completion = result.current.completeFirstAgentSetup({
+      name: "Old save", instructions: "", avatarSeed: "ink-v1:1:old", iconColor: "#2CC663",
+    }).then(() => "completed", (error: Error) => error.message);
+    await waitFor(() => expect(mocks.saveSnapshot).toHaveBeenCalledTimes(1));
+    const originalStatus = mocks.status!;
+    mocks.status = change === "owner"
+      ? { ...originalStatus, activeContextOwner: { internalUserId: "owner-b" } }
+      : { ...originalStatus, activeWorkspace: { ...originalStatus.activeWorkspace, localWorkspaceId: "workspace-b" } };
+    await act(async () => { await result.current.reconcileAccountWorkspace(); });
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    mocks.loadSnapshot.mockResolvedValue(shellStateToRuntimeSnapshot({
+      ...defaultShellState, agents: [{ ...defaultShellState.agents![0], name: "Current profile" }],
+    }));
+    mocks.status = originalStatus;
+    await act(async () => { await result.current.reconcileAccountWorkspace(); });
+    await waitFor(() => expect(result.current.agents[0].name).toBe("Current profile"));
+    await act(async () => { finishSave(); await completion; });
+    expect(await completion).toContain("workspace changed");
+    expect(result.current.agents[0].name).toBe("Current profile");
+    expect(result.current.firstAgentSetupRequired).toBe(true);
+  });
+
   it("flushes the final pending settings to their workspace on unmount", async () => {
     const { result, unmount } = renderHook(() => useShellRuntime(), { wrapper });
     await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));

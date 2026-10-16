@@ -127,6 +127,19 @@ function useTurnCallback<Args extends unknown[], Result>(
   } : undefined, [available, latest]);
 }
 
+function useMcpResourceRelease(callback: Props["onMcpAppResourceRelease"], scope: string) {
+  const owner = useMemo(() => ({ callback }), [scope]);
+  useLayoutEffect(() => {
+    if (callback) owner.callback = callback;
+  }, [callback, owner]);
+  // Teardown must survive parent unmount and late native registration. Each
+  // scope keeps its own release-only callback; it can never acquire a new scope.
+  return useMemo<NonNullable<Props["onMcpAppResourceRelease"]>>(
+    () => resourceOwner => owner.callback?.(resourceOwner) ?? Promise.resolve(),
+    [owner],
+  );
+}
+
 function sameAuthor(left: MivletAgentProfile | undefined, right: MivletAgentProfile) {
   if (!left) return false;
   const keys = Object.keys(right) as (keyof MivletAgentProfile)[];
@@ -170,7 +183,7 @@ export function ConversationFeed(props: Props) {
   const onPinResponse = useTurnCallback(props.onPinResponse, callbackScope);
   const onMcpAppApproval = useTurnCallback(props.onMcpAppApproval, callbackScope);
   const onMcpAppResourceRegister = useTurnCallback(props.onMcpAppResourceRegister, callbackScope);
-  const onMcpAppResourceRelease = useTurnCallback(props.onMcpAppResourceRelease, callbackScope);
+  const onMcpAppResourceRelease = useMcpResourceRelease(props.onMcpAppResourceRelease, callbackScope);
   const onOpenWorkspaceFiles = useTurnCallback(props.onOpenWorkspaceFiles, callbackScope);
   const previousAuthors = useRef<Record<string, MivletAgentProfile>>({});
   const authors = useMemo(() => {

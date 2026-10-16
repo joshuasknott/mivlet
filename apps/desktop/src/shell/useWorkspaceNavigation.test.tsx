@@ -1,9 +1,34 @@
-import { act, renderHook } from "@testing-library/react";
+import { act, fireEvent, render, renderHook, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation";
+import { WorkspaceRightNav } from "../components/navigation/WorkspaceRightNav";
+import type { RightPanelTab } from "../components/navigation/right-panel-state";
 vi.mock("../hooks/useMediaQuery", () => ({ useMediaQuery: () => false }));
 
 describe("conversation-only navigation", () => {
+  it("reopens the same saved row after returning to Files", () => {
+    const state = { loading: false, sessions: [], data: { conversations: [], teams: [], work: [] } };
+    const options = { runtime: { agents: [], openApprovals: [] }, state,
+      service: { getSnapshot: () => state, command: vi.fn(async () => {}), report: vi.fn() },
+      projects: [], marketplace: false, onNavigate: vi.fn(), onSearch: vi.fn(),
+    } as unknown as Parameters<typeof useWorkspaceNavigation>[0];
+    const file: RightPanelTab = { id: "file:brief", kind: "web", title: "Brief", url: "https://example.com/brief" };
+    function Workspace() {
+      const nav = useWorkspaceNavigation(options);
+      return <WorkspaceRightNav context={null} open onClose={() => {}} request={nav.panelRequest}
+        library={<button onClick={() => nav.setPanelRequest(file)}>Open brief</button>}
+        renderTab={() => <p>Saved brief contents</p>} />;
+    }
+    render(<Workspace />);
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    for (let visit = 0; visit < 2; visit++) {
+      fireEvent.click(screen.getByRole("button", { name: "Open brief" }));
+      expect(screen.getByText("Saved brief contents")).toBeVisible();
+      fireEvent.click(screen.getByRole("button", { name: "Back" }));
+      expect(screen.getByRole("button", { name: "Open brief" })).toBeVisible();
+    }
+  });
+
   it("opens an activity in its owning conversation without dispatching execution", () => {
     const state = {
       loading: false, sessions: [],

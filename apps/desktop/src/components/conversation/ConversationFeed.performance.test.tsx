@@ -1,12 +1,14 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import { useEffect } from "react";
 import type { MivletAgentProfile } from "@mivlet/protocol";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConversationMessageView } from "../../lib/conversation-runtime";
 import { createInitialNativeAgentState } from "../../hooks/native-agent/runtime";
 import { ConversationFeed } from "./ConversationFeed";
 
-const { renders } = vi.hoisted(() => ({
+const { renders, resourceReleases } = vi.hoisted(() => ({
   renders: vi.fn<(props: { text: string; workspaceId: string; conversationId: string; generation?: number; responseRevisionId?: string; onDraft: (text: string) => void }) => void>(),
+  resourceReleases: [] as (() => Promise<void>)[],
 }));
 vi.mock("./AssistantMessageActions", () => ({ AssistantMessageActions: () => null }));
 // Count the actual feed/turn boundary; renderer internals keep their existing suites.
@@ -14,6 +16,17 @@ vi.mock("./generated/GeneratedResponse", () => ({
   GeneratedResponse: (props: Parameters<typeof renders>[0]) => {
     renders(props);
     return <p>{props.text}</p>;
+  },
+}));
+// Exercise the feed's callback lifetime at the same passive cleanup boundary
+// used by McpAppFrame. Native registration and iframe behavior have their own suite.
+vi.mock("./McpAppResult", () => ({
+  McpAppResult: ({ releaseResource, generation }: { releaseResource: () => Promise<void>; generation: number }) => {
+    useEffect(() => {
+      resourceReleases.push(releaseResource);
+      return () => { void releaseResource(); };
+    }, [generation]);
+    return <p>Interactive test result</p>;
   },
 }));
 
@@ -60,7 +73,35 @@ function redact(entry: ConversationMessageView): ConversationMessageView {
 }
 
 describe("retained conversation rendering", () => {
-  beforeEach(() => renders.mockClear());
+  beforeEach(() => { renders.mockClear(); resourceReleases.length = 0; });
+
+  it("releases closed and late MCP resources through their original scope", async () => {
+    const first = vi.fn(async () => undefined);
+    const second = vi.fn(async () => undefined);
+    const state = { ...live, running: false, status: "completed" as const, responseParts: [{
+      id: "tool", kind: "tool" as const, tool: "chart", state: "succeeded" as const, content: "{}",
+      connectorId: "custom:chart", resultRevisionId: "revision",
+      mcpApp: { connectorId: "custom:chart", toolName: "chart", resourceUri: "ui://chart" },
+    }] };
+    const view = render(<ConversationFeed {...base} messages={[]} state={state} appGeneration={1}
+      onMcpAppResourceRelease={first} />);
+    fireEvent.click(screen.getByText(/^Worked/));
+    expect(resourceReleases).toHaveLength(1);
+    const releaseOld = resourceReleases[0];
+    view.rerender(<ConversationFeed {...base} messages={[]} state={state} appGeneration={2}
+      onMcpAppResourceRelease={second} />);
+    expect(first).toHaveBeenCalledOnce();
+    expect(second).not.toHaveBeenCalled();
+    // A registration already in flight can still finish after its owner closed.
+    await releaseOld();
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(second).not.toHaveBeenCalled();
+    view.unmount();
+    expect(second).toHaveBeenCalledOnce();
+    await resourceReleases.at(-1)!();
+    expect(second).toHaveBeenCalledTimes(2);
+    expect(first.mock.calls[0]).toEqual(first.mock.calls[1]);
+  });
 
   it("renders 200 retained answers once across 20 live updates while the live disclosure stays current", () => {
     const messages = history(200);

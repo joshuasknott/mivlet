@@ -884,8 +884,7 @@ export function useShellRuntime(
   }) => {
     const attempt = firstAgentSetupAttemptRef.current;
     if (attempt.generation !== workspaceScopeGeneration) {
-      attempt.generation = workspaceScopeGeneration;
-      attempt.pendingToken = null;
+      throw new Error("The workspace changed before your first agent could be saved.");
     }
     if (attempt.pendingToken !== null) {
       throw new Error("Your first agent is still being saved.");
@@ -943,7 +942,11 @@ export function useShellRuntime(
           );
         }
       }
-      if (attempt.pendingToken !== token) {
+      if (
+        firstAgentSetupAttemptRef.current !== attempt ||
+        firstAgentSetupAttemptRef.current.generation !== workspaceScopeGeneration ||
+        firstAgentSetupAttemptRef.current.pendingToken !== token
+      ) {
         throw new Error("The workspace changed before your first agent could be saved.");
       }
       setAgents(nextShellState.agents ?? []);
