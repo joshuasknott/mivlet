@@ -3,6 +3,8 @@ pub(crate) mod checkpoints;
 pub(crate) mod copy_manager;
 mod git;
 mod jobs;
+mod task_binding;
+pub(crate) use task_binding::{capture_work_repository, RepositoryWorkBinding};
 pub(super) mod process;
 pub(crate) mod pull_requests;
 #[cfg(test)]
@@ -97,6 +99,24 @@ fn save(directory: &Path, repo: &Repository) -> Result<(), String> {
         .map_err(|_| "Repository state could not be saved.")?;
     Ok(())
 }
+/// Save task-owned copy state without changing the human's selected copy.
+fn save_repository(directory: &Path, repo: &Repository) -> Result<(), String> {
+    if load(directory)?.is_some_and(|selected| selected.id == repo.id) {
+        save(directory, repo)
+    } else {
+        copy_manager::save_copy(directory, repo)
+    }
+}
+
+fn task_repository(
+    directory: &Path,
+    task: Option<&task_binding::TaskRepository>,
+) -> Result<Option<Repository>, String> {
+    match task {
+        Some(task) => task.load(directory).map(Some),
+        None => load(directory),
+    }
+}
 fn load(directory: &Path) -> Result<Option<Repository>, String> {
     let path = directory.join("repository.json");
     if !path.exists() {
@@ -153,12 +173,19 @@ fn reconcile_import(
                 ..Default::default()
             });
         }
-        ticket.with_current(|| save(directory, repo))?;
+        ticket.with_current(|| save_repository(directory, repo))?;
     }
     Ok(recovery)
 }
 fn status(directory: &Path, ticket: &OperationTicket) -> Result<Value, String> {
-    let Some(mut repo) = load(directory)? else {
+    status_for_task(directory, ticket, None)
+}
+fn status_for_task(
+    directory: &Path,
+    ticket: &OperationTicket,
+    task: Option<&task_binding::TaskRepository>,
+) -> Result<Value, String> {
+    let Some(mut repo) = task_repository(directory, task)? else {
         return Ok(json!({"repository": null}));
     };
     let mutex = lock(directory)?;
@@ -285,7 +312,14 @@ pub(crate) fn execute(
     arguments: Value,
     request_id: &str,
 ) -> Result<String, String> {
+    let task = task_binding::executing_binding(workspace, agent)?;
     if tool == "repository-pr-watch" {
+        if let Some(task) = &task {
+            let directory = directory(state, workspace, agent)?;
+            let selected = load(&directory)?
+                .ok_or("Select this task's repository before configuring its PR watch.")?;
+            task.binding.check(&selected)?;
+        }
         let request = serde_json::from_value(arguments).map_err(|_| "Invalid PR watch request.")?;
         return Ok(
             pull_requests::watch::configure(state, workspace, agent, generation, request)?
@@ -300,6 +334,7 @@ pub(crate) fn execute(
             ticket,
             state.command_jobs(workspace, agent)?,
             arguments,
+            task,
         );
     }
     // Repository inspection and recovery must not depend on command history.
@@ -313,6 +348,7 @@ pub(crate) fn execute(
         arguments,
         jobs.as_ref(),
         request_id,
+        task.as_ref(),
     )
 }
 #[cfg(test)]
@@ -337,7 +373,7 @@ fn execute_with_request(
     arguments: Value,
     request_id: &str,
 ) -> Result<String, String> {
-    execute_observed(directory, ticket, tool, arguments, None, request_id)
+    execute_observed(directory, ticket, tool, arguments, None, request_id, None)
 }
 fn execute_observed(
     directory: &Path,
@@ -346,15 +382,16 @@ fn execute_observed(
     arguments: Value,
     jobs: Option<&Arc<super::command_jobs::ScopeJobs>>,
     request_id: &str,
+    task: Option<&task_binding::TaskRepository>,
 ) -> Result<String, String> {
     ticket.check()?;
     if tool.starts_with("repository-pr-") {
-        return pull_requests::execute(directory, ticket, tool, arguments);
+        return pull_requests::execute_for_task(directory, ticket, tool, arguments, task);
     }
     let input: Input =
         serde_json::from_value(arguments).map_err(|_| "Invalid repository tool arguments.")?;
     if tool == "repository-status" {
-        return serde_json::to_string(&status(directory, ticket)?)
+        return serde_json::to_string(&status_for_task(directory, ticket, task)?)
             .map_err(|_| "Invalid repository status.".into());
     }
     let mutex = lock(directory)?;
@@ -362,7 +399,8 @@ fn execute_observed(
         .try_lock()
         .map_err(|_| "A repository operation is running. Wait or Stop it before continuing.")?;
     let _lease = mivlet_windows_executor::repository_files::lease(directory)?;
-    let mut repo = load(directory)?.ok_or("Attach a repository in Library first.")?;
+    let mut repo =
+        task_repository(directory, task)?.ok_or("Attach a repository in Library first.")?;
     if input.repository_id != repo.id {
         return Err(
             "Repository selection changed. Inspect status and request a fresh approval.".into(),
@@ -372,7 +410,7 @@ fn execute_observed(
     if let Some(recovery) = import_recovery {
         if tool == "repository-recover" {
             repo.operation = "idle".into();
-            ticket.with_current(|| save(directory, &repo))?;
+            ticket.with_current(|| save_repository(directory, &repo))?;
             mivlet_windows_executor::acknowledge_repository_import(
                 &directory.join(&repo.id).join("checkout"),
                 mivlet_windows_executor::Limits::CODING,
@@ -396,7 +434,8 @@ fn execute_observed(
     }
     let root = checkout(directory, &repo)?;
     if tool.starts_with("repository-checkpoint-") {
-        let result = checkpoints::execute(directory, &mut repo, ticket, tool, &input, request_id);
+        let result =
+            checkpoints::execute(directory, &mut repo, ticket, tool, &input, request_id, task);
         ticket.check()?;
         return result.and_then(|value| {
             serde_json::to_string(&value).map_err(|_| "Invalid checkpoint result.".into())
@@ -436,7 +475,7 @@ fn execute_observed(
                 fs::write(target, content)
                     .map_err(|_| "Cannot write repository file.".to_owned())?;
                 repo.command_diff_id = None;
-                save(directory, &repo)
+                save_repository(directory, &repo)
             })?;
             json!({"path": path, "bytes": content.len()})
         }
@@ -457,7 +496,7 @@ fn execute_observed(
             repo.last_result = None;
             repo.last_command = Some(script.to_owned());
             repo.command_diff_id = None;
-            save(directory, &repo)?;
+            save_repository(directory, &repo)?;
             let mut session = jobs
                 .map(|jobs| {
                     jobs.start(
@@ -488,7 +527,7 @@ fn execute_observed(
                         output: crate::secret_redaction::redact_secret_text_or_omit(&error),
                         ..Default::default()
                     });
-                    save(directory, &repo)?;
+                    save_repository(directory, &repo)?;
                     return Err(error);
                 }
             };
@@ -509,7 +548,7 @@ fn execute_observed(
                             output: crate::secret_redaction::redact_secret_text_or_omit(&error),
                             ..result
                         });
-                        save(directory, &repo)?;
+                        save_repository(directory, &repo)?;
                         return Err(error);
                     }
                 }
@@ -524,7 +563,7 @@ fn execute_observed(
             if !result.interrupted {
                 repo.command_diff_id = git::tree(directory, &repo, ticket).ok();
             }
-            save(directory, &repo)?;
+            save_repository(directory, &repo)?;
             if let Some(committed) = committed_import {
                 // Keep the durable intent and previous tree until repository
                 // state is saved. Cleanup remains outside the Stop fence.

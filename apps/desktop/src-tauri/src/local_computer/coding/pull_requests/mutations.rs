@@ -139,7 +139,7 @@ pub(super) fn execute(
     });
     ticket.with_current(|| save(directory, repo, saved))?;
     repo.operation = "publication PR outcome unknown; reconcile before retrying".into();
-    ticket.with_current(|| super::super::save(directory, repo))?;
+    ticket.with_current(|| super::super::save_repository(directory, repo))?;
     let outcome = if input.action == "push" {
         api.push(directory, repo, &input.next_head, &input.expected_head)
             .map(|()| json!({"head": input.next_head}))
@@ -219,7 +219,7 @@ fn complete(
     // Clear the repository marker first; pending remains authoritative if saving
     // the journal fails. Every attachment and mutation checks both.
     repo.operation = "idle".into();
-    ticket.with_current(|| super::super::save(directory, repo))?;
+    ticket.with_current(|| super::super::save_repository(directory, repo))?;
     saved.pending = None;
     ticket.with_current(|| save(directory, repo, saved))
 }
