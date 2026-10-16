@@ -30,6 +30,27 @@ function deferred() {
 }
 
 describe("attempt persistence", () => {
+  it("freezes authority and flushes text synchronously without letting presentation failure prevent durable Stop", async () => {
+    const save = vi.fn(async () => {});
+    const persistence = createAttemptPersistence(save);
+    persistence.current = attempt("accepted");
+    const flush = vi.fn(() => {
+      expect(persistence.stopped).toBe(true);
+      throw new Error("screen unavailable");
+    });
+    persistence.setTextFlush(flush);
+
+    const stopping = persistence.stop();
+    expect(flush).toHaveBeenCalledOnce();
+    expect(persistence.current?.status).toBe("cancelled");
+    await stopping;
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({
+      status: "cancelled", transcript: "accepted",
+    }));
+    await persistence.stop();
+    expect(flush).toHaveBeenCalledOnce();
+  });
+
   it("flushes the latest accepted transcript when stopped between checkpoints", async () => {
     const saved: ExecutionAttempt[] = [];
     const records: DurableRunRecord[] = [];

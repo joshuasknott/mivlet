@@ -10,19 +10,21 @@ import { describeBackendError } from "../../lib/backend-errors";
 import type { AttemptPersistence } from "../../lib/attempt-persistence";
 import type { DurableRunWriter } from "../../lib/conversation-runtime";
 import {
-  appendResponseText,
   resolveResponseTool,
   toolActivity,
   toolConnectorId,
 } from "../../lib/conversation-presentation";
 import type { NativeAgentState } from "./types";
 import { prependRecoverableAttempt } from "./persistence";
+import { createTextPresentation } from "./text-presentation";
 
 export interface NativeAgentEventSession {
   persisted: ExecutionAttempt;
   persistence: AttemptPersistence;
   durableWriter: DurableRunWriter | null;
   attemptId: string;
+  /** Rechecks account/workspace and thread for delayed presentation. */
+  isScopeCurrent: () => boolean;
   setState: Dispatch<SetStateAction<NativeAgentState>>;
   onToolCall?: () =>
     | ((event: Extract<BackendAgentEvent, { type: "tool-call" }>) => void)
@@ -38,55 +40,71 @@ export async function consumeNativeAgentEvents(
   eventStream: AsyncIterable<BackendAgentEvent>,
   session: NativeAgentEventSession,
 ): Promise<{ terminalized: boolean }> {
+  const presentation = createTextPresentation(
+    session.setState,
+    session.attemptId,
+    session.persisted.threadId,
+    session.isScopeCurrent,
+  );
+  session.persistence.setTextFlush(presentation.flush);
   let terminalized = false;
-  for await (const event of eventStream) {
-    if (session.persistence.stopped) {
-      session.persisted = session.persistence.current ?? session.persisted;
-      terminalized = true;
-      break;
-    }
-    if (event.type === "reasoning-summary") {
-      applyReasoningSummary(event, session);
-    } else if (event.type === "text-delta") {
-      await applyTextDelta(event, session);
-    } else if (event.type === "usage") {
-      applyUsage(event, session);
-    } else if (event.type === "provider-tool") {
-      await applyProviderTool(event, session);
-    } else if (event.type === "tool-call") {
-      await applyToolCall(event, session);
-    } else if (event.type === "tool-result") {
-      await applyToolResult(event, session);
-    } else if (event.type === "error") {
-      await applyError(event, session);
-      terminalized = true;
-    } else if (event.type === "done" || event.type === "cancelled") {
-      await applyTerminal(event, session);
-      terminalized = true;
-    }
-    // Publish every accepted mutation synchronously. Stop reads this
-    // snapshot; disk checkpoint cadence must never define visible state.
-    session.persistence.current = session.persisted;
-    const terminalOrBoundary =
-      event.type !== "text-delta" ||
-      session.persisted.transcript.length -
-        session.lastPersistedTranscriptLength >=
-        512 ||
-      Date.now() - session.lastPersistedAt >= 1_000;
-    if (terminalOrBoundary) {
+  try {
+    for await (const event of eventStream) {
+      if (session.persistence.stopped) {
+        session.persisted = session.persistence.current ?? session.persisted;
+        terminalized = true;
+        break;
+      }
+      // Text is presentation-only; lifecycle and tool boundaries flush it now.
+      if (event.type !== "text-delta") presentation.flush();
+      if (event.type === "reasoning-summary") {
+        applyReasoningSummary(event, session);
+      } else if (event.type === "text-delta") {
+        await applyTextDelta(event, session, presentation.append);
+      } else if (event.type === "usage") {
+        applyUsage(event, session);
+      } else if (event.type === "provider-tool") {
+        await applyProviderTool(event, session);
+      } else if (event.type === "tool-call") {
+        await applyToolCall(event, session);
+      } else if (event.type === "tool-result") {
+        await applyToolResult(event, session);
+      } else if (event.type === "error") {
+        await applyError(event, session);
+        terminalized = true;
+      } else if (event.type === "done" || event.type === "cancelled") {
+        await applyTerminal(event, session);
+        terminalized = true;
+      }
+      // Publish every accepted mutation synchronously. Stop reads this
+      // authoritative snapshot independently of presentation and disk cadence.
       session.persistence.current = session.persisted;
-      await session.persistence.save(session.persisted);
-      session.lastPersistedTranscriptLength =
-        session.persisted.transcript.length;
-      session.lastPersistedAt = Date.now();
+      const terminalOrBoundary =
+        event.type !== "text-delta" ||
+        session.persisted.transcript.length -
+          session.lastPersistedTranscriptLength >=
+          512 ||
+        Date.now() - session.lastPersistedAt >= 1_000;
+      if (terminalOrBoundary) {
+        session.persistence.current = session.persisted;
+        await session.persistence.save(session.persisted);
+        session.lastPersistedTranscriptLength =
+          session.persisted.transcript.length;
+        session.lastPersistedAt = Date.now();
+      }
+      if (terminalized) break;
     }
-    if (terminalized) break;
+    if (!terminalized && session.persisted) {
+      presentation.flush();
+      await applyProviderEof(session);
+      terminalized = true;
+    }
+    return { terminalized };
+  } finally {
+    // Includes provider exceptions and Stop while a durable write is pending.
+    presentation.flush();
+    session.persistence.setTextFlush(null);
   }
-  if (!terminalized && session.persisted) {
-    await applyProviderEof(session);
-    terminalized = true;
-  }
-  return { terminalized };
 }
 
 function applyReasoningSummary(
@@ -109,16 +127,9 @@ function applyReasoningSummary(
 async function applyTextDelta(
   event: Extract<BackendAgentEvent, { type: "text-delta" }>,
   session: NativeAgentEventSession,
+  present: (text: string) => void,
 ) {
-  session.setState((current) => ({
-    ...current,
-    transcript: current.transcript + event.text,
-    responseParts: appendResponseText(
-      current.responseParts ?? [],
-      event.text,
-    ),
-    activity: "",
-  }));
+  present(event.text);
   const exchanges: ExecutionExchange[] = [
     ...(session.persisted.exchanges ?? []),
   ];

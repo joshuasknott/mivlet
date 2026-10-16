@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { AssistantMessageActions } from "./AssistantMessageActions";
 import { displayWorkspaceMentions } from "../../lib/collaboration-mentions";
 import type {
@@ -108,6 +108,32 @@ interface Props {
   onOpenWorkspaceFiles?: (agentId: string) => void;
 }
 
+// Event identity can stay stable while the committed handler and authority change.
+function useTurnCallback<Args extends unknown[], Result>(
+  callback: ((...args: Args) => Result) | undefined,
+  scope: string,
+) {
+  const latest = useMemo(() => ({ callback }), [scope]);
+  useLayoutEffect(() => {
+    latest.callback = callback;
+    return () => { latest.callback = undefined; };
+  }, [callback, latest]);
+  const available = Boolean(callback);
+  return useMemo(() => available ? (...args: Args): Result => {
+    const current = latest.callback;
+    if (!current)
+      throw new Error("This conversation action is no longer available.");
+    return current(...args);
+  } : undefined, [available, latest]);
+}
+
+function sameAuthor(left: MivletAgentProfile | undefined, right: MivletAgentProfile) {
+  if (!left) return false;
+  const keys = Object.keys(right) as (keyof MivletAgentProfile)[];
+  return Object.keys(left).length === keys.length &&
+    keys.every(key => Object.is(left[key], right[key]));
+}
+
 export function ConversationFeed(props: Props) {
   const { state, threadId } = props;
   const live = Boolean(
@@ -133,6 +159,47 @@ export function ConversationFeed(props: Props) {
     () => conversationTurns(visibleMessages),
     [visibleMessages],
   );
+  const callbackScope = JSON.stringify([
+    props.workspaceId, threadId, props.generation, props.appGeneration,
+  ]);
+  const isMcpRunCurrent = useTurnCallback(props.isMcpRunCurrent, callbackScope);
+  const onOpenConnector = useTurnCallback(props.onOpenConnector, callbackScope);
+  const onPreviewArtifact = useTurnCallback(props.onPreviewArtifact, callbackScope);
+  const onDraftResponse = useTurnCallback(props.onDraftResponse, callbackScope);
+  const onSaveMemory = useTurnCallback(props.onSaveMemory, callbackScope);
+  const onPinResponse = useTurnCallback(props.onPinResponse, callbackScope);
+  const onMcpAppApproval = useTurnCallback(props.onMcpAppApproval, callbackScope);
+  const onMcpAppResourceRegister = useTurnCallback(props.onMcpAppResourceRegister, callbackScope);
+  const onMcpAppResourceRelease = useTurnCallback(props.onMcpAppResourceRelease, callbackScope);
+  const onOpenWorkspaceFiles = useTurnCallback(props.onOpenWorkspaceFiles, callbackScope);
+  const previousAuthors = useRef<Record<string, MivletAgentProfile>>({});
+  const authors = useMemo(() => {
+    const next: Record<string, MivletAgentProfile> = {};
+    for (const [id, author] of Object.entries(props.authors ?? {})) {
+      const previous = previousAuthors.current[id];
+      next[id] = sameAuthor(previous, author) ? previous : author;
+    }
+    previousAuthors.current = next;
+    return next;
+  }, [props.authors]);
+  const redactedRuns = useMemo(
+    () => new Set<string | undefined>(
+      visibleMessages
+        .filter((view) => view.currentRevision.state === "redacted")
+        .map((view) => view.message.runId),
+    ),
+    [visibleMessages],
+  );
+  const unavailableAuthor = useMemo(
+    () => ({
+      ...props.agent,
+      id: "unavailable-author",
+      name: "Agent",
+      avatarSeed: "blob-v1:unavailable-author",
+      iconImageDataUrl: undefined,
+    }),
+    [props.agent],
+  );
   const presented = [...turns];
   for (const liveEntry of liveStates) {
     const state = liveEntry.state;
@@ -146,11 +213,7 @@ export function ConversationFeed(props: Props) {
       (turn) => turn.id === state.currentAttemptId,
     );
     const canonical = presented[index];
-    const redacted = visibleMessages.some(
-      (entry) =>
-        entry.message.runId === state.currentAttemptId &&
-        entry.currentRevision.state === "redacted",
-    );
+    const redacted = redactedRuns.has(state.currentAttemptId);
     const canonicalReady =
       canonical &&
       !state.running &&
@@ -189,16 +252,17 @@ export function ConversationFeed(props: Props) {
   }
   const entries: ({ turn: ConversationTurn } | { fact: ProjectFact })[] =
     presented.map((turn) => ({ turn }));
-  const branchUnavailable = branchHasMissingAncestor(
-    props.messages,
-    props.selectedHeadId,
+  const branchUnavailable = useMemo(
+    () => branchHasMissingAncestor(props.messages, props.selectedHeadId),
+    [props.messages, props.selectedHeadId],
   );
-  const availableBranchHeads = [
-    ...new Set([
+  const availableBranchHeads = useMemo(
+    () => [...new Set([
       ...branchHeads(props.messages),
       ...(props.branchHeadIds ?? []),
-    ]),
-  ];
+    ])],
+    [props.messages, props.branchHeadIds],
+  );
   for (const fact of props.decisionEvents ?? []) {
     const index = entries.findIndex(
       (entry) =>
@@ -266,7 +330,7 @@ export function ConversationFeed(props: Props) {
           );
         }
         const { turn } = entry;
-        const author = props.authors?.[turn.id];
+        const author = authors[turn.id];
         const liveEntry = liveStates.find(
           (entry) =>
             entry.state.currentAttemptId === turn.id &&
@@ -276,24 +340,41 @@ export function ConversationFeed(props: Props) {
           <Turn
             key={turn.id}
             turn={turn}
-            {...props}
-            state={liveEntry?.state ?? props.state}
+            state={liveEntry?.state}
+            receipt={(liveEntry?.state ?? props.state).progressReceipts?.[turn.id]}
+            awaitingApproval={
+              Boolean(liveEntry && props.approval) ||
+              Boolean(props.awaitingApprovalRunIds?.includes(turn.id))
+            }
+            profileName={props.profileName}
+            connectors={props.connectors}
+            workspaceId={props.workspaceId}
+            threadId={threadId}
+            showAuthor={props.showAuthor}
+            requireAuthor={props.requireAuthor}
+            presence={liveEntry ? props.presence : undefined}
+            approval={liveEntry ? props.approval : undefined}
+            interruption={liveEntry ? props.interruption : undefined}
+            appGeneration={props.appGeneration}
+            isMcpRunCurrent={isMcpRunCurrent}
+            onOpenConnector={onOpenConnector}
+            onDraftResponse={onDraftResponse}
+            onSaveMemory={onSaveMemory}
+            onPinResponse={onPinResponse}
+            onMcpAppApproval={onMcpAppApproval}
+            onMcpAppResourceRegister={onMcpAppResourceRegister}
+            onMcpAppResourceRelease={onMcpAppResourceRelease}
+            onOpenWorkspaceFiles={onOpenWorkspaceFiles}
             agent={
               author ??
               (props.requireAuthor
-                ? {
-                    ...props.agent,
-                    id: "unavailable-author",
-                    name: "Agent",
-                    avatarSeed: "blob-v1:unavailable-author",
-                    iconImageDataUrl: undefined,
-                  }
+                ? unavailableAuthor
                 : (liveEntry?.agent ?? props.agent))
             }
             onPreviewArtifact={
               props.requireAuthor && !author
                 ? undefined
-                : props.onPreviewArtifact
+                : onPreviewArtifact
             }
             generation={
               props.requireAuthor && !author ? undefined : props.generation
@@ -392,19 +473,36 @@ function UserMessage({
   );
 }
 
-function Turn({
+type TurnProps = Pick<Props,
+  | "agent" | "profileName" | "connectors" | "workspaceId" | "threadId"
+  | "showAuthor" | "requireAuthor" | "presence" | "approval" | "interruption"
+  | "generation" | "appGeneration" | "isMcpRunCurrent" | "onOpenConnector"
+  | "onPreviewArtifact" | "onDraftResponse" | "onSaveMemory" | "onPinResponse"
+  | "onMcpAppApproval" | "onMcpAppResourceRegister" | "onMcpAppResourceRelease"
+  | "onOpenWorkspaceFiles"
+> & {
+  turn: ConversationTurn;
+  live: boolean;
+  state?: NativeAgentState;
+  receipt?: NonNullable<NativeAgentState["progressReceipts"]>[string];
+  awaitingApproval: boolean;
+};
+
+// Completed turns receive only their own receipt, never the changing live state.
+const Turn = memo(function Turn({
   turn,
   live,
+  receipt,
+  awaitingApproval,
   ...props
-}: Props & { turn: ConversationTurn; live: boolean }) {
-  const running = live && props.state.running;
+}: TurnProps) {
+  const running = Boolean(live && props.state?.running);
   const [disclosure, setDisclosure] = useState({ running, open: false });
   const expanded = disclosure.running === running && disclosure.open;
   const [clock, setClock] = useState(Date.now());
   const [savedSummary, setSavedSummary] = useState("");
-  const receipt = props.state.progressReceipts?.[turn.id];
   const summary = live
-    ? Object.values(props.state.reasoningSummaries ?? {}).join("\n\n")
+    ? Object.values(props.state?.reasoningSummaries ?? {}).join("\n\n")
     : Object.values(receipt?.summaries ?? {}).join("\n\n") || savedSummary;
   useEffect(() => {
     if (live && summary) setSavedSummary(summary);
@@ -448,7 +546,7 @@ function Turn({
   const notices = turn.parts.filter(
     (part) =>
       part.kind === "notice" &&
-      (!live || (!props.state.lastError && props.state.status !== "cancelled")),
+      (!live || (!props.state?.lastError && props.state?.status !== "cancelled")),
   );
   const failed = work.filter(
     (part) => part.kind === "tool" && part.state === "failed" && !part.terminalStatus,
@@ -475,7 +573,7 @@ function Turn({
         part.tool,
       ),
   );
-  const stopped = live && props.state.status === "cancelled";
+  const stopped = live && props.state?.status === "cancelled";
   const cancelled =
     turn.parts.some(
       (part) => (part.kind === "tool" && part.terminalStatus === "cancelled") ||
@@ -490,13 +588,13 @@ function Turn({
         (part.kind === "notice" && part.status === "interrupted") ||
         (part.kind === "tool" && part.terminalStatus === "interrupted"),
     ) ||
-    (live && props.state.status === "interrupted") ||
+    (live && props.state?.status === "interrupted") ||
     danglingTool;
   const recoveredToolFailure =
     Boolean(final?.kind === "text" && final.content.trim()) ||
     work.some((part) => part.kind === "tool" && part.state === "succeeded");
   const failedTerminal =
-    (live && props.state.status === "failed") ||
+    (live && props.state?.status === "failed") ||
     turn.parts.some((part) => part.kind === "notice" && part.error) ||
     (work.some(
       (part) =>
@@ -504,7 +602,6 @@ function Turn({
         part.state === "failed" &&
         !part.terminalStatus,
     ) && !recoveredToolFailure);
-  const awaitingApproval = Boolean(props.approval) || props.awaitingApprovalRunIds?.includes(turn.id);
   const label = running
     ? awaitingApproval
       ? "Waiting for your approval"
@@ -529,7 +626,7 @@ function Turn({
     .reverse()
     .find((part) => part.kind === "tool" && part.state === "running");
   const activity =
-    props.state.activity ||
+    props.state?.activity ||
     (currentTool?.kind === "tool"
       ? toolActivity(currentTool.tool, "running")
       : "");
@@ -568,7 +665,7 @@ function Turn({
               presence={
                 live
                   ? (props.presence ??
-                    agentPresence(props.state, Boolean(props.approval)))
+                    (props.state ? agentPresence(props.state, Boolean(props.approval)) : "idle"))
                   : "idle"
               }
               activityKey={`${props.agent.id}:${turn.id}`}
@@ -771,4 +868,4 @@ function Turn({
       </article>
     </section>
   );
-}
+});
