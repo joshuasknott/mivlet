@@ -9,6 +9,8 @@ import type {
   LocalComputerAttachmentStageRequest,
   LocalComputerAttachmentReceipt,
   LocalComputerAttachmentDiscardRequest,
+  LocalComputerImageAttachmentRequest,
+  NativeImageInput,
 } from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
@@ -51,6 +53,13 @@ export const discardRuntimeLocalComputerAttachmentBatch = (
   nativeComputerCommand<void>("local_computer_discard_attachment_batch", {
     request,
   });
+export const restoreRuntimeLocalComputerImageAttachment = (
+  request: LocalComputerImageAttachmentRequest,
+) =>
+  nativeComputerCommand<NativeImageInput>(
+    "local_computer_restore_image_attachment",
+    { request },
+  );
 export const cancelRuntimeLocalComputer = (
   request: LocalComputerEpochRequest,
 ) =>

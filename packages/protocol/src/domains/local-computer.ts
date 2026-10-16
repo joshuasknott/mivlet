@@ -100,6 +100,16 @@ export interface LocalComputerAttachmentDiscardRequest extends LocalComputerTarg
   batchId: string;
 }
 
+/** Rehydrate a deliberately reused image; native verifies scope, hash and size. */
+export interface LocalComputerImageAttachmentRequest extends LocalComputerEpochRequest {
+  attachmentId: string;
+  name: string;
+  mimeType: string;
+  relativePath: string;
+  sizeBytes: number;
+  sha256: string;
+}
+
 /**
  * An ephemeral, explicitly selected text-file preview for the trusted Mivlet UI.
  * The content must not enter model context, logs, or persisted runtime state.
