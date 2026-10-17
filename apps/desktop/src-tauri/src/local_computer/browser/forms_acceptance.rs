@@ -78,7 +78,7 @@ pub(super) fn run(
         || choices[0]["name"] != "Public topic"
         || before.to_string().contains("Human text preserved")
     {
-        return Err("Form QA leaked existing content or offered a nonempty field.".into());
+        return Err(format!("Form QA field projection failed: fields={} expectedPublicTopic={} existingValueLeaked={} visible={}", choices.len(), choices.first().is_some_and(|choice| choice["name"] == "Public topic"), before.to_string().contains("Human text preserved"), before["tabVisible"] == true));
     }
     let reference = choices[0]["fieldRef"]
         .as_str()
