@@ -190,6 +190,12 @@ const TOOL_DEFINITIONS: BackendTool[] = [
     parameters:toolParameters({fieldRef:textParameter,origin:textParameter,name:textParameter,text:{type:"string",minLength:1,maxLength:2048}},["fieldRef","origin","name","text"],true)
   },
   {
+    name:"local-browser-handover",
+    description:"Hand the owned browser to the user for a private or manual step. Save task attention, revoke this turn's control and keep the browser open. User must explicitly continue; never resume or reselect in this turn.",
+    defaultMode:"full-access",defaultRisk:"high",
+    parameters:toolParameters({reason:{type:"string",minLength:1,maxLength:240}},["reason"],true)
+  },
+  {
     name: "local-browser-navigate",
     description: "Navigate once: 30s navigationRef, exact source origin, HTTP(S) URL. Selected foreground only. Observe; no replay/file import.",
     defaultMode: "full-access", defaultRisk: "high",

@@ -30,6 +30,7 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
   let mutationSinceObservation = false;
   let observation = "";
   let blocked = "";
+  let handedOver = false;
   let pendingRecovery: PendingRecovery | null = null;
   const recoveryFailures = new Map<RecoveryClass, number>();
   const preflightFailures = new Map<string, number>();
@@ -37,6 +38,7 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
   return async (approval, argumentsJson) => {
     const name = approval.action.split(/\s+/)[0];
     if (!isLocalComputerTool(name, argumentsJson)) return execute(approval, argumentsJson);
+    if (handedOver) throw new Error("The browser is under human control. Wait for a fresh explicit user continuation before selecting, reading, or acting again.");
     const mutation = MUTATIONS.has(name);
     const fingerprint = `${name}:${stableArguments(argumentsJson)}`;
     if (++calls > 80) blocked = "This computer turn reached its action limit. Explain the current state and ask the user to continue.";
@@ -56,6 +58,11 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
     if (calls > 84) throw new Error("Computer work stopped at its turn limit. Report the current state to the user.");
     try {
       const result = await execute(approval, argumentsJson);
+      if (name === "local-browser-handover" && stringArgument(result,"status") === "human-control-required") {
+        handedOver = true;
+        activity("Waiting for your browser step");
+        return result;
+      }
       if (mutation && stringArgument(result, "status") === "foreground-required") {
         mutationSinceObservation = false;
         preflightFailures.set(fingerprint, (preflightFailures.get(fingerprint) ?? 0) + 1);

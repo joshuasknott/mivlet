@@ -210,6 +210,8 @@ export function buildToolApproval(
     ? "Switch the selected foreground browser to this exact observed tab once. Inspect the current page before further input."
     : toolName === "local-browser-fill" && isRegistered
     ? "Enter this exact public text into the observed empty field. Page handlers may send it to the website. Preserve existing values and private fields; inspect the page afterward."
+    : toolName === "local-browser-handover" && isRegistered
+    ? "Save this task as needing your attention, stop agent control and leave the browser open for you. Continuing requires your explicit request and a fresh window selection."
     : isRegistered
     ? `Execute the ${toolName} tool via ${providerId} with the given arguments.`
     : `Refuse unregistered tool ${toolName} — not in Mivlet's tool registry.`;

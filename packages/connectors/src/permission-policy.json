@@ -125,6 +125,7 @@
     "local-browser-navigate": "browser-state-mutation",
     "local-browser-activate": "browser-state-mutation",
     "local-browser-fill": "browser-state-mutation",
+    "local-browser-handover": "browser-state-mutation",
     "local-browser-click": "browser-state-mutation",
     "local-browser-scroll": "browser-state-mutation",
     "local-app-select": "browser-read",
