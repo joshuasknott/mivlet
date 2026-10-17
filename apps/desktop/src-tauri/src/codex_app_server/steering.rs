@@ -207,7 +207,9 @@ mod tests {
             }
         });
         started.recv_timeout(Duration::from_secs(5)).unwrap();
-        let request_id = format!("blocked-pipe-test-{}", uuid::Uuid::new_v4());
+        let mut request_bytes = [0u8; 24];
+        getrandom::fill(&mut request_bytes).unwrap();
+        let request_id = format!("blocked-pipe-test-{}", hex::encode(request_bytes));
         active_runs().lock().unwrap().insert(
             request_id.clone(),
             ActiveCodexRun {

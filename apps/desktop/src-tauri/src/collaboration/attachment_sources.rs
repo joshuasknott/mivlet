@@ -158,7 +158,6 @@ mod tests {
                 false,
                 None,
                 None,
-                None,
             )?;
             let mut parent = ctx.item("parent")?;
             parent.attachments = vec![WorkAttachment {
