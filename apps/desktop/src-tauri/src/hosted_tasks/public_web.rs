@@ -41,71 +41,6 @@ fn domain(value: &str) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn captured_policy_is_the_exact_worker_policy_and_scope_is_canonical() {
-        let source =
-            include_str!("../../../../../packages/protocol/src/domains/hosted-public-web.ts");
-        assert!(source.contains(&format!(
-            "export const HOSTED_PUBLIC_WEB_POLICY = \"{POLICY}\";"
-        )));
-        let scope = PublicWebScope {
-            allowed_domains: vec!["example.com".into()],
-            initial_urls: vec!["https://example.com/".into()],
-        };
-        validate(&scope).unwrap();
-        assert_eq!(policy(&scope).unwrap(), format!("{POLICY}\nReviewed scope: {{\"allowedDomains\":[\"example.com\"],\"initialUrls\":[\"https://example.com/\"]}}"));
-        for changed in [
-            "https://example.com",
-            "https://example.com/#section",
-            "https://u:p@example.com/",
-            "https://example.com:444/",
-            "https://example.com/?session=private",
-            "https://other.com/",
-        ] {
-            assert!(url(changed, &scope).is_err(), "{changed}");
-        }
-    }
-    #[test]
-    fn native_source_receipts_reject_unreviewed_scope_counts_and_provenance() {
-        let mut binding = super::super::tests::binding();
-        binding.version = 2;
-        binding.mode = Some("public-web-research".into());
-        binding.web_scope = Some(PublicWebScope {
-            allowed_domains: vec!["example.com".into()],
-            initial_urls: vec!["https://example.com/".into()],
-        });
-        binding.budget.max_model_calls = 4;
-        binding.budget.max_page_reads = Some(6);
-        binding.budget.max_source_bytes = Some(65536);
-        let mut snapshot: TaskSnapshot = serde_json::from_value(serde_json::json!({"binding":binding,"generation":1,"status":"completed","sequence":3,"resultBytes":1,"createdAt":1000,"updatedAt":2000,"retainedUntil":86401000,
-            "research":{"modelCalls":2,"pageReads":1,"sourceBytes":32,"sources":[{"citationId":format!("web-{}", "a".repeat(24)),"title":"Public source","finalUri":"https://example.com/","fetchedAt":"1970-01-01T00:00:01.500Z","contentSha256":"a".repeat(64),"contentBytes":32,"truncated":false}]}})).unwrap();
-        validate_receipt(&binding, &snapshot).unwrap();
-        let original = snapshot.clone();
-        snapshot.updated_at = i64::MAX;
-        assert!(validate_receipt(&binding, &snapshot).is_err());
-        snapshot = original.clone();
-        snapshot.research.as_mut().unwrap().sources[0].final_uri = "https://other.com/".into();
-        assert!(validate_receipt(&binding, &snapshot).is_err());
-        snapshot = original.clone();
-        snapshot.research.as_mut().unwrap().source_bytes += 1;
-        assert!(validate_receipt(&binding, &snapshot).is_err());
-        snapshot = original.clone();
-        snapshot.research.as_mut().unwrap().model_calls = 5;
-        assert!(validate_receipt(&binding, &snapshot).is_err());
-        snapshot = original.clone();
-        snapshot.research.as_mut().unwrap().sources[0].citation_id = "invented".into();
-        assert!(validate_receipt(&binding, &snapshot).is_err());
-        snapshot = original;
-        snapshot.research = None;
-        assert!(validate_receipt(&binding, &snapshot).is_err());
-        let legacy = super::super::tests::binding();
-        snapshot.binding = legacy.clone();
-        assert!(validate_receipt(&legacy, &snapshot).is_ok());
-    }
-}
 pub(crate) fn url(value: &str, scope: &PublicWebScope) -> Result<(), String> {
     if value.len() > 2048
         || value
@@ -272,4 +207,70 @@ pub(crate) fn validate_receipt(binding: &Binding, snapshot: &TaskSnapshot) -> Re
         return Err("The research source byte count did not match its receipt.".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn captured_policy_is_the_exact_worker_policy_and_scope_is_canonical() {
+        let source =
+            include_str!("../../../../../packages/protocol/src/domains/hosted-public-web.ts");
+        assert!(source.contains(&format!(
+            "export const HOSTED_PUBLIC_WEB_POLICY = \"{POLICY}\";"
+        )));
+        let scope = PublicWebScope {
+            allowed_domains: vec!["example.com".into()],
+            initial_urls: vec!["https://example.com/".into()],
+        };
+        validate(&scope).unwrap();
+        assert_eq!(policy(&scope).unwrap(), format!("{POLICY}\nReviewed scope: {{\"allowedDomains\":[\"example.com\"],\"initialUrls\":[\"https://example.com/\"]}}"));
+        for changed in [
+            "https://example.com",
+            "https://example.com/#section",
+            "https://u:p@example.com/",
+            "https://example.com:444/",
+            "https://example.com/?session=private",
+            "https://other.com/",
+        ] {
+            assert!(url(changed, &scope).is_err(), "{changed}");
+        }
+    }
+    #[test]
+    fn native_source_receipts_reject_unreviewed_scope_counts_and_provenance() {
+        let mut binding = super::super::tests::binding();
+        binding.version = 2;
+        binding.mode = Some("public-web-research".into());
+        binding.web_scope = Some(PublicWebScope {
+            allowed_domains: vec!["example.com".into()],
+            initial_urls: vec!["https://example.com/".into()],
+        });
+        binding.budget.max_model_calls = 4;
+        binding.budget.max_page_reads = Some(6);
+        binding.budget.max_source_bytes = Some(65536);
+        let mut snapshot: TaskSnapshot = serde_json::from_value(serde_json::json!({"binding":binding,"generation":1,"status":"completed","sequence":3,"resultBytes":1,"createdAt":1000,"updatedAt":2000,"retainedUntil":86401000,
+            "research":{"modelCalls":2,"pageReads":1,"sourceBytes":32,"sources":[{"citationId":format!("web-{}", "a".repeat(24)),"title":"Public source","finalUri":"https://example.com/","fetchedAt":"1970-01-01T00:00:01.500Z","contentSha256":"a".repeat(64),"contentBytes":32,"truncated":false}]}})).unwrap();
+        validate_receipt(&binding, &snapshot).unwrap();
+        let original = snapshot.clone();
+        snapshot.updated_at = i64::MAX;
+        assert!(validate_receipt(&binding, &snapshot).is_err());
+        snapshot = original.clone();
+        snapshot.research.as_mut().unwrap().sources[0].final_uri = "https://other.com/".into();
+        assert!(validate_receipt(&binding, &snapshot).is_err());
+        snapshot = original.clone();
+        snapshot.research.as_mut().unwrap().source_bytes += 1;
+        assert!(validate_receipt(&binding, &snapshot).is_err());
+        snapshot = original.clone();
+        snapshot.research.as_mut().unwrap().model_calls = 5;
+        assert!(validate_receipt(&binding, &snapshot).is_err());
+        snapshot = original.clone();
+        snapshot.research.as_mut().unwrap().sources[0].citation_id = "invented".into();
+        assert!(validate_receipt(&binding, &snapshot).is_err());
+        snapshot = original;
+        snapshot.research = None;
+        assert!(validate_receipt(&binding, &snapshot).is_err());
+        let legacy = super::super::tests::binding();
+        snapshot.binding = legacy.clone();
+        assert!(validate_receipt(&legacy, &snapshot).is_ok());
+    }
 }
