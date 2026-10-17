@@ -35,7 +35,7 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
   async read(cap: HostedTaskCapability): Promise<HostedTaskResult> {
     const row = await this.ctx.storage.get<StoredTask>("task");
     if (!row) throw new Error("task-not-found"); this.owner(row, cap);
-    if (row.snapshot.retainedUntil <= Date.now()) { await this.expire(); const expired = await this.ctx.storage.get<StoredTask>("task"); return { snapshot: expired!.snapshot, text: "" }; }
+    if (row.snapshot.retainedUntil <= Date.now()) { await this.expire(); const expired = await this.ctx.storage.get<StoredTask>("task"); if (!expired) throw new Error("task-not-found"); return { snapshot: expired.snapshot, text: "" }; }
     return { snapshot: row.snapshot, text: row.snapshot.status === "completed" ? row.text ?? "" : "" };
   }
 

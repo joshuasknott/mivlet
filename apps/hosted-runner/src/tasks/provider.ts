@@ -102,5 +102,9 @@ function usageRecord(event: Extract<BackendAgentEvent, { type: "usage" }>): Host
     ...(event.cachedInputTokens !== undefined ? { cachedInputTokens: event.cachedInputTokens } : {}),
     ...(event.cacheWriteTokens !== undefined ? { cacheWriteTokens: event.cacheWriteTokens } : {}),
     ...(event.reasoningTokens !== undefined ? { reasoningTokens: event.reasoningTokens } : {}),
-    costUsd: event.costUsd, costEstimated: event.costEstimated ?? true, costUnknown: event.costUnknown ?? true };
+    // The shared adapter may estimate a provider-wide catalogue price. This
+    // cloud path has no exact model billing receipt, so never present that
+    // estimate as known cloud spend or as an enforced money cap.
+    costUsd: event.costEstimated === false && event.costUnknown !== true ? event.costUsd : 0,
+    costEstimated: event.costEstimated !== false, costUnknown: event.costEstimated !== false || event.costUnknown !== false };
 }
