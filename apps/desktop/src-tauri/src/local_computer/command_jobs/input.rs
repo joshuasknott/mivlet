@@ -23,6 +23,18 @@ fn validate(input: &InputRequest) -> Result<(), String> {
         Ok(())
     }
 }
+pub(super) fn dispatch_model(
+    jobs: &ScopeJobs,
+    ticket: &OperationTicket,
+    input: InputRequest,
+    check_repository: impl FnOnce(&str) -> Result<(), String>,
+) -> Result<Value, String> {
+    validate(&input)?;
+    if let Some(repository) = jobs.record(&input.job_id)?.repository_id {
+        check_repository(&repository)?;
+    }
+    dispatch(jobs, ticket, input)
+}
 pub(super) fn dispatch(
     jobs: &ScopeJobs,
     ticket: &OperationTicket,
@@ -145,6 +157,53 @@ pub async fn native_command_input(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_model_cannot_consume_input_for_another_work_repository_but_user_job_authority_is_separate()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let auth = super::super::super::authority::ComputerAuthority::load(root.path()).unwrap();
+        let ticket = auth.begin_agent(1).unwrap();
+        let manager = JobManager::default();
+        let jobs = manager.scope(root.path()).unwrap();
+        let repository = "a".repeat(48);
+        let session = jobs
+            .start_with_options(
+                &ticket,
+                Some(&repository),
+                "fixture",
+                false,
+                30,
+                true,
+                SessionOptions {
+                    interactive: true,
+                    preview_port: None,
+                },
+            )
+            .unwrap();
+        session.running().unwrap();
+        let input = || InputRequest {
+            job_id: session.id.clone(),
+            job_generation: 1,
+            input_sequence: 1,
+            text: "inspect\n".into(),
+        };
+        let other_current_work_repository = "b".repeat(48);
+        let rejected = dispatch_model(&jobs, &ticket, input(), |held_repository| {
+            assert_eq!(held_repository, repository);
+            if held_repository != other_current_work_repository {
+                Err("Current Work is bound to another copy.".into())
+            } else {
+                Ok(())
+            }
+        });
+        assert!(rejected.unwrap_err().contains("another copy"));
+        assert_eq!(session.snapshot().unwrap().input_sequence, 0);
+        assert!(!jobs.inner.lock().unwrap().live[&session.id].input_pending);
+        // Direct user input targets this explicit retained job. There is no
+        // installed endpoint in this fixture, but admission consumes its seq.
+        assert!(dispatch(&jobs, &ticket, input()).is_err());
+        assert_eq!(session.snapshot().unwrap().input_sequence, 1);
+    }
     #[test]
     fn input_sequence_is_consumed_before_delivery_and_never_replayed() {
         let root = tempfile::tempdir().unwrap();

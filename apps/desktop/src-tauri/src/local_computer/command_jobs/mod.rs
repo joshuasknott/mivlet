@@ -566,7 +566,10 @@ pub(crate) fn execute(
         let input =
             serde_json::from_value(arguments).map_err(|_| "Invalid exact command input.")?;
         let jobs = state.command_jobs(workspace, agent)?;
-        let result = input::dispatch(&jobs, &ticket, input).and_then(|value| {
+        let result = input::dispatch_model(&jobs, &ticket, input, |repository| {
+            super::coding::validate_command_repository(workspace, agent, repository)
+        })
+        .and_then(|value| {
             serde_json::to_string(&value).map_err(|_| "Invalid command input receipt.".into())
         });
         return ticket.finish(result);
