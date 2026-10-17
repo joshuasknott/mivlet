@@ -536,6 +536,93 @@ fn page(probe: &Probe, restricted: bool) -> String {
     )
 }
 
+/// Disposable debug-only installed-WebView acceptance. It starts no account,
+/// provider, command executor, stored workspace, or renderer command handler.
+#[cfg(debug_assertions)]
+pub(crate) fn acceptance() -> Result<(), String> {
+    if std::env::var("MIVLET_PREVIEW_NETWORK_ACCEPTANCE").as_deref() != Ok("1") {
+        return Err(
+            "Set MIVLET_PREVIEW_NETWORK_ACCEPTANCE=1 for this disposable native WebView check."
+                .into(),
+        );
+    }
+    let profile = tempfile::Builder::new()
+        .prefix("mivlet-preview-network-qa-")
+        .tempdir()
+        .map_err(|_| "Native WebView QA profile is unavailable.")?;
+    let directory = profile.path().to_owned();
+    let passed = Arc::new(AtomicBool::new(false));
+    let outcome = passed.clone();
+    let deadline = Instant::now() + Duration::from_secs(18);
+    let mut context = tauri::generate_context!();
+    context.config_mut().app.windows.clear();
+    let app = tauri::Builder::default()
+        .setup(move |app| {
+            let window = tauri::WebviewWindowBuilder::new(
+                app,
+                "main",
+                tauri::WebviewUrl::External(url::Url::parse("about:blank")?),
+            )
+            .title("Mivlet native preview network acceptance")
+            .visible(false)
+            .skip_taskbar(true)
+            .data_directory(directory)
+            .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --site-per-process")
+            .build()?;
+            crate::mcp_app_host::install_navigation_guard(&window);
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                let result = async {
+                    let ready_deadline = Instant::now() + Duration::from_secs(5);
+                    while crate::interactive_network_guard::require_ready().is_err() {
+                        if Instant::now() >= ready_deadline {
+                            return Err("Installed native WebView navigation/network guards did not become ready.".to_owned());
+                        }
+                        tokio::time::sleep(Duration::from_millis(25)).await;
+                    }
+                    crate::interactive_network_guard::verify_connection_allowlist(&window, || {
+                        if Instant::now() >= deadline {
+                            return Err("Native WebView QA deadline expired.".into());
+                        }
+                        if window.is_visible().map_err(|_| "Native WebView QA window closed.")? {
+                            return Err("Native WebView QA must remain hidden.".into());
+                        }
+                        Ok(())
+                    }).await?;
+                    crate::mcp_app_host::require_live_preview_guards()?;
+                    if active().lock().map_err(|_| "Native WebView QA cleanup is unavailable.")?.is_some() {
+                        return Err("Native WebView QA retained its fixture registration.".into());
+                    }
+                    Ok::<(),String>(())
+                }.await;
+                let code = match result {
+                    Ok(()) => {
+                        outcome.store(true,Ordering::Release);
+                        eprintln!("Native preview network: installed WebView guards ready; loopback fetch and real data-only STUN positive controls observed; restricted fetch and STUN denied by native counters; fixture registrations removed.");
+                        0
+                    }
+                    Err(error) => { eprintln!("{error}"); 2 }
+                };
+                handle.exit(code);
+            });
+            Ok(())
+        })
+        .build(context)
+        .map_err(|_| "The disposable native WebView could not start.")?;
+    let code = app.run_return(|_, _| {});
+    profile
+        .close()
+        .map_err(|_| "The disposable native WebView profile could not be removed.")?;
+    if code == 0 && passed.load(Ordering::Acquire) && verified() {
+        Ok(())
+    } else {
+        Err(
+            "Installed native preview network acceptance did not pass; no app preview was exposed."
+                .into(),
+        )
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

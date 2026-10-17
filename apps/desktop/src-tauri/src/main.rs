@@ -39,6 +39,17 @@ fn main() {
             }
             return;
         }
+        #[cfg(all(windows, debug_assertions))]
+        Some("--check-preview-network") => {
+            if args.next().is_some() {
+                std::process::exit(2);
+            }
+            if let Err(error) = mivlet_desktop_lib::check_preview_network() {
+                eprintln!("{error}");
+                std::process::exit(2);
+            }
+            return;
+        }
         Some("--mivlet-browser-child") => {
             if !mivlet_desktop_lib::run_browser_child(
                 &std::env::args_os().skip(2).collect::<Vec<_>>(),
