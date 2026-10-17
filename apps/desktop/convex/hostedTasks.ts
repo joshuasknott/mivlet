@@ -14,7 +14,7 @@ import { hostedRunnerBaseUrl } from "./hostedExecutionPolicy";
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/;
 const SCOPES: readonly HostedTaskCapabilityScope[] = [
-  "task:admit", "task:read", "task:cancel",
+  "task:admit", "task:read", "task:cancel", "task:input", "task:output",
   "credential:enroll", "credential:read", "credential:revoke",
 ];
 
@@ -42,7 +42,7 @@ export function parseHostedTaskCapabilityArgs(value: unknown): HostedTaskCapabil
   return value as HostedTaskCapabilityArgs;
 }
 
-/** No computer entitlement is needed for a text-only task with no tools. */
+/** Account authority only; the runner enforces each mode's deployment prerequisites. */
 export const authorizeHostedTaskCapability = internalQuery({
   args: { workspaceId: v.string(), deviceId: v.string(), agentId: v.string() },
   returns: v.object({ accountId: v.string() }),
@@ -93,6 +93,7 @@ export const requestHostedTaskCapability = internalAction({
     workspaceId: v.string(), deviceId: v.string(), agentId: v.string(),
     scope: v.union(
       v.literal("task:admit"), v.literal("task:read"), v.literal("task:cancel"),
+      v.literal("task:input"), v.literal("task:output"),
       v.literal("credential:enroll"), v.literal("credential:read"), v.literal("credential:revoke"),
     ),
     resourceId: v.string(), requestSha256: v.string(),

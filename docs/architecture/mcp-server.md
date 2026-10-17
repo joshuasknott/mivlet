@@ -214,3 +214,14 @@ cross-device cookie isolation, renewal, unknown writes without replay and
 expiry at the original session deadline. These used a synthetic native peer;
 they do not establish signed-in desktop admission or physical-phone delivery.
 Evidence is in the ignored integration `output/agent-phone-live-boundaries.json`.
+
+Eight further browser checks passed against the deployed phone client at desktop
+and 390px widths, still using a synthetic native peer. They covered pairing,
+escaped result text, explicit retry of the original uncertain write, Stop,
+read-only grants and offline state. All seven screenshots were inspected; there
+were no page errors or horizontal overflow, and visible buttons met 44px targets.
+The initial session check now keeps Connect disabled and stale session responses
+cannot reset a newer connection. This client is deployed as version
+`aeef283c-631d-4dd6-b110-5f30d7a2dc3c`. Evidence and the design review are under
+`output/playwright/managed-phone-20261017/`. Physical-phone and real native
+account acceptance remain separate, unexercised checks.

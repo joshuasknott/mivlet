@@ -54,6 +54,17 @@ describe("hosted text capability authority", () => {
     await expect(mintHostedTaskCapability({ auth, runQuery }, args)).rejects.toThrow("runner-configuration-required");
   });
 
+  it.each(["task:input", "task:output"] as const)("binds repository transport %s to the exact native digest without accepting bytes", async scope => {
+    vi.stubEnv("MIVLET_HOSTED_TASK_SIGNING_KEY", key);
+    vi.stubEnv("MIVLET_HOSTED_TASK_URL", "https://tasks.example.com");
+    const scoped = { ...args, scope };
+    const receipt = await mintHostedTaskCapability({ auth, runQuery: async () => ({ accountId: "account_unit" }) }, scoped);
+    expect(await readHostedTaskCapability(key, receipt.token)).toMatchObject({ ...scoped, accountId: "account_unit" });
+    for (const payload of [{ dataBase64: "cHJpdmF0ZQ==" }, { path: "src/private.ts" }, { output: "source bytes" }]) {
+      expect(() => parseHostedTaskCapabilityArgs({ ...scoped, ...payload })).toThrow("invalid-request");
+    }
+  });
+
   it("accepts only bounded exact task scope arguments and rejects secret or text additions", () => {
     expect(parseHostedTaskCapabilityArgs(args)).toEqual(args);
     for (const bad of [
