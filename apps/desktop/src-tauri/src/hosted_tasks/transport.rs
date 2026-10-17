@@ -9,6 +9,8 @@ use serde_json::{json, Value};
 use std::time::Duration;
 use std::{future::Future, task::Poll};
 use url::Url;
+mod transfer;
+pub(crate) use transfer::Transfer;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -129,7 +131,7 @@ pub(crate) async fn call(
     let mut bytes = Vec::new();
     if response
         .content_length()
-        .is_some_and(|length| length > 131_072)
+        .is_some_and(|length| length > 1_048_576)
     {
         return Err("The cloud task response exceeded its limit.".into());
     }
@@ -138,7 +140,7 @@ pub(crate) async fn call(
         ticket.check()?;
         let chunk = chunk
             .map_err(|_| "The cloud task response was interrupted. Refresh its saved state.")?;
-        if bytes.len() + chunk.len() > 131_072 {
+        if bytes.len() + chunk.len() > 1_048_576 {
             return Err("The cloud task response exceeded its limit.".into());
         }
         bytes.extend_from_slice(&chunk);

@@ -165,6 +165,14 @@ pub(crate) fn validate(scope: &PublicWebScope) -> Result<(), String> {
     Ok(())
 }
 pub(crate) fn requested(request: &Prepare) -> Result<Option<PublicWebScope>, String> {
+    if request.selected_paths.is_some()
+        || request.writable_paths.is_some()
+        || request.checks.is_some()
+    {
+        return Err(
+            "Choose the separate isolated coding review before selecting files or checks.".into(),
+        );
+    }
     match (&request.mode, &request.web_scope) {
         (None, None) => Ok(None),
         (Some(mode), Some(scope)) if mode == "public-web-research" => {

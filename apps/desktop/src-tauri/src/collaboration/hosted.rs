@@ -5,6 +5,8 @@ use crate::local_computer::authority::OperationTicket;
 use crate::models::ExecutionAttempt;
 use crate::store::repos::{execution_attempt, workspace_directory::HostedComputerScope};
 use serde_json::json;
+mod coding;
+pub(crate) use coding::prepare_coding;
 
 pub(super) fn context<T>(
     app: &tauri::AppHandle,
@@ -340,6 +342,9 @@ pub(crate) fn begin_prepare(
             .unwrap_or_else(|| item.queue.as_ref().is_some_and(|q| q.held));
         queue::hold(ctx, &item.id, item.generation, true)?;
         let mut item = ctx.item(&item.id)?;
+        // The hold advances generation. A replacement review must not retain
+        // an earlier task id while native source capture is preparing.
+        item.hosted_task = None;
         item.reason = Some("Paused while preparing cloud text consent. If cloud setup is unavailable, keep it paused or resume it explicitly from the queue.".into());
         ctx.work(&item)?;
         let mut request = request.clone();
@@ -423,6 +428,12 @@ fn append(ctx: &Context<'_>, item: &Work, run: &str, kind: &str, text: &str) -> 
         &format!("{id}-revision"),
         "terminal",
         if item
+            .hosted_task
+            .as_ref()
+            .is_some_and(|h| h.binding.version == 3)
+        {
+            "hosted-offline-coding"
+        } else if item
             .hosted_task
             .as_ref()
             .is_some_and(|h| h.binding.version == 2)
@@ -550,6 +561,11 @@ fn result_at(
             reconcile_required: false,
         });
     };
+    if offer.admission.binding.version == 3
+        && matches!(saved.snapshot.status.as_str(), "completed" | "needs-review")
+    {
+        return coding::result_at(ctx, item, &offer);
+    }
     let b = &offer.admission.binding;
     let h = item
         .hosted_task
@@ -570,7 +586,11 @@ fn result_at(
         if phase != "stop-pending" {
             h.phase = "accepted".into();
         }
-        item.reason = Some("Running one cloud text task. It can continue while this desktop app is closed. Tools and local files are unavailable.".into());
+        item.reason = Some(match b.version {
+            3 => "Cloud coding admission/source transfer is saved. The isolated scratch operation can continue while this desktop app is closed. Local import remains separately approved.",
+            2 => "Running the reviewed static public web research task. It can continue while this desktop app is closed within its exact read scope and budgets.",
+            _ => "Running one cloud text task. It can continue while this desktop app is closed. Tools and local files are unavailable.",
+        }.into());
         ctx.work(&item)?;
     } else {
         // Preserve authenticated evidence in the existing attempt even
