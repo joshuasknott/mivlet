@@ -25,9 +25,8 @@ pub(super) fn project(
         let entry = archive
             .by_index(index)
             .map_err(|_| "The Office archive is invalid.")?;
-        let name = entry
-            .name()
-            .map_err(|_| "The Office archive contains an invalid file name.")?;
+        let name = std::str::from_utf8(entry.name_raw())
+            .map_err(|_| "The Office archive contains an invalid UTF-8 file name.")?;
         expanded = expanded.saturating_add(entry.size());
         if expanded > 200 * 1024 * 1024
             || entry.enclosed_name().is_none()

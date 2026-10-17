@@ -97,9 +97,8 @@ fn extract_archive(bytes: &[u8], destination: &Path) -> Result<(usize, usize, u6
         {
             return Err("Repository archives cannot contain links or special files.".into());
         }
-        let name = entry
-            .name()
-            .map_err(|_| "The repository archive contains an invalid file name.")?;
+        let name = std::str::from_utf8(entry.name_raw())
+            .map_err(|_| "The repository archive contains an invalid UTF-8 file name.")?;
         let path = entry_path(&name)?;
         total = total
             .checked_add(entry.size())
@@ -327,6 +326,18 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         assert!(extract_archive(&bytes, temp.path()).is_err());
         assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
+    }
+    #[test]
+    fn extraction_preserves_valid_unicode_source_names() {
+        let temp = tempfile::tempdir().unwrap();
+        let name = "repo/src/Δ.ts";
+        assert_eq!(
+            extract_archive(&archive(&[(name, b"source")]), temp.path())
+                .unwrap()
+                .0,
+            1
+        );
+        assert_eq!(fs::read(temp.path().join(name)).unwrap(), b"source");
     }
     #[test]
     fn paths_exclude_credentials_and_dependencies() {
