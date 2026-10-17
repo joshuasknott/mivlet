@@ -1,7 +1,7 @@
 import { ArrowClockwise } from "@phosphor-icons/react/dist/csr/ArrowClockwise";
 import { Spinner } from "@phosphor-icons/react/dist/csr/Spinner";
 import { UserCircle } from "@phosphor-icons/react/dist/csr/UserCircle";
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { VoiceCapability } from "@mivlet/protocol";
 import type { SettingsRuntime } from "../settings/settings-runtime";
 import { MemoryRecords } from "../settings/MemoryRecords";
@@ -25,6 +25,7 @@ export { LocalSchedules } from "../settings/LocalSchedules";
 // settings chunks while retaining the existing SettingsPage download ceiling.
 export { ProviderUsageDetails };
 export { AccountDialog } from "../agents/AccountDialog";
+const HostedProviderSettings = lazy(() => import("../hosted/HostedProviderSettings").then(module => ({ default: module.HostedProviderSettings })));
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
   status: "unavailable",
@@ -243,6 +244,7 @@ function ProviderSettings({
   runtime: SettingsRuntime;
   onStatus: (message: string) => void;
 }) {
+  const [cloudOpen, setCloudOpen] = useState(false);
   return (
     <div className="settings-page__body">
       <ProviderCatalogue
@@ -269,6 +271,12 @@ function ProviderSettings({
         }
         onStatus={onStatus}
       />
+      <details className="settings-disclosure" onToggle={event => setCloudOpen(event.currentTarget.open)}>
+        <summary>Cloud task connections</summary>
+        {cloudOpen && <Suspense fallback={<p role="status">Loading cloud connections…</p>}>
+          <HostedProviderSettings workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId} agents={runtime.agents} />
+        </Suspense>}
+      </details>
     </div>
   );
 }

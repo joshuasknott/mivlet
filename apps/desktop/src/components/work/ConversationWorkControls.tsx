@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { ArrowUp } from "@phosphor-icons/react/dist/csr/ArrowUp";
 import { ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { PencilSimple } from "@phosphor-icons/react/dist/csr/PencilSimple";
@@ -13,6 +13,7 @@ import { editableQueue } from "../../lib/work-queue";
 import "./conversation-work-controls.css";
 
 const goalLabels = { active: "In progress", paused: "Paused", completed: "Agent reports achieved", blocked: "Needs your input", "budget-exhausted": "Budget reached" };
+const HostedTaskControls = lazy(() => import("../hosted/HostedTaskControls").then(module => ({ default: module.HostedTaskControls })));
 
 /** Compact controls over native Work, never a second queue or execution owner. */
 export function ConversationWorkControls({ work, conversationId, service, goalDraft, onGoalDraftChange, disabled = false }: {
@@ -25,6 +26,8 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
 }) {
   const queue = editableQueue(work, conversationId);
   const roots = work.filter(item => item.conversationId === conversationId && !item.parentId);
+  const cloudTasks = roots.filter(item => item.hostedTask);
+  const [cloudReviewId, setCloudReviewId] = useState<string>();
   const goalWork = [...roots].reverse().find(item => item.outcomeGoal && item.status !== "cancelled");
   const active = [...roots].reverse().find(item => item.status === "running" || item.status === "awaiting-approval");
   const [pending, setPending] = useState(false);
@@ -102,7 +105,9 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
               <label>Edit queued request<textarea autoFocus required maxLength={32000} rows={2} value={editText} onChange={event => setEditText(event.target.value)} /></label>
               <div className="conversation-work-actions"><button type="submit" disabled={busy || !editText.trim()}>Save</button><button type="button" disabled={busy} onClick={() => setEditing(undefined)}>Cancel</button></div>
             </form> : <>
-              <div className="conversation-queue-message"><span>{item.userRequest}</span><small>{item.agentName}{item.queue?.held ? " · Paused" : ""}{item.attachments?.length ? ` · ${item.attachments.length} attached` : ""}</small></div>
+              <div className="conversation-queue-message"><span>{item.userRequest}</span><small>{item.agentName}{item.queue?.held ? " · Paused" : ""}{item.attachments?.length ? ` · ${item.attachments.length} attached` : ""}</small>
+                {!item.hostedTask && <button type="button" disabled={busy} onClick={() => setCloudReviewId(item.id)}>Cloud options</button>}
+              </div>
               <div className="conversation-work-actions">
                 <button type="button" title="Move up" aria-label={`Move queued request ${index + 1} up`} disabled={busy || index === 0} onClick={() => void action(() => service.command({ action: "move-queued-work", id: item.id, expectedGeneration: item.generation, beforeId: queue[index - 1].id }))}><ArrowUp size={16} aria-hidden="true" /></button>
                 <button type="button" title="Move down" aria-label={`Move queued request ${index + 1} down`} disabled={busy || index === queue.length - 1} onClick={() => void action(() => service.command({ action: "move-queued-work", id: item.id, expectedGeneration: item.generation, beforeId: queue[index + 2]?.id }))}><ArrowDown size={16} aria-hidden="true" /></button>
@@ -116,6 +121,9 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
       </ol>
       {queue.length > 6 ? <div className="conversation-work-actions"><button type="button" disabled={!pageIndex} onClick={() => setPage(pageIndex - 1)}>Previous</button><span>{pageIndex + 1}/{Math.ceil(queue.length / 6)}</span><button type="button" disabled={(pageIndex + 1) * 6 >= queue.length} onClick={() => setPage(pageIndex + 1)}>Next</button></div> : null}
     </div> : null}
+    {roots.filter(item => item.id === cloudReviewId || cloudTasks.includes(item)).map(item => <Suspense key={item.id} fallback={<p role="status">Loading cloud task…</p>}>
+      <HostedTaskControls item={item} onChanged={service.refresh} disabled={busy} />
+    </Suspense>)}
     {active ? <div className="conversation-work-guidance">
       <button type="button" onClick={() => setGuiding(!guiding)} aria-expanded={guiding}>Guide active work</button>
       {guiding ? <div className="conversation-work-form">
