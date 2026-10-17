@@ -1,0 +1,19 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mivlet-hosted-tasks",
+  "main": "src/tasks/index.ts",
+  "compatibility_date": "2026-08-28",
+  // Distinct deployment secrets: MIVLET_HOSTED_TASK_SIGNING_KEY (also Convex)
+  // and MIVLET_HOSTED_TASK_ENCRYPTION_KEY (Worker only). Neither may reuse
+  // computer lifecycle credentials or users' local provider connections.
+  "durable_objects": {
+    "bindings": [
+      { "name": "TASK_AUTHORITY", "class_name": "TaskAuthority" },
+      { "name": "PROVIDER_CUSTODY", "class_name": "ProviderCustody" }
+    ]
+  },
+  "migrations": [
+    { "tag": "v1-hosted-text-tasks", "new_sqlite_classes": ["TaskAuthority", "ProviderCustody"] }
+  ],
+  "observability": { "enabled": false }
+}

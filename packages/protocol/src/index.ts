@@ -1071,3 +1071,4 @@ export type { McpClientAccess, McpServerConfig, McpConsentRequest, McpClientGran
 export type * from "./domains/provider-usage";
 export type { ProviderContinuationInput, ProviderContinuationMessage, ProviderContinuation } from "./domains/provider-continuation";
 export * from "./domains/hosted-tasks";
+export * from "./domains/hosted-task-capability";

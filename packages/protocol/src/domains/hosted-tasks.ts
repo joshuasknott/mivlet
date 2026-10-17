@@ -1,3 +1,5 @@
+import { redactSecretText, secretMarkerSurvives } from "../secret-redaction";
+
 /** Explicitly delegated hosted text Work. These records grant no native tools. */
 export const HOSTED_TEXT_TASK_LIMITS = {
   inputBytes: 65_536,
@@ -10,6 +12,8 @@ export const HOSTED_TEXT_TASK_LIMITS = {
   retainedPerAccount: 40,
   capabilityMs: 120_000,
   credentialBytes: 512,
+  credentialsPerAccount: 8,
+  credentialRetentionMs: 30 * 24 * 60 * 60_000,
 } as const;
 
 export type HostedTextProviderId = "openai" | "anthropic" | "gemini" | "xai" | "deepseek";
@@ -93,6 +97,20 @@ export interface HostedProviderConnection {
   enabled: boolean;
   createdAt: number;
   updatedAt: number;
+  expiresAt: number;
+}
+export interface HostedCredentialEnrollment {
+  credentialId: string;
+  providerId: HostedTextProviderId;
+  /** Explicit replacement must advance the stored revision by exactly one. */
+  revision: number;
+}
+
+/** Reject, rather than silently redact, data the exact consent cannot send. */
+export function hostedTextContentFailure(content: string): string | undefined {
+  if (content.includes("\0") || secretMarkerSurvives(content) || redactSecretText(content) !== content) return "hosted-secret-content";
+  if (/(?:^|[\s"'`(])(?:[A-Za-z]:[\\/]|\\\\|file:\/\/|\/(?:Users|home|tmp|var|etc|root|mnt|media|private)\/)/im.test(content)) return "hosted-local-path-content";
+  return undefined;
 }
 export type HostedTaskCapabilityScope = "task:admit" | "task:read" | "task:cancel" | "credential:enroll" | "credential:read" | "credential:revoke";
 /** Native/Convex/Worker wire only. Never display, persist, or send to a model. */

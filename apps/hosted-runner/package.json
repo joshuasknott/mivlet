@@ -12,10 +12,15 @@
     "worker:types": "wrangler types --config wrangler.jsonc",
     "worker:dev": "wrangler dev --config wrangler.jsonc --port 8789",
     "worker:deploy:dry-run": "wrangler deploy --config wrangler.jsonc --dry-run",
-    "worker:deploy": "wrangler deploy --config wrangler.jsonc --containers-rollout=immediate"
+    "worker:deploy": "wrangler deploy --config wrangler.jsonc --containers-rollout=immediate",
+    "tasks:types": "wrangler types --config wrangler.tasks.jsonc tasks-configuration.d.ts",
+    "tasks:dev": "wrangler dev --config wrangler.tasks.jsonc --port 8790",
+    "tasks:deploy:dry-run": "wrangler deploy --config wrangler.tasks.jsonc --dry-run",
+    "tasks:deploy": "wrangler deploy --config wrangler.tasks.jsonc"
   },
   "dependencies": {
     "@cloudflare/sandbox": "0.13.0-next.738.2",
+    "@mivlet/connectors": "workspace:*",
     "@mivlet/protocol": "workspace:*"
   },
   "devDependencies": {
