@@ -12,6 +12,7 @@ export default tseslint.config(
       "**/worker-configuration.d.ts",
       "**/tasks-configuration.d.ts",
       "**/phone-configuration.d.ts",
+      "**/coding-configuration.d.ts",
       "**/runtime-configuration.d.ts",
       "**/*.test.{ts,tsx}",
       "**/*.spec.{ts,tsx}",

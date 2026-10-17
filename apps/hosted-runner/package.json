@@ -5,9 +5,9 @@
   "type": "module",
   "description": "Mivlet hosted text tasks, phone relay, and deployment-gated isolated computers.",
   "scripts": {
-    "build": "tsc -p tsconfig.json && tsc -p tsconfig.tasks.json && tsc -p tsconfig.phone.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.tasks.json && tsc -p tsconfig.phone.json && tsc -p tsconfig.coding.json",
     "pretest": "pnpm --filter @mivlet/protocol build",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tasks.json --noEmit && tsc -p tsconfig.phone.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tasks.json --noEmit && tsc -p tsconfig.phone.json --noEmit && tsc -p tsconfig.coding.json --noEmit",
     "test": "vitest run --configLoader runner",
     "worker:types": "wrangler types --config wrangler.jsonc",
     "worker:dev": "wrangler dev --config wrangler.jsonc --port 8789",
@@ -21,7 +21,10 @@
     "phone:types": "wrangler types --config wrangler.phone.jsonc --include-runtime false --env-interface PhoneRelayBindings phone-configuration.d.ts",
     "phone:dev": "wrangler dev --config wrangler.phone.jsonc --port 8791",
     "phone:deploy:dry-run": "wrangler deploy --config wrangler.phone.jsonc --dry-run",
-    "phone:deploy": "wrangler deploy --config wrangler.phone.jsonc"
+    "phone:deploy": "wrangler deploy --config wrangler.phone.jsonc",
+    "coding:types": "wrangler types --config wrangler.coding.jsonc --include-runtime false --env-interface HostedCodingBindings coding-configuration.d.ts",
+    "coding:deploy:dry-run": "wrangler deploy --config wrangler.coding.jsonc --dry-run",
+    "coding:deploy": "wrangler deploy --config wrangler.coding.jsonc --containers-rollout=immediate"
   },
   "dependencies": {
     "@cloudflare/sandbox": "0.13.0-next.738.2",

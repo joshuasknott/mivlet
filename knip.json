@@ -16,6 +16,7 @@
         "src/index.ts",
         "src/tasks/index.ts",
         "src/phone/index.ts",
+        "src/coding/index.ts",
         "src/**/*.test.ts",
         "vitest.config.ts"
       ],
@@ -60,6 +61,7 @@
     "**/worker-configuration.d.ts",
     "**/tasks-configuration.d.ts",
     "**/phone-configuration.d.ts",
+    "**/coding-configuration.d.ts",
     "**/runtime-configuration.d.ts",
     "apps/hosted-runner/prototypes/opencode/**"
   ],

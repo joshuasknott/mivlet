@@ -1,6 +1,6 @@
 import { HOSTED_PUBLIC_WEB_LIMITS as L, type HostedPublicWebProgress, type HostedPublicWebSource, type HostedPublicWebTaskBinding } from "@mivlet/protocol";
 
-export interface ResearchStep {
+interface ResearchStep {
   id: string; kind: "model" | "read"; inputSha256: string;
   status: "dispatching" | "completed"; outputSha256?: string;
 }

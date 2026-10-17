@@ -27,7 +27,7 @@ print(json.dumps(results,sort_keys=True))
  * inherited filter blocks both public networking and the image control server
  * on loopback/Unix sockets, independently of Container Internet policy.
  * Linux UAPI: seccomp_filter.html and arch/x86/entry/syscalls/syscall_64.tbl. */
-export const CHILD_RESTRICTIONS = String.raw`
+const CHILD_RESTRICTIONS = String.raw`
 import ctypes, os, platform, resource
 def restrict_child():
     if platform.machine() not in ('x86_64','amd64'): raise RuntimeError('unsupported-seccomp-architecture')

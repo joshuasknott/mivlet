@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist/coding",
+    "rootDir": "src"
+  },
+  "include": ["src/coding", "runtime-configuration.d.ts", "coding-configuration.d.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**"]
+}
