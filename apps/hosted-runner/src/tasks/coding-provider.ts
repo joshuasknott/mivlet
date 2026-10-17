@@ -134,6 +134,7 @@ export async function runRealCoding(binding: HostedCodingTaskBinding, input: Hos
           let result: CodingCheckResult;
           try {
             const taskSha256 = await hostedTaskSha256(binding); signal.throwIfAborted();
+            safe({ scope: binding.repository.scope, files: manifest }, L.admissionBytes);
             await runtime.begin({ leaseId, taskSha256, stepId: toolStep, deadline: state.deadline, scope: binding.repository.scope, files: manifest, candidateSha256 });
             for (const file of manifest) {
               signal.throwIfAborted(); const bytes = await files.bytes(file); signal.throwIfAborted();
