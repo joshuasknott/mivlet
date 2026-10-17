@@ -7,6 +7,7 @@ import { readNativeAppPreview, closeNativeAppPreview, validateNativePreviewPick 
 const CodingTerminal = lazy(() => import("./CodingTerminal").then(module => ({ default: module.CodingTerminal })));
 const CodingPreview = lazy(() => import("./CodingPreview").then(module => ({ default: module.CodingPreview })));
 const CodingResultTabs = lazy(() => import("./CodingResultTabs").then(module => ({ default: module.CodingResultTabs })));
+const CodingRepositoryReview = lazy(() => import("./CodingRepositoryReview").then(module => ({ default: module.CodingRepositoryReview })));
 interface Props {
   workspaceId: string; agentId: string; jobId: string; jobGeneration: number; onDraft?: (text: string) => void;
 }
@@ -49,6 +50,8 @@ function CodingSession({ workspaceId, agentId, jobId, jobGeneration, onDraft }: 
     {open && state ? <Suspense fallback={<p role="status">Opening session controls…</p>}>
       <CodingResultTabs terminal={<CodingTerminal key={`${workspaceId}:${agentId}:${jobId}:${jobGeneration}`} target={state.target} job={state.job}
         onJobChange={job => setState(previous => previous && { ...previous, job })} />}
+        files={state.job.repositoryId ? <CodingRepositoryReview target={state.target} repositoryId={state.job.repositoryId} view="files" /> : undefined}
+        changes={state.job.repositoryId ? <CodingRepositoryReview target={state.target} repositoryId={state.job.repositoryId} view="changes" /> : undefined}
         preview={state.job.previewPort && state.job.repositoryId && state.job.status === "running" && onDraft ? <CodingPreview target={state.target}
           readPreview={async target => { const result = await readNativeAppPreview(target); if (!result) throw new Error("Native app preview requires Mivlet desktop."); return result; }}
           closePreview={async target => { const result = await closeNativeAppPreview(target); if (!result) throw new Error("Native preview owner is unavailable."); return result; }}

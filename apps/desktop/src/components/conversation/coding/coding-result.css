@@ -32,5 +32,9 @@
 .coding-preview__feedback>div{display:flex;gap:10px;align-items:flex-end}
 .coding-preview textarea{resize:vertical;min-height:70px;max-height:200px}
 .coding-preview__feedback .coding-result__notice{margin:9px 0 0}
+.coding-repository-review{min-width:0}
+.coding-repository-review__files{margin:0;padding:0 14px 12px 32px;max-height:330px;overflow:auto;font-size:var(--text-12)}
+.coding-repository-review__files li{padding:4px 0;overflow-wrap:anywhere}
+.coding-repository-review pre{margin:0 12px 12px;padding:12px;border:1px solid var(--line);border-radius:var(--radius-1);max-height:360px;overflow:auto;background:var(--surface);font:12px/1.55 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:pre-wrap;overflow-wrap:anywhere;user-select:text}
 @media(max-width:700px){.coding-result button{min-height:44px}.coding-result__toolbar{align-items:flex-start}.coding-preview iframe{height:360px}.coding-preview__feedback>div{flex-direction:column;align-items:stretch}.coding-preview textarea{width:100%}.coding-terminal__input{flex-wrap:wrap}.coding-terminal__input input{min-width:150px;min-height:44px}}
 @media(prefers-reduced-motion:no-preference){.coding-result button{transition:background var(--motion-fast) var(--ease-out)}}

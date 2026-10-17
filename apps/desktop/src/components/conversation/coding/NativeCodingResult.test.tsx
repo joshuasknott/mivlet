@@ -8,7 +8,8 @@ vi.mock("../../../runtime/domains/local-computer", () => ({ loadRuntimeLocalComp
 vi.mock("./CodingTerminal", () => ({ CodingTerminal: ({ target }: { target: { jobId: string } }) => <p>Verified terminal {target.jobId}</p> }));
 const callbacks = vi.hoisted(() => ({ stop: undefined as (() => Promise<void>) | undefined }));
 vi.mock("./CodingPreview", () => ({ CodingPreview: ({ onStop }: { onStop: () => Promise<void> }) => { callbacks.stop = onStop; return <p>Verified preview</p>; } }));
-vi.mock("./CodingResultTabs", () => ({ CodingResultTabs: ({ terminal, preview }: { terminal: React.ReactNode; preview: React.ReactNode }) => <>{terminal}{preview}</> }));
+vi.mock("./CodingRepositoryReview", () => ({ CodingRepositoryReview: ({ target, repositoryId, view }: { target: { agentId: string }; repositoryId: string; view: string }) => <p>Task {view}: {target.agentId}/{repositoryId}</p> }));
+vi.mock("./CodingResultTabs", () => ({ CodingResultTabs: ({ terminal, preview, files, changes }: { terminal: React.ReactNode; preview: React.ReactNode; files: React.ReactNode; changes: React.ReactNode }) => <>{terminal}{preview}{files}{changes}</> }));
 const id = "a".repeat(48);
 const props = { workspaceId: "workspace", agentId: "agent", jobId: id, jobGeneration: 4 };
 beforeEach(() => {
@@ -23,6 +24,8 @@ it("opens controls only after deliberate reconnect and exact scoped native verif
   await screen.findByText(`Verified terminal ${id}`);
   expect(listNativeCommandJobs).toHaveBeenCalledWith({ workspaceId: "workspace", agentId: "agent", expectedGeneration: 4 });
   expect(screen.getByText("Verified preview")).toBeTruthy();
+  expect(screen.getByText("Task files: agent/repo")).toBeTruthy();
+  expect(screen.getByText("Task changes: agent/repo")).toBeTruthy();
 });
 it("refuses a receipt whose generation does not match native history", async () => {
   vi.mocked(listNativeCommandJobs).mockResolvedValue({ jobs: [{ id, generation: 9 }] } as never);
