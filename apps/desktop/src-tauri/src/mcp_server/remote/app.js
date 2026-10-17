@@ -1,9 +1,13 @@
 // No tokens or provider credentials enter this client. All dynamic content is text.
 const byId = (id) => document.getElementById(id);
+const managedPath = location.pathname.match(/^\/d\/([a-f0-9]{64})\/remote$/);
+const basePath = managedPath ? `/d/${managedPath[1]}` : "";
+const remotePath = (path) => `${basePath}${path}`;
 const ui = Object.fromEntries(["connection","subtitle","notice","connect-panel","connect","workspace","agent","refresh","work","empty","truncated","result","result-content","close-result","composer","request","disconnect","send","read-only","retry-panel","retry","notifications"].map(id => [id, byId(id)]));
 let session;
 let epoch = 0;
 let readVersion = 0;
+let resultReadVersion = 0;
 let timer;
 let busy = false;
 let pendingMutation;
@@ -28,12 +32,14 @@ async function request(path, body) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(path, { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", signal: controller.signal, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json", "X-Mivlet-Remote": "1" }, body: JSON.stringify(body) }) });
+    const response = await fetch(remotePath(path), { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", signal: controller.signal, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json", "X-Mivlet-Remote": "1" }, body: JSON.stringify(body) }) });
     if (response.status === 204) return undefined;
     const result = await response.json();
     if (!response.ok) {
       const error = new Error(result.error || "The request could not be completed.");
-      error.rejected = true;
+      // A relay/server timeout can follow a committed native write. Preserve
+      // its original request ID for explicit reconciliation/retry.
+      error.rejected = response.status < 500 && response.status !== 408;
       if (response.status === 401) reset("Access expired or was revoked. Connect this browser again.");
       throw error;
     }
@@ -42,6 +48,7 @@ async function request(path, body) {
 }
 function reset(message) {
   ++epoch;
+  ++resultReadVersion;
   clearTimeout(timer);
   session = undefined;
   pendingMutation = undefined;
@@ -113,14 +120,16 @@ function renderWork(items) {
     const view = element("button","View result");
     view.addEventListener("click",async () => {
       const version = epoch;
+      const reading = ++resultReadVersion;
       try {
         const result = await call("mivlet_read_work", {workspaceId:session.workspaceId,agentId:item.agentId,workId:item.id});
-        if (version !== epoch) return;
+        if (version !== epoch || reading !== resultReadVersion) return;
         const outputs = result.outputs || [];
-        ui["result-content"].replaceChildren(...(outputs.length ? outputs.map(output => element("p",output.text,"result-text")) : [element("p","No saved result yet.")]));
+        ui["result-content"].replaceChildren(...(outputs.length ? outputs.map(output => element("p",output.text,"result-text")) : [element("p",result.truncated ? "No result text is available in this phone view." : "No saved result yet.")]));
+        if (result.truncated) ui["result-content"].append(element("p","Some saved results were omitted to fit the phone view. Open Mivlet on your computer for the rest.","muted"));
         ui.result.hidden = false;
         ui["close-result"].focus();
-      } catch (error) { if (version === epoch) notice(error.message); }
+      } catch (error) { if (version === epoch && reading === resultReadVersion) notice(error.message); }
     });
     actions.append(view);
     if (item.canControl && !terminal.has(item.status)) {
@@ -159,8 +168,22 @@ async function refresh() {
 }
 ui.connect.addEventListener("click", async () => {
   lock(true);
+  const version = epoch;
   try {
     const response = await request("/remote/connect",{});
+    if (basePath) {
+      if (response.pending !== true || typeof response.pairingCode !== "string" || !/^[A-Za-z0-9_-]{12}$/.test(response.pairingCode)) throw new Error("The connection request was invalid.");
+      notice(`Pairing code: ${response.pairingCode}. Approve this exact code in Mivlet Settings on your computer, then choose the agents and access to share.`);
+      const deadline = Date.now() + 300000;
+      while (version === epoch && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (version !== epoch) return;
+        const consent = await request("/remote/consent");
+        if (consent.connected === true) { await initialize(); return; }
+        if (consent.pending !== true) throw new Error("The connection request expired. Connect again.");
+      }
+      throw new Error("The connection request expired. Connect again.");
+    }
     if (!/^\/oauth\/wait\/[A-Za-z0-9_-]{43}$/.test(response.authorizeUrl)) throw new Error("The sign-in address was invalid.");
     location.assign(response.authorizeUrl);
   } catch (error) { notice(error.message); lock(false); }
@@ -176,8 +199,8 @@ ui.disconnect.addEventListener("click",async () => {
   catch { notice("Could not disconnect. Revoke this browser in Mivlet Settings to end its access."); }
 });
 ui.refresh.addEventListener("click",() => void refresh());
-ui.agent.addEventListener("change",() => { ++epoch; ui.result.hidden=true; void refresh(); });
-ui["close-result"].addEventListener("click",() => { ui.result.hidden=true; ui.refresh.focus(); });
+ui.agent.addEventListener("change",() => { ++epoch; ++resultReadVersion; ui.result.hidden=true; void refresh(); });
+ui["close-result"].addEventListener("click",() => { ++resultReadVersion; ui.result.hidden=true; ui.refresh.focus(); });
 ui.notifications.hidden = !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window);
 byId("notification-help").hidden = ui.notifications.hidden;
 function notificationLabel(failed = false) {
@@ -195,7 +218,7 @@ async function notificationStatus(version) {
   } catch { /* Local HTTP and unsupported services keep the explicit opt-in. */ }
 }
 async function pushWorker() {
-  await navigator.serviceWorker.register("/remote/sw.js",{scope:"/remote"});
+  await navigator.serviceWorker.register(remotePath("/remote/sw.js"),{scope:remotePath("/remote")});
   let timeout;
   try {
     return await Promise.race([navigator.serviceWorker.ready,new Promise((_,reject) => { timeout=setTimeout(() => reject(new Error("The notification worker did not become ready. Try again.")),10000); })]);
@@ -256,5 +279,5 @@ async function initialize() {
     void notificationStatus(version);
   } catch { if (version === epoch) reset("Connect this browser to see the work you choose to share."); }
 }
-if (new URLSearchParams(location.search).has("connection")) { history.replaceState(null,"","/remote"); notice("Sign-in expired or was declined. Connect again when ready."); }
+if (new URLSearchParams(location.search).has("connection")) { history.replaceState(null,"",remotePath("/remote")); notice("Sign-in expired or was declined. Connect again when ready."); }
 void initialize();
