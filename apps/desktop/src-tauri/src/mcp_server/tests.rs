@@ -6,7 +6,7 @@ use crate::store::{
 use serde_json::{json, Value};
 use std::future::IntoFuture;
 
-fn engine(origin: &str) -> Arc<Engine> {
+pub(super) fn engine(origin: &str) -> Arc<Engine> {
     let store = Box::leak(Box::new(
         Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap(),
     ));
@@ -18,6 +18,7 @@ fn engine_with_store(origin: &str, store: &'static Store) -> Arc<Engine> {
         origin: origin.into(),
         config: Config::default(),
         oauth: Mutex::new(oauth::State::default()),
+        remote: Mutex::new(remote::Sessions::default()),
         app: None,
         inflight: Arc::new(tokio::sync::Semaphore::new(16)),
         rate: Mutex::new((std::time::Instant::now(), 0)),
