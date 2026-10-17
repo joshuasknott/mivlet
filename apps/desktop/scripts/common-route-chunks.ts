@@ -9,9 +9,9 @@ type GetModuleInfo = (id: string) => {
 export function commonRouteChunk(id: string): string | undefined {
   const path = id.replace(/\\/g, "/").split("?")[0];
   if (/\/src\/components\/hosted\//.test(path)
-    || /\/src\/runtime\/domains\/hosted-tasks\.ts$/.test(path)) return "cloud-tasks";
+    || /\/src\/runtime\/domains\/hosted-tasks\.ts$/.test(path)) return "workspace-tools";
   // The optional workspace panels share one deferred code request on local disk.
-  // Opening any one also fetches the other editors/inspectors, but React mounts
+  // Opening any one also fetches cloud controls and the other editors/inspectors; React mounts
   // only the selected view. Shared command/checkpoint wrappers
   // stay outside: conversation controls also import those wrappers.
   if (/\/src\/components\/navigation\/(?:WorkspaceLibrary|NativeExecutionSetup|NativeCommandJobs|RepositoryFiles|RepositoryCopies|RepositoryCheckpoints|PullRequestReview)\.tsx$/.test(path)

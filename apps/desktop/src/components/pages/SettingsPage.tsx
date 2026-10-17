@@ -191,7 +191,7 @@ function ConfiguredAccountSettings({
               {!authentication && !needsRecovery ? (
                 <button
                   type="button"
-                  className="button button--primary"
+                  className="button button-primary"
                   disabled={busy}
                   onClick={() => void act(runtime.signInIdentity, "Sign-in opened in your browser.")}
                 >
@@ -202,7 +202,7 @@ function ConfiguredAccountSettings({
               {needsRecovery ? (
                 <button
                   type="button"
-                  className="button button--primary"
+                  className="button button-primary"
                   disabled={busy}
                   onClick={() => void act(runtime.recoverIdentity, "Account recovery opened in your browser.")}
                 >
@@ -212,7 +212,7 @@ function ConfiguredAccountSettings({
               ) : null}
               <button
                 type="button"
-                className="button button--secondary"
+                className="button button-secondary"
                 disabled={busy}
                 onClick={() => void act(runtime.refreshIdentity, "Account status refreshed.")}
               >
@@ -222,7 +222,7 @@ function ConfiguredAccountSettings({
               {authentication ? (
                 <button
                   type="button"
-                  className="button button--secondary"
+                  className="button button-secondary"
                   disabled={busy}
                   onClick={() => void act(runtime.signOutIdentity, "Signed out of Mivlet.")}
                 >
@@ -347,7 +347,7 @@ function MemorySettings({
             <div className="profile-action-row">
               <button
                 type="button"
-                className="button button--secondary"
+                className="button button-secondary"
                 disabled={exporting}
                 onClick={() => void exportMemory()}
               >

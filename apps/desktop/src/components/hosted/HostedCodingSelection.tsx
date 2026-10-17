@@ -18,7 +18,7 @@ export function HostedCodingSelection({ candidates, value, onChange, onLoad, dis
   };
   return <section className="cloud-panel-coding-selection" aria-label="Files for cloud task">
     <p>Choose what the agent can read and change in an isolated cloud copy. Files are shared only after your next review.</p>
-    <button type="button" className="button button--secondary" disabled={disabled} onClick={onLoad}>{candidates ? "Refresh files" : "Choose files from this task’s copy"}</button>
+    <button type="button" className="button button-secondary" disabled={disabled} onClick={onLoad}>{candidates ? "Refresh files" : "Choose files from this task’s copy"}</button>
     {candidates && <>
       <label>Find a file<input type="search" value={query} onChange={event => setQuery(event.target.value)} /></label>
       <div className="cloud-panel-coding-files" role="group" aria-label="Available files">

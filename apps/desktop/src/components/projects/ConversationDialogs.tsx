@@ -298,7 +298,7 @@ export function ConversationDialog({
           <footer>
             <button
               type="button"
-              className="button button--secondary"
+              className="button button-secondary"
               disabled={pending}
               onClick={onClose}
             >
@@ -306,7 +306,7 @@ export function ConversationDialog({
             </button>
             <button
               type="submit"
-              className="button button--primary"
+              className="button button-primary"
               disabled={pending}
             >
               {pending ? "Saving…" : edit ? "Save changes" : `Create ${label}`}
@@ -407,7 +407,7 @@ export function PlaceConversationDialog({
             </button>
             <button
               type="submit"
-              className="button button--primary"
+              className="button button-primary"
               disabled={pending || !id}
             >
               {pending ? "Moving…" : "Share with project"}
@@ -602,7 +602,7 @@ export function MigrateGroupDialog({
           <footer>
             <button
               type="button"
-              className="button button--secondary"
+              className="button button-secondary"
               disabled={pending}
               onClick={onClose}
             >
@@ -610,7 +610,7 @@ export function MigrateGroupDialog({
             </button>
             <button
               type="submit"
-              className="button button--primary"
+              className="button button-primary"
               disabled={pending}
             >
               {pending ? "Converting…" : "Convert to project"}

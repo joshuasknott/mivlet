@@ -224,29 +224,29 @@
 .plugin-config-server-panel .profile-action-row .button {
   min-width: 124px;
 }
-.plugin-config-consent-actions .button--primary {
+.plugin-config-consent-actions .button-primary {
   min-width: 152px;
 }
-.plugin-config-consent-actions .button--secondary {
+.plugin-config-consent-actions .button-secondary {
   min-width: 84px;
 }
 .plugin-config-settings .button > svg {
   flex: 0 0 auto;
 }
-.plugin-config-settings .button--secondary {
+.plugin-config-settings .button-secondary {
   color: var(--ink);
   background: var(--surface-raised);
   border-color: var(--line-strong);
 }
-.plugin-config-settings .button--secondary:hover:not(:disabled) {
+.plugin-config-settings .button-secondary:hover:not(:disabled) {
   background: var(--surface-hover);
 }
-.plugin-config-settings .button--primary {
+.plugin-config-settings .button-primary {
   color: var(--surface-raised);
   background: var(--settings-accent, var(--accent));
   border-color: var(--settings-accent, var(--accent));
 }
-.plugin-config-settings .button--primary:hover:not(:disabled) {
+.plugin-config-settings .button-primary:hover:not(:disabled) {
   filter: brightness(0.92);
 }
 .plugin-config-settings :is(input, select, button, summary):focus-visible {

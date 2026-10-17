@@ -376,7 +376,7 @@ export function EventAutomationEditor({
           </small>
           <button
             type="button"
-            className="button button--secondary"
+            className="button button-secondary"
             disabled={pending}
             onClick={() => {
               const generation = previewGeneration.current;
@@ -417,7 +417,7 @@ export function EventAutomationEditor({
       <div className="automation-panel-automations__pair">
         <button
           type="submit"
-          className="button button--primary"
+          className="button button-primary"
           disabled={
             pending ||
             !supported ||
@@ -430,7 +430,7 @@ export function EventAutomationEditor({
         </button>
         <button
           type="button"
-          className="button button--secondary"
+          className="button button-secondary"
           disabled={pending}
           onClick={onClose}
         >

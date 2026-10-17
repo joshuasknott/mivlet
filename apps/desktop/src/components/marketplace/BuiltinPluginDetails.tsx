@@ -50,7 +50,7 @@ export function BuiltinPluginDetails({
       <div className="integration-panel-detail__actions">
         <button
           type="button"
-          className={enabled ? undefined : "button--primary"}
+          className={enabled ? undefined : "button-primary"}
           disabled={unavailable || busy || !workspaceId}
           onClick={() => void onToggle(!enabled)}
         >

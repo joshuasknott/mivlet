@@ -11,16 +11,16 @@ const graph = (edges: Record<string, string[]>, dynamic: Record<string, string[]
   ? { isEntry: false, importers: edges[id], dynamicImporters: dynamic[id] ?? [] } : null;
 
 it("keeps every cohort under the unchanged common budget accounting", () => {
-  for (const name of ["cloud-tasks", "workspace-tools"]) {
+  for (const name of ["workspace-tools"]) {
     expect(conversationUpgradeAssetPattern.test(`${name}-hash.js`)).toBe(false);
     expect(intelligentUiAssetPattern.test(`${name}-hash.js`)).toBe(false);
   }
 });
 
 it("keeps correlated deferred cloud/repository fragments in common-accounted cohorts", () => {
-  expect(commonRouteChunk("C:\\mivlet\\apps\\desktop\\src\\components\\hosted\\HostedTaskControls.tsx")).toBe("cloud-tasks");
-  expect(commonRouteChunk("/mivlet/apps/desktop/src/components/hosted/HostedProviderSettings.tsx")).toBe("cloud-tasks");
-  expect(commonRouteChunk("/mivlet/apps/desktop/src/runtime/domains/hosted-tasks.ts")).toBe("cloud-tasks");
+  expect(commonRouteChunk("C:\\mivlet\\apps\\desktop\\src\\components\\hosted\\HostedTaskControls.tsx")).toBe("workspace-tools");
+  expect(commonRouteChunk("/mivlet/apps/desktop/src/components/hosted/HostedProviderSettings.tsx")).toBe("workspace-tools");
+  expect(commonRouteChunk("/mivlet/apps/desktop/src/runtime/domains/hosted-tasks.ts")).toBe("workspace-tools");
   for (const name of ["WorkspaceLibrary", "NativeExecutionSetup", "NativeCommandJobs", "RepositoryFiles", "RepositoryCopies", "RepositoryCheckpoints", "PullRequestReview"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/navigation/${name}.tsx`)).toBe("workspace-tools");
   for (const name of ["coding", "repository-copies"])

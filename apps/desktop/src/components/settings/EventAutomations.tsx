@@ -100,7 +100,7 @@ export function EventAutomations({
             </p>
             <button
               type="button"
-              className="button button--secondary"
+              className="button button-secondary"
               disabled={pending || editing !== undefined}
               onClick={(event) => {
                 editorOpener.current = event.currentTarget;
@@ -142,7 +142,7 @@ export function EventAutomations({
               </label>
               <button
                 type="button"
-                className="button button--secondary"
+                className="button button-secondary"
                 disabled={
                   pending ||
                   ingress.isPending ||
@@ -224,7 +224,7 @@ export function EventAutomations({
                 <div className="profile-action-row">
                   <button
                     type="button"
-                    className="button button--secondary"
+                    className="button button-secondary"
                     disabled={pending || editing !== undefined}
                     onClick={(event) => {
                       editorOpener.current = event.currentTarget;
@@ -235,7 +235,7 @@ export function EventAutomations({
                   </button>
                   <button
                     type="button"
-                    className="button button--secondary"
+                    className="button button-secondary"
                     disabled={pending}
                     onClick={() =>
                       void act(
@@ -261,7 +261,7 @@ export function EventAutomations({
                   </button>
                   <button
                     type="button"
-                    className="button button--secondary"
+                    className="button button-secondary"
                     disabled={pending}
                     onClick={() =>
                       void act(
@@ -340,7 +340,7 @@ function EventDeliveryHistory({
           {delivery.threadId && onOpenResult ? (
             <button
               type="button"
-              className="button button--secondary"
+              className="button button-secondary"
               onClick={() =>
                 void onOpenResult(schedule.agentId, delivery.threadId!).catch(
                   (failure) => setError(message(failure)),

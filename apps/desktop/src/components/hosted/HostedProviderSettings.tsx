@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import type { HostedProviderConnection, HostedProviderEnroll, HostedProviderRevoke, HostedProviderScope, HostedTextProviderId } from "@mivlet/protocol";
 import { ProviderIcon } from "../ProviderIcon";
 import { enrollHostedProvider, listHostedProviders, revokeHostedProvider } from "../../runtime/domains/hosted-tasks";
-import { getActiveRuntimeDataScope } from "../../runtime-scope";
+import { useHostedOperation } from "./useHostedOperation";
 import { boundedHostedRead, hostedProviderLabels, hostedScopeKey } from "./hosted-ui";
 import "./hosted-controls.css";
 
@@ -27,34 +27,20 @@ export function HostedProviderSettings(props: HostedProviderSettingsProps) {
   </div>;
 }
 function ProviderSettings({ workspaceId, agentId, api = defaultApi }: HostedProviderScope & { api?: HostedProviderApi }) {
-  const scope = useRef(getActiveRuntimeDataScope()).current;
   const [connections, setConnections] = useState<HostedProviderConnection[]>([]);
-  const [pending, setPending] = useState("");
-  const [error, setError] = useState("");
   const [loaded, setLoaded] = useState(false);
-  const live = useRef(true);
-  const busy = useRef(false);
-  const current = () => live.current && scope !== null && getActiveRuntimeDataScope() === scope && scope.workspaceId === workspaceId;
-  const run = async (name: string, action: () => Promise<void>) => {
-    if (busy.current || !current()) return;
-    busy.current = true; setPending(name); setError("");
-    try { await action(); }
-    catch (reason) { if (current()) setError(reason instanceof Error ? reason.message : "The cloud connection is unavailable."); }
-    finally { busy.current = false; if (current()) setPending(""); }
-  };
+  const { current, pending, error, run } = useHostedOperation(workspaceId, "The cloud connection is unavailable.");
   const load = async () => {
     const result = await boundedHostedRead(api.list({ workspaceId, agentId }));
     if (current()) { setConnections(result); setLoaded(true); }
   };
   useEffect(() => {
-    live.current = true;
     void run("refresh", load);
-    return () => { live.current = false; };
   }, []);
   return <section className="settings-group cloud-panel-provider-settings" aria-label="Cloud task connections">
     <header className="cloud-panel-card__heading"><h2>Cloud tasks</h2><span>Text and public web research</span></header>
-    <p>Let a reviewed text or public web research task finish while your computer is asleep.</p>
-    <p className="cloud-panel-muted">Connect a separate API key for cloud use. Your local provider connections are never transferred. Cloud keys expire after 30 days; task and page text are retained for 24 hours. This uses Mivlet’s development service.</p>
+    <p>Reviewed cloud tasks can finish while this computer sleeps.</p>
+    <p className="cloud-panel-muted">Cloud use needs a separate API key; local connections stay here. Keys expire after 30 days. Task and page text are kept for 24 hours on Mivlet’s development service.</p>
     <div className="cloud-panel-provider-list">{(Object.keys(hostedProviderLabels) as HostedTextProviderId[]).flatMap(providerId => {
       const matching = current() ? connections.filter(value => value.providerId === providerId && value.enabled).sort((left, right) => right.updatedAt - left.updatedAt) : [];
       const rows: (HostedProviderConnection | undefined)[] = matching.length ? matching : [undefined];
@@ -62,19 +48,19 @@ function ProviderSettings({ workspaceId, agentId, api = defaultApi }: HostedProv
         <ProviderIcon provider={providerId} size={26} />
         <div><strong>{hostedProviderLabels[providerId]}{matching.length > 1 ? ` · connection ${index + 1}` : ""}</strong><small>{!loaded ? pending ? "Checking connection…" : "Connection unavailable" : connection ? `${connection.expiresAt > Date.now() ? "Connected" : "Expired"} · expires ${new Date(connection.expiresAt).toLocaleDateString()}` : "Not connected"}</small></div>
         <div className="cloud-panel-actions">
-          <button type="button" className={connection ? "button button--secondary" : "button button--primary"} disabled={Boolean(pending) || !loaded || !current()} onClick={() => void run(providerId, async () => {
+          <button type="button" className={connection ? "button button-secondary" : "button button-primary"} disabled={Boolean(pending) || !loaded || !current()} onClick={() => void run(providerId, async () => {
             await api.enroll({ workspaceId, agentId, providerId, ...(connection ? { credentialId: connection.credentialId, expectedRevision: connection.revision } : {}) });
             if (current()) await load();
           })}>{pending === providerId ? "Opening secure entry…" : connection ? "Replace key" : "Connect hosted API key"}</button>
-          {connection && <button type="button" className="button button--secondary" disabled={Boolean(pending)} onClick={() => void run(`revoke:${providerId}`, async () => {
+          {connection && <button type="button" className="button button-secondary" disabled={Boolean(pending)} onClick={() => void run(`revoke:${providerId}`, async () => {
             await boundedHostedRead(api.revoke({ workspaceId, agentId, credentialId: connection.credentialId, revision: connection.revision }));
             if (current()) await load();
           })}>Disconnect</button>}
         </div>
       </div>);
     })}</div>
-    <p className="cloud-panel-muted">Enter the key in the secure native window. It is stored in your cloud connection, separately from this device’s credentials. Provider usage is billed by your provider.</p>
-    <button type="button" className="button button--secondary" disabled={Boolean(pending)} onClick={() => void run("refresh", load)}>Refresh connections</button>
+    <p className="cloud-panel-muted">Enter the key in the secure desktop window. Cloud credentials are stored separately from this device. Your provider bills usage.</p>
+    <button type="button" className="button button-secondary" disabled={Boolean(pending)} onClick={() => void run("refresh", load)}>Refresh connections</button>
     {pending === "refresh" && <p role="status">Checking cloud connections…</p>}
     {error && <p role="alert">{error}</p>}
   </section>;

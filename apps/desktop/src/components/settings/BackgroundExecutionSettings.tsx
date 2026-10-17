@@ -102,7 +102,7 @@ export function BackgroundExecutionSettings() {
         <div className="profile-action-row background-execution__actions">
           <button
             type="button"
-            className={`button button--secondary${canStop ? " background-execution__stop" : ""}`}
+            className={`button button-secondary${canStop ? " background-execution__stop" : ""}`}
             disabled={
               Boolean(pending && !(pending === "refresh" && canStop)) ||
               (!canStop && !status?.supported)
@@ -114,7 +114,7 @@ export function BackgroundExecutionSettings() {
           {status?.running && !error && (
             <button
               type="button"
-              className="button button--secondary"
+              className="button button-secondary"
               disabled={Boolean(pending)}
               onClick={() => void act("restart")}
             >
@@ -123,7 +123,7 @@ export function BackgroundExecutionSettings() {
           )}
           <button
             type="button"
-            className="button button--secondary background-execution__refresh"
+            className="button button-secondary background-execution__refresh"
             disabled={Boolean(pending)}
             onClick={() => void act("refresh")}
           >

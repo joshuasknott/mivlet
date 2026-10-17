@@ -141,3 +141,15 @@ it("keeps imported CSS layers, custom properties and JSX consistent in a real bu
     await rm(fixture, { recursive: true, force: true });
   }
 });
+
+it("compacts button variants without changing the HTML element, type or role", () => {
+  const code = '<button type="button" role="button" className="button button-primary"/><button className="button button-secondary"/>';
+  const map = styleNameMap('.button{} .button-primary{} .button-secondary:hover{}', sources(code));
+  expect(map.has("button")).toBe(false);
+  expect(map.has("button-primary")).toBe(true);
+  expect(map.has("button-secondary")).toBe(true);
+  const compact = compactStyleSource(code, "buttons.tsx", map);
+  expect(compact).toContain('<button type="button" role="button"');
+  expect(compact).toContain('className="button ' + map.get("button-primary") + '"');
+  expect(compactStyleText('.button-secondary:hover{}', map)).toBe('.' + map.get("button-secondary") + ':hover{}');
+});

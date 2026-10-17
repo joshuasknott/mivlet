@@ -107,13 +107,13 @@ export function ManagedPhoneSettings({ workspaceId, api = nativeApi }: { workspa
     <p className="plugin-config-description">This connection uses the selected workspace on this computer. Manual MCP access must be stopped before connecting.</p>
     {phoneUrl && <label>Phone link<input readOnly value={phoneUrl} onFocus={event => event.target.select()} /></label>}
     <div className="profile-action-row">
-      {!active && <button type="button" className="button button--primary" disabled={!connectScope || Boolean(busy) || Boolean(error) || uncertain} onClick={() => { if (connectScope) void change("Connecting…", () => api.connect(connectScope)); }}>{busy === "Connecting…" ? busy : "Connect phone"}</button>}
-      {phoneUrl && <button type="button" className="button button--secondary" disabled={Boolean(busy)} onClick={() => {
+      {!active && <button type="button" className="button button-primary" disabled={!connectScope || Boolean(busy) || Boolean(error) || uncertain} onClick={() => { if (connectScope) void change("Connecting…", () => api.connect(connectScope)); }}>{busy === "Connecting…" ? busy : "Connect phone"}</button>}
+      {phoneUrl && <button type="button" className="button button-secondary" disabled={Boolean(busy)} onClick={() => {
         if (!current()) return;
         void navigator.clipboard.writeText(phoneUrl).then(() => { if (current()) setNotice("Phone link copied. Open it on your phone, then approve access here."); }, () => { if (current()) setNotice("Copy the phone link from the field above."); });
       }}><Copy size={18} aria-hidden="true" />Copy phone link</button>}
-      {exactConnection && <button type="button" className="button button--secondary" disabled={Boolean(busy) || Boolean(error) || uncertain} onClick={() => void change("Disconnecting…", () => api.disconnect(exactConnection))}>{busy === "Disconnecting…" ? busy : "Disconnect phone"}</button>}
-      <button type="button" className="button button--secondary" disabled={Boolean(busy) || !current()} onClick={() => { setNotice(""); void read(); }}>Check phone status</button>
+      {exactConnection && <button type="button" className="button button-secondary" disabled={Boolean(busy) || Boolean(error) || uncertain} onClick={() => void change("Disconnecting…", () => api.disconnect(exactConnection))}>{busy === "Disconnecting…" ? busy : "Disconnect phone"}</button>}
+      <button type="button" className="button button-secondary" disabled={Boolean(busy) || !current()} onClick={() => { setNotice(""); void read(); }}>Check phone status</button>
     </div>
     {busy && <p role="status">{busy}</p>}
     {error && <p className="plugin-config-notice plugin-config-notice--error" role="alert">{error}{uncertain && " The request may have completed. Check phone status before another connection action; nothing will be retried automatically."}</p>}

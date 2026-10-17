@@ -619,8 +619,8 @@
 .integration-panel-detail__actions button:disabled { cursor: default; opacity: .55; }
 .plugin-catalogue-back:focus-visible, .integration-panel-detail button:focus-visible, .integration-panel-detail summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
-.integration-panel-detail__actions .button--primary { color: var(--surface); background: var(--accent); border-color: var(--accent); }
-.integration-panel-detail__actions .button--primary:hover { color: var(--surface); background: var(--accent); opacity: .86; }
+.integration-panel-detail__actions .button-primary { color: var(--surface); background: var(--accent); border-color: var(--accent); }
+.integration-panel-detail__actions .button-primary:hover { color: var(--surface); background: var(--accent); opacity: .86; }
 
 @media (max-width: 650px) {
   .integration-panel-detail-modal { padding: 12px; }

@@ -306,7 +306,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
       <div className="profile-clean-card__content">
         <section className="profile-section" aria-label="Saved tool servers">
             {!loaded ? <p role="status">Loading tool servers…</p> : loadError ? (
-              <div className="plugin-config-settings__empty"><p role="alert">{loadError}</p><button type="button" className="button button--secondary" onClick={() => void refresh()}>Retry</button></div>
+              <div className="plugin-config-settings__empty"><p role="alert">{loadError}</p><button type="button" className="button button-secondary" onClick={() => void refresh()}>Retry</button></div>
             ) : (
               <>
               {!desktopAvailable ? <p className="plugin-config-settings__empty">Tool servers are available only in the desktop app.</p> :
@@ -323,7 +323,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                         </span>
                         <button
                           type="button"
-                          className="button button--secondary"
+                          className="button button-secondary"
                           disabled={checkingId === server.id || server.disabled}
                           onClick={() => void check(server)}
                         >
@@ -333,7 +333,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                           <span className="profile-action-row">
                             <button
                               type="button"
-                              className="button button--secondary"
+                              className="button button-secondary"
                               disabled={authorizingId === server.id || server.disabled}
                               onClick={() => void authorize(server)}
                             >
@@ -341,7 +341,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                             </button>
                             <button
                               type="button"
-                              className="button button--secondary"
+                              className="button button-secondary"
                               disabled={authorizingId === server.id || server.disabled}
                               onClick={() => void disconnectAccount(server)}
                             >
@@ -389,7 +389,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                             </select>
                             <small>The tool must return Mivlet's cited-search contract. Results stay untrusted.</small>
                           </label>
-                          <button type="button" className="button button--secondary" disabled={busy} onClick={() => void saveEnablement(server)}>Save access</button>
+                          <button type="button" className="button button-secondary" disabled={busy} onClick={() => void saveEnablement(server)}>Save access</button>
                         </div>
                       ) : null}
                     </div>
@@ -425,7 +425,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                     <span>HTTPS address</span>
                     <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://example.com/mcp" />
                   </label>}
-                  <button type="button" className="button button--secondary" disabled={!desktopAvailable || busy || !name.trim() || !(transport === "stdio" ? command.trim() : endpoint.trim())} onClick={() => void prepare()}>
+                  <button type="button" className="button button-secondary" disabled={!desktopAvailable || busy || !name.trim() || !(transport === "stdio" ? command.trim() : endpoint.trim())} onClick={() => void prepare()}>
                     Review and save
                   </button>
                 </div>
@@ -456,7 +456,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
             <input ref={confirmationInputRef} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
           </label>
           <div className="profile-action-row">
-            <button type="button" className="button button--secondary" disabled={busy} onClick={() => void decide("deny")}>Cancel</button>
+            <button type="button" className="button button-secondary" disabled={busy} onClick={() => void decide("deny")}>Cancel</button>
             <button type="button" className="button" disabled={busy || confirmation !== pending.approval.confirmationPhrase} onClick={() => void decide("once")}>Save server</button>
           </div>
         </section>

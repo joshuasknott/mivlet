@@ -253,7 +253,7 @@ export function PluginPanel({
           <h1>Plugins</h1>
           <p>Give your agents access to the tools you use.</p>
         </div>
-        {workspaceId ? <button type="button" className="button button--secondary plugin-catalogue-add-custom" onClick={() => {
+        {workspaceId ? <button type="button" className="button button-secondary plugin-catalogue-add-custom" onClick={() => {
           setCustomServerId(undefined); setToolServerStatus(""); setToolServersOpen(true);
         }}><Plus size={16} aria-hidden="true" />Add custom plugin</button> : null}
         <label className="connections-search">
@@ -527,7 +527,7 @@ function ConnectorDetails({
     <p className="integration-panel-detail__intro">{ready ? "Ready to use with any of your agents." : configured ? `Sign in to use ${connector.name} in your conversations.` : "This connection is not available on this installation yet."}</p>
     <div className="integration-panel-detail__actions">
       {ready ? <button type="button" disabled={busy} onClick={() => onUseConnector(connector)}>Use in chat</button> :
-        <button type="button" className="button--primary" disabled={busy || !configured} onClick={() => void run(() => onConnect(connector))}>
+        <button type="button" className="button-primary" disabled={busy || !configured} onClick={() => void run(() => onConnect(connector))}>
           {busy ? "Connecting…" : configured ? needsRepair ? "Reconnect" : "Connect" : "Unavailable"}
         </button>}
       {connected || connector.account ? <button type="button" disabled={busy} onClick={() => void run(() => onDisconnect(connector.id))}>Disconnect</button> : null}

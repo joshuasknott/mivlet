@@ -43,17 +43,17 @@ export function MemoryRecords({ runtime }: { runtime: SettingsRuntime }) {
         <label className="settings-field"><span>Title</span><input value={editing.title} maxLength={120} required disabled={pending} onChange={(event) => setEditing({ ...editing, title: event.target.value })} /></label>
         <label className="settings-field"><span>Memory</span><textarea value={editing.value} maxLength={2000} required disabled={pending} rows={4} onChange={(event) => setEditing({ ...editing, value: event.target.value })} /></label>
         <div className="profile-action-row">
-          <button className="button button--primary" type="submit" disabled={pending}>{pending ? "Saving…" : "Save correction"}</button>
-          <button className="button button--secondary" type="button" disabled={pending} onClick={() => { setEditing(null); setError(""); }}>Cancel</button>
+          <button className="button button-primary" type="submit" disabled={pending}>{pending ? "Saving…" : "Save correction"}</button>
+          <button className="button button-secondary" type="button" disabled={pending} onClick={() => { setEditing(null); setError(""); }}>Cancel</button>
         </div>
       </form> : <>
         <strong>{record.title}</strong>
         <p style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{record.value}</p>
         <small>{record.kind} · {memoryScopeLabel(record)} · {record.source}{record.disabled ? " · Disabled" : ""}</small>
         <div className="profile-action-row">
-          <button className="button button--secondary" type="button" disabled={pending} onClick={() => { setEditing({ ...record }); setError(""); }}>Correct</button>
-          <button className="button button--secondary" type="button" disabled={pending} onClick={() => { void changeState(record.id, false); }}>{record.disabled ? "Enable" : "Disable"}</button>
-          <button className="button button--secondary" type="button" disabled={pending} onClick={() => { void changeState(record.id, true); }}>Forget</button>
+          <button className="button button-secondary" type="button" disabled={pending} onClick={() => { setEditing({ ...record }); setError(""); }}>Correct</button>
+          <button className="button button-secondary" type="button" disabled={pending} onClick={() => { void changeState(record.id, false); }}>{record.disabled ? "Enable" : "Disable"}</button>
+          <button className="button button-secondary" type="button" disabled={pending} onClick={() => { void changeState(record.id, true); }}>Forget</button>
         </div>
       </>}
     </div>)}

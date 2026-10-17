@@ -137,7 +137,7 @@ export function McpServerSettings({
             </label>
             <div className="profile-action-row">
               <button
-                className="button button--secondary"
+                className="button button-secondary"
                 type="button"
                 disabled={busy}
                 onClick={() =>
@@ -151,7 +151,7 @@ export function McpServerSettings({
                 Copy URL
               </button>
               <button
-                className="button button--secondary"
+                className="button button-secondary"
                 type="button"
                 disabled={busy}
                 onClick={() =>
@@ -231,7 +231,7 @@ export function McpServerSettings({
               </label>
             </details>
             <button
-              className="button button--secondary"
+              className="button button-secondary"
               disabled={busy || !status || Boolean(statusError)}
               type="submit"
             >
@@ -315,7 +315,7 @@ export function McpServerSettings({
                   </span>
                   {!grant.revoked && (
                     <button
-                      className="button button--secondary"
+                      className="button button-secondary"
                       type="button"
                       disabled={busy}
                       onClick={() =>
@@ -500,14 +500,14 @@ function Consent({
       </details>
       <div className="profile-action-row plugin-config-consent-actions">
         <button
-          className="button button--primary"
+          className="button button-primary"
           type="submit"
           disabled={busy || !agentIds.length}
         >
           Approve access
         </button>
         <button
-          className="button button--secondary"
+          className="button button-secondary"
           type="button"
           disabled={busy}
           onClick={() => void onDecide(false, [], [], "read-only", 1)}
