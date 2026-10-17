@@ -89,12 +89,6 @@
 
 /* assistant-ui action primitives stay in the same quiet footer language as
    the existing Mivlet actions while retaining the library's focus semantics. */
-.assistant-ui-message-actions { display: contents; }
-.assistant-ui-action-bar { display: inline-flex; align-items: center; gap: 4px; margin-left: 4px; }
-.assistant-ui-action-bar button { min-height: 28px; padding: 3px 7px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--ink-muted); font: inherit; font-size: 11px; cursor: pointer; }
-.assistant-ui-action-bar button:hover:not(:disabled) { border-color: var(--line); color: var(--ink); background: var(--surface-raised, var(--surface)); }
-.assistant-ui-action-bar button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.assistant-ui-action-bar button:disabled { opacity: .45; cursor: default; }
 .copy-control { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .message-code { min-width: 0; margin-block: 12px; }
 .message-code > header { display: flex; justify-content: space-between; align-items: center; gap: 10px; padding: 6px 12px; border: 1px solid var(--line); border-bottom: 0; border-radius: 8px 8px 0 0; font-size: 11px; color: var(--ink-muted); }
