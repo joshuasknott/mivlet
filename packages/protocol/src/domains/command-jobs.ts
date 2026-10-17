@@ -17,6 +17,10 @@ export interface NativeCommandJob {
   operationId: number;
   commandId: string;
   persistent: boolean;
+  /** Legacy records default to false/zero; input is never replayed. */
+  interactive?: boolean;
+  inputSequence?: number;
+  previewPort?: number | null;
   network: boolean;
   timeoutSeconds: number;
   status: NativeCommandJobStatus;
@@ -45,4 +49,16 @@ export interface NativeCommandOutput {
 export interface NativeCommandTarget extends LocalComputerEpochRequest {
   jobId: string;
   jobGeneration: number;
+}
+export interface NativeCommandInput extends NativeCommandTarget {
+  inputSequence: number;
+  /** Exact UTF-8 payload including any explicit newline, at most 4096 bytes. */
+  text: string;
+}
+export interface NativeCommandInputReceipt {
+  jobId: string;
+  jobGeneration: number;
+  inputSequence: number;
+  /** Pipe delivery only; application success still requires observed output. */
+  delivery: "accepted" | "uncertain";
 }
