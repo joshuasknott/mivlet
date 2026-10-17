@@ -5,7 +5,7 @@ use std::{
     io::{Read, Write},
     net::{TcpListener, TcpStream, UdpSocket},
     sync::{
-        atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering},
         Arc, Mutex, OnceLock,
     },
     time::{Duration, Instant},
@@ -13,9 +13,11 @@ use std::{
 use webview2_com::CallDevToolsProtocolMethodCompletedHandler;
 use windows::core::HSTRING;
 const LIFETIME: Duration = Duration::from_secs(10);
-static STATE: AtomicU8 = AtomicU8::new(0); // idle, running, verified, failed
+// Low two bits: idle, running, verified, failed. Upper bits fence every attempt.
+static STATE: AtomicU64 = AtomicU64::new(0);
 static ACTIVE: OnceLock<Mutex<Option<Arc<Probe>>>> = OnceLock::new();
 struct Probe {
+    attempt: u64,
     origin: String,
     frame_id: String,
     baseline_nonce: String,
@@ -39,7 +41,49 @@ fn active() -> &'static Mutex<Option<Arc<Probe>>> {
     ACTIVE.get_or_init(|| Mutex::new(None))
 }
 pub(crate) fn verified() -> bool {
-    STATE.load(Ordering::Acquire) == 2
+    STATE.load(Ordering::Acquire) & 3 == 2
+}
+fn begin_attempt() -> (u64, bool) {
+    loop {
+        let current = STATE.load(Ordering::Acquire);
+        if current & 3 != 0 {
+            return (current & !3, false);
+        }
+        let attempt = (current & !3).wrapping_add(4);
+        if STATE
+            .compare_exchange(current, attempt | 1, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            return (attempt, true);
+        }
+    }
+}
+fn transition_on(state: &AtomicU64, attempt: u64, status: u64) -> bool {
+    state
+        .compare_exchange(
+            attempt | 1,
+            attempt | status,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .is_ok()
+}
+fn transition(attempt: u64, status: u64) {
+    let _ = transition_on(&STATE, attempt, status);
+}
+fn cancel_attempt(attempt: u64) {
+    loop {
+        let current = STATE.load(Ordering::Acquire);
+        if current & !3 != attempt || matches!(current & 3, 0 | 2) {
+            return;
+        }
+        if STATE
+            .compare_exchange(current, attempt, Ordering::AcqRel, Ordering::Acquire)
+            .is_ok()
+        {
+            return;
+        }
+    }
 }
 fn live(probe: &Probe) -> bool {
     !probe.cancel.load(Ordering::Acquire) && Instant::now() < probe.expires
@@ -87,14 +131,18 @@ pub(crate) fn navigation(expected: &str, uri: &str) -> Option<bool> {
                     && probe.phase.load(Ordering::Acquire) == 1)),
     )
 }
-fn evaluate(window: &tauri::WebviewWindow, expression: String) -> Result<(), String> {
+fn evaluate(
+    window: &tauri::WebviewWindow,
+    expression: String,
+    attempt: Option<u64>,
+) -> Result<(), String> {
     window.with_webview(move|webview| {
         let result=(||->windows::core::Result<()> {
             let core=unsafe{webview.controller().CoreWebView2()?};
-            let callback=CallDevToolsProtocolMethodCompletedHandler::create(Box::new(|status,_|{if status.is_err(){STATE.store(3,Ordering::Release);}Ok(())}));
+            let callback=CallDevToolsProtocolMethodCompletedHandler::create(Box::new(move|status,_|{if status.is_err(){if let Some(attempt)=attempt {transition(attempt,3);}}Ok(())}));
             unsafe{core.CallDevToolsProtocolMethod(&HSTRING::from("Runtime.evaluate"),&HSTRING::from(json!({"expression":expression,"returnByValue":true,"silent":true,"includeCommandLineAPI":false,"userGesture":false,"awaitPromise":false}).to_string()),&callback)}
         })();
-        if result.is_err(){STATE.store(3,Ordering::Release);}
+        if result.is_err(){if let Some(attempt)=attempt {transition(attempt,3);}}
     }).map_err(|_|"The native connection conformance frame could not start.".into())
 }
 pub(crate) async fn verify(
@@ -104,10 +152,15 @@ pub(crate) async fn verify(
     if verified() {
         return check();
     }
-    if STATE
-        .compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire)
-        .is_ok()
-    {
+    let (attempt, start) = begin_attempt();
+    if !start {
+        return match STATE.load(Ordering::Acquire) & 3 {
+            2 => check(),
+            3 => Err("This WebView2 runtime did not prove native connection allowlist enforcement, including blocked data-only WebRTC. Update the runtime and reopen Mivlet; no app preview was exposed.".into()),
+            _ => Err("Native preview connection verification is already in progress. Retry opening this preview after that check finishes; no app preview was exposed.".into()),
+        };
+    }
+    if start {
         let started = (|| {
             let listener = TcpListener::bind(("127.0.0.1", 0))
                 .map_err(|_| "Native connection probe listener is unavailable.")?;
@@ -131,6 +184,7 @@ pub(crate) async fn verify(
             getrandom::fill(&mut nonce).map_err(|_| "Native probe nonce is unavailable.")?;
             let restricted_nonce = hex::encode(nonce);
             let probe = Arc::new(Probe {
+                attempt,
                 origin: format!(
                     "http://mivlet-preview-probe-{token}.localhost:{}",
                     listener
@@ -172,32 +226,42 @@ pub(crate) async fn verify(
                 .spawn(move || serve(listener, udp, restricted_udp, running))
                 .map_err(|_| "Native connection probe could not start.")?;
             let source=format!("(()=>{{const f=document.createElement('iframe');f.id={};f.hidden=true;f.style.display='none';f.setAttribute('sandbox','allow-scripts allow-same-origin');f.src={};document.documentElement.append(f);}})()",json!(probe.frame_id),json!(format!("{}/baseline",probe.origin)));
-            evaluate(window, source)
+            evaluate(window, source, Some(attempt))
         })();
         if let Err(error) = started {
-            STATE.store(3, Ordering::Release);
-            cleanup(window);
+            transition(attempt, 3);
+            cleanup(window, attempt);
             return Err(error);
         }
     }
     let deadline = Instant::now() + LIFETIME;
     loop {
         if let Err(error) = check() {
-            cleanup(window);
-            STATE.store(0, Ordering::Release);
+            cleanup(window, attempt);
+            cancel_attempt(attempt);
             return Err(error);
         }
-        match STATE.load(Ordering::Acquire) {0=>return Err("Native preview verification was canceled by its owning task. Retry from the current task; no app preview was exposed.".into()),2=>{cleanup(window);return check();},3=>{cleanup(window);return Err("This WebView2 runtime did not prove native connection allowlist enforcement, including blocked data-only WebRTC. Update the runtime and reopen Mivlet; no app preview was exposed.".into());},_=>{}}
+        let current = STATE.load(Ordering::Acquire);
+        if current & !3 != attempt {
+            return Err("Native preview verification was replaced after its owning task stopped. Retry from the current task; no app preview was exposed.".into());
+        }
+        match current & 3 {0=>return Err("Native preview verification was canceled by its owning task. Retry from the current task; no app preview was exposed.".into()),2=>{cleanup(window,attempt);return check();},3=>{cleanup(window,attempt);return Err("This WebView2 runtime did not prove native connection allowlist enforcement, including blocked data-only WebRTC. Update the runtime and reopen Mivlet; no app preview was exposed.".into());},_=>{}}
         if Instant::now() >= deadline {
-            cleanup(window);
-            STATE.store(3, Ordering::Release);
+            transition(attempt, 3);
+            cleanup(window, attempt);
             return Err("Native connection allowlist verification timed out. No app preview was exposed; reopen Mivlet after updating its runtime.".into());
         }
         tokio::time::sleep(Duration::from_millis(25)).await;
     }
 }
-fn cleanup(window: &tauri::WebviewWindow) {
-    if let Some(probe) = active().lock().ok().and_then(|mut probe| probe.take()) {
+fn cleanup(window: &tauri::WebviewWindow, attempt: u64) {
+    if let Some(probe) = active().lock().ok().and_then(|mut probe| {
+        if probe.as_ref().is_some_and(|probe| probe.attempt == attempt) {
+            probe.take()
+        } else {
+            None
+        }
+    }) {
         probe.cancel.store(true, Ordering::Release);
         let _ = evaluate(
             window,
@@ -205,6 +269,7 @@ fn cleanup(window: &tauri::WebviewWindow) {
                 "document.getElementById({})?.remove()",
                 json!(probe.frame_id)
             ),
+            None,
         );
     }
 }
@@ -232,7 +297,7 @@ fn observed(probe: &Probe) -> bool {
 fn serve(listener: TcpListener, udp: UdpSocket, restricted_udp: UdpSocket, probe: Arc<Probe>) {
     let mut workers: Vec<std::thread::JoinHandle<()>> = Vec::new();
     let mut bytes = [0u8; 2048];
-    while live(&probe) && STATE.load(Ordering::Acquire) == 1 {
+    while live(&probe) && STATE.load(Ordering::Acquire) == (probe.attempt | 1) {
         for (socket, counter) in [
             (&udp, &probe.baseline_udp),
             (&restricted_udp, &probe.restricted_udp),
@@ -251,7 +316,7 @@ fn serve(listener: TcpListener, udp: UdpSocket, restricted_udp: UdpSocket, probe
             }
         }
         if observed(&probe) {
-            STATE.store(2, Ordering::Release);
+            transition(probe.attempt, 2);
             break;
         }
         workers.retain(|worker| !worker.is_finished());
@@ -274,9 +339,7 @@ fn serve(listener: TcpListener, udp: UdpSocket, restricted_udp: UdpSocket, probe
     for worker in workers {
         let _ = worker.join();
     }
-    if STATE.load(Ordering::Acquire) == 1 {
-        STATE.store(3, Ordering::Release);
-    }
+    transition(probe.attempt, 3);
 }
 fn connection(mut stream: TcpStream, probe: &Probe) {
     let _ = stream.set_read_timeout(Some(Duration::from_millis(50)));
@@ -377,14 +440,14 @@ fn connection(mut stream: TcpStream, probe: &Probe) {
             {
                 probe.baseline_rtc.store(true, Ordering::Release);
             } else {
-                STATE.store(3, Ordering::Release);
+                transition(probe.attempt, 3);
             }
         }
         "/result" => {
             probe.result_cue.store(true, Ordering::Release);
         }
         "/failed" => {
-            STATE.store(3, Ordering::Release);
+            transition(probe.attempt, 3);
         }
         "/baseline-control" => {}
         "/restricted-control" => {
@@ -478,6 +541,7 @@ mod tests {
     use super::*;
     fn probe() -> Probe {
         Probe {
+            attempt: 4,
             origin: format!(
                 "http://mivlet-preview-probe-{}.localhost:12345",
                 "a".repeat(48)
@@ -500,6 +564,19 @@ mod tests {
             result_cue: AtomicBool::new(true),
             restricted_started: Mutex::new(Some(Instant::now() - Duration::from_millis(1300))),
         }
+    }
+    #[test]
+    fn canceled_callbacks_and_server_tail_cannot_change_a_new_attempt() {
+        let state = AtomicU64::new(4 | 1);
+        assert!(transition_on(&state, 4, 0));
+        state.store(8 | 1, Ordering::Release);
+        assert!(!transition_on(&state, 4, 3));
+        assert!(!transition_on(&state, 4, 2));
+        assert!(!transition_on(&state, 4, 0));
+        assert_eq!(state.load(Ordering::Acquire), 8 | 1);
+        assert!(transition_on(&state, 8, 2));
+        assert!(!transition_on(&state, 8, 3));
+        assert_eq!(state.load(Ordering::Acquire), 8 | 2);
     }
     #[test]
     fn no_renderer_cue_can_replace_native_positive_and_negative_network_observations() {
