@@ -1,4 +1,4 @@
-.repository-copies {
+.repository-copy-list {
   margin-block: 1rem;
   padding: 14px;
   border: 1px solid var(--line);
@@ -6,11 +6,11 @@
   min-width: 0;
   container-type: inline-size;
 }
-.repository-copies > summary {
+.repository-copy-list > summary {
   font-size: var(--text-15);
   font-weight: 600;
 }
-.repository-copies > summary svg {
+.repository-copy-list > summary svg {
   vertical-align: middle;
   margin-right: 8px;
 }
@@ -43,7 +43,7 @@
   overflow-wrap: anywhere;
   font-weight: 600;
 }
-.repository-copies svg {
+.repository-copy-list svg {
   flex-shrink: 0;
 }
 .repository-copies__state,
@@ -73,7 +73,7 @@
   color: var(--ink-muted);
   font-size: var(--text-12);
 }
-.repository-copies .repository-copies__storage {
+.repository-copy-list .repository-copies__storage {
   display: flex;
   align-items: start;
   gap: 10px;
@@ -94,18 +94,18 @@
 .repository-copies__list p {
   margin-block: 0.5rem;
 }
-.repository-copies dl {
+.repository-copy-list dl {
   margin-block: 0.75rem;
 }
-.repository-copies dt {
+.repository-copy-list dt {
   font-weight: 600;
   margin-top: 0.6rem;
 }
-.repository-copies dd {
+.repository-copy-list dd {
   margin: 0.2rem 0 0;
 }
-.repository-copies dd,
-.repository-copies code {
+.repository-copy-list dd,
+.repository-copy-list code {
   overflow-wrap: anywhere;
   white-space: normal;
 }
@@ -116,7 +116,7 @@
   justify-content: end;
   margin-top: 4px;
 }
-.repository-copies button {
+.repository-copy-list button {
   min-height: 44px;
   max-width: 100%;
   display: inline-flex;
@@ -143,7 +143,7 @@
 .repository-copies__preview h4 svg {
   color: var(--caution);
 }
-.repository-copies .repository-copies__remove {
+.repository-copy-list .repository-copies__remove {
   color: var(--destructive);
   border-color: var(--destructive);
   background: var(--destructive-subtle);
@@ -151,7 +151,7 @@
 .repository-copies__preview button {
   margin: 0.5rem 0.5rem 0 0;
 }
-.repository-copies .repository-copies__confirm {
+.repository-copy-list .repository-copies__confirm {
   display: flex;
   gap: 0.6rem;
   align-items: start;
@@ -163,7 +163,7 @@
   height: 18px;
 }
 @media (max-width: 480px) {
-  .repository-copies {
+  .repository-copy-list {
     padding: 12px;
   }
   .repository-copies__list > li {

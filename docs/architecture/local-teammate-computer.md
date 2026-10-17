@@ -253,7 +253,16 @@ across input-driver Stop. The profile is independent of the user's
 usual browser profile, but the window still shares the interactive Windows session.
 The published browser outlives the input driver and Stop for human takeover;
 unpublished cancelled launches are closed, and account/app shutdown closes the
-owned browser job. Native upload/download custody remains pending.
+owned browser job. An explicitly approved native download is the exception: it
+closes that owned browser job after transfer to seal file custody.
+
+`local-browser-handover` records the public manual-step reason in the canonical
+current Work, fences its current run, revokes computer input and retains the
+owned browser. It does not read private page data. The user completes the step
+in that window and explicitly continues the task; a new request must discover,
+select and observe the current window again. The retired turn cannot acquire a
+new lease, including under Full Access. A native handover remains saved even if
+the cancelled provider cannot receive its terminal tool reply.
 
 Shared `local-browser-tabs` and `local-browser-observe` provide text reads in the
 agent's owned browser through the same selected-window lease and global approval
@@ -274,7 +283,85 @@ Credential-shaped output is refused. Page text remains explicitly untrusted.
 Reads invalidate older desktop action observations. A cancelled or malformed pipe
 exchange disables further agent commands while keeping the pipe handles alive for
 human use; close that private window and open a fresh browser to resume agent reads.
-Form editing, automatic tab switching and native upload/download custody remain pending.
+An explicit `local-browser-activate` may select a public tab from the same list's
+30-second, single-use `activationRef` and exact origin. It requires the already
+selected foreground browser, rechecks the exact source document/window/generation,
+and invalidates older choices before one fenced native activation. It never
+restores a window or changes delivery mode. List and observe again before input;
+an interrupted activation is uncertain and is never replayed.
+Public form entry uses `local-browser-fill`: one fresh 30-second `fieldRef`, exact
+origin/name and 1–2048 bytes of approved public text. Observation offers only empty
+ordinary text/search inputs and textareas. Existing values, rich editors, private
+sign-in/payment identifiers, password/OTP controls and file fields are excluded.
+The model never receives current values. Native code rechecks document, node,
+privacy, empty state, metadata, visibility, geometry and hit identity.
+
+One fixed native function in a separate isolated world sets that exact node's
+value and emits input/change events. The function is compiled into Mivlet; text is
+passed only as a data argument. It atomically refuses a populated, replaced,
+disabled, hidden or changed field. There is no caller JavaScript, selector,
+focus/select-all sequence, CSP bypass, universal access or user-gesture grant.
+The one bounded write retains account/lease/generation/Stop fences. The reply
+contains status and character count, no field value. Page event handlers may send
+entered text to the website, so the normal exact approval binds the full payload
+digest. Fresh observation is required; errors after dispatch remain uncertain and
+are never replayed. Editing populated fields remains unsupported.
+The closed native operation uses the official
+[DOM node resolution](https://chromedevtools.github.io/devtools-protocol/tot/DOM/#method-resolveNode)
+and [Runtime function-call protocol](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-callFunctionOn).
+
+`local-browser-download` consumes a separate 30-second observed-link choice with
+the exact origin, public link name and URL, a passive filename and a 1–10 second
+timeout. Browser authentication stays in Chromium. A fixed native download policy
+uses a fresh private staging directory and Chromium GUID filenames; native events
+must prove one exact source frame/URL/GUID with monotonic completion at most 8 MiB.
+Redirected final URLs, multiple downloads, credential-shaped URLs, unsupported
+formats, incomplete files, links and credential markers fail closed. Native code
+checks staging every 25 ms; this watchdog is not a disk quota and writes can
+briefly exceed its bound. Suggested browser filenames are never exported.
+
+The browser policy covers its context, so this initial capability deliberately
+closes the agent-owned browser Job after transfer, then confirms all its processes
+exited before inspecting exactly one completed file. Active failure or Stop also
+closes that Job; normal Stop outside transfer keeps the browser open. This is part
+of the exact approval. The ordinary foreground lease and privacy checks cover the
+transfer; final import has no more browser input and retains account/generation
+fences. A fresh directory rename imports validated bytes into the agent's
+`Downloads/download-*` workspace without overwriting files. The receipt contains
+relative path, size and SHA-256; it is not publication. A new browser open/window
+selection is required afterward. The private profile remains native-owned.
+See the official [download policy](https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-setDownloadBehavior)
+and [download progress events](https://chromedevtools.github.io/devtools-protocol/tot/Browser/#event-downloadProgress).
+
+Uploads use a separate read projection, `local-browser-upload-choices`, with a
+fresh tab reference and exact origin. It returns only public `aria-label` names
+and 30-second single-use references for empty, visible top-frame single-file
+inputs. It returns no page text, existing filename or field value. Other private
+fields, occupied file inputs, multiple/directory/capture inputs, missing public
+labels and unsupported controls fail closed. One fixed read-only isolated-world
+function checks only native node metadata, visibility and `files.length`; it
+never reads a selected file's name or value. Ordinary page reads keep their
+existing file-field privacy refusal.
+
+`local-browser-upload` binds the exact observed field/origin/name and one published
+artifact ID. Native code reopens that immutable account/workspace/agent receipt,
+verifies passive content and SHA-256, then stages at most 8 MiB under native
+custody. The file input's accept rule, document/loader, node, attributes, empty
+state, geometry, visibility and exact DOM hit are checked again before one fenced
+`DOM.setFileInputFiles` dispatch. No caller path, selector or script is accepted.
+The website's input/change handlers may transmit the whole file immediately, as
+the exact approval states. A successful receipt confirms attachment, not final
+submission or the website's processing outcome. Interrupted input is never replayed.
+
+Staged bytes and their containing directory remain pinned and immutable until
+the owned browser Job exits. At most four uploads (32 MiB combined) are retained
+per owned browser; close/reopen it before more. Normal Stop preserves that browser
+and its file custody. Account/app shutdown closes its Job before custody cleanup.
+The task guard requires durable human handover after successful or uncertain
+attachment so the user can inspect the file-valued page and confirm submission.
+The retired turn cannot select/read/act again after handover; continuing requires
+the user's explicit fresh request. See the fixed native
+[file assignment protocol](https://chromedevtools.github.io/devtools-protocol/tot/DOM/#method-setFileInputFiles).
 
 For a visible HTTP(S) tab, observation also exposes a bounded subset of named,
 enabled top-frame buttons and HTTP links as opaque `controlRef` choices.
@@ -347,8 +434,10 @@ locks; cancellation and response waits happen outside them. The fixed native
 `Page.navigate` call sends no referrer or JavaScript. A successful reply means
 only dispatched, not verified page load: the agent must list and observe again.
 Errors, downloads and interrupted replies have uncertain outcomes and are not
-replayed. Browser-managed downloads are not imported or presented as Mivlet
-artifacts; native transfer custody and richer DOM inputs remain pending.
+replayed. Downloads caused by ordinary navigation/click are not imported or
+presented as Mivlet artifacts; only the separately approved native download path
+has managed custody. Rich editors, existing text replacement and arbitrary form
+controls remain outside these bounded DOM operations.
 
 The driver is private to Rust; React receives no driver methods, process handles,
 raw accessibility tokens or screenshots. Native code only exposes:
@@ -405,8 +494,18 @@ adapters share the four-image, 1 MB total, 8192-pixel bounds, local base64 forma
 and declared byte/dimension checks. Claude sends inline `image.source` blocks in
 its initial SDK user message; Codex stages the same validated bytes for one turn.
 Historical pixels and unsupported managed routes fail before provider dispatch.
-Mivlet stores attachment metadata only; retries require reattachment. This path
-grants no screenshot tools. Claude Stop terminates its supervised turn directly,
+New uploads are saved in the exact agent workspace before submission. Work and
+conversation records retain metadata, relative paths and content hashes, never
+inline pixels. Deliberate continuation restores saved images only after native
+scope, size, SHA-256 and image-format validation under the current computer
+generation. Historical messages never automatically resend pixels. Older
+metadata-only image references and missing or changed files require reattachment.
+For a queued child task, native code follows its saved parent relationships to
+the original upload and verifies the exact attachment identity, type, size and
+hash. It copies those bytes into the receiving agent's own attachment storage,
+then rechecks task generations before returning a receipt. This recovers shared
+uploads after restart without granting arbitrary access to another agent's files.
+This path grants no screenshot tools. Claude Stop terminates its supervised turn directly,
 without waiting for a blocked stdin payload writer. Wire and real subprocess
 fixtures establish local framing and cancellation; live Claude account acceptance
 remains unverified. See the [SDK user-message transport](https://github.com/anthropics/claude-agent-sdk-python/blob/9c69ce7aced5cdf2aa1ac86fe62e877b4962de8b/src/claude_agent_sdk/_internal/query.py)

@@ -79,21 +79,11 @@ export default {
           route = "unauthorized";
           return json({ error: "unauthorized" }, 401);
         }
-        const generation = await authority.requireReady(computerId, authorization.expectedGeneration);
-        const browser = env.BROWSER_AUTHORITY.getByName(computerId);
-        if (parts.length === 5 && parts[4] === "navigate" && request.method === "POST") {
-          route = "browser.navigate";
-          return json(await browser.navigate(computerId, await readBoundedJson(request), generation));
-        }
-        if (parts.length === 5 && parts[4] === "act" && request.method === "POST") {
-          route = "browser.act";
-          return json(await browser.act(computerId, await readBoundedJson(request), generation));
-        }
-        if (parts.length === 5 && parts[4] === "snapshot" && request.method === "GET") {
-          route = "browser.snapshot";
-          return json(await browser.snapshot(computerId, generation));
-        }
-        return json({ error: "not-found" }, 404);
+        // Workers node:https ignores custom lookup. Page routing also omits
+        // non-Fetch Chromium traffic. Do not launch or reconnect an unproven
+        // dynamic browser, including a purported read-only live snapshot.
+        route = "browser.prerequisite";
+        return json({ error: "hosted-browser-network-prerequisite", message: "Dynamic hosted browsing requires a verified platform network boundary. Use separately reviewed static public web research for public text sources." }, 503);
       }
       if (parts[3] !== "processes") return json({ error: "not-found" }, 404);
       if (parts.length === 4 && request.method === "POST") {

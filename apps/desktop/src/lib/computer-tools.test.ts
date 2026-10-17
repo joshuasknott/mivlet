@@ -16,6 +16,16 @@ describe("conversation computer tools", () => {
   });
   const enabled = { computer: true };
   const connector = { name: "gmail-read", description: "Read Gmail", parameters: "{}" };
+  it("offers exact command input only behind the current computer bridge and removes stale disconnected input specs", () => {
+    const provider = { backendType: "codex-app-server", authState: "connected", capabilities: ["tool-requests"] } as BackendProvider;
+    const model = { id: "model", label: "model", available: true };
+    for (const route of [provider, { ...provider, backendType: "native-api" }, { ...provider, backendType: "claude-agent", driverKind: "claude-agent" }] as BackendProvider[]) {
+      expect(conversationToolsForModel([], true, route, model, enabled).map(tool => tool.name)).toContain("command-input");
+    }
+    const stale = conversationComputerTools([], true, true, enabled);
+    expect(conversationComputerTools(stale, false, true, enabled).map(tool => tool.name)).not.toContain("command-input");
+    expect(conversationComputerTools(stale, true, true, { computer: false }).map(tool => tool.name)).not.toContain("command-input");
+  });
   it("hides native app tools when the bundled runtime is missing while preserving scoped files", () => {
     const prior = conversationComputerTools([connector], true, true, enabled);
     const names = conversationComputerTools(prior, true, true, enabled, false, false).map(tool => tool.name);
@@ -66,7 +76,7 @@ describe("conversation computer tools", () => {
     const previous = ["run-shell", "local-browser-action", "local-browser-observe"].map(name => ({ name, description: "old", parameters: "{}" }));
     const names = conversationComputerTools(previous, true, true, enabled).map(tool => tool.name);
     expect(names).not.toContain("run-shell");
-    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-observe", "local-browser-open", "local-browser-tabs", "local-browser-navigate", "local-browser-scroll", "local-browser-click"]);
+    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-observe", "local-browser-open", "local-browser-tabs", "local-browser-activate", "local-browser-fill", "local-browser-download", "local-browser-handover", "local-browser-upload-choices", "local-browser-upload", "local-browser-navigate", "local-browser-scroll", "local-browser-click"]);
     expect(conversationComputerTools(previous, true, true, enabled).find(tool => tool.name === "local-browser-observe")?.description).toContain("top-frame");
     expect(names).toContain("local-app-observe");
   });

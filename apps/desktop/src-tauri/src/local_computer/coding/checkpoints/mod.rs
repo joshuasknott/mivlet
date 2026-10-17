@@ -1,5 +1,7 @@
 //! Immutable file checkpoints in a selected private repository. Conversation
 //! state, provider sessions and Git HEAD are deliberately outside restoration.
+pub(crate) mod conversation;
+pub(crate) mod hosted;
 mod preview;
 // Native service projection for the separately stacked copy inventory consumer.
 // It grants no action and must never be exposed as a cleanup authorization.
@@ -8,7 +10,7 @@ pub(crate) mod retention;
 mod storage;
 #[cfg(test)]
 mod tests;
-use super::{checkout, git, save, Input, OperationTicket, Repository};
+use super::{checkout, git, save_repository as save, Input, OperationTicket, Repository};
 use mivlet_windows_executor::{repository_files as files, Limits};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -41,6 +43,7 @@ pub(super) fn execute(
     tool: &str,
     input: &Input,
     request_id: &str,
+    task: Option<&super::task_binding::TaskRepository>,
 ) -> Result<Value, String> {
     ticket.check()?;
     storage::storage(directory, repo)?;
@@ -81,6 +84,16 @@ pub(super) fn execute(
             {
                 return Err("The copy or checkpoint changed after review. Preview again and request a fresh approval.".into());
             }
+            // The saga may have been cancelled while this approved call waited
+            // for repository custody. Re-resolve its native intent under the
+            // same lock used by cancellation before changing any files.
+            let restore = conversation::restore_task_for_request(directory, ticket, request_id)?;
+            if task.is_some_and(|task| task.requires_restore_intent()) && restore.is_none() {
+                return Err("The reviewed restore intent is no longer available. No files were restored; review a fresh restore.".into());
+            }
+            if let Some(restore) = restore {
+                restore.binding.check(repo)?;
+            }
             // The pre-restore state remains a normal immutable checkpoint, even
             // after successful transaction cleanup. It can itself be restored.
             let before = storage::capture(
@@ -102,9 +115,13 @@ pub(super) fn execute(
                 ticket.execution_binding(),
                 || ticket.check().is_ok(),
             )?;
-            // Recheck selected ownership and HEAD immediately before the short
+            // Recheck exact retained-copy identity and HEAD before the short
             // atomic rename fence. Repository custody excludes all native writers.
-            if super::load(directory)?.is_none_or(|selected| selected.id != repo.id)
+            let current = super::task_repository(directory, task)?
+                .ok_or("Repository ownership changed; request a fresh restore review.")?;
+            if current.id != repo.id
+                || current.branch != repo.branch
+                || current.base != repo.base
                 || storage::storage(directory, repo)?.join("checkout") != root
                 || git::run(directory, repo, &["rev-parse", "HEAD"], ticket)?
                     != input.expected_head.as_deref().unwrap()
@@ -124,6 +141,17 @@ pub(super) fn execute(
                 save(directory, repo)?;
                 Ok(committed)
             })?;
+            crate::collaboration::restore::record_restore_receipt(
+                &ticket.execution_binding().scope_id,
+                request_id,
+                &repo.id,
+                checkpoint_id,
+                &before.id,
+                input
+                    .expected_output
+                    .as_deref()
+                    .ok_or("Missing reviewed restore output.")?,
+            )?;
             committed.acknowledge(|| ticket.check().is_ok())?;
             storage::remove_tree(&prepared.tree, Limits::CODING, ticket)?;
             Ok(

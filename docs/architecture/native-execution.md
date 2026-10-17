@@ -6,6 +6,76 @@ does not invoke a provider shell or alter Computer Use window grants, leases or
 foreground/background delivery. WSL/Ubuntu/Bubblewrap are not prerequisites for
 these tools. The separate experimental Grok bridge is unchanged.
 
+## Restricted running-app preview
+
+A command session may reserve one explicit Node HTTP preview port. The fixed,
+native-staged read-only preload redirects only that HTTP listener to a generated
+`LOCAL` named pipe; it does not grant sandbox loopback, private-network access or
+a host listener. HTTPS and non-Node server adapters need separate support. The
+executor authenticates each pipe peer against its retained process handle, exact
+Windows Job, AppContainer SID and restricted token before exposing a stream.
+
+The desktop issues a short-lived native descriptor only for the exact scoped
+job/generation, repository copy and frozen input-tree revision. A bounded native
+proxy accepts its own opaque `48hex.mivlet-preview.localhost:<port>` Host and
+Origin and forwards only through that executor stream. It never probes a host
+application port. Closing
+the view leaves the command running; Stop, account change, expiry and job closure
+invalidate transport. A background-owned job must be stopped, background execution
+turned off, and a new foreground-owned preview command started; running-job
+ownership cannot be transferred by opening this initial preview.
+
+The desktop CSP permits only `http://*.mivlet-preview.localhost:*` for these
+dynamic frames; script and connection directives remain limited to app assets
+and Tauri IPC. The separate HTTP origin receives no Tauri IPC. Existing native
+child-frame navigation and pre-transmission Document guards, including paused out-of-process
+frames, pin live preview navigation to its registered origin. Static MCP and
+generated-HTML guests keep their exact URL pins. Every proxied app response adds
+a policy limited to the preview's HTTP/WebSocket origin, data/blob media and local
+scripts/styles; external resources, nested frames, native protocols and reporting
+endpoints are excluded. Application CSP remains enforced. HTTP and upgrade headers,
+request size, concurrency, lifetime and total transferred bytes are bounded.
+The proxy strips upstream connection policies and reporting endpoints, adds a
+native `Connection-Allowlist` limited to its own origin, and blocks WebRTC and
+redirects. Redirecting applications need a separate validated redirect adapter;
+even same-origin HTTP redirects are currently unsupported. Cookie Domain
+attributes are removed so cookies remain on the one opaque preview host. Request
+body framing accepts a single bounded Content-Length body; chunked requests and
+HTTP pipelining are rejected.
+
+Before the first descriptor, native WebView2 environment metadata must report
+Chromium 152 or newer and a controlled hidden frame must prove enforcement. The
+desktop explicitly enables the native Chromium `ConnectionAllowlists` and
+`OverrideConnectionAllowlistOriginTrial` features, because embedded-runtime
+feature/origin-trial gating can differ from the Chrome release announcement.
+Neither the feature flags nor the reported version replace the actual proof. The
+native fixture observes a successful loopback fetch and real STUN binding packet,
+then verifies that the restricted document reaches its own control routes while
+neither its forbidden fetch nor its separate STUN socket receives traffic during
+a bounded native observation window. Renderer result messages cannot declare
+success. The probe owns unpredictable fixture routes, exact document registrations,
+a ten-second deadline, and cleanup on account, task-generation or exact job Stop.
+An unsupported runtime or inconclusive probe exposes no app preview.
+The debug-only `--check-preview-network` entry, explicitly enabled with
+`MIVLET_PREVIEW_NETWORK_ACCEPTANCE=1`, exercises this proof in a hidden disposable
+WebView with the same installed native guards. It starts no account, workspace,
+provider or command executor, registers no renderer command handler, and removes
+its temporary profile. This installed-runtime check is separate from restricted
+Node pipe transport, running-app/HMR display and user point-feedback acceptance.
+
+Public point feedback is optional: a fixed bootstrap is added only to a normal,
+uncompressed bounded first HTML head chunk. CSP may block it, in which case the UI
+never enables picking. A trusted click omits file/form/editable subtrees and emits
+only bounded path, tag, label and geometry. The host validates the exact frame
+source/origin plus native preview/job/generation/revision before staging an
+explicitly untrusted chat draft. Nothing is sent automatically. This preview
+shows the session's frozen input snapshot; repository-to-session live edit sync
+requires its own confined-tree protocol and is not implied by HMR support.
+
+Native pipeline, installed WebView navigation/network fences, HMR and user picker
+acceptance are distinct checks. Source/unit or mocked HTTP checks do not establish
+that an installed restricted dev server and WebView worked end to end.
+
 ## Security identity and launch
 
 Each execution has a random, ephemeral Less Privileged AppContainer package SID.
@@ -35,7 +105,8 @@ project content. Output redaction is additional protection, not secret detection
 
 The environment is constructed from scratch. No host PATH, provider connection,
 Git credential pipe or native-store handle is inherited. An explicit handle list
-contains only empty stdin and bounded stdout/stderr pipes. A private desktop and
+contains empty stdin (or the explicitly approved private interactive input pipe)
+and bounded stdout/stderr pipes. A private desktop and
 job UI restrictions prevent this lane from becoming interactive Computer Use.
 
 The job is attached atomically during suspended process creation, has no breakaway
@@ -93,8 +164,15 @@ a reviewed pinned extension and currently fail as missing commands.
 return a job identity while Rust retains the operation ticket. They require an
 explicit 1–86400 second lifetime and the existing exact single-use approval over
 the full command, selected repository/files, network policy and timeout. Ordinary
-command timeouts remain unchanged. There is no interactive stdin or provider
-shell fallback.
+command timeouts remain unchanged. A persistent start may explicitly approve
+`interactive: true` to retain a private stdin pipe. `command-input` requires the
+exact job/generation and next monotonic input sequence, bound to the normal
+single-use model approval. The main-window user control uses the same native
+scope/epoch and sequence checks. Native history persists the consumed sequence
+before writing; it saves no input text. Delivery is bounded to two seconds
+outside authority/registry locks. An uncertain write kills the exact Job and
+never replays; an accepted receipt confirms pipe bytes, not application success.
+There is no TTY, resize, provider shell or host-shell fallback.
 
 `command-jobs` lists this agent's bounded native history. `command-output` reads
 after a sequence cursor, returning at most 32 KiB with explicit dropped-history

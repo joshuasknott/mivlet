@@ -78,3 +78,29 @@ pub fn prepare_restore(
     )?;
     Ok(PreparedRepositoryImport { prepared, limits })
 }
+
+/// Stage an exactly approved hosted file result with a local before-import
+/// checkpoint. The caller verifies native cloud provenance and Work custody.
+#[allow(clippy::too_many_arguments)]
+pub fn prepare_hosted_import(
+    source: &Path,
+    destination: &Path,
+    limits: Limits,
+    provenance: &crate::HostedRepositoryImportSource,
+    expected_current: &str,
+    expected_output: &str,
+    binding: Binding,
+    current: impl Fn() -> bool,
+) -> Result<PreparedRepositoryImport, String> {
+    let prepared = repository_import::prepare_hosted(
+        source,
+        destination,
+        limits,
+        provenance,
+        expected_current,
+        expected_output,
+        binding,
+        &current,
+    )?;
+    Ok(PreparedRepositoryImport { prepared, limits })
+}

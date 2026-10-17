@@ -19,13 +19,13 @@
         "height": 1024,
         "minWidth": 640,
         "minHeight": 600,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --site-per-process"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --site-per-process --enable-features=ConnectionAllowlists,OverrideConnectionAllowlistOriginTrial"
       }
     ],
     "security": {
       "csp": {
         "default-src": "'self'",
-        "frame-src": "https: http://127.0.0.1:* http://127.0.0.2:*",
+        "frame-src": "https: http://127.0.0.1:* http://127.0.0.2:* http://*.mivlet-preview.localhost:*",
         "script-src": "'self'",
         "connect-src": "'self' ipc: http://ipc.localhost",
         "font-src": "'self'",

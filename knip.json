@@ -12,19 +12,32 @@
     },
     "apps/hosted-runner": {
       "ignoreDependencies": ["cloudflare"],
-      "entry": ["src/index.ts", "src/**/*.test.ts", "vitest.config.ts"],
+      "entry": [
+        "src/index.ts",
+        "src/tasks/index.ts",
+        "src/phone/index.ts",
+        "src/coding/index.ts",
+        "src/**/*.test.ts",
+        "vitest.config.ts"
+      ],
       "project": ["src/**/*.ts", "vitest.config.ts"]
     },
     "apps/desktop": {
       "entry": [
         "src/main.tsx",
         "src/**/*.test.{ts,tsx}",
+        "scripts/**/*.test.ts",
         "src-tauri/tests/fixtures/*.mjs",
         "vite.config.ts",
         "convex/**/*.ts",
         "!convex/_generated/**"
       ],
-      "project": ["src/**/*.{ts,tsx}", "convex/**/*.ts", "vite.config.ts"]
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "convex/**/*.ts",
+        "scripts/**/*.ts",
+        "vite.config.ts"
+      ]
     },
     "packages/connectors": {
       "entry": ["src/index.ts", "src/**/*.test.ts"],
@@ -52,6 +65,10 @@
     "**/target/**",
     "**/_generated/**",
     "**/worker-configuration.d.ts",
+    "**/tasks-configuration.d.ts",
+    "**/phone-configuration.d.ts",
+    "**/coding-configuration.d.ts",
+    "**/runtime-configuration.d.ts",
     "apps/hosted-runner/prototypes/opencode/**"
   ],
   "ignoreDependencies": ["@fontsource/inter"]

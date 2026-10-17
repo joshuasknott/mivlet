@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { loadRuntimeConversationDraft, saveRuntimeConversationDraft } from "../runtime/domains/conversations";
 import type { ComposerAttachment } from "../lib/types";
+import type { OutcomeGoalInput } from "@mivlet/protocol";
 
 export interface ComposerScope {
   workspaceId: string;
@@ -10,6 +11,7 @@ export interface ComposerScope {
   threadId?: string;
 }
 interface ComposerContent {
+  outcomeGoal?: OutcomeGoalInput;
   text: string;
   attachments: ComposerAttachment[];
   recipientId?: string;
@@ -60,6 +62,10 @@ function decode(content: string): ComposerContent {
   const value = JSON.parse(content) as ComposerContent;
   if (!value || typeof value.text !== "string" || !Array.isArray(value.attachments)
     || (value.replyWorkId !== undefined && typeof value.replyWorkId !== "string")
+    || (value.outcomeGoal !== undefined && (!value.outcomeGoal || typeof value.outcomeGoal.objective !== "string"
+      || typeof value.outcomeGoal.successCriteria !== "string" || !Number.isInteger(value.outcomeGoal.maxTurns)
+      || value.outcomeGoal.maxTurns < 1 || value.outcomeGoal.maxTurns > 24 || !Number.isInteger(value.outcomeGoal.maxTokens)
+      || value.outcomeGoal.maxTokens < 1000 || value.outcomeGoal.maxTokens > 512000))
     || value.attachments.length > 12 || value.attachments.some((a) => !a || typeof a.id !== "string" || typeof a.name !== "string" || typeof a.type !== "string" || typeof a.sizeBytes !== "number" || (a.sourceId !== undefined && typeof a.sourceId !== "string"))
   ) {
     throw new Error("Could not restore this conversation's composer.");
@@ -73,6 +79,8 @@ export function useScopedComposer(scope?: ComposerScope) {
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
   const key = scope ? composerScopeKey(scope) : "";
+  const currentKey = useRef(key);
+  currentKey.current = key;
   const [, render] = useState(0);
   const mounted = useRef(true);
   const allowed = (entry: Entry) => currentIdentity.current === JSON.stringify([entry.scope.workspaceId, entry.scope.accountId]);
@@ -177,9 +185,29 @@ export function useScopedComposer(scope?: ComposerScope) {
     attachments: entry?.ready ? entry.content.attachments : [],
     recipientId: entry?.content.recipientId,
     replyWorkId: entry?.content.replyWorkId,
+    outcomeGoal: entry?.content.outcomeGoal,
+    setOutcomeGoal: (outcomeGoal: OutcomeGoalInput | undefined) => mutate(content => ({ ...content, outcomeGoal })),
     setReplyWork: (replyWorkId: string | undefined) => mutate(content => ({ ...content, replyWorkId })),
     setRecipient: (recipientId: string) => mutate(content => ({ ...content, recipientId })),
     setText: (text: string) => mutate((content) => ({ ...content, text })),
+    appendText: (text: string) => mutate((content) => ({
+      ...content,
+      text: `${content.text}${content.text && !/\s$/.test(content.text) ? "\n\n" : ""}${text}`,
+    })),
+    stageWorkFeedback: (workId: string, agentId: string, text: string) => {
+      if (!entry?.ready || !allowed(entry) || currentKey.current !== key)
+        throw new Error("The original conversation or account changed. Reopen its preview before adding feedback.");
+      mutate(content => {
+        if (content.replyWorkId && content.replyWorkId !== workId)
+          throw new Error("This draft follows another task. Send it or choose New request before adding preview feedback. Your draft was kept.");
+        if (content.attachments.length || content.outcomeGoal)
+          throw new Error("This draft contains attachments or a new goal. Keep or send that request first, then add feedback to the preview’s original task.");
+        if (content.recipientId && content.recipientId !== agentId)
+          throw new Error("This draft has another recipient. Choose the preview’s original agent before adding its feedback. Your draft was kept.");
+        return { ...content, replyWorkId: workId, recipientId: agentId,
+          text: `${content.text}${content.text && !/\s$/.test(content.text) ? "\n\n" : ""}${text}` };
+      });
+    },
     setAttachments: (update: (attachments: ComposerAttachment[]) => ComposerAttachment[]) => mutate((content) => ({ ...content, attachments: update(content.attachments) })),
     flush: () => entry ? persist(entry) : Promise.resolve(),
     saveNewThreadDraft: async (threadId: string, text: string) => {

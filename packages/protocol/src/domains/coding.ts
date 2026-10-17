@@ -1,4 +1,12 @@
 /** Credential-free repository projection. Native paths and Git credentials stay native. */
+export interface RepositoryWorkBinding {
+  version: 1;
+  repositoryId: string;
+  branch: string;
+  baseCommit: string;
+  capturedAt: string;
+}
+
 export interface RepositoryCommandResult {
   exitCode: number | null;
   output: string;

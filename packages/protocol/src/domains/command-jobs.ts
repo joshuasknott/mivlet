@@ -1,4 +1,5 @@
 import type { LocalComputerEpochRequest } from "./local-computer.js";
+import type { CodingRepository, CodingRepositoryStatus, RepositoryWorkBinding } from "./coding.js";
 
 export type NativeCommandJobStatus =
   | "preparing"
@@ -13,10 +14,16 @@ export type NativeCommandJobStatus =
 export interface NativeCommandJob {
   id: string;
   repositoryId: string | null;
+  /** Immutable native capture; legacy jobs cannot invent a repository binding. */
+  repositoryBinding?: RepositoryWorkBinding | null;
   generation: number;
   operationId: number;
   commandId: string;
   persistent: boolean;
+  /** Legacy records default to false/zero; input is never replayed. */
+  interactive?: boolean;
+  inputSequence?: number;
+  previewPort?: number | null;
   network: boolean;
   timeoutSeconds: number;
   status: NativeCommandJobStatus;
@@ -45,4 +52,29 @@ export interface NativeCommandOutput {
 export interface NativeCommandTarget extends LocalComputerEpochRequest {
   jobId: string;
   jobGeneration: number;
+}
+export interface NativeCommandInput extends NativeCommandTarget {
+  inputSequence: number;
+  /** Exact UTF-8 payload including any explicit newline, at most 4096 bytes. */
+  text: string;
+}
+export interface NativeCommandInputReceipt {
+  jobId: string;
+  jobGeneration: number;
+  inputSequence: number;
+  /** Pipe delivery only; application success still requires observed output. */
+  delivery: "accepted" | "uncertain";
+}
+
+/** Read-only current task-copy state, never the command's discarded snapshot. */
+export interface NativeCommandRepositoryReview {
+  jobId: string;
+  jobGeneration: number;
+  repository: CodingRepository;
+  changes: CodingRepositoryStatus["changes"];
+  /** At most 200 paths and 64 KiB of UTF-8 names in total. */
+  files: string[];
+  truncated: boolean;
+  busy: boolean;
+  recoveryRequired: boolean;
 }

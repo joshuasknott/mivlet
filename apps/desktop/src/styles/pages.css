@@ -358,11 +358,11 @@
   cursor: not-allowed;
 }
 
-.mcp-settings {
+.plugin-config-settings {
   margin-top: var(--space-5);
 }
 
-.mcp-settings__add > summary {
+.plugin-config-settings__add > summary {
   display: inline-flex;
   min-height: 40px;
   align-items: center;
@@ -377,31 +377,31 @@
   font-weight: 500;
 }
 
-.mcp-settings__add > summary::-webkit-details-marker { display: none; }
-.mcp-settings__add > summary::marker { content: ""; }
-.mcp-settings__add > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
-.mcp-settings__add > p {
+.plugin-config-settings__add > summary::-webkit-details-marker { display: none; }
+.plugin-config-settings__add > summary::marker { content: ""; }
+.plugin-config-settings__add > summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.plugin-config-settings__add > p {
   color: var(--ink-muted);
   font-size: var(--text-12);
   line-height: 1.6;
   margin: 20px 0 16px;
 }
-.mcp-settings__empty { margin: 0 0 24px; color: var(--ink-muted); font-size: var(--text-13); }
+.plugin-config-settings__empty { margin: 0 0 24px; color: var(--ink-muted); font-size: var(--text-13); }
 
-.mcp-settings__form {
+.plugin-config-settings__form {
   display: grid;
 }
 
-.mcp-settings__form textarea {
+.plugin-config-settings__form textarea {
   resize: vertical;
 }
 
-.mcp-settings__server {
+.plugin-config-settings__server {
   display: grid;
   gap: var(--space-2);
 }
 
-.mcp-settings__access {
+.plugin-config-settings__access {
   background: var(--surface-raised);
   border: 1px solid var(--line-soft);
   border-radius: var(--radius-2);
@@ -410,11 +410,11 @@
   padding: var(--space-3);
 }
 
-.mcp-settings__access > small {
+.plugin-config-settings__access > small {
   color: var(--ink-muted);
 }
 
-.mcp-settings__access label {
+.plugin-config-settings__access label {
   align-items: center;
   display: flex;
   gap: var(--space-2);
@@ -733,8 +733,8 @@
 .settings-disclosure { margin: 20px 0; border-top: 1px solid var(--line); padding-top: 15px; }
 .settings-disclosure summary { font-size: 12px; color: var(--ink-muted); cursor: pointer; }
 @media (max-width: 650px) { .settings-modal__label { padding-bottom: 8px; } }
-.approval-card__context { margin: 4px 0 8px; color: var(--ink-muted); font-size: var(--text-13); overflow-wrap: anywhere; }
-.approval-card__payload { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; font: inherit; font-size: var(--text-13); }
+.permission-panel-card__context { margin: 4px 0 8px; color: var(--ink-muted); font-size: var(--text-13); overflow-wrap: anywhere; }
+.permission-panel-card__payload { white-space: pre-wrap; overflow-wrap: anywhere; max-width: 100%; font: inherit; font-size: var(--text-13); }
 
 .provider-model-settings .settings-disclosure summary { display: flex; justify-content: space-between; gap: 12px; }
 .provider-model-settings summary span { font-size: 12px; font-weight: 400; opacity: .65; }
@@ -760,43 +760,43 @@
 .settings-page .profile-clean-card, .settings-page .provider-access-list { box-shadow: none; border-color: var(--line); background: transparent; }
 .settings-page .profile-clean-card__content { padding: 0; }
 .settings-page .profile-section { padding: 20px 0; }
-.settings-page .mcp-settings__empty { margin: 8px 0 24px; padding: 28px 20px; color: var(--ink-muted); background: var(--surface-hover); border: 0; border-radius: 10px; line-height: 1.6; }
+.settings-page .plugin-config-settings__empty { margin: 8px 0 24px; padding: 28px 20px; color: var(--ink-muted); background: var(--surface-hover); border: 0; border-radius: 10px; line-height: 1.6; }
 .settings-page .settings-disclosure { margin-top: 16px; }
 @media (max-width: 650px) { .settings-preference-row { gap: 12px; flex-wrap: wrap; } }
 
 .settings-input-note { margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 1.6; }
 .settings-page .toggle-row.settings-preference-row { width: 100%; padding: 20px 0; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); }
-.local-schedules { gap: 18px; }
-.local-schedules .profile-section { display: grid; gap: 12px; min-width: 0; }
+.schedule-list { gap: 18px; }
+.schedule-list .profile-section { display: grid; gap: 12px; min-width: 0; }
 .local-schedules__prompt { white-space: pre-wrap; overflow-wrap: anywhere; }
 .local-schedules__editor label { display: grid; gap: 6px; }
-.local-schedules .local-schedules__editor .input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-1); background: var(--surface-raised); color: var(--ink); font: inherit; }
-.local-schedules .local-schedules__editor textarea { min-height: 110px; resize: vertical; }
-.local-schedules .local-schedules__editor .input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
-.local-schedules .input, .local-schedules .button, .local-schedules summary { min-height: 44px; }
-.local-schedules small { overflow-wrap: anywhere; }
+.schedule-list .local-schedules__editor .input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-1); background: var(--surface-raised); color: var(--ink); font: inherit; }
+.schedule-list .local-schedules__editor textarea { min-height: 110px; resize: vertical; }
+.schedule-list .local-schedules__editor .input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.schedule-list .input, .schedule-list .button, .schedule-list summary { min-height: 44px; }
+.schedule-list small { overflow-wrap: anywhere; }
 
 .settings-modal__tab { display: flex; align-items: center; gap: 10px; font-size: 13px; border-radius: 8px; }
 .settings-modal__label { font-size: 13px; color: var(--ink-muted); padding-bottom: 20px; }
 .settings-modal .settings-page__header h1 { font-size: 25px; letter-spacing: -.035em; }
 .settings-modal .settings-section-heading p { font-size: 13px; line-height: 1.65; }
-.settings-modal .mcp-settings__server { padding: 18px 0; border-bottom: 1px solid var(--line); }
-.settings-modal .mcp-settings__server .provider-access-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0; }
-.settings-modal .mcp-settings__server .provider-access-row > span:first-child { flex: 1 1 180px; }
-.mcp-settings__access { margin-top: 16px; }
+.settings-modal .plugin-config-settings__server { padding: 18px 0; border-bottom: 1px solid var(--line); }
+.settings-modal .plugin-config-settings__server .provider-access-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 0; }
+.settings-modal .plugin-config-settings__server .provider-access-row > span:first-child { flex: 1 1 180px; }
+.plugin-config-settings__access { margin-top: 16px; }
 .schedules-dialog { position: relative; width: min(680px, 100%); max-height: calc(100dvh - 48px); overflow: auto; padding: 32px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-overlay); box-shadow: var(--shadow-3); }
 .schedules-dialog > header { margin-bottom: 24px; }
 .schedules-dialog h1 { margin: 0; padding-right: 32px; font-size: 25px; letter-spacing: -.03em; }
-.schedules-dialog .local-schedules { margin: 0; }
+.schedules-dialog .schedule-list { margin: 0; }
 .schedules-dialog .profile-section { border-top: 1px solid var(--line); padding: 20px 0; }
 @media (max-width: 650px) { .schedules-dialog { padding: 24px 20px; } }
 
-.settings-modal .mcp-settings__add > p { margin: 18px 0; font-size: 12px; line-height: 1.7; }
-.mcp-settings__form { max-width: none; gap: 16px; }
-.mcp-settings__form .settings-field { display: grid; gap: 8px; min-width: 0; }
-.mcp-settings__form input, .mcp-settings__form select, .mcp-settings__form textarea, .schedules-dialog .settings-field select { width: 100%; min-width: 0; min-height: 40px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
-.mcp-settings__form > button { justify-self: start; }
-.mcp-settings__form input::placeholder { color: var(--ink-soft); }
+.settings-modal .plugin-config-settings__add > p { margin: 18px 0; font-size: 12px; line-height: 1.7; }
+.plugin-config-settings__form { max-width: none; gap: 16px; }
+.plugin-config-settings__form .settings-field { display: grid; gap: 8px; min-width: 0; }
+.plugin-config-settings__form input, .plugin-config-settings__form select, .plugin-config-settings__form textarea, .schedules-dialog .settings-field select { width: 100%; min-width: 0; min-height: 40px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.plugin-config-settings__form > button { justify-self: start; }
+.plugin-config-settings__form input::placeholder { color: var(--ink-soft); }
 
 .schedules-toolbar { display: flex; align-items: end; gap: 16px; flex-wrap: wrap; }
 .schedules-toolbar > label { flex: 1 1 180px; display: grid; gap: 8px; }
@@ -935,7 +935,7 @@
 .provider-method-form__actions { display: flex; gap: 12px; }
 
 /* MCP server cards keep the name/status column flexible while action controls retain their touch target. */
-.mcp-settings__server-header {
+.plugin-config-settings__server-header {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-start;
@@ -943,39 +943,39 @@
   min-width: 0;
 }
 
-.mcp-settings__server-header > span:first-child {
+.plugin-config-settings__server-header > span:first-child {
   display: grid;
   flex: 1 1 240px;
   gap: 2px;
   min-width: 0;
 }
 
-.mcp-settings__server-header > span:first-child strong,
-.mcp-settings__server-header > span:first-child small {
+.plugin-config-settings__server-header > span:first-child strong,
+.plugin-config-settings__server-header > span:first-child small {
   min-width: 0;
   overflow-wrap: anywhere;
 }
 
-.mcp-settings__server-header > .button,
-.mcp-settings__server-header > .profile-action-row {
+.plugin-config-settings__server-header > .button,
+.plugin-config-settings__server-header > .profile-action-row {
   flex: 0 0 auto;
 }
 
-.mcp-settings__server-header .profile-action-row {
+.plugin-config-settings__server-header .profile-action-row {
   margin-top: 0;
 }
 
 @media (max-width: 700px) {
-  .mcp-settings__server-header {
+  .plugin-config-settings__server-header {
     align-items: stretch;
   }
 
-  .mcp-settings__server-header > span:first-child {
+  .plugin-config-settings__server-header > span:first-child {
     flex-basis: 100%;
   }
 
-  .mcp-settings__server-header > .button,
-  .mcp-settings__server-header > .profile-action-row {
+  .plugin-config-settings__server-header > .button,
+  .plugin-config-settings__server-header > .profile-action-row {
     flex: 1 1 auto;
   }
 }

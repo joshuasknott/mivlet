@@ -72,5 +72,6 @@ describe("provider-neutral rich interface boundary", () => {
     expect(() => encodeRichState({ x: "x".repeat(8001) })).toThrow();
     expect(() => decodeRichState('{"__proto__":{"bad":true}}')).toThrow();
     expect(() => encodeRichState({ date: new Date() })).toThrow();
+    expect(() => encodeRichState({ first: "界".repeat(1500), second: "界".repeat(1500) })).toThrow(/storage limit/);
   });
 });

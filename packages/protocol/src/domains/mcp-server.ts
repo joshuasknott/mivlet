@@ -4,6 +4,7 @@ export interface McpServerConfig {
   port: number;
   publicOrigin?: string;
   browserOrigins: string[];
+  remoteAccess?: boolean;
 }
 export interface McpConsentRequest {
   id: string;
@@ -38,6 +39,7 @@ export interface McpConsentDecision {
 }
 export interface McpServerStatus {
   endpoint?: string | null;
+  remoteUrl?: string | null;
   pending: McpConsentRequest[];
   grants: McpClientGrant[];
   history: {

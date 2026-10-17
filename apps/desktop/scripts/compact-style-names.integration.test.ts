@@ -20,7 +20,10 @@ it.each([false, true])(
         linkedSrc,
         process.platform === "win32" ? "junction" : "dir",
       );
-      await writeFile(join(src, "entry.css"), '@import "./layers/base.css";');
+      await writeFile(
+        join(src, "fixture-card.css"),
+        '@import "./layers/base.css";',
+      );
       await writeFile(
         join(src, "layers/base.css"),
         `
@@ -30,6 +33,8 @@ it.each([false, true])(
       .fixture-card--active { padding: 7px; }
       .fixture-action__close { margin: 3px; }
       .fixture-protocol { display: block; }
+      .fixture-status { margin: 11px; }
+      .fixture-status--enabled { padding: 9px; }
     `,
       );
       await writeFile(
@@ -39,7 +44,7 @@ it.each([false, true])(
       await writeFile(
         join(src, "entry.tsx"),
         `
-      import "./entry.css";
+      import "./fixture-card.css";
       function h(tag, props) {
         const element = document.createElement(tag);
         Object.assign(element, props);
@@ -49,6 +54,8 @@ it.each([false, true])(
       const active = true;
       const action = "close";
       const protocol = "fixture-protocol";
+      const status = "enabled";
+      const emptyStatus = "";
       window.fixture = [
         <div className={\`fixture-card\${active ? "--active" : ""}\`} />,
         <div className="fixture-card" />,
@@ -56,6 +63,8 @@ it.each([false, true])(
         <button className={"fixture-action__" + action} />,
         <button className="fixture-action__close" />,
         <div className="fixture-protocol" id={protocol} />,
+        <span className={\`fixture-status \${status ? \`fixture-status--\${status}\` : ""}\`} />,
+        <span className={\`fixture-status \${emptyStatus ? \`fixture-status--\${emptyStatus}\` : ""}\`} />,
       ];
       document.documentElement.style.setProperty("--fixture-tone", "rgb(12, 34, 56)");
     `,
@@ -115,6 +124,12 @@ it.each([false, true])(
         expect(getComputedStyle(fixture[3]).margin).toBe("3px");
         expect(fixture[5].id).toBe("fixture-protocol");
         expect(fixture[5].className).toBe("fixture-protocol");
+        expect(getComputedStyle(fixture[6]).margin).toBe("11px");
+        expect(getComputedStyle(fixture[6]).padding).toBe("9px");
+        expect(fixture[6].classList.length).toBe(2);
+        expect(getComputedStyle(fixture[7]).margin).toBe("11px");
+        expect(fixture[7].classList.length).toBe(1);
+        expect(cssText).not.toContain("fixture-status");
       } finally {
         dom.window.close();
       }

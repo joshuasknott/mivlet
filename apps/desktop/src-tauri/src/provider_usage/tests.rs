@@ -131,6 +131,7 @@ fn exact_model_estimates_require_cache_prices_and_cost_unknown_survives_decode()
         cache_write_per_million_usd: None,
         source: "https://example.test/pricing".into(),
         observed_at: AT.into(),
+        origin: None,
     };
     assert!(estimate(&usage, &price).is_none());
     price.cached_input_per_million_usd = Some(0.5);

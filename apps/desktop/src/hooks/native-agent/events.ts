@@ -23,6 +23,7 @@ export interface NativeAgentEventSession {
   persistence: AttemptPersistence;
   durableWriter: DurableRunWriter | null;
   attemptId: string;
+  pricingTier?: "standard" | "fast" | "priority";
   /** Rechecks account/workspace and thread for delayed presentation. */
   isScopeCurrent: () => boolean;
   setState: Dispatch<SetStateAction<NativeAgentState>>;
@@ -158,6 +159,7 @@ function applyUsage(
   event: Extract<BackendAgentEvent, { type: "usage" }>,
   session: NativeAgentEventSession,
 ) {
+  const observedAt = new Date().toISOString();
   const usage = {
     inputTokens: event.inputTokens,
     outputTokens: event.outputTokens,
@@ -167,6 +169,8 @@ function applyUsage(
     costUsd: event.costUsd,
     costEstimated: event.costEstimated,
     costUnknown: event.costUnknown,
+    pricingTier: session.pricingTier,
+    observedAt,
   };
   session.setState((current) => ({
     ...current,
@@ -179,7 +183,7 @@ function applyUsage(
   session.persisted = {
     ...session.persisted,
     usage,
-    updatedAt: new Date().toISOString(),
+    updatedAt: observedAt,
   };
 }
 

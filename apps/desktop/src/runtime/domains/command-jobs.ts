@@ -3,6 +3,9 @@ import type {
   NativeCommandJob,
   NativeCommandOutput,
   NativeCommandTarget,
+  NativeCommandInput,
+  NativeCommandInputReceipt,
+  NativeCommandRepositoryReview,
 } from "@mivlet/protocol";
 import { invokeNative } from "../bridge";
 
@@ -20,3 +23,11 @@ export const readNativeCommandOutput = (
   });
 export const stopNativeCommandJob = (target: NativeCommandTarget) =>
   invokeNative<{ job: NativeCommandJob }>("native_command_stop", { ...target });
+export const writeNativeCommandInput = (request: NativeCommandInput) =>
+  invokeNative<NativeCommandInputReceipt>("native_command_input", {
+    ...request,
+  });
+export const inspectNativeCommandRepository = (target: NativeCommandTarget) =>
+  invokeNative<NativeCommandRepositoryReview>("native_command_repository", {
+    ...target,
+  });

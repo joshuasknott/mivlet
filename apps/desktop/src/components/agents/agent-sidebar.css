@@ -1,37 +1,18 @@
 /* Inline, bounded collections keep both sections within reach in large workspaces. */
 .agent-sidebar.workspace-sidebar {
-  --ink: #272623;
-  --ink-muted: #75716a;
-  --ink-soft: #75716a;
-  --sidebar-surface: #f4f3ee;
-  --surface-hover: #eae9e3;
-  --line: #e0ded7;
-  --line-strong: #cbc8bf;
-  --accent-line: #8d8a80;
   gap: 0;
   min-width: 0;
   color: var(--ink);
-  font-size: 13px;
-}
-:root[data-theme="dark"] .agent-sidebar.workspace-sidebar,
-.desktop-frame[data-theme="dark"] .agent-sidebar.workspace-sidebar {
-  --ink: #eeefef;
-  --ink-muted: #b0b3b8;
-  --ink-soft: #a0a4ab;
-  --sidebar-surface: #1c1d1f;
-  --surface-hover: #2e3034;
-  --surface-raised: #26282b;
-  --surface-overlay: #242629;
-  --line: #35373b;
-  --line-strong: #4a4d52;
-  --accent-line: #7e8999;
+  font-size: 14px;
 }
 .agent-sidebar.workspace-sidebar .agent-sidebar__topline { flex: 0 0 auto; min-height: 48px; padding-inline: 8px; margin-bottom: 3px; }
-.agent-sidebar.workspace-sidebar .agent-search { grid-template-columns: 18px minmax(0, 1fr) auto; min-height: 36px; margin: 0 0 8px; background: transparent; border-color: transparent; font-size: 12px; gap: 8px; }
+.agent-sidebar.workspace-sidebar .agent-search { grid-template-columns: 18px minmax(0, 1fr) auto; min-height: 40px; margin: 0 0 10px; background: var(--surface-hover); border-color: transparent; font-size: 12px; gap: 8px; }
 .agent-sidebar.workspace-sidebar .agent-search:hover { background: var(--surface-hover); color: var(--ink); }
 .agent-sidebar.workspace-sidebar .agent-search__shortcut { color: var(--ink-muted); font-size: 11px; font-weight: 400; white-space: nowrap; }
-.sidebar-new-conversation { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; min-height: 38px; padding: 8px 12px; margin-bottom: 14px; border: 1px solid transparent; border-radius: 7px; background: #30302e; color: #fff; font-size: 13px; font-weight: 500; }
-.sidebar-new-conversation:hover { background: #454541; }
+.sidebar-new-conversation { display: flex; flex: 0 0 auto; align-items: center; justify-content: flex-start; gap: 10px; width: 100%; min-height: 40px; padding: 8px 12px; margin-bottom: 14px; border: 1px solid var(--conversation-action-line); border-radius: 8px; background: var(--conversation-action-surface); color: var(--conversation-action-ink); font-size: 13px; font-weight: 500; }
+.sidebar-new-conversation:hover { background: var(--conversation-action-hover); }
+:where([data-theme="dark"]) .agent-sidebar.workspace-sidebar .agent-search { background: var(--surface-raised); border-color: var(--line); }
+:where([data-theme="dark"]) .agent-sidebar.workspace-sidebar .agent-search:hover { background: var(--surface-hover); }
 .sidebar-sections { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 140px; overflow-y: auto; overscroll-behavior: contain; }
 .sidebar-section { display: flex; flex: 0 1 auto; flex-direction: column; min-height: 100px; overflow: hidden; padding-block: 5px 10px; }
 .sidebar-section + .sidebar-section { border-top: 1px solid var(--line); }
@@ -51,11 +32,12 @@
 .sidebar-section__list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }
 .sidebar-section__list[hidden] { display: none; }
 .sidebar-section__empty { padding: 5px 8px 9px; margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 1.5; }
-.sidebar-row { position: relative; border-radius: 6px; margin-block: 1px; }
+.sidebar-row { position: relative; border-radius: 8px; margin-block: 1px; }
 .sidebar-row--active, .sidebar-row:hover, .sidebar-row:focus-within { background: var(--surface-hover); }
-.sidebar-row__select { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 35px; padding: 4px 8px; color: var(--ink); background: transparent; border: 0; border-radius: 6px; text-align: left; }
+:where([data-theme="dark"]) .sidebar-row--active { background: var(--conversation-action-hover); }
+.sidebar-row__select { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 38px; padding: 5px 8px; color: var(--ink); background: transparent; border: 0; border-radius: 8px; text-align: left; }
 .sidebar-row__folder { flex: 0 0 28px; }
-.sidebar-row__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 400; }
+.sidebar-row__name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; font-weight: 400; }
 .sidebar-row--active .sidebar-row__name { font-weight: 500; }
 .sidebar-row__members { display: flex; flex: 0 0 auto; align-items: center; gap: 1px; }
 .sidebar-row__members small { margin-left: 2px; color: var(--ink-muted); font-size: 10px; }
@@ -85,10 +67,11 @@
 .sidebar-search-result:hover, .sidebar-search-result[aria-current="page"] { background: var(--surface-hover); }
 .agent-sidebar.workspace-sidebar .agent-sidebar__connections { flex: 0 0 auto; min-height: 40px; margin-top: 8px; padding: 6px 8px; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 8px; border-top: 1px solid var(--line); border-radius: 0; font-size: 13px; }
 .agent-sidebar.workspace-sidebar .agent-sidebar__plugins-icon { width: 28px; height: 28px; }
-.agent-sidebar.workspace-sidebar .agent-sidebar__profile { min-height: 42px; padding: 6px 8px; grid-template-columns: 28px minmax(0, 1fr) 18px; gap: 8px; font-size: 12px; }
+.agent-sidebar.workspace-sidebar .agent-sidebar__profile { min-height: 48px; padding: 8px; grid-template-columns: 28px minmax(0, 1fr) 18px; gap: 8px; background: transparent; border-radius: 8px; font-size: 13px; }
+.agent-sidebar.workspace-sidebar .agent-sidebar__profile:hover { background: var(--surface-hover); }
 .agent-sidebar.workspace-sidebar .agent-sidebar__profile-avatar { width: 27px; height: 27px; border-radius: 50%; background: var(--surface-hover); color: var(--ink); font-size: 11px; }
 .agent-sidebar.workspace-sidebar .account-menu { flex: 0 0 auto; border-top: 1px solid var(--line); }
-.agent-sidebar.workspace-sidebar button:focus-visible, .sidebar-menu button:focus-visible { outline: 2px solid var(--accent-line); outline-offset: -2px; }
+.agent-sidebar.workspace-sidebar button:focus-visible, .sidebar-menu button:focus-visible { outline: 2px solid var(--ink-muted); outline-offset: -2px; }
 @media (hover: none), (pointer: coarse) {
   .sidebar-section__actions, .sidebar-row__actions { opacity: 1; pointer-events: auto; }
   .sidebar-row__select { min-height: 44px; padding-right: 50px; }

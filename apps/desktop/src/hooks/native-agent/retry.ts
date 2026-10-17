@@ -9,7 +9,7 @@ import {
   INTERRUPTED_CHECKPOINT_INSTRUCTION,
 } from "../../lib/agent-run";
 import { CONVERSATION_STYLE_INSTRUCTIONS } from "../../lib/conversation-presentation";
-import { GENERATED_UI_INSTRUCTIONS } from "../../lib/generated-interface";
+import { GENERATED_UI_INSTRUCTIONS } from "../../lib/generated-ui-instructions";
 
 export function describeRetryBlock(
   attemptToRetry: ExecutionAttempt,

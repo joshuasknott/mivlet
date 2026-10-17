@@ -1,9 +1,14 @@
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
-import { MessageAttachments } from "../conversation/MessageAttachments";
+import { FilePdf } from "@phosphor-icons/react/dist/csr/FilePdf";
+import { FileXls } from "@phosphor-icons/react/dist/csr/FileXls";
+import { FileImage } from "@phosphor-icons/react/dist/csr/FileImage";
+import { FileCode } from "@phosphor-icons/react/dist/csr/FileCode";
+import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { attachmentPreview } from "../../lib/attachment-previews";
 import type { RightPanelTab } from "./right-panel-state";
 import type { PanelFile } from "./workspace-panel-data";
 
+/** Metadata cards never load file contents. Every format opens the same inspector. */
 export function PanelFileRow({
   file,
   workspaceId,
@@ -13,76 +18,82 @@ export function PanelFileRow({
   workspaceId: string;
   onOpen: (tab: RightPanelTab) => void;
 }) {
+  const extension = file.title.split(".").at(-1)?.toLowerCase();
+  const format =
+    extension === "pdf"
+      ? "pdf"
+      : ["xlsx", "xls", "csv"].includes(extension ?? "")
+        ? "sheet"
+        : ["png", "jpg", "jpeg", "gif", "webp", "svg"].includes(extension ?? "")
+          ? "image"
+          : ["json", "ts", "tsx", "js", "html", "css", "yaml", "yml"].includes(
+                extension ?? "",
+              )
+            ? "code"
+            : "document";
+  const Icon = {
+    pdf: FilePdf,
+    sheet: FileXls,
+    image: FileImage,
+    code: FileCode,
+    document: FileText,
+  }[format];
+  let target = file.tab;
   if (file.attachment) {
     const { file: attachment, agentId, threadId } = file.attachment;
     const preview = attachmentPreview(workspaceId, threadId, attachment.id);
-    if (
-      preview ||
-      (attachment.availability === "workspace-file" && attachment.relativePath)
-    ) {
-      return (
-        <button
-          type="button"
-          className="workspace-library__card"
-          onClick={() =>
-            onOpen({
-              id: file.id,
-              kind: "file",
-              title: file.title,
-              ...preview,
-              ...(attachment.availability === "workspace-file" &&
-              attachment.relativePath
-                ? {
-                    target: {
-                      type: "artifact" as const,
-                      workspaceId,
-                      agentId,
-                      relativePath: attachment.relativePath,
-                      title: file.title,
-                    },
-                  }
-                : {}),
-            })
+    const retained =
+      attachment.availability === "workspace-file" &&
+      attachment.relativePath &&
+      agentId !== "unavailable-author";
+    target =
+      preview || retained
+        ? {
+            id: file.id,
+            kind: "file",
+            title: file.title,
+            ...preview,
+            ...(retained
+              ? {
+                  target: {
+                    type: "artifact" as const,
+                    workspaceId,
+                    agentId,
+                    relativePath: attachment.relativePath!,
+                    title: file.title,
+                  },
+                }
+              : {}),
           }
-        >
-          <FileText size={21} aria-hidden="true" />
-          <span className="workspace-library__detail">
-            <strong>{file.title}</strong>
-            <small>{file.detail}</small>
-          </span>
-        </button>
-      );
-    }
-    return (
-      <MessageAttachments
-        workspaceId={workspaceId}
-        agentId={agentId}
-        threadId={threadId}
-        attachments={[
-          {
-            ...attachment,
-            availability:
-              attachment.availability === "transient"
-                ? "knowledge-context"
-                : attachment.availability,
-          },
-        ]}
-      />
-    );
+        : undefined;
   }
   return (
     <button
       type="button"
-      className="workspace-library__card"
+      className="workspace-library__card panel-file-card"
+      data-format={format}
+      disabled={!target}
+      aria-label={`${target ? "Open" : "Preview"} ${file.title}`}
+      aria-description={target ? file.detail : "Original not retained. Reattach to preview."}
+      title={file.title + "\n" + file.detail}
       onClick={() => {
-        if (file.tab) onOpen(file.tab);
+        if (target) onOpen(target);
       }}
     >
-      <FileText size={21} aria-hidden="true" />
+      <span className="panel-file-card__icon">
+        <Icon size={23} aria-hidden="true" />
+      </span>
       <span className="workspace-library__detail">
         <strong>{file.title}</strong>
-        <small>{file.detail}</small>
+        <small>
+          {target ? file.detail : "Original not retained · Reattach to preview"}
+        </small>
       </span>
+      <CaretRight
+        size={16}
+        className="panel-file-card__open"
+        aria-hidden="true"
+      />
     </button>
   );
 }

@@ -105,6 +105,47 @@ pub(super) fn hydrate_fact_source(
 
 pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
     match command {
+        Command::LiveSteerWork { .. } => {
+            return Err(invalid(
+                "Live steering requires the native provider delivery boundary.",
+            ))
+        }
+        Command::EditQueuedWork {
+            id,
+            expected_generation,
+            prompt,
+        } => queue::edit(ctx, &id, expected_generation, &prompt)?,
+        Command::SetWorkHeld {
+            id,
+            expected_generation,
+            held,
+        } => queue::hold(ctx, &id, expected_generation, held)?,
+        Command::MoveQueuedWork {
+            id,
+            expected_generation,
+            before_id,
+        } => queue::move_before(ctx, &id, expected_generation, before_id.as_deref())?,
+        Command::SetOutcomeGoal {
+            id,
+            expected_generation,
+            objective,
+            success_criteria,
+            max_turns,
+            max_tokens,
+        } => goals::set(
+            ctx,
+            &id,
+            expected_generation,
+            &objective,
+            &success_criteria,
+            max_turns,
+            max_tokens,
+        )?,
+        Command::SetGoalPaused {
+            id,
+            expected_generation,
+            paused,
+        } => goals::pause(ctx, &id, expected_generation, paused)?,
         Command::ArmProviderReset {
             id,
             expected_generation,
@@ -133,6 +174,14 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             id(&event_id)?;
             let text = bounded(&text, 2_000, "Steering")?;
             let mut item = ctx.item(&key)?;
+            if item.execution_owner.as_deref() == Some("hosted")
+                || item
+                    .hosted_task
+                    .as_ref()
+                    .is_some_and(|h| h.phase == "review")
+            {
+                return Err(invalid("This cloud text request has frozen input. Stop or finish it, then start a new request and review its complete cloud text; live steering is unavailable."));
+            }
             if let Some(event) = item.steering.iter().find(|event| event.id == event_id) {
                 return if event.text == text {
                     Ok(())
@@ -373,6 +422,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             }
         }
         Command::StartWork {
+            outcome_goal,
             id,
             conversation_id,
             agent_id,
@@ -382,8 +432,17 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             recipient_ids,
             attachments,
         } => {
+            let work_id = id.clone();
             if let Some(refs) = &attachments {
                 work::validate_attachments(refs)?;
+                if refs.iter().any(|attachment| {
+                    matches!(
+                        attachment.availability.as_str(),
+                        "transient" | "image-input"
+                    )
+                }) {
+                    return Err(invalid("Prepare the original files and images in the agent workspace before queueing this request, so its saved inputs survive restart."));
+                }
             }
             if let Some(recipient_ids) = recipient_ids {
                 if recipient_ids.first().is_none_or(|first| first != &agent_id) {
@@ -416,6 +475,27 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
                     attachments.as_deref(),
                 )?;
             }
+            if let Some(goal) = outcome_goal {
+                let item = ctx.item(&work_id)?;
+                if item.outcome_goal.as_ref().is_some_and(|existing| {
+                    existing.objective == goal.objective
+                        && existing.success_criteria == goal.success_criteria
+                }) && item.max_turns == goal.max_turns
+                    && item.max_tokens == goal.max_tokens
+                {
+                    // Same submission retry; its bound attempts are immutable.
+                } else {
+                    goals::set(
+                        ctx,
+                        &work_id,
+                        item.generation,
+                        &goal.objective,
+                        &goal.success_criteria,
+                        goal.max_turns,
+                        goal.max_tokens,
+                    )?;
+                }
+            }
         }
         Command::BindWork {
             id,
@@ -436,7 +516,14 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             run_id,
             status,
             reason,
-        } => work::finish(ctx, &id, generation, &run_id, status, reason)?,
+        } => {
+            if ctx.item(&id)?.execution_owner.as_deref() == Some("hosted") {
+                return Err(invalid(
+                    "A cloud Work result needs its authenticated native task receipt.",
+                ));
+            }
+            work::finish(ctx, &id, generation, &run_id, status, reason)?;
+        }
         Command::StopWork {
             id,
             expected_generation,
@@ -476,6 +563,15 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             reconcile,
         } => {
             let mut item = ctx.item(&id)?;
+            if item.hosted_task.as_ref().is_some_and(|h| {
+                h.phase != "review"
+                    && h.phase != "reconciled"
+                    && h.snapshot
+                        .as_ref()
+                        .is_none_or(|s| matches!(s.status.as_str(), "queued" | "running"))
+            }) {
+                return Err(invalid("Refresh the cloud task and obtain a terminal receipt or acknowledged cancellation before starting a local continuation."));
+            }
             if !reconcile
                 || expected_generation != item.generation
                 || item.status.active()
@@ -508,6 +604,11 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             // Reconciliation is a new user-authorized foreground attempt; a
             // crashed native attempt is never resurrected automatically.
             item.execution_owner = None;
+            item.hosted_task = None;
+            if let Some(goal) = item.outcome_goal.as_mut() {
+                goal.status = "active".into();
+                goal.report = None;
+            }
             super::provider_resets::require_review(
                 &mut item,
                 "An ordinary continuation replaced the reset request.",

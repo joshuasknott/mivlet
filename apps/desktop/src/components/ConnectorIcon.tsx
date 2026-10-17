@@ -44,10 +44,10 @@ const artwork: Record<string, SVGProps<SVGSVGElement>> = {
 export function ConnectorIcon({ id }: { id: string }) {
   const builtin = builtinPluginEntries.find((entry) => entry.id === id);
   if (builtin)
-    return <img src={builtin.icon} className="connector-icon-svg" alt="" />;
+    return <img src={builtin.icon} className="integration-panel-icon-svg" alt="" />;
   const key = Object.hasOwn(artwork, id) ? id : "folder";
   return (
-    <svg {...artwork[key]} className="connector-icon-svg">
+    <svg {...artwork[key]} className="integration-panel-icon-svg">
       <use href={`/brand/connector-artwork.svg#${key}`} />
     </svg>
   );

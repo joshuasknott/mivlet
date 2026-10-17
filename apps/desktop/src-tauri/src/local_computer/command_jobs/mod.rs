@@ -1,12 +1,16 @@
 //! Native job ownership and bounded log observation. This is a process lifecycle
 //! service, not a Work scheduler; all starts arrive through existing tool permits.
+pub(crate) mod input;
 mod redaction;
 mod store;
+pub(crate) use input::receive_input;
 pub(super) use redaction::output_log as safe_output;
 #[cfg(test)]
 mod tests;
 use super::{authority::OperationTicket, LocalComputerState};
-use mivlet_windows_executor::{output::OutputPage, OutputLog, Receipt};
+use mivlet_windows_executor::{
+    output::OutputPage, Binding, OutputLog, Receipt, SessionControl, SessionOptions,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -56,10 +60,18 @@ impl JobStatus {
 pub struct JobRecord {
     pub id: String,
     pub repository_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_binding: Option<super::coding::RepositoryWorkBinding>,
     pub generation: u64,
     pub operation_id: u64,
     pub command_id: String,
     pub persistent: bool,
+    #[serde(default)]
+    pub interactive: bool,
+    #[serde(default)]
+    pub input_sequence: u64,
+    #[serde(default)]
+    pub preview_port: Option<u16>,
     pub network: bool,
     pub timeout_seconds: u64,
     pub status: JobStatus,
@@ -77,8 +89,15 @@ impl JobRecord {
         hex(&self.id, 48)
             && hex(&self.command_id, 64)
             && self.repository_id.as_ref().is_none_or(|id| hex(id, 48))
+            && self.repository_binding.as_ref().is_none_or(|binding| {
+                binding.valid() && self.repository_id.as_deref() == Some(&binding.repository_id)
+            })
             && self.generation > 0
             && self.operation_id > 0
+            && self.input_sequence <= 9_007_199_254_740_991
+            && (self.interactive || self.input_sequence == 0)
+            && (self.persistent || (!self.interactive && self.preview_port.is_none()))
+            && self.preview_port != Some(0)
             && (1..=86_400).contains(&self.timeout_seconds)
             && self.created_at.len() <= 40
             && self.finished_at.as_ref().is_none_or(|s| s.len() <= 40)
@@ -91,6 +110,8 @@ impl JobRecord {
 struct Live {
     output: OutputLog,
     cancel: Arc<AtomicBool>,
+    control: SessionControl,
+    input_pending: bool,
 }
 struct Inner {
     records: Vec<JobRecord>,
@@ -163,6 +184,47 @@ impl Drop for JobManager {
     }
 }
 impl LocalComputerState {
+    pub(crate) fn command_preview(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        id: &str,
+        job_generation: u64,
+    ) -> Result<(Binding, SessionControl), String> {
+        self.validate_target(workspace, agent)?;
+        let ticket = self
+            .authority_for(workspace, agent)?
+            .begin_viewer(generation)?;
+        let jobs = self.command_jobs(workspace, agent)?;
+        let result = ticket.with_current(|| {
+            let inner = jobs
+                .inner
+                .lock()
+                .map_err(|_| "Command jobs are unavailable.")?;
+            let record = inner
+                .records
+                .iter()
+                .find(|r| r.id == id)
+                .ok_or("This preview job is unavailable.")?;
+            if generation != job_generation
+                || record.generation != job_generation
+                || record.status != JobStatus::Running
+                || record.preview_port.is_none()
+            {
+                return Err("This preview belongs to an ended or revoked command session.".into());
+            }
+            let live = inner
+                .live
+                .get(id)
+                .ok_or("The native preview owner is unavailable.")?;
+            if live.cancel.load(Ordering::Acquire) {
+                return Err("The preview session was stopped.".into());
+            }
+            Ok((live.control.binding(), live.control.clone()))
+        });
+        ticket.finish(result)
+    }
     pub(crate) fn command_jobs(
         &self,
         workspace: &str,
@@ -189,22 +251,55 @@ impl ScopeJobs {
         timeout_seconds: u64,
         persistent: bool,
     ) -> Result<JobSession, String> {
+        self.start_with_options(
+            ticket,
+            repository_id,
+            script,
+            network,
+            timeout_seconds,
+            persistent,
+            SessionOptions::default(),
+        )
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn start_with_options(
+        self: &Arc<Self>,
+        ticket: &OperationTicket,
+        repository_id: Option<&str>,
+        script: &str,
+        network: bool,
+        timeout_seconds: u64,
+        persistent: bool,
+        options: SessionOptions,
+    ) -> Result<JobSession, String> {
         ticket.check()?;
         let mut bytes = [0u8; 24];
         getrandom::fill(&mut bytes).map_err(|_| "Cannot create command identity.")?;
         let id = hex::encode(bytes);
         let binding = ticket.execution_binding();
         let command_id = hex::encode(Sha256::digest(
-            serde_json::to_vec(&(script, network, timeout_seconds, persistent, &binding))
-                .map_err(|_| "Invalid command identity.")?,
+            serde_json::to_vec(&(
+                script,
+                network,
+                timeout_seconds,
+                persistent,
+                &binding,
+                options.interactive,
+                options.preview_port,
+            ))
+            .map_err(|_| "Invalid command identity.")?,
         ));
         let record = JobRecord {
             id: id.clone(),
             repository_id: repository_id.map(str::to_owned),
+            repository_binding: None,
             generation: binding.generation,
             operation_id: binding.operation_id,
             command_id,
             persistent,
+            interactive: options.interactive,
+            input_sequence: 0,
+            preview_port: options.preview_port,
             network,
             timeout_seconds,
             status: JobStatus::Preparing,
@@ -217,6 +312,7 @@ impl ScopeJobs {
         if !record.valid() {
             return Err("Invalid command job metadata.".into());
         }
+        let control = SessionControl::new(binding, options, ticket.cancellation())?;
         let session = {
             let mut inner = self
                 .inner
@@ -255,6 +351,8 @@ impl ScopeJobs {
                 Live {
                     output: output.clone(),
                     cancel: ticket.cancellation(),
+                    control,
+                    input_pending: false,
                 },
             );
             JobSession {
@@ -280,6 +378,23 @@ impl ScopeJobs {
             .find(|r| r.id == id)
             .cloned()
             .ok_or("Command job is unavailable in this scope.".into())
+    }
+    pub(crate) fn repository_binding(
+        &self,
+        id: &str,
+        generation: u64,
+    ) -> Result<super::coding::RepositoryWorkBinding, String> {
+        let record = self.record(id)?;
+        if record.generation != generation {
+            return Err("This repository review belongs to another command generation.".into());
+        }
+        let binding = record.repository_binding.ok_or(
+            "This command has no saved repository binding. Start a fresh repository command to inspect its files; no Library copy was substituted.",
+        )?;
+        if !binding.valid() || record.repository_id.as_deref() != Some(&binding.repository_id) {
+            return Err("The command repository binding needs recovery.".into());
+        }
+        Ok(binding)
     }
     fn update(&self, id: &str, update: impl FnOnce(&mut JobRecord)) -> Result<(), String> {
         self.update_memory(id, update)?;
@@ -358,18 +473,63 @@ impl ScopeJobs {
         if inner.records[index].generation != generation {
             return Err("Job generation changed. Refresh before stopping a job.".into());
         }
+        let mut control = None;
         if inner.records[index].status.active() {
             let live = inner
                 .live
                 .get(id)
                 .ok_or("Job owner is unavailable; reconcile by reopening the native scope.")?;
             live.cancel.store(true, Ordering::Release);
+            control = Some(live.control.clone());
             inner.records[index].status = JobStatus::Stopping;
         }
-        Ok(inner.records[index].clone())
+        let record = inner.records[index].clone();
+        drop(inner);
+        if let Some(control) = control {
+            control.stop();
+        }
+        Ok(record)
     }
 }
 impl JobSession {
+    /// Captured before the job receipt is returned, never rebound from Library.
+    pub(crate) fn bind_repository(
+        &mut self,
+        binding: super::coding::RepositoryWorkBinding,
+    ) -> Result<(), String> {
+        if !binding.valid() {
+            return Err("Invalid command repository binding.".into());
+        }
+        let mut inner = self
+            .scope
+            .inner
+            .lock()
+            .map_err(|_| "Command jobs are unavailable.")?;
+        let record = inner
+            .records
+            .iter_mut()
+            .find(|record| record.id == self.id)
+            .ok_or("The exact command job is unavailable.")?;
+        if record.status != JobStatus::Preparing
+            || record.repository_binding.is_some()
+            || record.repository_id.as_deref() != Some(&binding.repository_id)
+        {
+            return Err("The command repository binding cannot be replaced.".into());
+        }
+        record.repository_binding = Some(binding);
+        drop(inner);
+        self.scope.persist()
+    }
+    pub(crate) fn control(&self) -> Result<SessionControl, String> {
+        self.scope
+            .inner
+            .lock()
+            .map_err(|_| "Command jobs are unavailable.")?
+            .live
+            .get(&self.id)
+            .map(|live| live.control.clone())
+            .ok_or("The native command owner is unavailable.".into())
+    }
     pub(crate) fn fail(&mut self, error: &str) -> Result<(), String> {
         let mut safe = crate::secret_redaction::redact_secret_text_or_omit(error);
         while safe.len() > 256 {
@@ -453,6 +613,18 @@ pub(crate) fn execute(
     arguments: Value,
 ) -> Result<String, String> {
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
+    if tool == "command-input" {
+        let input =
+            serde_json::from_value(arguments).map_err(|_| "Invalid exact command input.")?;
+        let jobs = state.command_jobs(workspace, agent)?;
+        let result = input::dispatch_model(&jobs, &ticket, input, |repository| {
+            super::coding::validate_command_repository(workspace, agent, repository)
+        })
+        .and_then(|value| {
+            serde_json::to_string(&value).map_err(|_| "Invalid command input receipt.".into())
+        });
+        return ticket.finish(result);
+    }
     let input: JobInput =
         serde_json::from_value(arguments).map_err(|_| "Invalid command observation request.")?;
     let jobs = state.command_jobs(workspace, agent)?;

@@ -56,6 +56,24 @@ pub(super) fn run(
         .as_array()
         .and_then(|tabs| tabs.iter().find(|t| t["title"] == "Second tab fixture"))
         .ok_or("Scroll QA second tab missing.")?;
+    // The two-tab acceptance deliberately finishes with the first tab selected.
+    // Navigation does not select a hidden tab; explicitly consume its activation
+    // choice, then list again because activation retires prior navigation refs.
+    super::navigation::activate(
+        process,
+        hwnd,
+        1,
+        text(page, "activationRef")?,
+        origin,
+        check,
+        dispatch,
+    )?;
+    let list: Value = serde_json::from_str(&observations::tabs(process, hwnd, 1, check)?)
+        .map_err(|_| "Scroll QA fresh list invalid.")?;
+    let page = list["tabs"]
+        .as_array()
+        .and_then(|tabs| tabs.iter().find(|t| t["title"] == "Second tab fixture"))
+        .ok_or("Scroll QA selected second tab missing.")?;
     super::navigation::navigate(
         process,
         hwnd,

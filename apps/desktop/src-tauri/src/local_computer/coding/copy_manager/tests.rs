@@ -61,6 +61,119 @@ fn action(target: &CopyScope, preview: CleanupPreview) -> CopyAction {
 }
 
 #[test]
+fn queued_task_keeps_its_copy_after_selection_changes_and_writes_never_reselect() {
+    let (temp, directory, authority, repo, owner, _target) = fixture();
+    let ticket = authority.begin_agent(1).unwrap();
+    let other = git::attach(&directory, &temp.path().join("source"), &ticket).unwrap();
+    register_owner(&directory, &other, &owner, None).unwrap();
+    let evidence = Evidence {
+        work: vec![LinkedWork {
+            id: "queued-task".into(),
+            status: WorkStatus::Queued,
+            repository_id: Some(repo.id.clone()),
+        }],
+        ..Default::default()
+    };
+    select(&directory, &other.id, &owner, &evidence, &ticket).unwrap();
+    let task = super::super::task_binding::TaskRepository::for_test(
+        super::super::RepositoryWorkBinding {
+            version: 1,
+            repository_id: repo.id.clone(),
+            branch: repo.branch.clone(),
+            base_commit: repo.base.clone(),
+            captured_at: "2026-10-17T12:00:00Z".into(),
+        },
+        &owner.account,
+        &owner.workspace,
+        &owner.agent,
+    );
+    let result = super::super::execute_observed(
+        &directory,
+        &ticket,
+        "repository-write",
+        serde_json::json!({"repositoryId": repo.id, "path": "file.txt", "content": "task change"}),
+        None,
+        "task-write",
+        Some(&task),
+    )
+    .unwrap();
+    assert!(result.contains("file.txt"));
+    assert_eq!(load(&directory).unwrap().unwrap().id, other.id);
+    assert_eq!(
+        fs::read(directory.join(&repo.id).join("checkout/file.txt")).unwrap(),
+        b"task change"
+    );
+    assert_eq!(
+        fs::read(directory.join(&other.id).join("checkout/file.txt")).unwrap(),
+        b"original"
+    );
+    assert_eq!(
+        fs::read(temp.path().join("source/file.txt")).unwrap(),
+        b"original"
+    );
+    assert!(super::super::execute_observed(
+        &directory,
+        &ticket,
+        "repository-write",
+        serde_json::json!({"repositoryId": other.id, "path": "file.txt", "content": "wrong copy"}),
+        None,
+        "wrong-copy",
+        Some(&task),
+    )
+    .is_err());
+    let status: serde_json::Value = serde_json::from_str(
+        &super::super::execute_observed(
+            &directory,
+            &ticket,
+            "repository-status",
+            serde_json::json!({}),
+            None,
+            "task-status",
+            Some(&task),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(status["repository"]["id"], repo.id);
+}
+
+#[test]
+fn bound_unfinished_work_protects_its_exact_copy_and_legacy_work_protects_all() {
+    let (temp, directory, authority, repo, owner, _target) = fixture();
+    let ticket = authority.begin_agent(1).unwrap();
+    let other = git::attach(&directory, &temp.path().join("source"), &ticket).unwrap();
+    register_owner(&directory, &other, &owner, None).unwrap();
+    let evidence = Evidence {
+        work: vec![LinkedWork {
+            id: "queued-task".into(),
+            status: WorkStatus::Queued,
+            repository_id: Some(repo.id.clone()),
+        }],
+        ..Default::default()
+    };
+    assert!(
+        !inspect(&directory, &repo.id, &owner, &evidence, false, false, &ticket)
+            .blockers
+            .is_empty()
+    );
+    assert!(
+        inspect(&directory, &other.id, &owner, &evidence, false, false, &ticket)
+            .blockers
+            .is_empty()
+    );
+    let legacy = Evidence {
+        unresolved: true,
+        ..Default::default()
+    };
+    assert!(
+        !inspect(&directory, &other.id, &owner, &legacy, false, false, &ticket)
+            .blockers
+            .is_empty()
+    );
+    assert!(select(&directory, &other.id, &owner, &legacy, &ticket).is_err());
+}
+
+#[test]
 fn retained_inventory_disk_accounting_selection_and_disposable_cleanup() {
     let (temp, directory, authority, repo, owner, target) = fixture();
     let ticket = authority.begin_agent(1).unwrap();

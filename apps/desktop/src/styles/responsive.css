@@ -10,7 +10,7 @@
     min-height: 100dvh;
   }
 
-  .connector-search {
+  .integration-panel-search {
     grid-template-columns: 1fr;
   }
 
@@ -166,7 +166,7 @@
     height: 34px;
   }
 
-  .approval-details {
+  .permission-panel-details {
     grid-template-columns: 1fr;
   }
 

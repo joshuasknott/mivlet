@@ -3,20 +3,29 @@ use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
+    atomic::{AtomicBool, AtomicU32, Ordering},
+    Arc, Mutex, OnceLock,
 };
 use webview2_com::{
     take_pwstr, CallDevToolsProtocolMethodCompletedHandler,
     DevToolsProtocolEventReceivedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DevToolsProtocolEventReceivedEventArgs2,
-        ICoreWebView2DevToolsProtocolEventReceiver, ICoreWebView2_11,
+        ICoreWebView2DevToolsProtocolEventReceiver, ICoreWebView2_11, ICoreWebView2_2,
     },
 };
 use windows::core::{Interface, HSTRING, PWSTR};
 static READY: AtomicBool = AtomicBool::new(false);
 static FAILED: AtomicBool = AtomicBool::new(false);
+static BROWSER_MAJOR: AtomicU32 = AtomicU32::new(0);
+static BROWSER_VERSION: OnceLock<String> = OnceLock::new();
+#[cfg(debug_assertions)]
+pub(crate) fn diagnostic_version() -> &'static str {
+    BROWSER_VERSION
+        .get()
+        .map(String::as_str)
+        .unwrap_or("unavailable")
+}
 const MAX_FRAMES: usize = 128;
 type Frames = HashMap<String, String>;
 #[derive(Default)]
@@ -26,11 +35,27 @@ struct Fence {
 }
 thread_local! {
     // COM receivers remain on the main WebView UI thread for its lifetime.
-    static RECEIVERS: RefCell<Vec<ICoreWebView2DevToolsProtocolEventReceiver>> = const { RefCell::new(Vec::new()) };
+    static RECEIVERS: RefCell<Vec<(ICoreWebView2DevToolsProtocolEventReceiver, i64)>> = const { RefCell::new(Vec::new()) };
+}
+/// Disposable QA owns the sole WebView in its process. Remove subscriptions
+/// before Close so handler-captured Core interfaces cannot keep its profile
+/// alive after the event loop exits. This is not a renderer command.
+#[cfg(debug_assertions)]
+pub(crate) fn dispose_acceptance() {
+    READY.store(false, Ordering::Release);
+    RECEIVERS.with(|receivers| {
+        for (receiver, token) in receivers.borrow_mut().drain(..) {
+            let _ = unsafe { receiver.remove_DevToolsProtocolEventReceived(token) };
+        }
+    });
 }
 fn allow(frames: &mut Frames, frame: &str, uri: &str, registered: bool) -> bool {
     if let Some(expected) = frames.get(frame) {
-        return expected == uri;
+        return crate::local_computer::live_preview::navigation_allowed(expected, uri)
+            .unwrap_or_else(|| expected == uri);
+    }
+    if crate::local_computer::live_preview::navigation_allowed(uri, uri) == Some(false) {
+        return false;
     }
     if registered {
         if frames.len() >= MAX_FRAMES {
@@ -42,11 +67,10 @@ fn allow(frames: &mut Frames, frame: &str, uri: &str, registered: bool) -> bool 
 }
 impl Fence {
     fn allow(&mut self, session: &str, frame: &str, uri: &str, registered: bool) -> bool {
-        if self
-            .sessions
-            .get(session)
-            .is_some_and(|expected| expected != uri)
-        {
+        if self.sessions.get(session).is_some_and(|expected| {
+            !crate::local_computer::live_preview::navigation_allowed(expected, uri)
+                .unwrap_or_else(|| expected == uri)
+        }) {
             return false;
         }
         let allowed = allow(&mut self.frames, frame, uri, registered);
@@ -86,6 +110,37 @@ pub(crate) fn require_ready() -> Result<(), String> {
                 .into(),
         )
     }
+}
+pub(crate) fn require_connection_allowlist() -> Result<(), String> {
+    require_ready()?;
+    require_modern_runtime()?;
+    if crate::connection_allowlist_probe::verified() {
+        Ok(())
+    } else {
+        Err("The native connection allowlist has not yet proved its loopback fetch and data-only WebRTC boundary. No app preview was exposed.".into())
+    }
+}
+fn require_modern_runtime() -> Result<(), String> {
+    if BROWSER_MAJOR.load(Ordering::Acquire) >= 152 {
+        Ok(())
+    } else {
+        Err("Running-app previews require Microsoft Edge WebView2 with Chromium 152 or newer for native connection allowlists. Update the desktop runtime and reopen Mivlet; no app preview was exposed.".into())
+    }
+}
+pub(crate) async fn verify_connection_allowlist(
+    window: &tauri::WebviewWindow,
+    check: impl Fn() -> Result<(), String>,
+) -> Result<(), String> {
+    require_ready()?;
+    require_modern_runtime()?;
+    crate::connection_allowlist_probe::verify(window, check).await
+}
+fn browser_major(version: &str) -> Option<u32> {
+    let first = version.split('.').next()?;
+    if first.is_empty() || first.len() > 4 || !first.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    first.parse().ok().filter(|major| *major > 0)
 }
 fn command(
     core: &ICoreWebView2,
@@ -173,11 +228,19 @@ fn subscribe(
     unsafe {
         receiver.add_DevToolsProtocolEventReceived(handler, &mut token)?;
     }
-    RECEIVERS.with(|receivers| receivers.borrow_mut().push(receiver));
+    RECEIVERS.with(|receivers| receivers.borrow_mut().push((receiver, token)));
     Ok(())
 }
 pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
     let _: ICoreWebView2_11 = core.cast()?;
+    let environment = unsafe { core.cast::<ICoreWebView2_2>()?.Environment()? };
+    let mut version = PWSTR::null();
+    unsafe {
+        environment.BrowserVersionString(&mut version)?;
+    }
+    let version = take_pwstr(version);
+    BROWSER_MAJOR.store(browser_major(&version).unwrap_or(0), Ordering::Release);
+    let _ = BROWSER_VERSION.set(version.chars().take(128).collect());
     let fence = Arc::new(Mutex::new(Fence::default()));
     let requests = fence.clone();
     let handler_core = core.clone();
@@ -216,7 +279,10 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
                         &session,
                         frame,
                         uri,
-                        crate::mcp_app_host::is_registered_mcp_url(uri),
+                        crate::mcp_app_host::is_registered_mcp_url(uri)
+                            || crate::local_computer::live_preview::registered_origin(uri)
+                                .is_some()
+                            || crate::connection_allowlist_probe::registered(uri),
                     )
                 })
                 .unwrap_or(false),
@@ -267,7 +333,9 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
                     session,
                     target,
                     uri,
-                    crate::mcp_app_host::is_registered_mcp_url(uri),
+                    crate::mcp_app_host::is_registered_mcp_url(uri)
+                        || crate::local_computer::live_preview::registered_origin(uri).is_some()
+                        || crate::connection_allowlist_probe::registered(uri),
                 )
             })
             .unwrap_or(false)
@@ -319,6 +387,20 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn connection_allowlist_runtime_version_is_native_observed_and_strictly_parsed() {
+        assert_eq!(browser_major("155.0.4283.60"), Some(155));
+        assert_eq!(browser_major("152.0.0.0 beta"), Some(152));
+        for invalid in [
+            "Chrome/155.0.0.0",
+            "155x.0.0.0",
+            "",
+            "0.0.0.0",
+            "99999.0.0.0",
+        ] {
+            assert!(browser_major(invalid).is_none());
+        }
+    }
+    #[test]
     fn pins_resources_before_the_first_request_and_keeps_process_swap_identity() {
         let mut frames = Frames::new();
         let issued = "http://127.0.0.2:1234/token/index.html";
@@ -358,5 +440,34 @@ mod tests {
         assert!(!fence.allow("child", "different-frame", "https://example.com", false));
         assert!(fence.allow("child", "different-frame", issued, true));
         assert!(fence.allow("ordinary", "normal", "https://example.com", false));
+    }
+    #[test]
+    fn expired_native_preview_origin_cannot_be_reintroduced_as_an_ordinary_frame() {
+        let issued = "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234/";
+        let mut frames = Frames::new();
+        assert!(!allow(&mut frames, "new-preview", issued, false));
+        frames.insert("retained".into(), issued.into());
+        assert!(!allow(&mut frames, "retained", issued, false));
+        assert!(!allow(
+            &mut frames,
+            "retained",
+            "http://127.0.0.1:1420/",
+            false
+        ));
+    }
+    #[test]
+    fn malformed_reserved_preview_hosts_cannot_become_ordinary_frames() {
+        for uri in [
+            "http://mivlet-preview.localhost:41234/",
+            "http://wrong.mivlet-preview.localhost:41234/",
+            "http://extra.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234/",
+            "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost/",
+            "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234/",
+            "http://user@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234/",
+        ] {
+            assert!(!allow(&mut Frames::new(), "unregistered", uri, false));
+            let mut frames = Frames::from([("retained".into(), uri.into())]);
+            assert!(!allow(&mut frames, "retained", uri, false));
+        }
     }
 }

@@ -25,6 +25,8 @@ mod codex_app_server;
 mod codex_images;
 mod collaboration;
 mod collaboration_connectors;
+#[cfg(windows)]
+mod connection_allowlist_probe;
 mod connector_api;
 mod connector_approvals;
 mod connector_auth;
@@ -46,6 +48,7 @@ mod execution_control;
 mod generated_html;
 mod google;
 mod hosted_computer;
+mod hosted_tasks;
 #[cfg(windows)]
 mod interactive_network_guard;
 mod knowledge;
@@ -104,6 +107,11 @@ pub fn check_owned_browser() -> Result<(), String> {
     local_computer::browser::check_owned_browser()
 }
 
+#[cfg(all(windows, debug_assertions))]
+pub fn check_preview_network() -> Result<(), String> {
+    connection_allowlist_probe::acceptance()
+}
+
 /// Developer-only live check; prints status/counts, never credentials or source content.
 #[cfg(debug_assertions)]
 pub fn check_connectors() {
@@ -117,6 +125,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(mcp_server::Server::default())
+        .manage(mcp_server::PhoneRelay::default())
         .setup(|app| {
             let handle = app.handle().clone();
             if account_session::initialize(&handle)? {
@@ -151,6 +160,7 @@ pub fn run() {
                     computers.clone(),
                 );
                 protected_secrets::start_maintenance(computers.clone());
+                hosted_tasks::start_maintenance(handle.clone(), computers.clone());
                 app.manage(computers);
                 app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
                 app.manage(local_schedules::events::EventIngress::new());
@@ -197,6 +207,10 @@ pub fn run() {
             provider_usage::provider_allowance,
             provider_usage::refresh_provider_allowance,
             provider_usage::set_provider_usage_price,
+            provider_usage::reset_provider_usage_price,
+            provider_usage::pricing::refresh_provider_usage_prices,
+            provider_usage::imports::import_provider_usage_history,
+            provider_usage::imports::clear_imported_provider_usage,
             account_session::account_theme,
             local_computer::control::local_app_stop,
             local_computer::artifacts::local_computer_open_artifact,
@@ -240,6 +254,9 @@ pub fn run() {
             mcp_server::mcp_server_status,
             mcp_server::mcp_server_decide,
             mcp_server::mcp_server_revoke,
+            mcp_server::phone_relay_status,
+            mcp_server::phone_relay_connect,
+            mcp_server::phone_relay_disconnect,
             collaboration::collaboration_load,
             collaboration::provider_continuation::provider_continuation_preview,
             collaboration::provider_continuation_read::provider_continuation_read,
@@ -259,6 +276,7 @@ pub fn run() {
             conversations::conversation_get_thread,
             conversations::conversation_update_thread,
             conversations::conversation_select_branch,
+            collaboration::restore::conversation_restore,
             conversations::conversation_list_messages,
             conversations::conversation_list_messages_page,
             conversations::conversation_append_message,
@@ -384,6 +402,16 @@ pub fn run() {
             account_workspace::account_workspace_reconcile,
             account_workspace::account_workspace_clear_session,
             hosted_computer::hosted_computer_status,
+            hosted_tasks::hosted_text_prepare,
+            hosted_tasks::hosted_task_prepare_public_web,
+            hosted_tasks::hosted_task_prepare_coding,
+            hosted_tasks::hosted_text_review_cancel,
+            hosted_tasks::hosted_text_admit,
+            hosted_tasks::hosted_text_refresh,
+            hosted_tasks::hosted_text_stop,
+            hosted_tasks::hosted_provider_list,
+            hosted_tasks::hosted_provider_revoke,
+            protected_secrets::hosted_provider_enroll,
             hosted_computer::hosted_computer_provision,
             hosted_computer::hosted_process_prepare,
             hosted_computer::hosted_process_launch,
@@ -401,6 +429,9 @@ pub fn run() {
             local_computer::repositories::local_computer_import_repository,
             local_computer::coding::coding_repository_attach,
             local_computer::coding::coding_repository_status,
+            local_computer::coding::hosted_repository::hosted_repository_candidates,
+            local_computer::coding::hosted_repository::hosted_repository_import_review,
+            local_computer::coding::hosted_repository::hosted_repository_import_apply,
             local_computer::coding::copy_manager::coding_copy_inventory,
             local_computer::coding::copy_manager::account::coding_copy_account_inventory,
             local_computer::coding::copy_manager::coding_copy_preview,
@@ -410,11 +441,17 @@ pub fn run() {
             local_computer::execution_setup::native_execution_status,
             local_computer::command_jobs::native_command_jobs,
             local_computer::command_jobs::native_command_stop,
+            local_computer::coding::job_review::native_command_repository,
+            local_computer::live_preview::native_command_preview,
+            local_computer::live_preview::native_preview_feedback,
+            local_computer::command_jobs::input::native_command_input,
             local_computer::execution_setup::native_execution_setup,
             local_computer::local_computer_status,
             local_computer::local_computer_files,
             local_computer::local_computer_file_preview,
             local_computer::local_computer_stage_attachment,
+            local_computer::attachment_images::local_computer_restore_image_attachment,
+            local_computer::attachment_shares::local_computer_stage_work_attachments,
             local_computer::local_computer_discard_attachment_batch,
             mcp_process::spawn_mcp_process,
             mcp_process::write_mcp_frame,

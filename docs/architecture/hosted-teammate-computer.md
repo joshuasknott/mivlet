@@ -19,8 +19,10 @@ The runner exposes only these capability families:
 - bounded browser observation and exact control actions; and
 - trusted snapshot/live-view metadata for the human UI.
 
-There is no hosted recurring-work or background-conversation contract in the
-current protocol.
+The separate [hosted text task path](hosted-text-tasks.md) explicitly delegates
+one frozen text request to an API provider. It uses a task-only Worker without
+these computer/browser bindings. It grants no tools, files, browser, recurring
+work, or automatic continuation of ordinary conversations.
 
 ## Approval and authorization
 
@@ -48,16 +50,17 @@ closed, including when the nonce store is unavailable. Re-running ensure on a
 computer that already has a generation bumps that generation so prior
 capabilities cannot target the replacement.
 
-Browser navigation accepts only public HTTPS targets, rejects embedded
-credentials and private or reserved destinations (including DNS answers),
-strips fragments, and revalidates redirects and subrequests. Cloudflare
-Browser Rendering cannot pin Chromium TCP peers (`route.continue()` would
-re-resolve). The Worker completes HTTPS with a lookup bound to the validated
-public address set, then fulfills the route. A later private, loopback,
-link-local, or cloud-metadata answer is aborted. Observations and actions are bounded to
-opaque current references; password, one-time-code, payment, transaction, and
-WebAuthn fields are excluded or blocked. Screens and temporary human takeover
-credentials stay in the trusted UI path.
+Dynamic hosted browser routes currently fail closed with
+`hosted-browser-network-prerequisite`, before launching or reconnecting a
+browser. The earlier custom `node:https` lookup was only exercised in Node
+fixtures. Cloudflare's [HTTP compatibility documentation](https://developers.cloudflare.com/workers/runtime-apis/nodejs/http/#request)
+explicitly excludes `lookup` and `createConnection`, so those fixtures do not
+establish edge peer pinning. Page request interception also does not establish
+a boundary for every Chromium network API. A supported platform boundary and
+actual edge conformance are prerequisites for restoring dynamic browsing.
+Static public web research uses a separately reviewed task mode and the
+platform's strictly public Fetch boundary; it does not run page JavaScript or
+provide interactive browsing.
 
 Deleting a hosted computer invalidates its computer and browser authority. A
 stale generation or capability cannot target its replacement. Process
@@ -67,6 +70,18 @@ generation mismatch destroys stored browser state and does **not** reconnect
 the previous Browser Run session.
 
 ## Deployment prerequisites
+
+The checked-in `@cloudflare/sandbox` version remains `0.13.0-next.738.2`.
+Its Dockerfile now pins the matching official amd64 image by immutable digest:
+`docker.io/cloudflare/sandbox:0.13.0-next.738.2@sha256:f4b2137219568aa44539ab93c0e774db6bcab323c134c5088447916e58f15e75`.
+The [official npm metadata](https://registry.npmjs.org/@cloudflare%2Fsandbox/0.13.0-next.738.2)
+and [Docker Hub metadata](https://hub.docker.com/v2/repositories/cloudflare/sandbox/tags/0.13.0-next.738.2)
+were checked on 2026-10-17; they identify package commit
+`e952c0c41432cf91d2dedd1c9726f47c8a582ba4` and the active image digest above.
+Cloudflare's [version-matching guidance](https://developers.cloudflare.com/sandbox/sdk/configuration/dockerfile/)
+requires the image to match the Worker package. Current `@cloudflare/sandbox`
+1.x is a separate API line and is not silently substituted here. Registry
+metadata proves the pin exists; it does not establish deployed runtime behavior.
 
 The separate [OpenCode and Agents fixture](hosted-opencode-prototype.md)
 passes local Workerd model/tool execution, scheduling, exact approval and durable

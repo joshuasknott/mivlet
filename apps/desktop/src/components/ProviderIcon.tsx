@@ -8,7 +8,6 @@ interface ProviderIconProps {
 // OpenAI's current official symbol (2025 refresh), used verbatim; see
 // public/brand/README.md for source and terms.
 const openAiViewBox = "1.68 1.75 16.65 16.5";
-
 const additionalProviderMarks = new Set([
   "deepseek", "alibaba", "moonshot", "zai", "groq", "together",
   "fireworks", "cerebras", "mistral", "openrouter", "nvidia", "siliconflow", "cohere",
@@ -16,86 +15,34 @@ const additionalProviderMarks = new Set([
 
 export function ProviderIcon({ provider, size = 20 }: ProviderIconProps) {
   const providerId = provider.toLowerCase();
-
-  if (additionalProviderMarks.has(providerId)) {
-    return (
-      <svg
-        viewBox="0 0 24 24"
-        width={size}
-        height={size}
-        fill="currentColor"
-        style={{ color: providerId === "groq" ? "#F55036" : "var(--provider-monochrome)" }}
-        data-provider-brand={providerId}
-        aria-hidden="true"
-      >
-        <use href={`/brand/additional-provider-artwork.svg#${providerId}`} />
-      </svg>
-    );
+  if (providerId === "antigravity" || providerId === "cursor" || providerId === "opencode") {
+    const src = providerId === "antigravity" ? "/brand/google-antigravity.png" : `/brand/${providerId}.svg`;
+    return <img src={src} width={size} height={size} alt="" data-provider-brand={providerId} aria-hidden="true" />;
   }
 
-  if (providerId === "codex" || providerId === "openai") {
-    const color = providerId === "codex" ? "#3941FF" : "var(--provider-monochrome)";
-    return (
-      <svg viewBox={openAiViewBox} width={size} height={size} fill="currentColor" style={{ color }} data-provider-brand={providerId} aria-hidden="true"><use href="/brand/provider-artwork.svg#openai" /></svg>
-    );
+  let brand = providerId;
+  let symbol = providerId;
+  let viewBox = "0 0 24 24";
+  let colour: string | undefined;
+  const additional = additionalProviderMarks.has(providerId);
+  if (additional) {
+    colour = providerId === "groq" ? "#F55036" : "var(--provider-monochrome)";
+  } else if (providerId === "codex" || providerId === "openai") {
+    symbol = "openai";
+    viewBox = openAiViewBox;
+    colour = providerId === "codex" ? "#3941FF" : "var(--provider-monochrome)";
+  } else if (providerId === "anthropic" || providerId === "claude") {
+    symbol = brand = "anthropic";
+    viewBox = "0 0 125 125";
+    colour = "#D97757";
+  } else if (providerId === "gemini" || providerId === "google") {
+    symbol = brand = "gemini";
+  } else if (providerId === "xai") {
+    brand = "grok";
+    viewBox = "0 0 512 512";
+  } else {
+    return <Cube size={size} data-provider-brand={providerId === "custom" ? "custom" : undefined} aria-hidden="true" />;
   }
-
-  if (providerId === "anthropic" || providerId === "claude") {
-    return (
-      <svg viewBox="0 0 125 125" width={size} height={size} fill="currentColor" style={{ color: "#D97757" }} data-provider-brand="anthropic" aria-hidden="true"><use href="/brand/provider-artwork.svg#anthropic" /></svg>
-    );
-  }
-
-  if (providerId === "antigravity") {
-    return (
-      <img
-        src="/brand/google-antigravity.png"
-        width={size}
-        height={size}
-        alt=""
-        data-provider-brand="antigravity"
-        aria-hidden="true"
-      />
-    );
-  }
-
-  if (providerId === "gemini" || providerId === "google") {
-    return (
-      <svg viewBox="0 0 24 24" width={size} height={size} data-provider-brand="gemini" aria-hidden="true"><use href="/brand/provider-artwork.svg#gemini" /></svg>
-    );
-  }
-
-  if (providerId === "xai") {
-    return (
-      <svg viewBox="0 0 512 512" width={size} height={size} data-provider-brand="grok" aria-hidden="true"><use href="/brand/provider-artwork.svg#xai" /></svg>
-    );
-  }
-
-  if (providerId === "cursor") {
-    return (
-      <img
-        src="/brand/cursor.svg"
-        width={size}
-        height={size}
-        alt=""
-        data-provider-brand="cursor"
-        aria-hidden="true"
-      />
-    );
-  }
-
-  if (providerId === "opencode") {
-    return (
-      <img
-        src="/brand/opencode.svg"
-        width={size}
-        height={size}
-        alt=""
-        data-provider-brand="opencode"
-        aria-hidden="true"
-      />
-    );
-  }
-
-  return <Cube size={size} data-provider-brand={providerId === "custom" ? "custom" : undefined} aria-hidden="true" />;
+  const artwork = additional ? "additional-provider-artwork" : "provider-artwork";
+  return <svg viewBox={viewBox} width={size} height={size} fill={colour ? "currentColor" : undefined} style={colour ? { color: colour } : undefined} data-provider-brand={brand} aria-hidden="true"><use href={`/brand/${artwork}.svg#${symbol}`} /></svg>;
 }

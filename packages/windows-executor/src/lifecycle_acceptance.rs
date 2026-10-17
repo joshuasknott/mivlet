@@ -9,6 +9,9 @@ use std::{
     time::{Duration, Instant},
 };
 fn resources() -> PathBuf {
+    if let Some(path) = std::env::var_os("MIVLET_EXECUTION_ACCEPTANCE_RUNTIME") {
+        return PathBuf::from(path);
+    }
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .ancestors()
         .nth(2)

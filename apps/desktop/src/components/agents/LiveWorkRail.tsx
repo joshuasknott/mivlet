@@ -133,9 +133,9 @@ export function LiveWorkRail({
         ) : <p className="local-computer-files__unavailable">{localComputer.loading ? "Checking workspace files…" : "Refresh computer status to load this agent's private files."}</p>}
       </section>
 
-      {hostedComputer.available ? <section className={`hosted-computer-card${hostedComputer.status === "ready" ? " is-ready" : hostedComputer.status === "degraded" || hostedComputer.error ? " is-attention" : ""}`} aria-label="Optional hosted computer">
-        <span className="hosted-computer-card__icon"><Cloud size={18} weight={hostedComputer.status === "ready" ? "fill" : "regular"} /></span>
-        <span className="hosted-computer-card__copy">
+      {hostedComputer.available ? <section className={`cloud-panel-computer-card${hostedComputer.status === "ready" ? " is-ready" : hostedComputer.status === "degraded" || hostedComputer.error ? " is-attention" : ""}`} aria-label="Optional hosted computer">
+        <span className="cloud-panel-computer-card__icon"><Cloud size={18} weight={hostedComputer.status === "ready" ? "fill" : "regular"} /></span>
+        <span className="cloud-panel-computer-card__copy">
           <strong>Optional hosted computer</strong>
           <small>{hostedComputer.status === "ready" && hostedComputer.keepAlive
             ? "Always on and ready"
@@ -151,9 +151,9 @@ export function LiveWorkRail({
           <button type="button" onClick={hostedComputer.onProvision} disabled={hostedComputer.provisioning || hostedComputer.loading}>
             {hostedComputer.status === "degraded" || hostedComputer.error ? "Retry" : "Set up"}
           </button>
-        ) : hostedComputer.status === "ready" ? <span className="hosted-computer-card__state">On</span> : null}
+        ) : hostedComputer.status === "ready" ? <span className="cloud-panel-computer-card__state">On</span> : null}
         {hostedComputer.status === "ready" ? (
-          <form className="hosted-browser-launcher" onSubmit={submitBrowser}>
+          <form className="cloud-panel-browser-launcher" onSubmit={submitBrowser}>
             <Browser size={16} aria-hidden="true" />
             <input
               type="url"
@@ -175,7 +175,7 @@ export function LiveWorkRail({
         ) : null}
         {screenPreviewUrl ? <button type="button" onClick={() => setScreenOpen(true)}>Open hosted screen</button> : null}
         {hostedComputer.browserDownload ? (
-          <div className="hosted-download-summary" aria-label="Latest cloud browser download">
+          <div className="cloud-panel-download-summary" aria-label="Latest cloud browser download">
             <FileArrowDown size={15} aria-hidden="true" />
             <span>
               <strong>{hostedComputer.browserDownload.fileName}</strong>
@@ -183,7 +183,7 @@ export function LiveWorkRail({
             </span>
           </div>
         ) : null}
-        {hostedComputer.browserError ? <small className="hosted-browser-launcher__error" role="alert">{hostedComputer.browserError}</small> : null}
+        {hostedComputer.browserError ? <small className="cloud-panel-browser-launcher__error" role="alert">{hostedComputer.browserError}</small> : null}
       </section> : null}
 
       {screenOpen && screenPreviewUrl ? (

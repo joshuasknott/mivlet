@@ -179,7 +179,7 @@ pub(super) fn capture(
     Ok((display, choices))
 }
 
-fn point(quads: &Value, metrics: &Value) -> Result<(i32, i32), String> {
+pub(super) fn point(quads: &Value, metrics: &Value) -> Result<(i32, i32), String> {
     let quads = quads["quads"]
         .as_array()
         .filter(|quads| quads.len() == 1)
@@ -241,7 +241,11 @@ pub(super) fn click(
 ) -> Result<String, String> {
     let choice = process.controls.remove(reference).ok_or(STALE)?;
     process.controls.clear();
+    process.fields.clear();
+    process.downloads.clear();
+    process.upload_choices.clear();
     process.navigation.clear();
+    process.activation.clear();
     process.scroll = None;
     process.tabs = None;
     let (window, pages) = observations::targets(process, scope.0, check)?;

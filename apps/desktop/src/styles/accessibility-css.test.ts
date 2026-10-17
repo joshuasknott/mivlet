@@ -78,12 +78,20 @@ describe("desktop motion accessibility", () => {
       [light, "light", "ink-soft", "surface"],
       [light, "light", "ink-soft", "surface-raised"],
       [light, "light", "ink-soft", "surface-hover"],
+      [light, "light", "ink-muted", "sidebar-surface"],
+      [light, "light", "ink-muted", "panel-surface"],
+      [light, "light", "ink-muted", "surface-hover"],
       [light, "light", "positive", "positive-subtle"],
       [light, "light", "caution", "caution-subtle"],
       [light, "light", "destructive", "destructive-subtle"],
       [dark, "dark", "ink-soft", "surface"],
       [dark, "dark", "ink-soft", "surface-raised"],
       [dark, "dark", "ink-soft", "surface-hover"],
+      [dark, "dark", "ink-muted", "sidebar-surface"],
+      [dark, "dark", "ink-muted", "panel-surface"],
+      [dark, "dark", "user-message-ink", "user-message-surface"],
+      [dark, "dark", "conversation-action-ink", "conversation-action-surface"],
+      [dark, "dark", "conversation-action-ink", "conversation-action-hover"],
       [dark, "dark", "positive", "surface-raised"],
       [dark, "dark", "caution", "surface-raised"],
       [dark, "dark", "destructive", "surface-raised"],
@@ -106,6 +114,22 @@ describe("desktop motion accessibility", () => {
         contrastRatio(foreground, background),
         `${theme} ${foregroundName} on ${backgroundName}`,
       ).toBeGreaterThanOrEqual(4.5);
+    }
+  });
+
+  it("keeps dark conversation controls and user bubbles dark", () => {
+    const dark = themeVariables(
+      readFileSync(tokensPath, "utf8"),
+      /:root\[data-theme="dark"\],[\s\S]*?\{([\s\S]*?)\n\}/,
+    );
+    for (const name of [
+      "conversation-action-surface",
+      "conversation-action-hover",
+      "user-message-surface",
+    ]) {
+      const color = dark.get(name);
+      if (!color) throw new Error(`Missing dark ${name} token`);
+      expect(relativeLuminance(color), name).toBeLessThan(0.06);
     }
   });
 });

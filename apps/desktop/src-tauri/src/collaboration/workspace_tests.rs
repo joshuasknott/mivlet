@@ -144,6 +144,7 @@ fn workspace_recipients_share_a_frozen_request_without_membership_or_private_con
         commands::apply(
             ctx,
             Command::StartWork {
+                outcome_goal: None,
                 id: "workspace-effort".into(),
                 conversation_id: room.id.clone(),
                 agent_id: "researcher".into(),
@@ -433,6 +434,7 @@ fn missing_recipients_fail_without_profile_or_permission_widening() {
         commands::apply(
             ctx,
             Command::StartWork {
+                outcome_goal: None,
                 id: "removed-recipient".into(),
                 conversation_id: room.id.clone(),
                 agent_id: "reviewer".into(),

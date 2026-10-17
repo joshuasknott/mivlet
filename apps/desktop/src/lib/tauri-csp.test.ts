@@ -25,6 +25,15 @@ function loadCsp(configPath: string) {
 const desktopRoot = join(__dirname, "..", "..");
 const prodConfigPath = join(desktopRoot, "src-tauri", "tauri.conf.json");
 const devConfigPath = join(desktopRoot, "src-tauri", "tauri.dev.conf.json");
+const frameSources = ["https:", "http://127.0.0.1:*", "http://127.0.0.2:*", "http://*.mivlet-preview.localhost:*"];
+
+function unexpectedNetworkSources(csp: Record<string, string>): string[] {
+  return Object.entries(csp).flatMap(([directive, value]) => value.split(/\s+/).filter(source => {
+    if (!source.includes("*") && !/^(?:https?|wss?):/.test(source)) return false;
+    if (directive === "frame-src" && frameSources.includes(source)) return false;
+    return !(directive === "connect-src" && source === "http://ipc.localhost");
+  }).map(source => `${directive}: ${source}`));
+}
 
 describe("tauri csp config (production)", () => {
   it("allows temporary voice playback without renderer network egress", () => {
@@ -47,22 +56,11 @@ describe("tauri csp config (production)", () => {
     // Explicitly reject null/empty/weak in prod
     expect(csp).not.toBeNull();
     expect(cspStr).not.toBe("null");
-    // No wildcard or catch-all anywhere
-    const withoutMcpLoopbackPort = cspStr.replace(
-      /http:\/\/127\.0\.0\.[12]:\*/g,
-      "",
-    );
-    expect(withoutMcpLoopbackPort).not.toMatch(/\*/);
-    expect(withoutMcpLoopbackPort).not.toMatch(/'\*'/);
+    // Dynamic ports and one reserved preview namespace are frame-only. Exact
+    // token comparisons reject host suffixes and wider localhost wildcards.
+    expect(unexpectedNetworkSources(csp)).toEqual([]);
     // No unsafe-eval
     expect(cspStr).not.toMatch(/unsafe-eval/i);
-    // No bare external http/https wild or non-ipc (robust against suffixes like ipc.localhost.evil)
-    expect(cspStr).not.toMatch(/https?:\/\/\*/);
-    expect(cspStr).not.toMatch(
-      /https?:\/\/(?!ipc\.localhost|127\.0\.0\.[12]:\*(?:[\s;"\']|$))/,
-    );
-    // Also reject any http/https not exactly the allowed ipc token (covers suffix attacks)
-    expect(cspStr).not.toMatch(/https?:\/\/ipc\.localhost(?!\b|[\s;"\']|$)/);
     // No ws: or broad dev hosts in prod
     expect(cspStr).not.toMatch(/\bws:/);
     // No external services / providers
@@ -71,26 +69,35 @@ describe("tauri csp config (production)", () => {
     );
   });
 
-  it("allows HTTPS previews and only the dedicated MCP App and generated HTML origins in frames", () => {
+  it("allows HTTPS previews, dedicated local guests and the reserved running-app namespace only in frames", () => {
     const { csp } = loadCsp(prodConfigPath);
-    expect(csp["frame-src"]).toBe(
-      "https: http://127.0.0.1:* http://127.0.0.2:*",
-    );
+    expect(csp["frame-src"].split(/\s+/)).toEqual(frameSources);
     expect(csp["script-src"]).toBe("'self'");
+  });
+
+  it.each([
+    ["frame-src", "http://*.localhost:*"],
+    ["frame-src", "http://*.mivlet-preview.localhost.evil:*"],
+    ["frame-src", "http://*.mivlet-preview.localhost:*evil"],
+    ["frame-src", "http://mivlet-preview.localhost:*"],
+    ["frame-src", "http://127.0.0.1.evil:*"],
+    ["frame-src", "*"],
+    ["connect-src", "http://*.mivlet-preview.localhost:*"],
+    ["connect-src", "http://ipc.localhost.evil"],
+    ["script-src", "http://*.mivlet-preview.localhost:*"],
+    ["img-src", "http://*.mivlet-preview.localhost:*"],
+  ])("rejects expanded or misplaced source %s %s", (directive, source) => {
+    const { csp } = loadCsp(prodConfigPath);
+    expect(unexpectedNetworkSources({ ...csp, [directive]: `${csp[directive]} ${source}` })).toContain(`${directive}: ${source}`);
   });
 
   it("uses object form without forbidden broad patterns", () => {
     const { csp } = loadCsp(prodConfigPath);
     const cspStr = typeof csp === "string" ? csp : JSON.stringify(csp);
     expect(typeof csp).toBe("object");
-    // No wildcard host or catch-all
-    expect(cspStr.replace(/http:\/\/127\.0\.0\.[12]:\*/g, "")).not.toMatch(
-      /\*/,
-    );
+    expect(unexpectedNetworkSources(csp)).toEqual([]);
     // No broad unsafe-eval in production
     expect(cspStr).not.toMatch(/unsafe-eval/i);
-    // No bare http/https: * or external CDNs in webview policy
-    expect(cspStr).not.toMatch(/https?:\/\/\*/);
   });
 
   it("contains the minimal required directives for Vite/Tauri prod assets + IPC + local resources", () => {

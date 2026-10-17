@@ -12,6 +12,7 @@ use std::{
 
 pub(super) struct Server {
     pub origin: String,
+    uploaded: Arc<AtomicBool>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -30,6 +31,8 @@ impl Server {
         );
         let stop = Arc::new(AtomicBool::new(false));
         let ending = stop.clone();
+        let uploaded = Arc::new(AtomicBool::new(false));
+        let received = uploaded.clone();
         let thread = std::thread::spawn(move || {
             let mut workers: Vec<JoinHandle<()>> = Vec::new();
             while !ending.load(Ordering::Acquire) {
@@ -44,7 +47,10 @@ impl Server {
                 if let Ok((stream, _)) = listener.accept() {
                     if workers.len() < 16 {
                         let stopped = ending.clone();
-                        workers.push(std::thread::spawn(move || serve(stream, &stopped)));
+                        let received = received.clone();
+                        workers.push(std::thread::spawn(move || {
+                            serve(stream, &stopped, &received)
+                        }));
                     }
                 } else {
                     std::thread::sleep(Duration::from_millis(10));
@@ -56,9 +62,13 @@ impl Server {
         });
         Ok(Self {
             origin,
+            uploaded,
             stop,
             thread: Some(thread),
         })
+    }
+    pub(super) fn received_upload(&self) -> bool {
+        self.uploaded.load(Ordering::Acquire)
     }
 }
 impl Drop for Server {
@@ -69,7 +79,7 @@ impl Drop for Server {
         }
     }
 }
-fn serve(mut stream: TcpStream, stop: &AtomicBool) {
+fn serve(mut stream: TcpStream, stop: &AtomicBool, uploaded: &AtomicBool) {
     if stream
         .set_read_timeout(Some(Duration::from_millis(50)))
         .is_err()
@@ -101,12 +111,71 @@ fn serve(mut stream: TcpStream, stop: &AtomicBool) {
     if !request[..count].windows(4).any(|b| b == b"\r\n\r\n") || stop.load(Ordering::Acquire) {
         return;
     }
+    let upload = std::str::from_utf8(&request[..count])
+        .is_ok_and(|text| text.starts_with("POST /upload-result HTTP/1.1\r\n"));
+    if upload {
+        let Some(end) = request[..count]
+            .windows(4)
+            .position(|part| part == b"\r\n\r\n")
+            .map(|index| index + 4)
+        else {
+            return;
+        };
+        let length = std::str::from_utf8(&request[..end]).ok().and_then(|text| {
+            text.lines().find_map(|line| {
+                line.split_once(':')
+                    .filter(|(name, _)| name.eq_ignore_ascii_case("content-length"))
+                    .and_then(|(_, value)| value.trim().parse::<usize>().ok())
+            })
+        });
+        if length != Some(b"quarter,revenue\nQ1,42\n".len()) {
+            return;
+        }
+        let length = length.unwrap();
+        while count < end + length
+            && count < request.len()
+            && !stop.load(Ordering::Acquire)
+            && Instant::now() < deadline
+        {
+            match stream.read(&mut request[count..]) {
+                Ok(0) => return,
+                Ok(size) => count += size,
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+                    ) => {}
+                Err(_) => return,
+            }
+        }
+        if request.get(end..end + length) == Some(b"quarter,revenue\nQ1,42\n".as_slice()) {
+            uploaded.store(true, Ordering::Release);
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        }
+        return;
+    }
     let path = std::str::from_utf8(&request[..count])
         .ok()
         .and_then(|r| r.split("\r\n").next())
         .and_then(|line| line.strip_prefix("GET "))
         .and_then(|line| line.strip_suffix(" HTTP/1.1"));
+    if path == Some("/download.csv")
+        && !std::str::from_utf8(&request[..count]).is_ok_and(|headers| {
+            headers
+                .lines()
+                .any(|line| line.eq_ignore_ascii_case("Cookie: MivletFixture=fixture-bounded"))
+        })
+    {
+        let _ = stream
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    }
     let body = match path {
+        Some("/upload-page") => "<!doctype html><html><head><title>Upload fixture</title></head><body><h1>Public upload</h1><input type=file aria-label='Upload report' accept='.csv' onchange=\"this.files[0].text().then(body=>fetch('/upload-result',{method:'POST',body})).then(()=>document.getElementById('done').textContent='File received')\"><p id=done>Waiting for file</p></body></html>",
+        Some("/download-page") => "<!doctype html><title>Download fixture</title><h1>Public download</h1><a href='/download.csv' download>Download report</a>",
+        Some("/download.csv") => "quarter,revenue\nQ1,42\n",
+        Some("/form") => "<!doctype html><title>Public form fixture</title><h1>Public form</h1><label>Public topic<input id=topic type=text aria-label='Public topic' oninput=\"document.getElementById('result').textContent='Field edited once'\"></label><p id=result>Not edited</p><label>Existing content<input aria-label='Existing content' value='Human text preserved'></label>",
         Some("/scroll") => "<!doctype html><title>Scroll fixture</title><script>Object.defineProperty(Document.prototype,'visibilityState',{get:()=> 'visible'});</script><style>body{margin:0}main{position:relative;min-height:5000px;background:#eee}button{position:absolute;top:1250px;left:40px;height:40px}#result{position:absolute;top:1300px}</style><main><h1>Public scrolling report</h1><button onclick=\"document.getElementById('result').textContent='Scrolled action verified'\">Finish scroll</button><button style=\"top:50px\" onclick=\"window.open('/second','_blank')\">Open scroll companion</button><p id=result>Not finished</p></main>",
         Some("/private") => "<!doctype html><title>Private step</title><label>Password<input type=password value='Hidden password delta'></label>",
         Some("/file") => "<!doctype html><title>Private file step</title><label>Choose file<input type=file></label>",
@@ -117,7 +186,17 @@ fn serve(mut stream: TcpStream, stop: &AtomicBool) {
     } else {
         body.into()
     };
-    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+    let content_type = if path == Some("/download.csv") {
+        "text/csv\r\nContent-Disposition: attachment; filename=browser-report.csv"
+    } else {
+        "text/html; charset=utf-8"
+    };
+    let cookie = if path == Some("/download-page") {
+        "Set-Cookie: MivletFixture=fixture-bounded; HttpOnly; SameSite=Strict; Path=/\r\n"
+    } else {
+        ""
+    };
+    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
     let _ = stream.write_all(response.as_bytes());
 }
 

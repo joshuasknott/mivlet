@@ -104,7 +104,7 @@ pub(super) fn prompt(
                     if value.len() < 16 || value.len() > 512 {
                         SetWindowTextW(
                             GetDlgItem(hwnd, ERROR),
-                            wide("Use a signing secret of 16 to 512 bytes.").as_ptr(),
+                            wide("Use a protected credential of 16 to 512 bytes.").as_ptr(),
                         );
                         return 0;
                     }
@@ -195,12 +195,18 @@ pub(super) fn prompt(
             58,
             11,
         );
+        let cloud =
+            input.consumer == "hosted-provider-enrollment" && input.purpose == "cloud-api-provider";
         let target = make(
             "STATIC",
-            &format!(
-                "For webhook: {}\r\nUse: verify incoming HMAC-SHA256 signatures",
-                input.target_id
-            ),
+            &if cloud {
+                format!("Cloud-only connection: {}\r\nUse: one-call text tasks, without tools or local files", input.target_id)
+            } else {
+                format!(
+                    "For webhook: {}\r\nUse: verify incoming HMAC-SHA256 signatures",
+                    input.target_id
+                )
+            },
             0,
             20,
             112,
@@ -208,10 +214,27 @@ pub(super) fn prompt(
             46,
             12,
         );
-        let description = make("STATIC", "Only Mivlet's native webhook verifier receives this value. Your agent receives a one-use reference. It expires in 10 minutes.", 0, 20, 164, content_width, 46, 13);
+        let description = make(
+            "STATIC",
+            if cloud {
+                "Sent directly over HTTPS, encrypted in cloud custody for 30 days or until revoked. Never saved in chat or WebView state. Provider billing applies."
+            } else {
+                "Only Mivlet's native webhook verifier receives this value. Your agent receives a one-use reference. It expires in 10 minutes."
+            },
+            0,
+            20,
+            164,
+            content_width,
+            46,
+            13,
+        );
         let label = make(
             "STATIC",
-            "&Signing secret",
+            if cloud {
+                "&Separate cloud API key"
+            } else {
+                "&Signing secret"
+            },
             0,
             20,
             216,

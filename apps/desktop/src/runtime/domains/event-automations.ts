@@ -1,5 +1,4 @@
-import { getRuntimeAdapter } from "../adapters/select";
-import { toRuntimeError } from "../errors";
+import { invokeRequiredNative } from "../required-native";
 import type {
   AutomationEventDraft,
   EventAutomationInput,
@@ -9,16 +8,12 @@ import type {
 } from "@mivlet/protocol/domains/event-automations";
 import type { LocalSchedule } from "./local-schedules";
 
-async function invoke<T>(command: string, request: object): Promise<T> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind === "preview")
-    throw new Error("Event automations require the installed desktop app.");
-  try {
-    return await adapter.invoke<T>(command, { request });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
+const invoke = <T>(command: string, request: object): Promise<T> =>
+  invokeRequiredNative<T>(
+    command,
+    { request },
+    "Event automations require the installed desktop app.",
+  );
 
 export const saveEventTrigger = (
   request: EventAutomationInput & {

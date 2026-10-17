@@ -96,7 +96,7 @@ export function ApprovalPanel({
   return (
     <section className={`context-panel${compact ? " context-panel--inline-approval" : ""}`} aria-label={compact ? "Confirm action" : "Approvals and memory"}>
       {!compact ? <SectionHeading title="Approvals" meta={`${approvals.length} waiting`} /> : null}
-      <div className="approval-list">
+      <div className="permission-panel-list">
         {approvals.length === 0 ? (
           <div className="empty-state">
             <ShieldCheck size={22} />
@@ -113,20 +113,20 @@ export function ApprovalPanel({
             const visibleDataUsed = approval.dataUsed.filter((item) => !isApprovalReference(item));
             return (
               <article
-                className={`approval-card approval-card--${tone}${protectedEntry ? " approval-card--protected-entry" : ""}`}
+                className={`permission-panel-card permission-panel-card--${tone}${protectedEntry ? " permission-panel-card--protected-entry" : ""}`}
                 key={approval.id}
                 data-risk={tone}
               >
-                <header className="approval-card__header">
+                <header className="permission-panel-card__header">
                   {protectedEntry ? <>
                     <span className="protected-entry__icon" aria-hidden="true"><LockKey size={24} /></span>
                     <div className="protected-entry__heading">
                       <span className="protected-entry__eyebrow">Protected secret</span>
-                      <span className="approval-card__summary">{actionLabel(approval)}</span>
+                      <span className="permission-panel-card__summary">{actionLabel(approval)}</span>
                       <span className="protected-entry__provider">{serviceLabel(approval.service)}</span>
                     </div>
-                  </> : <span className="approval-card__summary">{actionSummary(approval)}</span>}
-                  {!compact ? <span className={`approval-risk approval-risk--${tone}`}>
+                  </> : <span className="permission-panel-card__summary">{actionSummary(approval)}</span>}
+                  {!compact ? <span className={`permission-panel-risk permission-panel-risk--${tone}`}>
                     {isHighRisk(approval.mode, approval.riskLevel) ? (
                       <ShieldWarning size={14} aria-hidden="true" />
                     ) : (
@@ -135,12 +135,12 @@ export function ApprovalPanel({
                     {riskLabel(approval.riskLevel)}
                   </span> : null}
                 </header>
-                {previews[approval.id] ? <p className="approval-card__context">{previews[approval.id].summary.split("\n").slice(0, 3).join(" · ")}</p> : compact ? <p className="approval-card__context">{approval.consequence}</p> : null}
-                {!compact ? <p className="approval-card__why">{whyApprovalIsNeeded(approval)}</p> : null}
-                <details className="approval-inspection" open={Boolean(previews[approval.id]) || !compact}>
+                {previews[approval.id] ? <p className="permission-panel-card__context">{previews[approval.id].summary.split("\n").slice(0, 3).join(" · ")}</p> : compact ? <p className="permission-panel-card__context">{approval.consequence}</p> : null}
+                {!compact ? <p className="permission-panel-card__why">{whyApprovalIsNeeded(approval)}</p> : null}
+                <details className="permission-panel-inspection" open={Boolean(previews[approval.id]) || !compact}>
                 <summary>{compact ? "View action details" : "Action details"}</summary>
-                {previews[approval.id] ? <pre className="approval-card__payload">{previews[approval.id].summary}{"\n\n"}{previews[approval.id].details}</pre> : null}
-                <dl className="approval-details">
+                {previews[approval.id] ? <pre className="permission-panel-card__payload">{previews[approval.id].summary}{"\n\n"}{previews[approval.id].details}</pre> : null}
+                <dl className="permission-panel-details">
                   <div>
                     <dt>Service</dt>
                     <dd>{serviceLabel(approval.service)}</dd>
@@ -152,7 +152,7 @@ export function ApprovalPanel({
                   <div>
                     <dt>Mivlet can</dt>
                     <dd>
-                      <span className="approval-profile">{profileLabel(approval.mode)}</span>
+                      <span className="permission-panel-profile">{profileLabel(approval.mode)}</span>
                       <small>{profileDescription(approval.mode)}</small>
                     </dd>
                   </div>
@@ -160,14 +160,14 @@ export function ApprovalPanel({
                     <dt>Information used</dt>
                     <dd>
                       {visibleDataUsed.length > 1 ? (
-                        <ul className="approval-details__list">
+                        <ul className="permission-panel-details__list">
                           {visibleDataUsed.map((item) => <li key={item}>{item}</li>)}
                         </ul>
                       ) : visibleDataUsed[0] ?? "No additional data listed."}
                       {approvalReferences.length > 0 ? (
-                        <details className="approval-details__reference">
+                        <details className="permission-panel-details__reference">
                           <summary>Approval reference</summary>
-                          <ul className="approval-details__list">
+                          <ul className="permission-panel-details__list">
                             {approvalReferences.map((item) => <li key={item}>{item}</li>)}
                           </ul>
                         </details>
@@ -187,14 +187,14 @@ export function ApprovalPanel({
 
                 {isNativePending ? (
                   <>
-                    <p className="approval-card__waiting" role="status">
+                    <p className="permission-panel-card__waiting" role="status">
                       Waiting for native confirmation…
                     </p>
-                    <div className="approval-actions">
+                    <div className="permission-panel-actions">
                       {approval.decisions.includes("deny") ? (
                         <button
                           type="button"
-                          className="approval-action approval-action--deny"
+                          className="permission-panel-action permission-panel-action--deny"
                           onClick={() => onDecision(approval, "deny")}
                         >
                           <XCircle size={15} aria-hidden="true" />
@@ -221,7 +221,7 @@ export function ApprovalPanel({
                     onCancelConfirmation={onCancelConfirmation}
                   />
                 ) : (
-                  <div className="approval-actions">
+                  <div className="permission-panel-actions">
                     {DECISION_ORDER.filter(
                       (decision) =>
                         approval.decisions.includes(decision) &&
@@ -236,8 +236,8 @@ export function ApprovalPanel({
                         type="button"
                         className={
                           decision === "deny"
-                            ? "approval-action approval-action--deny"
-                            : "approval-action"
+                            ? "permission-panel-action permission-panel-action--deny"
+                            : "permission-panel-action"
                         }
                         aria-label={compact && decision === "once" ? "Approve" : decisionLabel(decision)}
                         title={decisionDescription(decision)}
@@ -262,14 +262,14 @@ export function ApprovalPanel({
         )}
       </div>
       {!compact && hasGrantsOrRules ? (
-        <div className="approval-grants" aria-label="Active approval grants and rules">
+        <div className="permission-panel-grants" aria-label="Active approval grants and rules">
           {sessionGrants.map((grant) => (
-            <span key={grant.id} className="approval-grant">
+            <span key={grant.id} className="permission-panel-grant">
               {grantSummary(grant)}
             </span>
           ))}
           {approvalRules.map((grant) => (
-            <span key={grant.id} className="approval-grant approval-grant--rule">
+            <span key={grant.id} className="permission-panel-grant permission-panel-grant--rule">
               {grantSummary(grant)}
             </span>
           ))}
@@ -302,10 +302,10 @@ function ApprovalModifyForm({
   onCancelModify: () => void;
 }) {
   return (
-    <div className="approval-edit">
-      <span className="approval-edit__label">Narrow what Mivlet can do</span>
+    <div className="permission-panel-edit">
+      <span className="permission-panel-edit__label">Narrow what Mivlet can do</span>
       {/* Live preview of the modified scope the user will save. */}
-      <p className="approval-modify-preview" aria-label={`Modified summary for ${approval.action}`}>
+      <p className="permission-panel-modify-preview" aria-label={`Modified summary for ${approval.action}`}>
         {modifiedSummary({
           mode: draft.mode,
           dataUsed: draft.dataUsed,
@@ -351,7 +351,7 @@ function ApprovalModifyForm({
           }
         />
       </label>
-      <div className="approval-actions">
+      <div className="permission-panel-actions">
         <button type="button" onClick={() => onSaveModify(approval)}>
           Save changes
         </button>
@@ -383,9 +383,9 @@ function ApprovalConfirmation({
     confirmationText.trim().length > 0 &&
     confirmationText.trim() === explanation.requiredPhrase;
   return (
-    <div className="approval-confirmation" aria-label={`Confirmation for ${approval.action}`}>
+    <div className="permission-panel-confirmation" aria-label={`Confirmation for ${approval.action}`}>
       <strong>Confirm this high-risk action</strong>
-      <p className="approval-confirmation__note">{explanation.note}</p>
+      <p className="permission-panel-confirmation__note">{explanation.note}</p>
       <p>
         Type <code>{explanation.requiredPhrase}</code> to continue. {explanation.whatItUnlocks}
       </p>
@@ -395,7 +395,7 @@ function ApprovalConfirmation({
         onChange={(event) => onUpdateConfirmation(event.target.value)}
         autoFocus
       />
-      <div className="approval-actions">
+      <div className="permission-panel-actions">
         <button type="button" onClick={onConfirmDecision} disabled={!matches}>
           Confirm
         </button>

@@ -28,6 +28,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use url::Url;
+mod browser_actions;
 
 use crate::approvals::resolve_approval;
 use crate::connector_api;
@@ -83,7 +84,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 60] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 67] = [
     "repository-pr-read",
     "repository-pr-local",
     "repository-pr-action",
@@ -99,6 +100,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 60] = [
     "command-jobs",
     "command-output",
     "command-stop",
+    "command-input",
     "repository-checkpoint-list",
     "repository-checkpoint-capture",
     "repository-checkpoint-preview",
@@ -129,6 +131,12 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 60] = [
     "local-browser-tabs",
     "local-browser-observe",
     "local-browser-navigate",
+    "local-browser-activate",
+    "local-browser-fill",
+    "local-browser-download",
+    "local-browser-upload-choices",
+    "local-browser-upload",
+    "local-browser-handover",
     "local-browser-click",
     "local-browser-scroll",
     "local-app-select",
@@ -328,7 +336,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "repository-status" | "repository-read" | "command-jobs" | "command-output" => {
             Some(("read-only", "low"))
         }
-        "command-stop" => Some(("full-access", "high")),
+        "command-stop" | "command-input" => Some(("full-access", "high")),
         "repository-write" | "repository-commit" => Some(("full-access", "high")),
         "repository-run" | "repository-start" | "repository-publish" | "workspace-run"
         | "workspace-start" => Some(("full-access", "critical")),
@@ -342,9 +350,17 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "web-fetch" => Some(("read-only", "medium")),
         "local-app-list" => Some(("read-only", "low")),
         "local-browser-open" => Some(("full-access", "high")),
-        "local-browser-navigate" => Some(("full-access", "high")),
-        "local-browser-click" | "local-browser-scroll" => Some(("full-access", "critical")),
-        "local-browser-tabs" | "local-browser-observe" => Some(("read-only", "medium")),
+        "local-browser-navigate" | "local-browser-activate" | "local-browser-handover" => {
+            Some(("full-access", "high"))
+        }
+        "local-browser-click"
+        | "local-browser-scroll"
+        | "local-browser-fill"
+        | "local-browser-download"
+        | "local-browser-upload" => Some(("full-access", "critical")),
+        "local-browser-tabs" | "local-browser-observe" | "local-browser-upload-choices" => {
+            Some(("read-only", "medium"))
+        }
         "local-app-select" => Some(("read-only", "medium")),
         "local-app-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
         "local-app-action" | "local-desktop-action" => Some(("full-access", "critical")),
@@ -443,6 +459,12 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-browser-tabs"
             | "local-browser-observe"
             | "local-browser-navigate"
+            | "local-browser-activate"
+            | "local-browser-fill"
+            | "local-browser-download"
+            | "local-browser-upload-choices"
+            | "local-browser-upload"
+            | "local-browser-handover"
             | "local-browser-click"
             | "local-browser-scroll"
             | "local-app-select"
@@ -533,6 +555,7 @@ pub(crate) fn validate_tool_approval_binding(
             | "create-pdf"
             | "workspace-run"
     ) || tool.starts_with("repository-")
+        || tool.starts_with("local-browser-")
         || is_protected_secret_tool(tool)
         || tool.starts_with("command-")
         || tool == "workspace-start"
@@ -1788,6 +1811,23 @@ async fn execute_native_tool(
         .map_err(|_| "Browser click outcome is uncertain. Do not replay it.")??;
         return Ok(ToolResult { ok: true, output });
     }
+    if browser_actions::supported(&tool) {
+        return browser_actions::execute(
+            &tool,
+            arguments,
+            local_computers.inner().clone(),
+            request
+                .workspace_id
+                .clone()
+                .ok_or("Browser actions require a workspace.")?,
+            request
+                .agent_id
+                .clone()
+                .ok_or("Browser actions require an agent.")?,
+            computer_generation,
+        )
+        .await;
+    }
     if tool == "local-browser-navigate" {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2622,6 +2662,105 @@ mod connector_authority_tests {
             },
         )
         .unwrap();
+    }
+
+    #[test]
+    fn browser_approval_binds_the_full_payload_beyond_bounded_previews() {
+        let mut approved = request("local-browser-activate");
+        approved.arguments = serde_json::json!({"activationRef":"a".repeat(48), "origin":format!("https://{}.example", "x".repeat(260))});
+        approved.approval.request.data_used =
+            approval_argument_previews(&approved.tool, &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved
+            .approval
+            .request
+            .data_used
+            .push(argument_digest(&approved.arguments).unwrap());
+        validate_tool_approval_binding(
+            &approved.tool,
+            &approved.arguments,
+            &approved.approval.request,
+        )
+        .unwrap();
+        let mut changed = approved.arguments.clone();
+        changed["origin"] = format!("https://{}.different", "x".repeat(260)).into();
+        assert!(validate_tool_approval_binding(
+            &approved.tool,
+            &changed,
+            &approved.approval.request
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn browser_transfer_permits_bind_exact_payload_scope_freshness_and_consume_once() {
+        for (tool, arguments, changes) in [
+            (
+                "local-browser-upload",
+                json!({"uploadRef":"a".repeat(48),"origin":"https://example.test","name":"Upload report","artifactId":format!("artifact-{}","b".repeat(64))}),
+                vec![
+                    ("artifactId", json!(format!("artifact-{}", "c".repeat(64)))),
+                    ("origin", json!("https://other.test")),
+                    ("name", json!("Other file field")),
+                    ("uploadRef", json!("d".repeat(48))),
+                ],
+            ),
+            (
+                "local-browser-download",
+                json!({"downloadRef":"a".repeat(48),"origin":"https://example.test","name":"Download report","url":"https://example.test/report.csv","fileName":"report.csv","timeoutSeconds":8}),
+                vec![
+                    ("downloadRef", json!("d".repeat(48))),
+                    ("origin", json!("https://other.test")),
+                    ("name", json!("Other download")),
+                    ("url", json!("https://example.test/other.csv")),
+                    ("fileName", json!("other.csv")),
+                    ("timeoutSeconds", json!(9)),
+                ],
+            ),
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("transfer-permits.json");
+            let mut approved = request(tool);
+            approved.arguments = arguments;
+            approved.workspace_id = Some("workspace".into());
+            approved.agent_id = Some("agent".into());
+            approved.computer_generation = Some(7);
+            approved.approval.request.data_used =
+                approval_argument_previews(&approved.tool, &approved.arguments)
+                    .unwrap()
+                    .into_iter()
+                    .collect();
+            approved.approval.request.data_used.extend([
+                argument_digest(&approved.arguments).unwrap(),
+                "Computer workspace: workspace".into(),
+                "Computer agent: agent".into(),
+                "Computer generation: 7".into(),
+            ]);
+            persist_permit(&path, &approved);
+            for (key, value) in changes {
+                let mut changed: ToolExecutionRequest =
+                    serde_json::from_value(serde_json::to_value(&approved).unwrap()).unwrap();
+                changed.arguments[key] = value;
+                assert!(verify_execution_permit(&path, &changed).is_err());
+            }
+            let mut wrong_generation: ToolExecutionRequest =
+                serde_json::from_value(serde_json::to_value(&approved).unwrap()).unwrap();
+            wrong_generation.computer_generation = Some(8);
+            assert!(verify_execution_permit(&path, &wrong_generation).is_err());
+            verify_execution_permit(&path, &approved).unwrap();
+            assert!(verify_execution_permit(&path, &approved).is_err());
+
+            let stale_path = root.path().join("stale-transfer-permits.json");
+            let stale_time = decided_at_offset(
+                -(crate::execution_approvals::EXECUTION_APPROVAL_TTL_SECONDS + 1),
+            );
+            approved.approval.decided_at = stale_time.clone();
+            approved.approval.request.requested_at = stale_time;
+            persist_permit(&stale_path, &approved);
+            assert!(verify_execution_permit(&stale_path, &approved).is_err());
+        }
     }
 
     #[test]

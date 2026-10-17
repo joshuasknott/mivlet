@@ -2,25 +2,16 @@ import type {
   McpConsentDecision,
   McpServerConfig,
   McpServerStatus,
-} from "@mivlet/protocol/domains/mcp-server";
+} from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
-import { toRuntimeError } from "../errors";
+import { invokeRequiredNative } from "../required-native";
 
-async function invoke<T>(
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<T> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind !== "native")
-    throw new Error(
-      "External assistants require the signed-in Mivlet desktop app.",
-    );
-  try {
-    return await adapter.invoke<T>(command, args);
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
+const invoke = <T>(command: string, args?: Record<string, unknown>) =>
+  invokeRequiredNative<T>(
+    command,
+    args,
+    "External assistants require the signed-in Mivlet desktop app.",
+  );
 export const getMcpServerStatus = () =>
   invoke<McpServerStatus>("mcp_server_status");
 export const startMcpServer = (config: McpServerConfig) =>

@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { ConversationRoom, MemoryRecord } from "@mivlet/protocol";
 import { Plus } from "@phosphor-icons/react/dist/csr/Plus";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import type { ShellRuntime } from "../../hooks/useShellRuntime";
 import "./workspace-memories.css";
+import { MemoryRecordCard } from "./MemoryRecordCard";
+import { PanelPagination } from "./PanelPagination";
+import { BookOpen } from "@phosphor-icons/react/dist/csr/BookOpen";
 import {
   memoryGroup,
   panelMemories,
@@ -27,17 +30,18 @@ export function WorkspaceMemories({
   room,
   runtime,
   scope = "chat",
+  sourceIds = [],
+  onOpenSource,
 }: {
   room?: ConversationRoom;
   runtime: MemoryRuntime;
   scope?: PanelScope;
+  sourceIds?: readonly string[];
+  onOpenSource?: (sourceId: string) => void;
 }) {
   const [query, setQuery] = useState("");
-  const [limit, setLimit] = useState(40);
   const refresh = runtime.refreshMemories;
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+
   const [editor, setEditor] = useState<{
     record?: MemoryRecord;
     title: string;
@@ -46,6 +50,26 @@ export function WorkspaceMemories({
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
   const [status, setStatus] = useState("");
+  const [refreshing, setRefreshing] = useState(true);
+  useEffect(() => {
+    let current = true;
+    setRefreshing(true);
+    void refresh()
+      .catch((failure: unknown) => {
+        if (current)
+          setError(
+            failure instanceof Error
+              ? failure.message
+              : "Memory could not be loaded.",
+          );
+      })
+      .finally(() => {
+        if (current) setRefreshing(false);
+      });
+    return () => {
+      current = false;
+    };
+  }, [refresh]);
   const act = async (operation: () => Promise<void>, message: string) => {
     if (pending) return;
     setPending(true);
@@ -73,59 +97,108 @@ export function WorkspaceMemories({
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
   );
-  const visible = records.slice(0, limit);
-  const suggested = visible.filter(
+  records.sort((a, b) =>
+    (b.record.updatedAt ?? b.record.createdAt ?? "").localeCompare(
+      a.record.updatedAt ?? a.record.createdAt ?? "",
+    ),
+  );
+  const suggested = records.filter(
     ({ record }) => record.approvalState === "suggested",
   );
-  const saved = visible.filter(
+  const saved = records.filter(
     ({ record }) => record.approved && record.approvalState !== "suggested",
+  );
+  const renderRecord = ({
+    record,
+    group,
+  }: {
+    record: MemoryRecord;
+    group: string;
+  }) => (
+    <MemoryRecordCard
+      key={record.id}
+      record={record}
+      group={group}
+      pending={pending}
+      onEdit={() => {
+        setEditor({ record, title: record.title, value: record.value });
+        setError("");
+      }}
+      onToggle={() =>
+        void act(
+          () => runtime.toggleMemoryRecordDisabled(record.id),
+          record.disabled ? "Memory enabled." : "Memory disabled.",
+        )
+      }
+      onDelete={() =>
+        void act(
+          () => runtime.forgetMemory(record.id),
+          record.approvalState === "suggested"
+            ? "Suggestion dismissed."
+            : "Memory deleted. The original conversation is unchanged.",
+        )
+      }
+      onApprove={() =>
+        void act(() => runtime.approveMemory(record.id), "Memory saved.")
+      }
+      onOpenSource={
+        record.provenance?.sourceId &&
+        sourceIds.includes(record.provenance.sourceId) &&
+        onOpenSource
+          ? () => onOpenSource(record.provenance!.sourceId!)
+          : undefined
+      }
+    />
   );
   return (
     <section className="workspace-memories" aria-label="Saved memory">
-      <header className="workspace-library__heading">
-        <div>
-          <h2>Memory</h2>
-          {!room && <p>Choose a conversation</p>}
-        </div>
-        <button
-          type="button"
-          aria-label="Add memory"
-          disabled={!room || pending || scope !== "chat"}
-          title={
-            scope === "owner"
-              ? "Switch to This chat to add a new memory."
-              : undefined
-          }
-          onClick={() => {
-            setEditor({ title: "", value: "" });
-            setError("");
-          }}
-        >
-          <Plus size={20} aria-hidden="true" />
-          Add
-        </button>
-      </header>
-      {runtime.memoryDisabled && (
-        <p className="workspace-memories__notice">
-          Memory is paused in Settings. Saved memories won’t be used until it is
-          enabled.
-        </p>
-      )}
-      {room && (
-        <label className="workspace-library__search">
-          <MagnifyingGlass size={17} aria-hidden="true" />
-          <input
-            type="search"
-            aria-label="Search memories"
-            placeholder="Search memories"
-            value={query}
-            onChange={(event) => {
-              setQuery(event.target.value);
-              setLimit(40);
+      <div className="panel-collection__controls">
+        <header className="workspace-library__heading">
+          <div>
+            <h2>Memory</h2>
+            {!room && <p>Choose a conversation</p>}
+          </div>
+        </header>
+        {runtime.memoryDisabled && (
+          <p className="workspace-memories__notice">
+            Memory is paused in Settings. Saved memories won’t be used until it
+            is enabled.
+          </p>
+        )}
+        <div className="workspace-library__toolbar">
+          {room && (
+            <label className="workspace-library__search">
+              <MagnifyingGlass size={17} aria-hidden="true" />
+              <input
+                type="search"
+                aria-label="Search memories"
+                placeholder="Search memories"
+                value={query}
+                onChange={(event) => {
+                  setQuery(event.target.value);
+                }}
+              />
+            </label>
+          )}
+          <button
+            type="button"
+            aria-label="Add memory"
+            disabled={!room || pending || scope !== "chat"}
+            title={
+              scope === "owner"
+                ? "Switch to This chat to add a new memory."
+                : undefined
+            }
+            onClick={() => {
+              setEditor({ title: "", value: "" });
+              setError("");
             }}
-          />
-        </label>
-      )}
+          >
+            <Plus size={20} aria-hidden="true" />
+            Add
+          </button>
+        </div>
+      </div>
       {editor && room && (
         <form
           className="workspace-memories__editor"
@@ -200,150 +273,117 @@ export function WorkspaceMemories({
           </div>
         </form>
       )}
-      {[
-        "This chat",
-        "From this project",
-        "From this agent",
-        "Account-wide",
-      ].map((group) => {
-        const entries = saved.filter((entry) => entry.group === group);
-        return entries.length ? (
-          <section
-            className="workspace-memories__group"
-            key={group}
-            aria-label={group}
-          >
-            <h3>{group}</h3>
-            {entries.map(({ record }) => (
-              <article className="workspace-memories__record" key={record.id}>
-                <div className="workspace-memories__record-heading">
-                  <strong>{record.title}</strong>
-                  <details
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        event.currentTarget.open = false;
-                        event.currentTarget.querySelector("summary")?.focus();
-                      }
-                    }}
-                  >
-                    <summary aria-label={`Actions for ${record.title}`}>
-                      ···
-                    </summary>
-                    <div className="workspace-memories__actions">
-                      <button
-                        type="button"
-                        disabled={pending}
-                        onClick={(event) => {
-                          event.currentTarget
-                            .closest("details")
-                            ?.removeAttribute("open");
-                          setEditor({
-                            record,
-                            title: record.title,
-                            value: record.value,
-                          });
-                        }}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        type="button"
-                        disabled={pending}
-                        onClick={() =>
-                          void act(
-                            () => runtime.toggleMemoryRecordDisabled(record.id),
-                            record.disabled
-                              ? "Memory enabled."
-                              : "Memory disabled.",
-                          )
-                        }
-                      >
-                        {record.disabled ? "Enable" : "Disable"}
-                      </button>
-                      <button
-                        type="button"
-                        disabled={pending}
-                        onClick={() =>
-                          void act(
-                            () => runtime.forgetMemory(record.id),
-                            "Memory deleted. The original conversation is unchanged.",
-                          )
-                        }
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </details>
-                </div>
-                <p>{record.value}</p>
-                <small>
-                  {record.source}
-                  {record.disabled ? " · Disabled" : ""}
-                </small>
-              </article>
-            ))}
-          </section>
-        ) : null;
-      })}
-      {suggested.length > 0 && (
-        <section
-          className="workspace-memories__group"
-          aria-label="Suggested memories"
-        >
-          <h3>Suggested memories</h3>
-          {suggested.map(({ record, group }) => (
-            <article className="workspace-memories__record" key={record.id}>
-              <strong>{record.title}</strong>
-              <p>{record.value}</p>
-              <small>
-                {group} · {record.source}
-              </small>
-              <div className="workspace-memories__suggestion-actions">
-                <button
-                  disabled={pending}
-                  onClick={() =>
-                    void act(
-                      () => runtime.approveMemory(record.id),
-                      "Memory saved.",
-                    )
-                  }
-                >
-                  Save
-                </button>
-                <button
-                  disabled={pending}
-                  onClick={() =>
-                    void act(
-                      () => runtime.forgetMemory(record.id),
-                      "Suggestion dismissed.",
-                    )
-                  }
-                >
-                  Dismiss
-                </button>
-              </div>
-            </article>
-          ))}
-        </section>
-      )}
-      {!records.length && room && (
+      <MemoryCollection
+        key={"saved:" + query + ":" + scope}
+        label={scope === "chat" ? "This chat" : "Shared memory"}
+        title={scope === "chat" ? "Saved in this chat" : "Shared memory"}
+        entries={saved.filter(
+          (entry) => scope === "owner" || entry.group === "This chat",
+        )}
+        pageSize={12}
+        renderRecord={renderRecord}
+      />
+      <MemoryCollection
+        key={"suggested:" + query}
+        label="Suggested memories"
+        title="Suggested memories"
+        entries={suggested}
+        pageSize={3}
+        renderRecord={renderRecord}
+      />
+      {scope === "chat" &&
+        ["From this project", "From this agent", "Account-wide"].map(
+          (group) => {
+            const entries = saved.filter((entry) => entry.group === group);
+            return entries.length ? (
+              <details
+                key={group + query}
+                className="workspace-memories__inherited"
+                open={Boolean(query.trim())}
+              >
+                <summary>
+                  <BookOpen size={19} aria-hidden="true" />
+                  <span>
+                    {group}
+                    <small>Inherited memory</small>
+                  </span>
+                  <span className="workspace-memories__count">
+                    {entries.length}
+                  </span>
+                </summary>
+                <MemoryCollection
+                  key={query}
+                  label={group}
+                  title={group}
+                  entries={entries}
+                  pageSize={8}
+                  renderRecord={renderRecord}
+                />
+              </details>
+            ) : null;
+          },
+        )}
+      {refreshing && !records.length && <p role="status">Loading memory…</p>}
+      {!records.length && room && !refreshing && !error && (
         <p className="right-panel__empty">
           {query.trim()
             ? "No memories match your search."
             : "No saved memories yet. Add a lasting decision, preference, or fact. Messages aren’t saved as memories automatically."}
         </p>
       )}
-      {records.length > limit && (
-        <button
-          type="button"
-          className="workspace-panel__link"
-          onClick={() => setLimit((value) => value + 40)}
-        >
-          Show more memories ({records.length - limit})
-        </button>
+      {error && (
+        <div>
+          <p role="alert">{error}</p>
+          <button
+            type="button"
+            className="workspace-panel__link"
+            disabled={pending}
+            onClick={() => void act(refresh, "Memory refreshed.")}
+          >
+            Retry memory
+          </button>
+        </div>
       )}
-      {error && <p role="alert">{error}</p>}
       {status && <p role="status">{status}</p>}
+    </section>
+  );
+}
+
+function MemoryCollection({
+  label,
+  title,
+  entries,
+  pageSize,
+  renderRecord,
+}: {
+  label: string;
+  title: string;
+  entries: { record: MemoryRecord; group: string }[];
+  pageSize: number;
+  renderRecord: (entry: { record: MemoryRecord; group: string }) => ReactNode;
+}) {
+  const [page, setPage] = useState(0);
+  if (!entries.length) return null;
+  const current = Math.min(
+    page,
+    Math.max(0, Math.ceil(entries.length / pageSize) - 1),
+  );
+  return (
+    <section className="workspace-memories__group" aria-label={label}>
+      <h3>
+        {title}
+        <span>{entries.length}</span>
+      </h3>
+      {entries
+        .slice(current * pageSize, (current + 1) * pageSize)
+        .map(renderRecord)}
+      <PanelPagination
+        total={entries.length}
+        page={current}
+        pageSize={pageSize}
+        label={label + " memory"}
+        onChange={setPage}
+      />
     </section>
   );
 }

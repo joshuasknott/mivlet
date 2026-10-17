@@ -1,98 +1,8 @@
-import type { ConversationMessageView } from "./conversation-runtime";
 import { connectorErrorMessage } from "./connector-errors";
 import { CONNECTOR_READ_TOOLS } from "./connector-chat";
 import { findMarketplaceConnector } from "../components/marketplace/marketplace-catalog";
-import type { Spine } from "@mivlet/protocol";
-
-export type ResponsePart =
-  | { id: string; kind: "text"; content: string }
-  | {
-      id: string;
-      kind: "tool";
-      tool: string;
-      connectorId?: string;
-      state: "running" | "succeeded" | "failed";
-      content: string;
-      /** Durable result outcome when execution stopped before a normal result. */
-      terminalStatus?: "interrupted" | "cancelled";
-      mcpApp?: McpAppDescriptor;
-      /** Exact persisted result revision; provider call IDs may be reused. */
-      resultRevisionId?: string;
-      toolInput?: Record<string, unknown>;
-    }
-  | {
-      id: string;
-      kind: "notice";
-      content: string;
-      error: boolean;
-      /** Durable terminal state represented by this notice. */
-      status?: "interrupted" | "cancelled" | "awaiting-user";
-    };
-
-/** Persisted, non-secret pointer to an MCP App resource. */
-export interface McpAppDescriptor {
-  connectorId: string;
-  toolName: string;
-  resourceUri: string;
-}
-
-function mcpAppDescriptor(value: unknown): McpAppDescriptor | undefined {
-  if (!value || typeof value !== "object" || Array.isArray(value))
-    return undefined;
-  const candidate = (value as Record<string, unknown>).mcpApp;
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
-    return undefined;
-  const record = candidate as Record<string, unknown>;
-  if (
-    typeof record.connectorId !== "string" ||
-    record.connectorId.length > 256 ||
-    typeof record.toolName !== "string" ||
-    record.toolName.length > 128 ||
-    typeof record.resourceUri !== "string" ||
-    !record.resourceUri.startsWith("ui://") ||
-    record.resourceUri.length > 2_048 ||
-    /[\u0000-\u001f\u007f]/u.test(record.resourceUri)
-  )
-    return undefined;
-  return {
-    connectorId: record.connectorId,
-    toolName: record.toolName,
-    resourceUri: record.resourceUri,
-  };
-}
-
-function parsedToolInput(content: string): Record<string, unknown> | undefined {
-  if (content.length > 256 * 1024) return undefined;
-  try {
-    const parsed: unknown = JSON.parse(content);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return undefined;
-    const value = parsed as Record<string, unknown>;
-    const args = value.arguments ?? value.input ?? value;
-    return args && typeof args === "object" && !Array.isArray(args) ? args as Record<string, unknown> : undefined;
-  } catch { return undefined; }
-}
-
-function resultMcpApp(content: string): McpAppDescriptor | undefined {
-  try {
-    return mcpAppDescriptor(JSON.parse(content));
-  } catch {
-    return undefined;
-  }
-}
-
-export interface ConversationTurn {
-  id: string;
-  prompt?: string;
-  promptMessageId?: string;
-  responseMessageId?: string;
-  responseRevisionId?: string;
-  /** Exact terminal assistant revision source used by native OpenUI actions. */
-  responseSource?: string;
-  attachments?: readonly Spine.Conversations.ConversationAttachmentMetadata[];
-  parts: ResponsePart[];
-  startedAt?: string;
-  endedAt?: string;
-}
+import type { ResponsePart } from "./conversation-presentation-types";
+import { resultMcpApp } from "./mcp-app-descriptor";
 
 /** Presentation only. Tool labels never confer execution authority. */
 const toolLabels: Record<string, [string, string]> = {
@@ -126,6 +36,13 @@ const toolLabels: Record<string, [string, string]> = {
   "web-fetch": ["Reading an exact web page", "Read an exact web page"],
   "local-app-list": ["Listing open applications", "Listed open applications"],
   "local-browser-tabs": ["Checking browser tabs", "Checked browser tabs"],
+  "local-browser-activate": ["Selecting a browser tab", "Selected a browser tab"],
+  "local-browser-fill": ["Filling a public field", "Text sent; awaiting observation"],
+  "local-browser-download": ["Receiving a file", "Received a verified file"],
+  "local-browser-upload-choices": ["Checking empty file fields", "Checked empty file fields"],
+  "local-browser-upload": ["Attaching an approved file", "File attached; review in browser"],
+  "local-browser-handover": ["Handing the browser to you", "Waiting for your input"],
+  "command-input": ["Sending session input", "Session input sent"],
   "local-browser-observe": [
     "Reading the browser page",
     "Read the browser page",
@@ -258,146 +175,6 @@ export function resolveResponseTool(
           : part,
       )
     : [...parts, result];
-}
-
-/** Pair call/result by run and call id, preserving conversational chronology. */
-export function conversationTurns(
-  messages: ConversationMessageView[],
-): ConversationTurn[] {
-  const turns: ConversationTurn[] = [];
-  // These parts belong to this reconstruction, so results can update them
-  // without scanning or copying the whole turn. Keep duplicate call IDs paired.
-  type ToolPart = Extract<ResponsePart, { kind: "tool" }>;
-  const toolsByCallId = new Map<string, ToolPart[]>();
-  const toolInputs = new WeakMap<ToolPart, Record<string, unknown>>();
-  for (const { message, currentRevision: revision } of messages) {
-    const content =
-      revision.state === "redacted"
-        ? "This message was removed."
-        : revision.content;
-    const previous = turns.at(-1);
-    const id =
-      message.runId ??
-      (message.kind === "user" ? message.id : (previous?.id ?? message.id));
-    let turn = previous;
-    if (
-      !turn ||
-      turn.id !== id ||
-      (message.kind === "user" && turn.prompt !== undefined)
-    ) {
-      turn = { id, parts: [], startedAt: message.createdAt };
-      turns.push(turn);
-      toolsByCallId.clear();
-    }
-    turn.endedAt = revision.checkpointedAt;
-    if (message.kind === "user") {
-      turn.prompt = content;
-      turn.promptMessageId = String(message.id);
-      const attachments = message.detail?.attachments;
-      if (
-        Array.isArray(attachments) &&
-        attachments.length <= 12 &&
-        attachments.every(
-          (item) =>
-            item &&
-            typeof item.id === "string" &&
-            typeof item.name === "string" &&
-            typeof item.mimeType === "string" &&
-            typeof item.sizeBytes === "number" &&
-            [
-              "image-input",
-              "knowledge-context",
-              "workspace-file",
-              "project-file",
-            ].includes(item.availability) &&
-            (item.relativePath === undefined ||
-              typeof item.relativePath === "string"),
-        )
-      )
-        turn.attachments = attachments;
-    } else if (revision.state === "redacted" || message.kind === "assistant") {
-      turn.responseMessageId = String(message.id);
-      turn.responseRevisionId = String(message.currentRevisionId);
-      turn.responseSource = content;
-      turn.parts.push({ id: message.id, kind: "text", content });
-    } else if (message.kind === "tool") {
-      const callId = message.detail.toolCallId;
-      const matchingParts = toolsByCallId.get(callId);
-      const isCall = message.detail.phase === "call";
-      const outcome = String(message.detail.outcome ?? "");
-      const terminalStatus =
-        !isCall && (outcome === "interrupted" || outcome === "cancelled")
-          ? (outcome as "interrupted" | "cancelled")
-          : undefined;
-      const state = isCall
-        ? "running"
-        : outcome === "succeeded"
-          ? "succeeded"
-          : "failed";
-      if (!isCall && matchingParts) {
-        const app = state === "succeeded" ? resultMcpApp(content) : undefined;
-        for (const part of matchingParts) {
-          part.content = content;
-          part.state = state;
-          if (terminalStatus) part.terminalStatus = terminalStatus;
-          else delete part.terminalStatus;
-          if (app) {
-            part.mcpApp = app;
-            part.resultRevisionId = String(message.currentRevisionId);
-            part.connectorId = app.connectorId;
-            part.toolInput = toolInputs.get(part);
-          }
-        }
-      } else {
-        const connectorId = isCall
-          ? toolConnectorId(message.detail.toolName, content)
-          : undefined;
-        const part: ToolPart = {
-          id: callId,
-          kind: "tool",
-          tool: isCall ? message.detail.toolName : "unknown-tool",
-          ...(connectorId ? { connectorId } : {}),
-          content: isCall ? "" : content,
-          state,
-          ...(terminalStatus ? { terminalStatus } : {}),
-          ...(state === "succeeded" && !isCall && resultMcpApp(content)
-            ? {
-                mcpApp: resultMcpApp(content),
-                resultRevisionId: String(message.currentRevisionId),
-                connectorId: resultMcpApp(content)!.connectorId,
-              }
-            : {}),
-        };
-        turn.parts.push(part);
-        const input = isCall ? parsedToolInput(content) : undefined;
-        if (input) toolInputs.set(part, input);
-        if (matchingParts) matchingParts.push(part);
-        else toolsByCallId.set(callId, [part]);
-      }
-    } else if (message.kind === "error" || message.kind === "interruption") {
-      turn.parts.push({
-        id: message.id,
-        kind: "notice",
-        content,
-        error: message.kind === "error",
-        ...(message.kind === "interruption"
-          ? { status: message.detail.reason === "user-stop" ? "cancelled" as const : "interrupted" as const }
-          : {}),
-      });
-    } else if (
-      message.kind === "approval" &&
-      message.detail.phase === "decision" &&
-      message.detail.decision === "denied"
-    ) {
-      turn.parts.push({
-        id: message.id,
-        kind: "notice",
-        content: "You declined this action.",
-        error: false,
-      });
-    }
-  }
-  return turns;
 }
 
 export const CONVERSATION_STYLE_INSTRUCTIONS = `Conversation style:

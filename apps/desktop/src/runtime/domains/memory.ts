@@ -9,7 +9,12 @@ import type {
   RefreshLocalKnowledgeSourceRequest,
   MemoryControlState,
 } from "@mivlet/protocol";
-import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
+import {
+  hasTauriRuntime,
+  invoke,
+  invokeNative,
+  activeDataScope,
+} from "../bridge";
 
 export async function loadRuntimeImportedKnowledgeSources() {
   const scope = activeDataScope();
@@ -29,14 +34,10 @@ export async function importRuntimeLocalKnowledgeSource(
 ) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
-  try {
-    return await invoke<LocalFileImport>("import_local_knowledge_source", {
-      candidate,
-      ...scope,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<LocalFileImport>("import_local_knowledge_source", {
+    candidate,
+    ...scope,
+  });
 }
 
 export async function refreshRuntimeLocalKnowledgeSource(
@@ -44,17 +45,13 @@ export async function refreshRuntimeLocalKnowledgeSource(
 ) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
-  try {
-    return await invoke<LocalKnowledgeRefreshResponse>(
-      "refresh_local_knowledge_source",
-      {
-        request,
-        ...scope,
-      },
-    );
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<LocalKnowledgeRefreshResponse>(
+    "refresh_local_knowledge_source",
+    {
+      request,
+      ...scope,
+    },
+  );
 }
 
 export async function searchRuntimeKnowledgeSources(
@@ -89,14 +86,10 @@ export async function loadRuntimeMemoryState() {
 export async function saveRuntimeMemoryState(state: MemoryControlState) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
-  try {
-    return await invoke<MemoryControlState>("save_memory_state", {
-      state,
-      ...scope,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<MemoryControlState>("save_memory_state", {
+    state,
+    ...scope,
+  });
 }
 
 export async function correctRuntimeMemoryRecord(correction: {
@@ -139,11 +132,7 @@ export async function changeRuntimeMemoryRecord(change: {
 export async function exportRuntimeMemoryState(_state: MemoryControlState) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
-  try {
-    return await invoke<string>("export_memory_state", scope);
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<string>("export_memory_state", scope);
 }
 
 /**
@@ -168,12 +157,8 @@ export async function listRuntimeContextSummaries(threadId: string) {
 export async function saveRuntimeContextSummary(summary: ContextSummaryRecord) {
   const scope = activeDataScope();
   if (!scope || !hasTauriRuntime()) return null;
-  try {
-    return await invoke<ContextSummaryRecord>("save_context_summary", {
-      summary,
-      ...scope,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ContextSummaryRecord>("save_context_summary", {
+    summary,
+    ...scope,
+  });
 }

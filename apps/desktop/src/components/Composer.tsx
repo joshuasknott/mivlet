@@ -144,7 +144,6 @@ export function Composer({
   }, [addMenuOpen]);
 
   const isNewThread = !inThread;
-  const menuPlacementClass = isNewThread ? "composer-glow--new-thread" : "composer-glow--in-thread";
   const voiceListening = voiceStatus === "listening";
   const voiceTransitioning =
     voiceStatus === "starting" ||
@@ -305,7 +304,7 @@ export function Composer({
       ) : null}
       <form
         ref={formRef}
-        className={`composer-glow ${menuPlacementClass}${compactAgentSurface ? " composer-glow--compact-agent" : ""}`}
+        className={`composer-glow ${isNewThread ? "composer-glow--new-thread" : "composer-glow--in-thread"}${compactAgentSurface ? " composer-glow--compact-agent" : ""}`}
         onSubmit={(event) => {
           if (voiceListening || voiceTransitioning) { event.preventDefault(); return; }
           onSubmit(event);

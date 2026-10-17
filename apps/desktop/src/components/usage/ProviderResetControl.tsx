@@ -11,7 +11,7 @@ import {
   readProviderAllowance,
   refreshProviderAllowance,
 } from "../../runtime/domains/provider-usage";
-import "./provider-usage.css";
+import "./provider-reset.css";
 
 /** Native typed failure evidence is verified at arm time; text is never parsed for quota. */
 export function ProviderResetControl({

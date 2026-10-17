@@ -173,7 +173,7 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || isProtectedSecretTool(toolName)) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || toolName.startsWith("local-browser-") || isProtectedSecretTool(toolName)) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 
@@ -188,6 +188,8 @@ export function buildToolApproval(
     ? `Start the exact persistent Windows command for ${parsed.timeoutSeconds} seconds in an isolated snapshot. All writes discarded; native ownership and repository locks last until all descendants stop. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Stop or app closure terminates it. No automatic restart.`
     : toolName === "command-stop" && isRegistered
     ? "Stop this exact native job and all descendants. Wait for its terminal status; discard its snapshot."
+    : toolName === "command-input" && isRegistered
+    ? "Write this exact text once to the selected restricted interactive job. The sequence is consumed before delivery; an uncertain receipt stops the job and is never replayed. Native job history saves no input text."
     : (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
     ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
     : toolName === "repository-pr-action" && isRegistered
@@ -206,6 +208,18 @@ export function buildToolApproval(
     ? parsed.deliveryMode === "foreground"
       ? "Bring the selected Windows app forward and allow approved actions to use its foreground window. This may interrupt your work."
       : "Select the Windows app for supported background controls without bringing it forward. Each action still follows your approval settings."
+    : toolName === "local-browser-activate" && isRegistered
+    ? "Switch the selected foreground browser to this exact observed tab once. Inspect the current page before further input."
+    : toolName === "local-browser-fill" && isRegistered
+    ? "Enter this exact public text into the observed empty field. Page handlers may send it to the website. Preserve existing values and private fields; inspect the page afterward."
+    : toolName === "local-browser-download" && isRegistered
+    ? "Download this exact observed link into native staging using the browser's existing sign-in. Close this agent's owned browser after transfer, failure or Stop to contain pending writes, then accept one completed passive file up to 8 MiB into private workspace Downloads without overwriting files. Final redirects fail closed. Publication requires a separate action."
+    : toolName === "local-browser-handover" && isRegistered
+    ? "Save this task as needing your attention, stop agent control and leave the browser open for you. Continuing requires your explicit request and a fresh window selection."
+    : toolName === "local-browser-upload" && isRegistered
+    ? "Attach this exact published passive artifact to the observed empty file field. Its page handlers may immediately transmit the complete file to this website. Native staging remains private until the owned browser closes. No separate submit is clicked; hand control to the user for file confirmation. Never replay an uncertain attachment."
+    : toolName === "local-browser-upload-choices" && isRegistered
+    ? "Read only public labels of empty single-file fields in this exact tab and origin. Omit page text, selected filenames and all field values. No file is attached."
     : isRegistered
     ? `Execute the ${toolName} tool via ${providerId} with the given arguments.`
     : `Refuse unregistered tool ${toolName} — not in Mivlet's tool registry.`;

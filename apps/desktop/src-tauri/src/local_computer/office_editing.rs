@@ -303,7 +303,9 @@ pub fn edit_package(bytes: &[u8], edit: &OfficeEdit) -> Result<Vec<u8>, String> 
         let mut file = archive
             .by_index(index)
             .map_err(|_| "The Office package contains an invalid entry.".to_string())?;
-        let name = file.name().to_string();
+        let name = std::str::from_utf8(file.name_raw())
+            .map_err(|_| "The Office package contains an invalid UTF-8 file name.")?
+            .to_owned();
         if file.encrypted()
             || file.enclosed_name().is_none()
             || name.contains('\\')

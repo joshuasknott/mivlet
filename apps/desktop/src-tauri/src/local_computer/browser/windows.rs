@@ -26,9 +26,19 @@ use windows_sys::Win32::{
 
 #[path = "controls.rs"]
 mod controls;
+#[path = "downloads.rs"]
+mod downloads;
+#[cfg(debug_assertions)]
+#[path = "downloads_acceptance.rs"]
+mod downloads_acceptance;
 #[cfg(debug_assertions)]
 #[path = "fixture_server.rs"]
 mod fixture_server;
+#[path = "forms.rs"]
+mod forms;
+#[cfg(debug_assertions)]
+#[path = "forms_acceptance.rs"]
+mod forms_acceptance;
 #[path = "helper.rs"]
 mod helper;
 #[path = "navigation.rs"]
@@ -45,6 +55,11 @@ mod scrolling;
 #[cfg(debug_assertions)]
 #[path = "tab_acceptance.rs"]
 mod tab_acceptance;
+#[path = "uploads.rs"]
+mod uploads;
+#[cfg(debug_assertions)]
+#[path = "uploads_acceptance.rs"]
+mod uploads_acceptance;
 
 pub(super) fn run_helper(arguments: &[std::ffi::OsString]) -> Result<(), String> {
     helper::run(arguments)
@@ -97,6 +112,13 @@ pub(super) fn acceptance() -> Result<(), String> {
         &|| ticket.check(),
         &|start| ticket.with_current(start),
     )?;
+    uploads_acceptance::run(
+        &mut process,
+        window.identity.hwnd,
+        root.path(),
+        &|| ticket.check(),
+        &|start| ticket.with_current(start),
+    )?;
     let runtime = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/cua-driver");
     let driver =
         super::super::cua::Driver::start(&runtime, (window.identity.pid, window.identity.hwnd))?;
@@ -114,6 +136,13 @@ pub(super) fn acceptance() -> Result<(), String> {
         return Err("The owned browser disappeared before cleanup.".into());
     }
     let held = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle) };
+    downloads_acceptance::run(
+        &mut process,
+        window.identity.hwnd,
+        root.path(),
+        &|| ticket.check(),
+        &|start| ticket.with_current(start),
+    )?;
     let product = process.product;
     drop(process);
     if unsafe { WaitForSingleObject(held.as_raw_handle(), 5000) }
@@ -397,11 +426,97 @@ pub(super) struct BrowserProcess {
     tabs: Option<observations::TabSnapshot>,
     sessions: std::collections::HashMap<String, String>,
     navigation: std::collections::HashMap<String, navigation::Choice>,
+    activation: std::collections::HashMap<String, navigation::Choice>,
     controls: std::collections::HashMap<String, controls::Choice>,
+    fields: std::collections::HashMap<String, forms::Choice>,
+    downloads: std::collections::HashMap<String, downloads::Choice>,
+    upload_choices: std::collections::HashMap<String, uploads::Choice>,
+    upload_custody: Vec<uploads::Custody>,
     scroll: Option<(String, scrolling::Choice)>,
 }
 
 impl BrowserProcess {
+    pub(super) fn upload_choices(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<String, String> {
+        uploads::choices(self, (hwnd, generation), reference, origin, check)
+    }
+    pub(super) fn upload(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        input: &super::UploadRequest,
+        source: &super::super::artifacts::VerifiedUploadArtifact,
+        native_root: &Path,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        uploads::upload(
+            self,
+            (hwnd, generation),
+            input,
+            source,
+            native_root,
+            check,
+            dispatch,
+        )
+    }
+    pub(super) fn download(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        input: &super::DownloadRequest,
+        native_root: &Path,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<downloads::Transfer, String> {
+        downloads::download(
+            self,
+            (hwnd, generation),
+            input,
+            native_root,
+            check,
+            dispatch,
+        )
+    }
+    pub(super) fn fill(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        name: &str,
+        text: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        forms::fill(
+            self,
+            (hwnd, generation),
+            reference,
+            origin,
+            name,
+            text,
+            check,
+            dispatch,
+        )
+    }
+    pub(super) fn activate(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        navigation::activate(self, hwnd, generation, reference, origin, check, dispatch)
+    }
     pub(super) fn scroll(
         &mut self,
         hwnd: u64,
@@ -639,7 +754,12 @@ impl BrowserProcess {
                 tabs: None,
                 sessions: std::collections::HashMap::new(),
                 navigation: std::collections::HashMap::new(),
+                activation: std::collections::HashMap::new(),
                 controls: std::collections::HashMap::new(),
+                fields: std::collections::HashMap::new(),
+                downloads: std::collections::HashMap::new(),
+                upload_choices: std::collections::HashMap::new(),
+                upload_custody: Vec::new(),
                 scroll: None,
             })
         }
@@ -706,6 +826,38 @@ impl Drop for BrowserProcess {
 }
 
 struct BrowserJob(std::os::windows::io::OwnedHandle);
+impl BrowserJob {
+    fn stop_and_wait(&self) -> Result<(), String> {
+        use super::LaunchStop;
+        self.stop();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let mut information = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+            if unsafe {
+                QueryInformationJobObject(
+                    self.0.as_raw_handle(),
+                    JobObjectBasicAccountingInformation,
+                    std::ptr::addr_of_mut!(information).cast(),
+                    std::mem::size_of_val(&information) as u32,
+                    std::ptr::null_mut(),
+                )
+            } == 0
+            {
+                return Err(
+                    "The owned browser could not confirm transfer shutdown; no file was imported."
+                        .into(),
+                );
+            }
+            if information.ActiveProcesses == 0 {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("The owned browser is still closing; no file was imported.".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
 impl super::LaunchStop for BrowserJob {
     fn stop(&self) {
         unsafe {

@@ -14,12 +14,12 @@ export function computerAuthorityCurrent(
 }
 
 const COMPUTER_TOOLS = new Set([
-  "repository-start", "workspace-start", "command-jobs", "command-output", "command-stop",
+  "repository-start", "workspace-start", "command-jobs", "command-output", "command-stop", "command-input",
   "repository-checkpoint-list", "repository-checkpoint-capture", "repository-checkpoint-preview", "repository-checkpoint-restore", "repository-checkpoint-delete",
   "repository-status", "repository-read", "repository-write", "repository-run", "repository-commit", "repository-publish", "repository-recover",
   "read-file", "write-file", "workspace-run", "create-spreadsheet", "create-document", "create-presentation", "create-pdf", "computer-artifact",
   "local-app-list", "local-app-select", "local-app-observe", "local-app-action",
-  "local-browser-open", "local-browser-tabs", "local-browser-observe", "local-browser-navigate", "local-browser-click", "local-browser-scroll",
+  "local-browser-open", "local-browser-tabs", "local-browser-observe", "local-browser-navigate", "local-browser-activate", "local-browser-fill", "local-browser-download", "local-browser-handover", "local-browser-upload-choices", "local-browser-upload", "local-browser-click", "local-browser-scroll",
   "local-desktop-observe", "local-desktop-action",
   "generate-image", "edit-image",
 ]);

@@ -1,5 +1,8 @@
 //! Account-owned measurements. Provider protocols stay in native adapters;
 //! canonical encrypted attempts supply history, never CLI transcript/auth scans.
+mod history;
+pub(crate) mod imports;
+pub(crate) mod pricing;
 #[cfg(test)]
 mod tests;
 
@@ -11,10 +14,25 @@ use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeMap;
 
 type Result<T> = crate::store::Result<T>;
 const MAX_AGE_SECONDS: i64 = 300;
+type CollectionLock = std::sync::Arc<tokio::sync::Mutex<()>>;
+static COLLECTIONS: std::sync::OnceLock<
+    std::sync::Mutex<std::collections::HashMap<String, CollectionLock>>,
+> = std::sync::OnceLock::new();
+
+fn collection_lock(key: String) -> std::result::Result<CollectionLock, String> {
+    let mut locks = COLLECTIONS
+        .get_or_init(Default::default)
+        .lock()
+        .map_err(|_| "Usage collection is unavailable.")?;
+    locks.retain(|_, lock| std::sync::Arc::strong_count(lock) > 1);
+    Ok(locks
+        .entry(key)
+        .or_insert_with(|| std::sync::Arc::new(tokio::sync::Mutex::new(())))
+        .clone())
+}
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -57,6 +75,8 @@ pub(crate) struct Price {
     pub cache_write_per_million_usd: Option<f64>,
     pub source: String,
     pub observed_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<String>,
 }
 #[derive(Default, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -78,6 +98,11 @@ pub(crate) struct Model {
     estimated_cost_attempts: u64,
     unpriced_attempts: u64,
     latest_observed_at: String,
+    cached_input_attempts: u64,
+    cache_write_attempts: u64,
+    reasoning_attempts: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cache_savings_usd: Option<f64>,
 }
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -88,6 +113,11 @@ pub(crate) struct Report {
     allowances: Vec<Allowance>,
     prices: Vec<Price>,
     since: String,
+    until: String,
+    buckets: Vec<history::Bucket>,
+    pricing: pricing::Status,
+    imports: imports::Summary,
+    missing_usage_attempts: u64,
 }
 fn invalid(message: &str) -> StoreError {
     StoreError::Invalid(message.into())
@@ -252,6 +282,11 @@ fn unavailable(owner: &str, provider: &str, at: &str, reason: &str) -> Allowance
         reset_opportunity: None,
     }
 }
+fn not_collected(owner: &str, provider: &str, reason: &str) -> Allowance {
+    let mut report = unavailable(owner, provider, "", reason);
+    report.checked_at.clear();
+    report
+}
 fn key(owner: &str, provider: &str) -> String {
     format!("provider-allowance:{owner}:{provider}")
 }
@@ -264,10 +299,9 @@ pub(crate) fn cached(
 ) -> Result<Allowance> {
     let connected = backend_connection::list_records(conn, &scope.internal_user_id)?;
     let Some(connection) = connected.iter().find(|c| c.provider_id == provider) else {
-        return Ok(unavailable(
+        return Ok(not_collected(
             &scope.internal_user_id,
             provider,
-            at,
             "Connect this provider in Mivlet to read its allowance.",
         ));
     };
@@ -278,10 +312,9 @@ pub(crate) fn cached(
         &key(&scope.internal_user_id, provider),
     )?
     else {
-        return Ok(unavailable(
+        return Ok(not_collected(
             &scope.internal_user_id,
             provider,
-            at,
             "Refresh to check supported provider measurements.",
         ));
     };
@@ -290,20 +323,22 @@ pub(crate) fn cached(
     if report
         .observed_at
         .as_deref()
+        .or(Some(report.checked_at.as_str()))
         .is_some_and(|observed| observed < connection.updated_at.as_str())
     {
-        return Ok(unavailable(
+        return Ok(not_collected(
             &scope.internal_user_id,
             provider,
-            at,
             "The provider connection changed. Refresh its allowance.",
         ));
     }
     if !fresh(&report, at) && !report.windows.is_empty() {
         report.status = "stale".into();
         report.reset_opportunity = None;
-        report.reason =
-            Some("These measurements are stale. Refresh before relying on them.".into());
+        if report.reason.is_none() {
+            report.reason =
+                Some("These measurements are stale. Refresh before relying on them.".into());
+        }
     }
     Ok(report)
 }
@@ -415,15 +450,51 @@ pub(crate) async fn refresh_provider_allowance(
         ));
     }
     let store = crate::store::try_global().ok_or("Encrypted storage is unavailable.")?;
-    let connection_revision = store
+    let requested_at = time();
+    let (connection_revision, workspace_id) = store
         .with_conn(|conn| {
+            let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Read)?;
+            if scope.internal_user_id != owner {
+                return Err(invalid("The account changed during collection."));
+            }
             backend_connection::list_records(conn, &owner)?
                 .into_iter()
                 .find(|c| c.provider_id == provider_id)
-                .map(|c| c.updated_at)
+                .map(|c| (c.updated_at, scope.data.workspace_id().to_owned()))
                 .ok_or_else(|| invalid("The provider connection is unavailable."))
         })
         .map_err(|e| e.to_string())?;
+    let collector = collection_lock(hash(&format!(
+        "{owner}:{workspace_id}:{provider_id}:{connection_revision}"
+    )))?;
+    let _guard = collector.lock().await;
+    // A queued caller reuses the collection that just completed for this exact custody.
+    let recent = store
+        .with_conn(|conn| {
+            let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Read)?;
+            if scope.internal_user_id != owner || scope.data.workspace_id() != workspace_id {
+                return Err(invalid(
+                    "The account or workspace changed during collection.",
+                ));
+            }
+            if !backend_connection::list_records(conn, &owner)?
+                .iter()
+                .any(|c| c.provider_id == provider_id && c.updated_at == connection_revision)
+            {
+                return Err(invalid(
+                    "The provider connection changed during collection. Refresh its allowance.",
+                ));
+            }
+            let cached = cached(conn, store, &scope, &provider_id, &time())?;
+            Ok(
+                (cached.checked_at >= requested_at && cached.checked_at <= time())
+                    .then_some(cached),
+            )
+        })
+        .map_err(|e| e.to_string())?;
+    if let Some(report) = recent {
+        return Ok(report);
+    }
     let requested = provider_id.clone();
     let principal = owner.clone();
     let report = tauri::async_runtime::spawn_blocking(move || {
@@ -431,7 +502,9 @@ pub(crate) async fn refresh_provider_allowance(
         let result = match requested.as_str() {
             "codex" => crate::codex_app_server::usage_probe().map(|(a,r)| codex(&principal,&a,&r,&at)),
             "claude" => crate::managed_runtime::claude_usage(&app,&principal).map(|r| claude(&principal,&r,&at)),
-            _ => Ok(unavailable(&principal,&requested,&at,"This route exposes no supported subscription allowance endpoint. Saved Mivlet token receipts remain available.")),
+            "cursor" | "grok" | "opencode" => Ok(unavailable(&principal,&requested,&at,"This runtime needs verified Mivlet account isolation before its subscription limits can be collected. Check the provider's own account dashboard.")),
+            "antigravity" => Ok(unavailable(&principal,&requested,&at,"Mivlet's managed Antigravity ACP connection has no supported allowance adapter. Check Antigravity's own usage view.")),
+            _ => Ok(unavailable(&principal,&requested,&at,"This API route has no subscription allowance adapter. Saved token receipts remain available.")),
         };
         result.unwrap_or_else(|_| unavailable(&principal,&requested,&at,"The managed provider could not report allowance. Check its connection or runtime; no personal credentials were read."))
     }).await.map_err(|_| "Provider usage collection stopped unexpectedly.")?;
@@ -441,8 +514,10 @@ pub(crate) async fn refresh_provider_allowance(
     store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
-            if scope.internal_user_id != owner {
-                return Err(invalid("The account changed during collection."));
+            if scope.internal_user_id != owner || scope.data.workspace_id() != workspace_id {
+                return Err(invalid(
+                    "The account or workspace changed during collection.",
+                ));
             }
             if !backend_connection::list_records(conn, &owner)?
                 .iter()
@@ -499,104 +574,31 @@ fn estimate(usage: &crate::models::ExecutionAttemptUsage, price: &Price) -> Opti
             / 1_000_000.0,
     )
 }
+#[cfg(test)]
 pub(crate) fn report(
     conn: &Connection,
     store: &Store,
     scope: &AuthorizedCommandScope,
     at: &str,
 ) -> Result<Report> {
-    let since = (DateTime::parse_from_rfc3339(at).map_err(|_| invalid("Invalid usage date."))?
-        - Duration::days(30))
-    .to_rfc3339_opts(SecondsFormat::Millis, true);
-    let prices = prices(conn, store, scope)?;
-    let mut query =
-        conn.prepare("SELECT id FROM run WHERE workspace_id=?1 AND updated_at>=?2 ORDER BY id")?;
-    let ids = query
-        .query_map(rusqlite::params![scope.data.workspace_id(), since], |r| {
-            r.get::<_, String>(0)
-        })?
-        .collect::<std::result::Result<Vec<_>, _>>()?;
-    let mut models: BTreeMap<(String, String), Model> = BTreeMap::new();
-    for id in ids {
-        let row = execution_attempt::get_scoped(conn, store, &scope.data, &id)?
-            .ok_or_else(|| invalid("Usage receipt is unavailable."))?;
-        let Some(raw) = row.payload.get("usage").filter(|v| !v.is_null()) else {
-            continue;
-        };
-        let usage: crate::models::ExecutionAttemptUsage = serde_json::from_value(raw.clone())
-            .map_err(|_| invalid("Usage receipt is invalid."))?;
-        if !usage.cost_usd.is_finite() || usage.cost_usd < 0.0 {
-            return Err(invalid("Usage cost is invalid."));
-        }
-        let model = models
-            .entry((row.provider_id.clone(), row.model.clone()))
-            .or_insert_with(|| Model {
-                provider_id: row.provider_id.clone(),
-                model: row.model.clone(),
-                ..Default::default()
-            });
-        model.attempts += 1;
-        model.input_tokens = model.input_tokens.saturating_add(usage.input_tokens);
-        model.output_tokens = model.output_tokens.saturating_add(usage.output_tokens);
-        // A missing category is unknown, not a measured zero.
-        for (total, value) in [
-            (&mut model.cached_input_tokens, usage.cached_input_tokens),
-            (&mut model.cache_write_tokens, usage.cache_write_tokens),
-            (&mut model.reasoning_tokens, usage.reasoning_tokens),
-        ] {
-            if let Some(value) = value {
-                *total = Some(total.unwrap_or(0).saturating_add(value));
-            }
-        }
-        if row.updated_at > model.latest_observed_at {
-            model.latest_observed_at = row.updated_at;
-        }
-        let unknown = usage.cost_unknown.unwrap_or(usage.cost_usd == 0.0);
-        if !unknown
-            && !usage.cost_estimated
-            && !matches!(row.provider_id.as_str(), "claude" | "opencode")
-        {
-            model.reported_cost_usd += usage.cost_usd;
-            model.reported_cost_attempts += 1;
-        } else if !unknown {
-            model.estimated_cost_usd += usage.cost_usd;
-            model.estimated_cost_attempts += 1;
-        } else if let Some(cost) = prices
-            .iter()
-            .find(|p| p.provider_id == row.provider_id && p.model == row.model)
-            .and_then(|p| estimate(&usage, p))
-        {
-            model.estimated_cost_usd += cost;
-            model.estimated_cost_attempts += 1;
-        } else {
-            model.unpriced_attempts += 1;
-        }
-    }
-    let allowances = backend_connection::list(conn, &scope.internal_user_id)?
-        .iter()
-        .map(|p| cached(conn, store, scope, p, at))
-        .collect::<Result<Vec<_>>>()?;
-    Ok(Report {
-        checked_at: at.into(),
-        coverage: "saved-mivlet-attempts",
-        models: models.into_values().collect(),
-        allowances,
-        prices,
-        since,
-    })
+    history::read(conn, store, scope, at, None)
 }
 #[tauri::command]
-pub(crate) async fn provider_usage_report() -> std::result::Result<Report, String> {
-    tauri::async_runtime::spawn_blocking(provider_usage_report_blocking)
+pub(crate) async fn provider_usage_report(
+    query: Option<history::Query>,
+) -> std::result::Result<Report, String> {
+    tauri::async_runtime::spawn_blocking(move || provider_usage_report_blocking(query))
         .await
         .map_err(|_| "Usage history loading stopped unexpectedly.".to_string())?
 }
-fn provider_usage_report_blocking() -> std::result::Result<Report, String> {
+fn provider_usage_report_blocking(
+    query: Option<history::Query>,
+) -> std::result::Result<Report, String> {
     let store = crate::store::try_global().ok_or("Encrypted storage is unavailable.")?;
     store
         .with_conn(|conn| {
             let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Read)?;
-            report(conn, store, &scope, &time())
+            history::read(conn, store, &scope, &time(), query)
         })
         .map_err(|e| e.to_string())
 }
@@ -621,7 +623,29 @@ fn provider_allowance_blocking(provider_id: String) -> std::result::Result<Allow
         .map_err(|e| e.to_string())
 }
 #[tauri::command]
-pub(crate) fn set_provider_usage_price(price: Price) -> std::result::Result<(), String> {
+pub(crate) fn reset_provider_usage_price(
+    provider_id: String,
+    model: String,
+) -> std::result::Result<(), String> {
+    let store = crate::store::try_global().ok_or("Encrypted storage is unavailable.")?;
+    store
+        .transaction(|conn| {
+            let scope = authorized_scope::resolve(conn, None, None, ScopeAccess::Write)?;
+            let mut records = prices(conn, store, &scope)?;
+            records.retain(|p| p.provider_id != provider_id || p.model != model);
+            preferences::upsert_scoped(
+                conn,
+                store,
+                &scope.data,
+                "provider-usage-prices",
+                &json!(records),
+                &time(),
+            )
+        })
+        .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub(crate) fn set_provider_usage_price(mut price: Price) -> std::result::Result<(), String> {
     let valid_source = url::Url::parse(&price.source).ok().is_some_and(|url| {
         url.scheme() == "https"
             && url.host_str().is_some()
@@ -634,11 +658,14 @@ pub(crate) fn set_provider_usage_price(price: Price) -> std::result::Result<(), 
         || price.model.is_empty()
         || price.model.len() > 160
         || price.model.chars().any(char::is_control)
+        || crate::secret_redaction::looks_secret(&price.model)
         || price.source.is_empty()
         || price.source.len() > 300
         || !valid_source
         || crate::secret_redaction::looks_secret(&price.source)
-        || DateTime::parse_from_rfc3339(&price.observed_at).is_err()
+        || DateTime::parse_from_rfc3339(&price.observed_at)
+            .ok()
+            .is_none_or(|date| date > Utc::now() + Duration::minutes(1))
         || [
             Some(price.input_per_million_usd),
             Some(price.output_per_million_usd),
@@ -663,6 +690,7 @@ pub(crate) fn set_provider_usage_price(price: Price) -> std::result::Result<(), 
             if records.len() >= 256 {
                 return Err(invalid("Usage price limit reached."));
             }
+            price.origin = Some("override".into());
             records.push(price.clone());
             preferences::upsert_scoped(
                 conn,

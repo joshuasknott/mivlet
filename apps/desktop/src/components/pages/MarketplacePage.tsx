@@ -30,9 +30,9 @@ export function MarketplacePage({
   onSelectConnector: (connector: ConnectorManifest) => void;
   onSwitchAccount: (connectorId: string, connectionId: string) => void;
 }) {
-  return <section className="workspace marketplace-workspace" aria-label="Plugins">
-    <div className="marketplace-scroll"><div className="marketplace-content">
-      {onBack ? <button type="button" className="marketplace-back" onClick={onBack}>← Back to chat</button> : null}
+  return <section className="workspace plugin-catalogue-workspace" aria-label="Plugins">
+    <div className="plugin-catalogue-scroll"><div className="plugin-catalogue-content">
+      {onBack ? <button type="button" className="plugin-catalogue-back" onClick={onBack}>← Back to chat</button> : null}
             <PluginPanel
               initialConnectorId={initialConnectorId}
               key={workspaceId ?? "preview"}
@@ -47,7 +47,7 @@ export function MarketplacePage({
               accounts={accounts}
               onSwitchAccount={onSwitchAccount}
             />
-      {connectorStatus ? <p className="marketplace-runtime-status" role="status">{connectorStatus}</p> : null}
+      {connectorStatus ? <p className="plugin-catalogue-runtime-status" role="status">{connectorStatus}</p> : null}
     </div></div>
   </section>;
 }

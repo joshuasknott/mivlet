@@ -4,6 +4,31 @@ import { createComputerTaskExecutor } from "./computer-task-executor";
 
 const approval = (tool: string) => ({ action: `${tool} approved action` } as ApprovalRequest);
 describe("computer task execution bounds", () => {
+  it("requires durable handover after an attached or uncertain browser file", async () => {
+    for(const uncertain of [false,true]) {
+      const execute=vi.fn(async (request:ApprovalRequest)=>{
+        if(request.action.startsWith("local-browser-handover"))return '{"status":"human-control-required"}';
+        if(uncertain)throw new Error("File attachment outcome is uncertain; never replay it.");
+        return '{"status":"file-attached"}';
+      });
+      const guarded=createComputerTaskExecutor(execute);
+      if(uncertain)await expect(guarded(approval("local-browser-upload"),'{}')).rejects.toThrow("uncertain");
+      else await guarded(approval("local-browser-upload"),'{}');
+      await expect(guarded(approval("local-browser-navigate"),'{}')).rejects.toThrow("human confirmation");
+      await guarded(approval("local-browser-handover"),'{"reason":"Confirm the selected report"}');
+      await expect(guarded(approval("local-app-select"),'{}')).rejects.toThrow("fresh explicit user continuation");
+      expect(execute).toHaveBeenCalledTimes(2);
+    }
+  });
+  it("never selects, reads or acts again in a turn after human browser handover", async () => {
+    const execute = vi.fn(async () => '{"status":"human-control-required","requiresFreshRequest":true}');
+    const guarded = createComputerTaskExecutor(execute);
+    await guarded(approval("local-browser-handover"), '{"reason":"Complete the sign-in step"}');
+    for (const name of ["local-app-select", "local-browser-tabs", "local-browser-observe", "local-browser-fill"]) {
+      await expect(guarded(approval(name), "{}")).rejects.toThrow("fresh explicit user continuation");
+    }
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
   it("does not replay uncertain scrolling using a fresh scroll ref", async () => {
     const execute = vi.fn().mockRejectedValueOnce(new Error("Browser scroll outcome is uncertain. No input was replayed."));
     const guarded = createComputerTaskExecutor(execute);

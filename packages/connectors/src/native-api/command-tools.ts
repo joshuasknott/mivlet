@@ -52,4 +52,11 @@ export const COMMAND_TOOLS: Record<string, BackendTool> = {
     ["jobId", "jobGeneration"],
     true,
   ),
+  "command-input": spec(
+    "command-input",
+    "Write this exact text once to an explicitly interactive restricted job. Input is not a terminal/TTY; include any intended newline. Supply next inputSequence from job metadata. Accepted means pipe delivery only; uncertain terminates the job and must never be replayed. Never provide credentials.",
+    { ...identity, inputSequence: { type: "integer", minimum: 1, maximum: Number.MAX_SAFE_INTEGER },
+      text: { type: "string", minLength: 1, maxLength: 4096 } },
+    ["jobId", "jobGeneration", "inputSequence", "text"], true,
+  ),
 };
