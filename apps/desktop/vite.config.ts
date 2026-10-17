@@ -89,7 +89,10 @@ export default defineConfig({
           // The PDF engine is loaded only when a verified PDF preview opens.
           if (/[/\\]node_modules[/\\]pdfjs-dist[/\\]/.test(id))
             return "pdf-renderer";
-          if (id.includes("@phosphor-icons") || id === "\0mivlet-icon-wrapper") return "icons";
+          // Entry already loads these common modules with React. Sharing the
+          // vendor request removes repeated imports without an eager graph change.
+          if (id.includes("@phosphor-icons") || id === "\0mivlet-icon-wrapper"
+            || id === "\0commonjsHelpers.js") return "vendor";
           // Conversation-only UI engines are reached through the lazy
           // ConversationPane boundary. Keeping their package graphs in
           // dedicated chunks prevents the shell's generic vendor chunk from
