@@ -106,6 +106,7 @@ describe("closed relay transport", () => {
   it("accepts renewed identity only for the same connection and consumes each nonce once", async () => {
     const f = fixture();
     const now = Date.now();
+    f.memory.values.set("owner", { ...f.owner, authorityExpiresAt: now + 60000 });
     const cap: PhoneRelayCapability = { version: 1, scope: "phone:connect", accountId: f.owner.accountId, workspaceId: f.owner.workspaceId,
       deviceId: f.owner.deviceId, connectionId: id, epoch, issuedAt: now, expiresAt: now + 120000, sessionExpiresAt: now + 28800000, nonce: "nonce-new" };
     const token = await signPhoneRelayCapability(secret, cap);

@@ -1,5 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
-import { PHONE_RELAY_LIMITS, readPhoneRelayCapability, type PhoneRelayCapability, type PhoneRelayOperation, type PhoneRelayReply, type PhoneRelayRequest } from "@mivlet/protocol";
+import { PHONE_RELAY_LIMITS, derivePhoneRelayConnectionId, readPhoneRelayCapability, type PhoneRelayCapability, type PhoneRelayOperation, type PhoneRelayReply, type PhoneRelayRequest } from "@mivlet/protocol";
 import { json, OPERATIONS, validReply, type PhoneEnv } from "./contracts";
 
 interface Owner {
@@ -23,7 +23,8 @@ export class PhoneRelayAuthority extends DurableObject<PhoneEnv> {
       const token = request.headers.get("Authorization")?.match(/^MivletPhone (mp1\.[A-Za-z0-9_.-]+)$/)?.[1];
       if (!token) return json({ error: "unauthorized" }, 401);
       const cap = await readPhoneRelayCapability(this.env.MIVLET_PHONE_RELAY_SIGNING_KEY, token);
-      if (new URL(request.url).pathname !== `/v1/phone/${cap.connectionId}/connect`) return json({ error: "scope-mismatch" }, 401);
+      if (new URL(request.url).pathname !== `/v1/phone/${cap.connectionId}/connect`
+        || await derivePhoneRelayConnectionId(this.env.MIVLET_PHONE_RELAY_SIGNING_KEY, cap) !== cap.connectionId) return json({ error: "scope-mismatch" }, 401);
       return await this.connectNative(cap);
     } catch { return json({ error: "phone-connection-rejected" }, 401); }
   }
@@ -138,7 +139,7 @@ export class PhoneRelayAuthority extends DurableObject<PhoneEnv> {
       const renewed = await this.ctx.storage.transaction(async tx => {
         const current = await tx.get<Owner>("owner");
         if (!current || current.revision !== owner.revision || current.usedNonces.some(p => p.nonce === cap.nonce)
-          || Math.min(current.authorityExpiresAt, current.sessionExpiresAt) <= Date.now()) throw new Error("expired-renewal");
+          || cap.expiresAt <= current.authorityExpiresAt || Math.min(current.authorityExpiresAt, current.sessionExpiresAt) <= Date.now()) throw new Error("expired-renewal");
         current.usedNonces = [...current.usedNonces.filter(p => p.expiresAt > Date.now()), { nonce: cap.nonce, expiresAt: cap.expiresAt }];
         if (current.usedNonces.length > 8) throw new Error("renewal-rate-limited");
         current.nonce = cap.nonce;
