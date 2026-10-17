@@ -20,7 +20,7 @@ pub(super) struct TabSnapshot {
     choices: HashMap<String, String>,
 }
 impl TabSnapshot {
-    fn consume(
+    pub(super) fn consume(
         &mut self,
         hwnd: u64,
         generation: u64,

@@ -2722,7 +2722,8 @@ mod connector_authority_tests {
             ("name", "Other file field".into()),
             ("uploadRef", "d".repeat(48)),
         ] {
-            let mut changed = approved.clone();
+            let mut changed: ToolExecutionRequest =
+                serde_json::from_value(serde_json::to_value(&approved).unwrap()).unwrap();
             changed.arguments[key] = value.into();
             assert!(verify_execution_permit(&path, &changed).is_err());
         }
