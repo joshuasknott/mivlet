@@ -237,7 +237,7 @@ fn prepare_at(
         expected_sequence: head.last_sequence + 1,
         input_sha256: cloud::digest_value(&encoded).map_err(StoreError::Invalid)?,
         provider_id: provider,
-        model: model,
+        model,
         reasoning_effort: agent.reasoning_effort.clone(),
         credential_id: request.credential_id.clone(),
         credential_revision: request.credential_revision,
