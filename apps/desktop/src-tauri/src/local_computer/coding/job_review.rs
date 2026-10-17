@@ -135,6 +135,20 @@ fn bounded_text(mut value: String) -> (String, bool) {
     (value, truncated)
 }
 
+fn public_base_names(output: &str) -> bool {
+    if output.is_empty() {
+        return true;
+    }
+    output.ends_with('\0')
+        && output.split_terminator('\0').all(|name| {
+            !name.is_empty()
+                && !name.contains('\u{fffd}')
+                && !name.chars().any(char::is_control)
+                && super::safe_path(&name.to_ascii_lowercase()).is_ok()
+                && mivlet_windows_executor::repository_files::relative(name).is_ok()
+        })
+}
+
 fn review_changes(
     directory: &Path,
     repo: &Repository,
@@ -166,14 +180,7 @@ fn review_changes(
     let mut base_names = git::repo_git(directory, repo)?;
     base_names.args(["ls-tree", "-r", "--name-only", "-z", &repo.base, "--"]);
     let base_names = run(base_names)?;
-    if base_names.truncated
-        || base_names.redacted
-        || base_names.output.contains('\u{fffd}')
-        || base_names
-            .output
-            .split('\0')
-            .any(|name| super::safe_path(&name.to_ascii_lowercase()).is_err())
-    {
+    if base_names.truncated || base_names.redacted || !public_base_names(&base_names.output) {
         return Ok(Value::Null);
     }
     // Same derived scratch tree as Library review, with a shared overall

@@ -14,6 +14,24 @@ fn target(id: &str) -> ReviewRequest {
         job_generation: 1,
     }
 }
+
+#[test]
+fn base_names_require_complete_nul_framing_without_ambiguous_or_protected_paths() {
+    assert!(public_base_names(""));
+    assert!(public_base_names("src/app.ts\0literal[1].txt\0"));
+    for output in [
+        "src/app.ts",
+        "\0",
+        "src/app.ts\0\0",
+        "src/app.ts\n\0",
+        "src/\u{fffd}.txt\0",
+        "../outside\0",
+        "nested/.ENV.LOCAL\0",
+        "key.PEM\0",
+    ] {
+        assert!(!public_base_names(output), "{output:?}");
+    }
+}
 fn inspect(
     directory: &Path,
     jobs: &ScopeJobs,
