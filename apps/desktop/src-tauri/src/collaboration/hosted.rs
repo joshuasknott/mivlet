@@ -6,7 +6,7 @@ use crate::models::ExecutionAttempt;
 use crate::store::repos::{execution_attempt, workspace_directory::HostedComputerScope};
 use serde_json::json;
 
-fn context<T>(
+pub(super) fn context<T>(
     app: &tauri::AppHandle,
     workspace: &str,
     ticket: Option<&OperationTicket>,
@@ -158,6 +158,7 @@ fn prepare_at(
     connections: &[ProviderConnection],
     originally_held: Option<bool>,
 ) -> Result<Review> {
+    let web_scope = cloud::public_web::requested(request).map_err(StoreError::Invalid)?;
     let mut item = target(ctx, &request.target())?;
     eligible(ctx, &item)?;
     let agent = profile(ctx.profiles, &item.agent_id)?;
@@ -179,6 +180,12 @@ fn prepare_at(
         messages.push(TextMessage {
             role: "system".into(),
             content: agent.instructions.clone(),
+        });
+    }
+    if let Some(scope) = &web_scope {
+        messages.push(TextMessage {
+            role: "system".into(),
+            content: cloud::public_web::policy(scope).map_err(StoreError::Invalid)?,
         });
     }
     messages.push(TextMessage {
@@ -223,7 +230,9 @@ fn prepare_at(
     let run_id = cloud::opaque("cloud-run").map_err(StoreError::Invalid)?;
     let expires = chrono::Utc::now().timestamp_millis() + 120_000;
     let binding = Binding {
-        version: 1,
+        version: if web_scope.is_some() { 2 } else { 1 },
+        mode: web_scope.as_ref().map(|_| "public-web-research".into()),
+        web_scope: web_scope.clone(),
         task_id: cloud::opaque("task").map_err(StoreError::Invalid)?,
         admission_id: cloud::opaque("admission").map_err(StoreError::Invalid)?,
         run_id: run_id.clone(),
@@ -242,10 +251,12 @@ fn prepare_at(
         credential_id: request.credential_id.clone(),
         credential_revision: request.credential_revision,
         budget: Budget {
-            max_model_calls: 1,
+            max_model_calls: if web_scope.is_some() { 4 } else { 1 },
             max_output_tokens: 4096,
             max_elapsed_ms: 120_000,
             max_result_bytes: 65_536,
+            max_page_reads: web_scope.as_ref().map(|_| 6),
+            max_source_bytes: web_scope.as_ref().map(|_| 65_536),
         },
         expires_at: expires,
     };
@@ -254,12 +265,27 @@ fn prepare_at(
         input,
     };
     let review_id = cloud::opaque("cloud-review").map_err(StoreError::Invalid)?;
-    let approval = crate::models::ApprovalRequest { id: cloud::opaque("approval-cloud-text").map_err(StoreError::Invalid)?, service: "Mivlet cloud text task".into(),
+    let mut approval = crate::models::ApprovalRequest { id: cloud::opaque("approval-cloud-text").map_err(StoreError::Invalid)?, service: "Mivlet cloud text task".into(),
             action: format!("Send this exact text to {} / {}", binding.provider_id, binding.model), mode: "trusted-scope".into(), risk_level: "high".into(),
             data_used: vec![format!("Task worker: {runner_url}"), format!("Exact admission SHA-256: {}", cloud::digest_value(&serde_json::to_value(&admission).map_err(|_| invalid("Invalid cloud admission."))?).map_err(StoreError::Invalid)?),
                 format!("Full disclosed messages shown in this exact review: {} bytes; input SHA-256 {}", input_bytes, binding.input_sha256)],
             consequence: "Sends the complete displayed text to the selected API provider through the cloud task worker. One model call; no tools, files, browser or local context. Task text is retained for 24 hours; receipt metadata for 7 more days. Provider billing and retention apply. A sent request can have an uncertain outcome and is never automatically repeated.".into(),
             requested_at: ctx.time.into(), decisions: vec!["once".into(), "deny".into()], confirmation_phrase: None };
+    if let Some(scope) = &web_scope {
+        approval.service = "Mivlet public web research task".into();
+        approval.action = format!(
+            "Research this exact text within the reviewed public web scope using {} / {}",
+            binding.provider_id, binding.model
+        );
+        approval.data_used.push(format!(
+            "Exact domain and starting URL scope SHA-256: {}. Complete scope shown in this review.",
+            cloud::digest_value(
+                &serde_json::to_value(scope).map_err(|_| invalid("Invalid research scope."))?
+            )
+            .map_err(StoreError::Invalid)?
+        ));
+        approval.consequence = "Sends every displayed instruction and request to the selected cloud API provider. The agent may put any of that disclosed text into HTTPS paths or queries sent to the exact reviewed domains. Up to four model calls, six static page reads, 4096 aggregate requested output tokens, 120 seconds, 64 KiB source text and 64 KiB answer. No page scripts, forms, sign-in, file transfer, code execution or local context. Task text, source URLs/queries and source receipts are removed after 24 hours. Provider billing and retention apply; usage or cost can be unknown. Interrupted possible provider sends are never automatically repeated.".into();
+    }
     let approval =
         crate::approvals::normalize_approval_request(approval).map_err(StoreError::Invalid)?;
     let offer = Offer {
@@ -287,7 +313,7 @@ fn prepare_at(
         originally_held: Some(originally_held),
         snapshot: None,
     });
-    item.reason = Some("Paused for cloud text review. Confirm the exact disclosed text, or cancel to restore its previous queue state.".into());
+    item.reason = Some(if web_scope.is_some() { "Paused for public web research review. Confirm the complete text, exact domains, starting URLs and limits, or cancel to restore its previous queue state." } else { "Paused for cloud text review. Confirm the exact disclosed text, or cancel to restore its previous queue state." }.into());
     item.updated_at = ctx.time.into();
     ctx.work(&item)?;
     put_offer(ctx, &offer, &item)?;
@@ -394,7 +420,15 @@ fn append(ctx: &Context<'_>, item: &Work, run: &str, kind: &str, text: &str) -> 
         &id,
         &format!("{id}-revision"),
         "terminal",
-        "hosted-text",
+        if item
+            .hosted_task
+            .as_ref()
+            .is_some_and(|h| h.binding.version == 2)
+        {
+            "hosted-public-web"
+        } else {
+            "hosted-text"
+        },
         &json!({"text":text}),
         ctx.time,
     )?;

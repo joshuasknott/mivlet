@@ -13,7 +13,7 @@ const secret = "unit-key-not-valid-at-any-provider";
 const scope = { allowedDomains: ["example.com"], initialUrls: ["https://example.com/"] };
 function fixture() {
   const value = taskFixture();
-  const binding: HostedPublicWebTaskBinding = { ...value.binding, version: 2, mode: "public-web-research", webScope: structuredClone(scope),
+  const binding: HostedPublicWebTaskBinding = { ...value.binding, model: "gpt-4.1", version: 2, mode: "public-web-research", webScope: structuredClone(scope),
     budget: { maxModelCalls: 4, maxOutputTokens: 4096, maxElapsedMs: 120000, maxResultBytes: 65536, maxPageReads: 6, maxSourceBytes: 65536 } };
   return { binding, input: { messages: [{ role: "system" as const, content: publicWebTaskPolicy(scope) }, { role: "user" as const, content: "Read the known page and summarize its public evidence." }] } };
 }

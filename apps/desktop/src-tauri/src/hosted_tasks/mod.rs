@@ -3,6 +3,7 @@
 mod commands;
 pub(crate) mod dispatch;
 pub(crate) mod models;
+pub(crate) mod public_web;
 #[cfg(test)]
 mod tests;
 pub(crate) mod transport;
@@ -68,6 +69,7 @@ pub(crate) fn validate_result(
     result: &models::TaskResult,
 ) -> Result<(), String> {
     let s = &result.snapshot;
+    public_web::validate_receipt(binding, s)?;
     if &s.binding != binding
         || s.generation == 0
         || s.sequence == 0

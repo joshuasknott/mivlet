@@ -23,6 +23,8 @@ fn start(ctx: &Context<'_>) -> Result<(Prepare, HostedComputerScope, Vec<Provide
             expected_generation: item.generation,
             credential_id: "credential-unit".into(),
             credential_revision: 1,
+            mode: None,
+            web_scope: None,
         },
         HostedComputerScope {
             workspace_id: "cloud-workspace".into(),
@@ -154,6 +156,87 @@ fn native_claim_owns_one_existing_work_and_stop_rejects_its_late_conversation_wr
     });
 }
 #[test]
+fn research_review_captures_full_policy_exact_scope_and_bound_budget_before_claim() {
+    fixture(&store(), |ctx| {
+        let (mut request, scope, connections) = start(ctx)?;
+        request.mode = Some("public-web-research".into());
+        request.web_scope = Some(PublicWebScope {
+            allowed_domains: vec!["example.com".into()],
+            initial_urls: vec!["https://example.com/".into()],
+        });
+        let review = prepare_at(
+            ctx,
+            &request,
+            &scope,
+            4,
+            "https://tasks.example.test",
+            &connections,
+            None,
+        )?;
+        let binding = &review.admission.binding;
+        assert_eq!(binding.version, 2);
+        assert_eq!(binding.mode, request.mode);
+        assert_eq!(binding.web_scope, request.web_scope);
+        assert_eq!(binding.budget.max_model_calls, 4);
+        assert_eq!(binding.budget.max_output_tokens, 4096);
+        assert_eq!(binding.budget.max_page_reads, Some(6));
+        assert_eq!(binding.budget.max_source_bytes, Some(65536));
+        assert_eq!(review.admission.input.messages.len(), 3);
+        assert_eq!(
+            review.admission.input.messages[1].content,
+            cloud::public_web::policy(request.web_scope.as_ref().unwrap())
+                .map_err(StoreError::Invalid)?
+        );
+        assert!(review
+            .approval
+            .consequence
+            .contains("any of that disclosed text"));
+        let actual = cloud::digest_value(&serde_json::to_value(&review.admission.input).unwrap())
+            .map_err(StoreError::Invalid)?;
+        assert_eq!(binding.input_sha256, actual);
+        let target = Target {
+            expected_generation: review.work_generation,
+            ..request.target()
+        };
+        let _dispatch = cloud::dispatch::AdmissionGuard::retain(binding);
+        let captured = claim_at(ctx, &target, &review.review_id)?;
+        assert_eq!(captured.admission.binding, *binding);
+        assert!(stop_at(ctx, &target)?.1.is_some());
+        Ok(())
+    });
+}
+#[test]
+fn research_scope_expansion_is_rejected_before_the_canonical_queue_changes() {
+    fixture(&store(), |ctx| {
+        let (mut request, scope, connections) = start(ctx)?;
+        let before = ctx.item(&request.work_id)?;
+        request.mode = Some("public-web-research".into());
+        for (domain, url) in [
+            ("*.example.com", "https://example.com/"),
+            ("127.0.0.1", "https://127.0.0.1/"),
+            ("example.com", "https://other.com/"),
+            ("example.com", "https://example.com/?api_key=private"),
+        ] {
+            request.web_scope = Some(PublicWebScope {
+                allowed_domains: vec![domain.into()],
+                initial_urls: vec![url.into()],
+            });
+            assert!(prepare_at(
+                ctx,
+                &request,
+                &scope,
+                4,
+                "https://tasks.example.test",
+                &connections,
+                None
+            )
+            .is_err());
+            assert_eq!(ctx.item(&request.work_id)?, before);
+        }
+        Ok(())
+    });
+}
+#[test]
 fn stop_before_claim_cancels_review_and_prevents_the_delayed_approved_dispatch() {
     fixture(&store(), |ctx| {
         let (request, scope, connections) = start(ctx)?;
@@ -218,6 +301,7 @@ fn answer(offer: &Offer) -> TaskResult {
             created_at: now,
             updated_at: now,
             retained_until: now + 86_400_000,
+            research: None,
         },
         text: text.into(),
     }
