@@ -188,6 +188,8 @@ export function buildToolApproval(
     ? `Start the exact persistent Windows command for ${parsed.timeoutSeconds} seconds in an isolated snapshot. All writes discarded; native ownership and repository locks last until all descendants stop. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Stop or app closure terminates it. No automatic restart.`
     : toolName === "command-stop" && isRegistered
     ? "Stop this exact native job and all descendants. Wait for its terminal status; discard its snapshot."
+    : toolName === "command-input" && isRegistered
+    ? "Write this exact text once to the selected restricted interactive job. The sequence is consumed before delivery; an uncertain receipt stops the job and is never replayed. Native code does not echo or save the input."
     : (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
     ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
     : toolName === "repository-pr-action" && isRegistered

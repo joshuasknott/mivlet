@@ -1,7 +1,7 @@
 use crate::{
     files, runtime,
     security::{self, wide, Attributes, Capability, Handle, Profile},
-    setup, Binding, CompletedRun, ExecutionMode, Limits, OutputLog, Receipt,
+    setup, Binding, CompletedRun, ExecutionMode, Limits, OutputLog, Receipt, SessionControl,
 };
 use std::{
     collections::BTreeMap,
@@ -170,7 +170,7 @@ fn pipe() -> Result<(Handle, Handle), String> {
     }
     Ok((read, write))
 }
-fn environment(root: &Path, system: &Path) -> Vec<u16> {
+fn environment(root: &Path, system: &Path, preview: Option<&crate::PreviewSpec>) -> Vec<u16> {
     let mut values = BTreeMap::new();
     let path = |name: &str| launch_path(&root.join(name)).to_string_lossy().into_owned();
     values.insert("APPDATA", path("home/appdata"));
@@ -204,6 +204,17 @@ fn environment(root: &Path, system: &Path) -> Vec<u16> {
     values.insert("PIP_CONFIG_FILE", "NUL".into());
     values.insert("PIP_DISABLE_PIP_VERSION_CHECK", "1".into());
     values.insert("PYTHONDONTWRITEBYTECODE", "1".into());
+    if let Some(preview) = preview {
+        values.insert("MIVLET_PREVIEW_PORT", preview.port.to_string());
+        values.insert("MIVLET_PREVIEW_PIPE", preview.pipe_name.clone());
+        values.insert(
+            "NODE_OPTIONS",
+            format!(
+                "--require=\"{}\"",
+                launch_path(&root.join("preview-bridge.cjs")).display()
+            ),
+        );
+    }
     let mut block = Vec::new();
     for (key, value) in values {
         block.extend(wide(format!("{key}={value}")));
@@ -337,9 +348,31 @@ pub(crate) fn run(
     binding: Binding,
     mode: ExecutionMode,
     output: OutputLog,
+    session: Option<SessionControl>,
     current: impl Fn() -> bool,
     launch: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<CompletedRun, String> {
+    struct CloseSession(Option<SessionControl>);
+    impl Drop for CloseSession {
+        fn drop(&mut self) {
+            if let Some(session) = &self.0 {
+                session.close();
+            }
+        }
+    }
+    let _close_session = CloseSession(session.clone());
+    if let Some(session) = &session {
+        session.check(&binding)?;
+    }
+    let options = session.as_ref().map(|s| s.options()).unwrap_or_default();
+    if mode != ExecutionMode::Persistent && (options.interactive || options.preview_port.is_some())
+    {
+        return Err(
+            "Interactive input and previews require an explicitly approved persistent session."
+                .into(),
+        );
+    }
+    let preview = session.as_ref().and_then(|s| s.preview_spec());
     if !cfg!(target_arch = "x86_64") {
         return Err("Native execution supports Windows x64.".into());
     }
@@ -361,6 +394,8 @@ pub(crate) fn run(
                 seconds,
                 mode == ExecutionMode::Persistent,
                 &binding,
+                options.interactive,
+                options.preview_port,
             ))
             .map_err(|_| "Invalid command identity.")?,
         ))
@@ -399,6 +434,13 @@ pub(crate) fn run(
         format!("@echo off\r\n{script}\r\n"),
     )
     .map_err(|_| "Cannot stage native execution command.")?;
+    if preview.is_some() {
+        fs::write(
+            root.join("preview-bridge.cjs"),
+            include_bytes!("../resources/preview-bridge.cjs"),
+        )
+        .map_err(|_| "Cannot stage the fixed private preview bridge.")?;
+    }
     let profile = Profile::create(&id)?;
     security::protect(root, &profile.text, "0x1000a0")?;
     protect_tree(&work, &profile.text, "0x1301bf")?;
@@ -406,6 +448,9 @@ pub(crate) fn run(
     protect_tree(&root.join("home"), &profile.text, "0x1301bf")?;
     protect_tree(&runtime_dir, &profile.text, "0x1200a9")?;
     security::protect(&root.join("command.cmd"), &profile.text, "0x1200a9")?;
+    if preview.is_some() {
+        security::protect(&root.join("preview-bridge.cjs"), &profile.text, "0x1200a9")?;
+    }
     let owner = security::user_sid()?;
     let traverse = setup::traversal(&owner)?;
     let registry = Capability::derive("registryRead")?;
@@ -441,9 +486,14 @@ pub(crate) fn run(
     let (stdout, stdout_write) = pipe()?;
     let (stderr, stderr_write) = pipe()?;
     let (stdin, stdin_write) = pipe()?;
-    // Read-only empty stdin is the only input handle. No host handle, job handle,
-    // provider IPC, process token, workspace store or secret file is inherited.
-    drop(stdin_write);
+    // Optional interactive stdin is still a private one-way pipe. No terminal,
+    // host handle, token, provider IPC or workspace authority is inherited.
+    let stdin_write = if options.interactive {
+        Some(stdin_write)
+    } else {
+        drop(stdin_write);
+        None
+    };
     unsafe {
         SetHandleInformation(stdin.0, HANDLE_FLAG_INHERIT, HANDLE_FLAG_INHERIT);
     }
@@ -484,7 +534,7 @@ pub(crate) fn run(
         exe.display(),
         launch_path(&root.join("command.cmd")).display()
     ));
-    let env = environment(root, &system);
+    let env = environment(root, &system, preview.as_ref());
     if !current() {
         return Err("Execution generation changed before launch.".into());
     }
@@ -518,6 +568,9 @@ pub(crate) fn run(
     }
     let token = Handle::checked(token, "Verify execution token")?;
     boundary(token.0, &profile)?;
+    if let Some(session) = &session {
+        session.install(stdin_write, &job.0, &profile.text, &input_id)?;
+    }
     drop(stdin);
     drop(stdout_write);
     drop(stderr_write);

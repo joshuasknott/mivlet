@@ -100,6 +100,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 64] = [
     "command-jobs",
     "command-output",
     "command-stop",
+    "command-input",
     "repository-checkpoint-list",
     "repository-checkpoint-capture",
     "repository-checkpoint-preview",
@@ -333,7 +334,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "repository-status" | "repository-read" | "command-jobs" | "command-output" => {
             Some(("read-only", "low"))
         }
-        "command-stop" => Some(("full-access", "high")),
+        "command-stop" | "command-input" => Some(("full-access", "high")),
         "repository-write" | "repository-commit" => Some(("full-access", "high")),
         "repository-run" | "repository-start" | "repository-publish" | "workspace-run"
         | "workspace-start" => Some(("full-access", "critical")),
