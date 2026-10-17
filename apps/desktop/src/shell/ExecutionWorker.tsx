@@ -340,7 +340,7 @@ export function ExecutionWorker({
           CONVERSATION_STYLE_INSTRUCTIONS,
           generatedUiInstructions,
           tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
-          tools.some(tool => tool.name === "local-browser-observe") ? "Owned browser: select sole window, list/observe exact origin, act once, verify. tabRefs 60s; input refs 30s/single-use. Blank: navigate only. Click fully visible buttons/HTTP links; scroll public center up/down <=600px. May submit/download/run handlers. No tab switching/forms/JS/file import. Unknown input: fresh request, never replay." : "",
+          tools.some(tool => tool.name === "local-browser-observe") ? "Owned browser: select exact window, list/observe exact origin, use only advertised fresh single-use ref tools, act once, verify. Blank: navigate only. Activate only the observed tab; fill only empty public text fields. An approved passive download closes the owned browser before private workspace import. Handover persists attention and requires explicit Continue. No arbitrary JS or private fields. Unknown input: fresh request, never replay." : "",
           builtinPluginInstructions(
             session.work.prompt,
             staged.node?.plugins,
