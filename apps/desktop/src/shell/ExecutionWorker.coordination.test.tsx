@@ -319,7 +319,10 @@ describe("ExecutionWorker coordination reachability", () => {
     await waitFor(() => expect(selectedRuntime.assembleConversationContext).toHaveBeenCalled());
     setup.setCurrent(false);
     view.unmount();
-    await act(async () => finish({ messages: [{ role: "user", content: "prepared too late" }] } as PreparedContext));
+    await act(async () => finish({ systemPrefix: "prepared too late", receipt: {
+      version: 1, attemptId: "attempt-lead", assembledAt: "2026-10-17T00:00:00.000Z",
+      scope: { level: "thread", threadId: "conversation-direct" }, citations: [], contributions: [],
+    } }));
     await waitFor(() => expect(setup.service.released).toHaveBeenCalled());
     expect(harness.run).not.toHaveBeenCalled();
     expect(setup.commands).not.toContainEqual(expect.objectContaining({ action: "bind-work" }));
