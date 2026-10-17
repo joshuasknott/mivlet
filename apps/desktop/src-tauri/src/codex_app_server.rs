@@ -26,6 +26,10 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
+#[path = "codex_app_server/steering.rs"]
+mod steering;
+pub(crate) use steering::{steer_active_turn, SteeringDelivery};
+
 const CODEX_LOGIN_START_TIMEOUT: Duration = Duration::from_secs(20);
 const CODEX_LOGIN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -1026,7 +1030,7 @@ fn read_codex_stdout(
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
-        observe_steering_route(&request.request_id, &value);
+        steering::observe_route(&request.request_id, &value);
         if crate::provider_usage::codex_event_is_limit(&value) {
             crate::provider_usage::record_limit_failure("codex", request.options.run_id.as_deref());
         }
@@ -1695,128 +1699,6 @@ fn approval_rpc_id(encoded: &str) -> Value {
     serde_json::from_str(encoded).unwrap_or_else(|_| Value::String(encoded.to_string()))
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum SteeringDelivery {
-    Accepted,
-    Rejected,
-    Uncertain,
-}
-impl SteeringDelivery {
-    pub(crate) fn as_str(self) -> &'static str {
-        match self {
-            Self::Accepted => "accepted",
-            Self::Rejected => "rejected",
-            Self::Uncertain => "uncertain",
-        }
-    }
-}
-
-fn steering_reply_accepted(value: &Value, expected: &str) -> bool {
-    value.get("method").is_none()
-        && value.get("error").is_none()
-        && value.pointer("/result/turnId").and_then(Value::as_str) == Some(expected)
-}
-
-fn observe_steering_route(request_id: &str, value: &Value) {
-    let Ok(mut runs) = active_runs().lock() else {
-        return;
-    };
-    let Some(run) = runs.get_mut(request_id) else {
-        return;
-    };
-    if let Some(id) = value
-        .get("id")
-        .and_then(Value::as_str)
-        .filter(|_| value.get("method").is_none())
-    {
-        if let Some((expected, sender)) = run.steering.remove(id) {
-            let _ = sender.send(steering_reply_accepted(value, &expected));
-        }
-    }
-    if is_rpc_response(value, 2) {
-        run.thread_id = value
-            .pointer("/result/thread/id")
-            .and_then(Value::as_str)
-            .map(Into::into);
-    }
-    match value.get("method").and_then(Value::as_str) {
-        Some("turn/started") => {
-            run.turn_id = value
-                .pointer("/params/turn/id")
-                .and_then(Value::as_str)
-                .map(Into::into)
-        }
-        Some("turn/completed") => run.turn_id = None,
-        _ => {}
-    }
-}
-
-/// Official turn/steer protocol: exact active thread and expectedTurnId come
-/// only from this adapter's observed events. No renderer-supplied provider IDs.
-/// An acknowledgement confirms acceptance, not that earlier actions were undone.
-pub(crate) fn steer_active_turn(attempt: &str, event: &str, text: &str) -> SteeringDelivery {
-    if crate::execution_control::ensure_active_execution_allowed().is_err() {
-        return SteeringDelivery::Rejected;
-    }
-    let Ok(fence) = crate::account_session::AccountDispatchFence::capture() else {
-        return SteeringDelivery::Rejected;
-    };
-    let rpc = format!("mivlet-steer:{event}");
-    let (send, receive) = mpsc::channel();
-    let prepared = fence.with_current(|| {
-        let mut runs = active_runs().lock().map_err(|_| "Codex state is unavailable.")?;
-        let run = runs.values_mut().find(|run| run.run_id.as_deref() == Some(attempt)).ok_or("The exact Codex attempt is no longer active.")?;
-        let thread = run.thread_id.clone().ok_or("The Codex thread has not started.")?;
-        let turn = run.turn_id.clone().ok_or("The Codex turn has already ended or has not started.")?;
-        if run.steering.len() >= 16 || *run.image_delivery_stopped.lock().map_err(|_| "Codex was stopped.")? {
-            return Err("Codex steering is unavailable.".into());
-        }
-        run.steering.insert(rpc.clone(), (turn.clone(), send));
-        Ok((run.stdin.clone(), run.image_delivery_stopped.clone(), json!({"id":rpc,"method":"turn/steer","params":{"threadId":thread,"expectedTurnId":turn,"input":[{"type":"text","text":text.trim()}]}})))
-    });
-    let Ok((writer, stopped, payload)) = prepared else {
-        return SteeringDelivery::Rejected;
-    };
-    // A stalled provider pipe must not retain the global run registry lock:
-    // Stop/shutdown can always remove the run and terminate its child.
-    let write = fence.with_current(|| {
-        if *stopped
-            .lock()
-            .map_err(|_| "Codex stop state is unavailable.")?
-        {
-            return Err("Codex was stopped.".into());
-        }
-        write_json_line(&writer, &payload)
-    });
-    if write.is_err() {
-        // Before registration, nothing was sent. A registered write failure may
-        // have delivered a prefix, so it must never be retried automatically.
-        if let Ok(mut runs) = active_runs().lock() {
-            if let Some(run) = runs
-                .values_mut()
-                .find(|run| run.run_id.as_deref() == Some(attempt))
-            {
-                run.steering.remove(&rpc);
-            }
-        }
-        return SteeringDelivery::Uncertain;
-    }
-    let delivery = match receive.recv_timeout(Duration::from_secs(3)) {
-        Ok(true) => SteeringDelivery::Accepted,
-        Ok(false) => SteeringDelivery::Rejected,
-        Err(_) => SteeringDelivery::Uncertain,
-    };
-    if let Ok(mut runs) = active_runs().lock() {
-        if let Some(run) = runs
-            .values_mut()
-            .find(|run| run.run_id.as_deref() == Some(attempt))
-        {
-            run.steering.remove(&rpc);
-        }
-    }
-    delivery
-}
-
 // JSON-RPC peers own independent request-id spaces. Server tool requests can
 // reuse our thread/start id and must never be interpreted as its response.
 fn is_rpc_response(value: &Value, id: i64) -> bool {
@@ -1827,26 +1709,10 @@ fn is_rpc_response(value: &Value, id: i64) -> bool {
 
 #[tauri::command]
 pub fn interrupt_codex_app_server_turn(request: CodexInterruptRequest) -> Result<(), String> {
-    let runs = active_runs()
-        .lock()
-        .map_err(|_| "Mivlet could not access Codex app-server state.".to_string())?;
-    let run = runs
-        .get(&request.request_id)
-        .ok_or_else(|| "Codex app-server run is no longer active.".to_string())?;
-    *run.image_delivery_stopped
-        .lock()
-        .map_err(|_| "Image delivery state is unavailable.")? = true;
-    let Some(turn_id) = request.turn_id else {
-        return Ok(());
-    };
-    write_json_line(
-        &run.stdin,
-        &json!({
-            "id": 9,
-            "method": "turn/interrupt",
-            "params": { "threadId": request.thread_id, "turnId": turn_id }
-        }),
-    )
+    // Sessions are ephemeral; Mivlet owns durable history. Stop must terminate
+    // the exact child independently of a full stdin pipe or stalled RPC.
+    let _ = (&request.thread_id, &request.turn_id);
+    shutdown_codex_app_server_turn(request.request_id)
 }
 
 #[tauri::command]
@@ -1936,30 +1802,6 @@ fn public_web_search_event(value: &Value) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn steering_receipts_accept_only_the_exact_turn_response() {
-        use serde_json::json;
-        assert!(super::steering_reply_accepted(
-            &json!({"result":{"turnId":"active-turn"}}),
-            "active-turn"
-        ));
-        assert!(!super::steering_reply_accepted(
-            &json!({"result":{"turnId":"newer-turn"}}),
-            "active-turn"
-        ));
-        assert!(!super::steering_reply_accepted(
-            &json!({"error":{"code":-32601},"result":{"turnId":"active-turn"}}),
-            "active-turn"
-        ));
-        assert!(!super::steering_reply_accepted(
-            &json!({"method":"item/tool/call","result":{"turnId":"active-turn"}}),
-            "active-turn"
-        ));
-        assert!(!super::steering_reply_accepted(
-            &json!({"result":{}}),
-            "active-turn"
-        ));
-    }
     fn desktop_pending() -> super::PendingApproval {
         super::PendingApproval {
             kind: super::ApprovalKind::DynamicTool,
