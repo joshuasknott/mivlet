@@ -106,6 +106,7 @@ fn callback_rejects_state_issuer_duplicates_and_expired_browser() {
 #[tokio::test]
 async fn remote_http_is_opt_in_and_rejects_cross_origin_writes_and_mcp_cookie_auth() {
     use std::future::IntoFuture;
+    crate::ensure_rustls_provider();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
     let origin = format!("http://{address}");
