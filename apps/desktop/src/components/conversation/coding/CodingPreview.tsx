@@ -164,6 +164,7 @@ function PreviewSession({ target, readPreview, closePreview, validatePreviewPick
     {error && <p role="alert">{error}</p>}
     {state && state.status !== "ready" && <p className="coding-result__notice">{state.message}</p>}
     {preview && <><p className="coding-preview__address">Running preview</p><iframe ref={iframe} key={`${preview.id}:${preview.revision}`} src={preview.url} title="Running project preview" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { setLoaded(true); setError(""); }} onError={() => { setError("The preview could not load. Refresh to reconnect."); setLoaded(false); }} /></>}
+    {preview && <p className="coding-result__notice">This session holds the project files. Stop it before editing, then start a new preview.</p>}
     {picking && <p className="coding-result__notice" role="status">Select a public page element, or choose Cancel picking.</p>}
     {validating && <p className="coding-result__notice" role="status">Checking the selected element…</p>}
     {selection && <form className="coding-preview__feedback" onSubmit={(event) => {
