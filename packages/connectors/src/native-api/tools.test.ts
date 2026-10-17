@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NativeCompletionRequest } from "@mivlet/protocol";
 import { shapeAnthropicRequest } from "./anthropic";
 import { shapeOpenAiRequest } from "./openai-compat";
-import { registeredToolSpecs } from "./tools";
+import { lookupTool, registeredToolSpecs } from "./tools";
 
 const actionTools = registeredToolSpecs().filter((tool) =>
   ["local-app-action", "local-desktop-action"].includes(tool.name)
@@ -22,7 +22,7 @@ describe("native application action schemas", () => {
     expect(schema.required).toEqual(["fieldRef","origin","name","text"]);
     expect(Object.keys(schema.properties)).toEqual(["fieldRef","origin","name","text"]);
     expect(schema.additionalProperties).toBe(false);
-    expect(tool.defaultRisk).toBe("critical");
+    expect(lookupTool(tool.name)?.defaultRisk).toBe("critical");
   });
   it("offers explicit owned-tab activation with no raw browser target or script input", () => {
     const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-activate")!;
@@ -30,7 +30,7 @@ describe("native application action schemas", () => {
     expect(schema.required).toEqual(["activationRef", "origin"]);
     expect(Object.keys(schema.properties)).toEqual(["activationRef", "origin"]);
     expect(schema.additionalProperties).toBe(false);
-    expect(tool.defaultRisk).toBe("high");
+    expect(lookupTool(tool.name)?.defaultRisk).toBe("high");
   });
   it("shares bounded browser scrolling without coordinate, amount or script inputs", () => {
     const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-scroll")!;
