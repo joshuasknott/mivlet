@@ -59,6 +59,54 @@ pub(crate) async fn hosted_task_prepare_public_web(
     }
     prepare_review(&app, &state, request).await
 }
+#[tauri::command]
+pub(crate) async fn hosted_task_prepare_coding(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Arc<LocalComputerState>>,
+    request: Prepare,
+) -> Result<Review, String> {
+    main(&window)?;
+    crate::execution_control::ensure_active_execution_allowed()?;
+    let (selected, reviewed_scope) = super::coding::requested(&request)?;
+    valid_id(&request.credential_id)?;
+    let ticket = ticket(&state, &request.workspace_id, &request.agent_id)?;
+    let (request, originally_held) = hosted::begin_prepare(&app, &ticket, &request)?;
+    let scope = transport::cloud_scope()?;
+    let (connections, runner) = transport::connections(&ticket, &scope, &request.agent_id).await?;
+    let task = crate::local_computer::coding::hosted_repository::TaskIdentity {
+        local_workspace_id: request.workspace_id.clone(),
+        agent_id: request.agent_id.clone(),
+        work_id: request.work_id.clone(),
+        work_generation: request.expected_generation,
+        task_id: opaque("task")?,
+        run_id: opaque("cloud-run")?,
+    };
+    let snapshot = crate::local_computer::coding::hosted_repository::capture_snapshot(
+        &app,
+        &state,
+        &ticket,
+        &task,
+        &selected,
+        &reviewed_scope.writable_paths,
+    )?;
+    commit(&ticket, || {
+        hosted::prepare_coding(
+            &app,
+            &ticket,
+            &request,
+            &scope,
+            &runner,
+            &connections,
+            originally_held,
+            &task,
+            CodingRepository {
+                snapshot,
+                scope: reviewed_scope,
+            },
+        )
+    })
+}
 async fn prepare_review(
     app: &tauri::AppHandle,
     state: &LocalComputerState,
@@ -153,8 +201,44 @@ pub(crate) async fn hosted_text_admit(
     .await;
     match sent {
         Ok((value, _)) => {
-            let snapshot = serde_json::from_value(value)
+            let snapshot: TaskSnapshot = serde_json::from_value(value)
                 .map_err(|_| "Cloud admission is uncertain. Refresh its exact saved task.")?;
+            if offer.admission.binding.version == 3 && snapshot.status == "queued" {
+                commit(&ticket, || {
+                    hosted::result(
+                        &app,
+                        &ticket,
+                        &target,
+                        Some(TaskResult {
+                            snapshot,
+                            text: String::new(),
+                        }),
+                    )
+                })?;
+                return match super::coding_transfer::upload(
+                    &app,
+                    &state,
+                    &ticket,
+                    &target.workspace_id,
+                    &scope,
+                    &offer,
+                )
+                .await
+                {
+                    Ok(snapshot) => commit(&ticket, || {
+                        hosted::result(
+                            &app,
+                            &ticket,
+                            &target,
+                            Some(TaskResult {
+                                snapshot,
+                                text: String::new(),
+                            }),
+                        )
+                    }),
+                    Err(_) => hosted::result(&app, &ticket, &target, None),
+                };
+            }
             commit(&ticket, || {
                 hosted::result(
                     &app,
@@ -228,7 +312,7 @@ async fn refresh(
         let (value, _) = transport::call(&ticket, &scope, &target.agent_id, "tasks", &offer.admission.binding.task_id, "cancel", json!({"taskId":offer.admission.binding.task_id,"generation":result.snapshot.generation}), None, Some(&offer.runner_url), None).await?;
         let snapshot: TaskSnapshot = serde_json::from_value(value)
             .map_err(|_| "Cloud cancellation is still pending. Refresh its exact saved task.")?;
-        if snapshot.status == "completed" {
+        if matches!(snapshot.status.as_str(), "completed" | "needs-review") {
             // Completion may win a server-side cancel race. Only a new native
             // authenticated full read can provide that terminal answer.
             let (value, _) = transport::call(
@@ -262,9 +346,36 @@ async fn refresh(
             )
         });
     }
-    commit(&ticket, || {
-        hosted::result(app, &ticket, target, Some(result))
-    })
+    let control = commit(&ticket, || {
+        hosted::result(app, &ticket, target, Some(result.clone()))
+    })?;
+    if offer.admission.binding.version == 3
+        && matches!(
+            result.snapshot.status.as_str(),
+            "completed" | "needs-review"
+        )
+    {
+        let (current, _) = hosted::load(app, target)?;
+        if current.hosted_task.as_ref().is_some_and(|coding| {
+            matches!(
+                coding.phase.as_str(),
+                "awaiting-import" | "scope-change-required"
+            )
+        }) {
+            super::coding_transfer::receive(
+                app,
+                state,
+                &ticket,
+                &target.workspace_id,
+                &scope,
+                &offer,
+                &result,
+            )
+            .await?;
+            return commit(&ticket, || hosted::result(app, &ticket, target, None));
+        }
+    }
+    Ok(control)
 }
 #[tauri::command]
 pub(crate) async fn hosted_text_refresh(
