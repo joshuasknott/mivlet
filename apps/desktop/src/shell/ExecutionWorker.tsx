@@ -44,6 +44,7 @@ import { coordinationResource } from "../lib/coordination-resources";
 import { discardRuntimeLocalComputerAttachmentBatch } from "../runtime/domains/local-computer";
 import { applyProviderContinuation, providerContinuationHistory } from "../lib/provider-continuation";
 import { readProviderContinuation } from "../runtime/domains/provider-continuation";
+import { prepareSharedExecutionAttachments, sharedRequestAttachmentIds } from "../lib/shared-execution-attachments";
 
 /** Mounted by the workspace root, never by a tab. Each admission runs once. */
 export function ExecutionWorker({
@@ -223,7 +224,12 @@ export function ExecutionWorker({
         );
         if (!validation.ok)
           throw new Error(validation.error ?? "This model is unavailable.");
-        const resolved = resolveWorkAttachments(session.attachments, session.work);
+        const requestRoot = service.getSnapshot().data.work.find(work => work.id === session.work.rootId);
+        const inherited = sharedRequestAttachmentIds(session.work, requestRoot).length
+          ? await prepareSharedExecutionAttachments({ work: session.work, root: requestRoot, attachments: session.attachments,
+              node: await controller.localComputer.refresh(), isCurrent: () => service.current(session) })
+          : session.attachments;
+        const resolved = resolveWorkAttachments(inherited, session.work);
         if (resolved.error) throw new Error(resolved.error);
         controller.resetCancellation();
         const staged = await prepareExecutionAttachments(
