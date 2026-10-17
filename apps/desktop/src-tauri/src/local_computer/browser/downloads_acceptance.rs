@@ -86,7 +86,8 @@ pub(super) fn run(
         .prefix("download-workspace-")
         .tempdir_in(native_root)
         .map_err(|_| "Download QA workspace unavailable.")?;
-    let workspace = crate::paths::strict_canonicalize(workspace_root.path()).map_err(|_|"Download QA workspace failed validation.")?;
+    let workspace = crate::paths::strict_canonicalize(workspace_root.path())
+        .map_err(|_| "Download QA workspace failed validation.")?;
     let transferred = process.download(hwnd, 1, &input, native_root, check, dispatch)?;
     let result = transferred.finish(&input, native_root, &workspace, check, &|action| action())?;
     let result: Value =
