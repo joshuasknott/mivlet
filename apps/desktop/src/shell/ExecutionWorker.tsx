@@ -117,6 +117,8 @@ export function ExecutionWorker({
               ? "delegate"
               : name === "teammate-message"
                 ? "message"
+                : name === "goal-report"
+                  ? "goal-report"
               : name === "project-record"
                 ? "record-fact"
                 : "await-user",
@@ -223,16 +225,6 @@ export function ExecutionWorker({
           throw new Error(validation.error ?? "This model is unavailable.");
         const resolved = resolveWorkAttachments(session.attachments, session.work);
         if (resolved.error) throw new Error(resolved.error);
-        const images = composerImageInputs(resolved.attachments);
-        if (!images.ok) throw new Error(images.error);
-        if (
-          images.images.length &&
-          !supportsUserImageInput(provider, { id: session.model.modelId,
-            available: true, capabilities: session.model.capabilities })
-        )
-          throw new Error(
-            "Reattach images with a supported Codex/Claude model.",
-          );
         controller.resetCancellation();
         const staged = await prepareExecutionAttachments(
           resolved.attachments,
@@ -241,6 +233,11 @@ export function ExecutionWorker({
           session.work.agentId,
           () => service.current(session),
         );
+        const images = composerImageInputs(staged.attachments);
+        if (!images.ok) throw new Error(images.error);
+        if (images.images.length && !supportsUserImageInput(provider, { id: session.model.modelId,
+          available: true, capabilities: session.model.capabilities }))
+          throw new Error("Choose a supported image-capable model before continuing this request.");
         if (!service.current(session)) return;
         if (!session.attachments.length) {
           // Continued assignments recover durable workspace refs; files that
@@ -300,7 +297,9 @@ export function ExecutionWorker({
           provider.capabilities.includes("approvals") &&
           session.model.capabilities?.tools !== false;
         if (toolCapable)
-          tools.push(...collaborationToolSpecs(projectMember, Boolean(session.work.continuation)));
+          tools.push(...collaborationToolSpecs(projectMember, Boolean(session.work.continuation), Boolean(session.work.outcomeGoal)));
+        if (session.work.outcomeGoal && !toolCapable)
+          throw new Error("Outcome goals require a provider route with Mivlet coordination tools. Choose a supported model and explicitly continue.");
         if (room.kind === "group" && !toolCapable)
           throw new Error(
             "This model does not support the collaboration tools. Choose a tool-capable model for this participant.",

@@ -118,6 +118,22 @@ function fixture(work: CollaborationWorkItem[]) {
 }
 
 describe("native background custody", () => {
+  it("honors canonical queue order and held roots before creating sessions", async () => {
+    const { service } = fixture([
+      fixtureWork("held", "a", { queue: { held: true, order: 1 } }),
+      fixtureWork("later", "b", { queue: { held: false, order: 3 } }),
+      fixtureWork("first", "b", { queue: { held: false, order: 2 } }),
+    ]);
+    await service.refresh();
+    service.admit(agents, models, [provider], "full-access");
+    expect(service.getSnapshot().sessions.map(session => session.work.id)).toEqual(["first"]);
+  });
+  it("submits a goal atomically with its original request and exact attachment references", async () => {
+    const { service, command } = fixture([]);
+    const goal = { objective: "Finish report", successCriteria: "Citations checked", maxTurns: 4, maxTokens: 32000 };
+    await service.submit("room", "a", "Write the report", false, [], undefined, undefined, "goal-request", goal);
+    expect(command).toHaveBeenCalledWith("fixture", expect.objectContaining({ action: "start-work", id: "goal-request", prompt: "Write the report", outcomeGoal: goal, attachments: [] }));
+  });
   it("never admits native Work into a renderer provider session", async () => {
     const { service } = fixture([fixtureWork("background", "a", { executionOwner: "native-background" })]);
     await service.refresh();
@@ -355,7 +371,10 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
       [provider, other],
       "trusted-scope",
     );
-    const [root, child, unrelated] = service.getSnapshot().sessions;
+    const sessions = new Map(service.getSnapshot().sessions.map(session => [session.work.id, session]));
+    const root = sessions.get("root")!;
+    const child = sessions.get("child")!;
+    const unrelated = sessions.get("other")!;
     let finish!: () => void;
     root.cancel = vi.fn(
       () =>

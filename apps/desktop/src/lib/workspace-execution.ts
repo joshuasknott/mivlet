@@ -6,6 +6,7 @@ import type {
   MivletAgentProfile,
   PermissionMode,
   WorkAttachment,
+  OutcomeGoalInput,
 } from "@mivlet/protocol";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
 import type { ComposerAttachment } from "./types";
@@ -24,6 +25,7 @@ import {
 } from "./provider-models";
 import { ExecutionApprovalRouter } from "./execution-approvals";
 import { permissionModeFor } from "./agent-run";
+import { compareQueuedWork, workCanDispatch } from "./work-queue";
 
 export const activeWork = (work: CollaborationWorkItem) =>
   ["queued", "running", "waiting", "awaiting-approval"].includes(work.status);
@@ -43,6 +45,7 @@ export function composerAttachmentRefs(
   attachments: readonly ComposerAttachment[],
 ): WorkAttachment[] {
   return attachments.map((attachment) => {
+    if (attachment.durableRef) return attachment.durableRef;
     if (attachment.workspaceFile)
       return {
         id: attachment.id,
@@ -353,9 +356,7 @@ export class WorkspaceExecution {
         conversations: [...data.conversations].sort((a, b) =>
           a.updatedAt.localeCompare(b.updatedAt),
         ),
-        work: [...data.work].sort((a, b) =>
-          a.createdAt.localeCompare(b.createdAt),
-        ),
+        work: [...data.work].sort(compareQueuedWork),
         facts: [...data.facts].sort((a, b) =>
           a.createdAt.localeCompare(b.createdAt),
         ),
@@ -391,6 +392,9 @@ export class WorkspaceExecution {
       text,
     });
   }
+  liveSteer(id: string, expectedGeneration: number, text: string) {
+    return this.command({ action: "live-steer-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
+  }
   async submit(
     conversationId: string,
     agentId: string,
@@ -400,6 +404,7 @@ export class WorkspaceExecution {
     recipientIds?: string[],
     parentMessageId?: string,
     requestId?: string,
+    outcomeGoal?: OutcomeGoalInput,
   ) {
     const id = requestId ?? `work-${crypto.randomUUID()}`;
     this.attachments.set(id, [...attachments]);
@@ -407,6 +412,7 @@ export class WorkspaceExecution {
     try {
       await this.command({
         action: "start-work",
+        outcomeGoal,
         id,
         conversationId,
         agentId,
@@ -436,6 +442,7 @@ export class WorkspaceExecution {
     for (const work of this.state.data.work.filter(
       (work) => work.status === "queued" && work.executionOwner !== "native-background",
     )) {
+      if (!workCanDispatch(work, this.state.data.work)) continue;
       if (work.schedule && !this.scheduled.has(work.id)) continue;
       const external = this.state.data.work.filter(
         (work) =>

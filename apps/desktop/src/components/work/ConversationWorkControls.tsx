@@ -1,0 +1,129 @@
+import { useState } from "react";
+import { ArrowUp } from "@phosphor-icons/react/dist/csr/ArrowUp";
+import { ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";
+import { PencilSimple } from "@phosphor-icons/react/dist/csr/PencilSimple";
+import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
+import { Pause } from "@phosphor-icons/react/dist/csr/Pause";
+import { Play } from "@phosphor-icons/react/dist/csr/Play";
+import { Target } from "@phosphor-icons/react/dist/csr/Target";
+import { ListBullets } from "@phosphor-icons/react/dist/csr/ListBullets";
+import type { CollaborationWorkItem, OutcomeGoalInput } from "@mivlet/protocol";
+import type { WorkspaceExecution } from "../../lib/workspace-execution";
+import { editableQueue } from "../../lib/work-queue";
+import "./conversation-work-controls.css";
+
+const goalLabels = { active: "In progress", paused: "Paused", completed: "Agent reports achieved", blocked: "Needs your input", "budget-exhausted": "Budget reached" };
+
+/** Compact controls over native Work, never a second queue or execution owner. */
+export function ConversationWorkControls({ work, conversationId, service, goalDraft, onGoalDraftChange, disabled = false }: {
+  work: CollaborationWorkItem[];
+  conversationId: string;
+  service: WorkspaceExecution;
+  goalDraft?: OutcomeGoalInput;
+  onGoalDraftChange: (goal: OutcomeGoalInput | undefined) => void;
+  disabled?: boolean;
+}) {
+  const queue = editableQueue(work, conversationId);
+  const roots = work.filter(item => item.conversationId === conversationId && !item.parentId);
+  const goalWork = [...roots].reverse().find(item => item.outcomeGoal && item.status !== "cancelled");
+  const active = [...roots].reverse().find(item => item.status === "running" || item.status === "awaiting-approval");
+  const [pending, setPending] = useState(false);
+  const [error, setError] = useState("");
+  const [editing, setEditing] = useState<string>();
+  const [editText, setEditText] = useState("");
+  const [page, setPage] = useState(0);
+  const [goalForm, setGoalForm] = useState(false);
+  const [details, setDetails] = useState(false);
+  const [objective, setObjective] = useState(goalDraft?.objective ?? "");
+  const [criteria, setCriteria] = useState(goalDraft?.successCriteria ?? "");
+  const [turns, setTurns] = useState(goalDraft?.maxTurns ?? 6);
+  const [tokens, setTokens] = useState(goalDraft?.maxTokens ?? 128000);
+  const [guiding, setGuiding] = useState(false);
+  const [guidance, setGuidance] = useState("");
+  const [guidanceState, setGuidanceState] = useState("");
+  const busy = pending || disabled;
+  const action = async (operation: () => Promise<unknown>, done?: () => void) => {
+    if (busy) return;
+    setPending(true); setError("");
+    try { await operation(); done?.(); }
+    catch (failure) { setError(failure instanceof Error ? failure.message : "This Work changed. Refresh before trying again."); }
+    finally { setPending(false); }
+  };
+  const goal = goalDraft ?? goalWork?.outcomeGoal;
+  const pageIndex = Math.min(page, Math.max(0, Math.ceil(queue.length / 6) - 1));
+  const live = Boolean(active?.status === "running" && active.modelOptionId.startsWith("codex::") && !active.executionOwner);
+  const lastLive = active?.liveSteering?.at(-1);
+  return <section className="conversation-work-controls" aria-label="Goal and queued requests">
+    {goal ? <div className="conversation-goal-row">
+      <Target size={20} aria-hidden="true" />
+      <div className="conversation-goal-name"><span>{goalDraft ? "Next request goal" : "Goal"}: {goal.objective}</span>
+        <small>{goalDraft ? `${goalDraft.maxTurns} turns · ${goalDraft.maxTokens.toLocaleString()} tokens` : goalLabels[goalWork!.outcomeGoal!.status]}</small>
+      </div>
+      <div className="conversation-work-actions">
+        {goalDraft ? <button type="button" disabled={busy} onClick={() => onGoalDraftChange(undefined)} aria-label="Remove goal from next request"><Trash size={16} aria-hidden="true" /></button>
+          : goalWork && ["active", "paused"].includes(goalWork.outcomeGoal!.status) && ["queued", "running", "waiting", "awaiting-approval"].includes(goalWork.status)
+            ? <button type="button" disabled={busy} onClick={() => void action(() => service.command({ action: "set-goal-paused", id: goalWork.id, expectedGeneration: goalWork.generation, paused: goalWork.outcomeGoal!.status !== "paused" }))}>
+              {goalWork.outcomeGoal!.status === "paused" ? <Play size={15} aria-hidden="true" /> : <Pause size={15} aria-hidden="true" />}
+              {goalWork.outcomeGoal!.status === "paused" ? "Resume" : "Pause"}
+            </button> : null}
+        <button type="button" aria-expanded={details} onClick={() => setDetails(!details)}><ListBullets size={16} aria-hidden="true" />Details</button>
+      </div>
+    </div> : <button className="conversation-goal-add" type="button" disabled={busy} onClick={() => setGoalForm(!goalForm)} aria-expanded={goalForm}><Target size={16} aria-hidden="true" />Add an outcome goal</button>}
+    {details && goal ? <div className="conversation-work-detail">
+      <p>{goal.successCriteria}</p>
+      {goalWork && !goalDraft ? <><p>{goalWork.turnCount}/{goalWork.maxTurns} turns · {goalWork.tokenUsage.toLocaleString()}/{goalWork.maxTokens.toLocaleString()} reported tokens. Pause takes effect after the current turn.</p>
+        {goalWork.outcomeGoal?.report ? <p>{goalWork.outcomeGoal.report.text}</p> : null}
+        <p>Progress and completion are the agent’s reports. Saved results retain their source; approvals remain exact.</p></> : <p>This goal starts when you send the next request.</p>}
+    </div> : null}
+    {goalForm ? <form className="conversation-work-form" onSubmit={event => {
+      event.preventDefault();
+      onGoalDraftChange({ objective: objective.trim(), successCriteria: criteria.trim(), maxTurns: turns, maxTokens: tokens });
+      setGoalForm(false);
+    }}>
+      <label>Outcome<input value={objective} onChange={event => setObjective(event.target.value)} required maxLength={2000} placeholder="What should be true when the work is finished?" /></label>
+      <label>Success criteria<textarea value={criteria} onChange={event => setCriteria(event.target.value)} required maxLength={4000} rows={2} placeholder="Evidence the agent should check before reporting success" /></label>
+      <div className="conversation-goal-budgets"><label>Turn limit<input type="number" min={1} max={24} required value={turns} onChange={event => setTurns(event.target.valueAsNumber)} /></label>
+        <label>Token limit<input type="number" min={1000} max={512000} step={1000} required value={tokens} onChange={event => setTokens(event.target.valueAsNumber)} /></label></div>
+      <div className="conversation-work-actions"><button type="submit" disabled={busy || !objective.trim() || !criteria.trim()}>Use for next request</button><button type="button" onClick={() => setGoalForm(false)}>Cancel</button></div>
+    </form> : null}
+    {queue.length ? <div className="conversation-work-queue">
+      <p className="conversation-queue-label">Up next · {queue.length}</p>
+      <ol start={pageIndex * 6 + 1}>
+        {queue.slice(pageIndex * 6, pageIndex * 6 + 6).map((item, offset) => {
+          const index = pageIndex * 6 + offset;
+          return <li key={item.id}>
+            <span className="conversation-queue-number" aria-hidden="true">{index + 1}</span>
+            {editing === item.id ? <form className="conversation-work-form" onSubmit={event => { event.preventDefault(); void action(() => service.command({ action: "edit-queued-work", id: item.id, expectedGeneration: item.generation, prompt: editText }), () => setEditing(undefined)); }}>
+              <label>Edit queued request<textarea autoFocus required maxLength={32000} rows={2} value={editText} onChange={event => setEditText(event.target.value)} /></label>
+              <div className="conversation-work-actions"><button type="submit" disabled={busy || !editText.trim()}>Save</button><button type="button" disabled={busy} onClick={() => setEditing(undefined)}>Cancel</button></div>
+            </form> : <>
+              <div className="conversation-queue-message"><span>{item.userRequest}</span><small>{item.agentName}{item.queue?.held ? " · Paused" : ""}{item.attachments?.length ? ` · ${item.attachments.length} attached` : ""}</small></div>
+              <div className="conversation-work-actions">
+                <button type="button" title="Move up" aria-label={`Move queued request ${index + 1} up`} disabled={busy || index === 0} onClick={() => void action(() => service.command({ action: "move-queued-work", id: item.id, expectedGeneration: item.generation, beforeId: queue[index - 1].id }))}><ArrowUp size={16} aria-hidden="true" /></button>
+                <button type="button" title="Move down" aria-label={`Move queued request ${index + 1} down`} disabled={busy || index === queue.length - 1} onClick={() => void action(() => service.command({ action: "move-queued-work", id: item.id, expectedGeneration: item.generation, beforeId: queue[index + 2]?.id }))}><ArrowDown size={16} aria-hidden="true" /></button>
+                <button type="button" title={item.queue?.held ? "Resume" : "Pause"} aria-label={`${item.queue?.held ? "Resume" : "Pause"} queued request ${index + 1}`} disabled={busy} onClick={() => void action(() => service.command({ action: "set-work-held", id: item.id, expectedGeneration: item.generation, held: !item.queue?.held }))}>{item.queue?.held ? <Play size={16} aria-hidden="true" /> : <Pause size={16} aria-hidden="true" />}</button>
+                <button type="button" title="Edit" aria-label={`Edit queued request ${index + 1}`} disabled={busy} onClick={() => { setEditText(item.userRequest); setEditing(item.id); }}><PencilSimple size={17} aria-hidden="true" /></button>
+                <button type="button" title="Remove" aria-label={`Remove queued request ${index + 1}`} disabled={busy} onClick={() => void action(() => service.stop(item.id))}><Trash size={16} aria-hidden="true" /></button>
+              </div>
+            </>}
+          </li>;
+        })}
+      </ol>
+      {queue.length > 6 ? <div className="conversation-work-actions"><button type="button" disabled={!pageIndex} onClick={() => setPage(pageIndex - 1)}>Previous</button><span>{pageIndex + 1}/{Math.ceil(queue.length / 6)}</span><button type="button" disabled={(pageIndex + 1) * 6 >= queue.length} onClick={() => setPage(pageIndex + 1)}>Next</button></div> : null}
+    </div> : null}
+    {active ? <div className="conversation-work-guidance">
+      <button type="button" onClick={() => setGuiding(!guiding)} aria-expanded={guiding}>Guide active work</button>
+      {guiding ? <div className="conversation-work-form">
+        <label>Guidance for {active.agentName}<textarea value={guidance} onChange={event => setGuidance(event.target.value)} maxLength={2000} rows={2} /></label>
+        <p>{live ? "Live guidance is sent to this Codex turn. It cannot undo actions that have already started." : "This route takes guidance in a fresh turn after the current response. Earlier actions are not replayed."}</p>
+        <div className="conversation-work-actions">
+          {live ? <button type="button" disabled={busy || !guidance.trim()} onClick={() => void action(() => service.liveSteer(active.id, active.generation, guidance), () => { setGuidance(""); setGuidanceState("Live guidance saved. Check its delivery receipt below."); })}>Send live guidance</button> : null}
+          <button type="button" disabled={busy || !guidance.trim()} onClick={() => void action(() => service.reply(active.id, active.generation, guidance), () => { setGuidance(""); setGuidanceState("Guidance queued for the next fresh turn."); })}>Queue for next turn</button>
+        </div>
+      </div> : null}
+      {guidanceState ? <p role="status">{guidanceState}</p> : null}
+      {lastLive ? <p role="status">Live guidance: {lastLive.delivery === "accepted" ? "accepted by Codex" : lastLive.delivery === "rejected" ? "not accepted; use a next-turn follow-up" : lastLive.delivery === "uncertain" ? "delivery uncertain; review before continuing" : "waiting for receipt"}.</p> : null}
+    </div> : null}
+    {error ? <p className="conversation-work-error" role="alert">{error}</p> : null}
+  </section>;
+}

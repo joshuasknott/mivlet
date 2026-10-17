@@ -74,6 +74,13 @@ pub(super) fn reply_user(
         item.status = WorkStatus::Queued;
         item.reason = Some("A user follow-up is queued after delegated results.".into());
     }
+    if let Some(goal) = item.outcome_goal.as_mut() {
+        if matches!(goal.status.as_str(), "completed" | "blocked") {
+            goal.status = "active".into();
+            goal.report = None;
+        }
+    }
+    super::goals::enforce_budget(&mut item);
     item.updated_at = ctx.time.into();
     ctx.work(&item)
 }
