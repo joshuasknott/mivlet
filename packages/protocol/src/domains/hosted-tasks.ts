@@ -96,25 +96,8 @@ export interface HostedWorkExecution {
 }
 export interface HostedTaskTarget { workspaceId: string; agentId: string; workId: string; expectedGeneration: number }
 export interface HostedTaskPrepare extends HostedTaskTarget { credentialId: string; credentialRevision: number }
-export interface HostedTaskReview {
-  collaboration: import("./collaboration").CollaborationSnapshot;
-  runnerUrl: string;
-  reviewId: string;
-  workId: string;
-  workGeneration: number;
-  admission: HostedTaskAdmission;
-  inputBytes: number;
-  expiresAt: number;
-  originallyHeld: boolean;
-  approval: import("./approvals").ApprovalRequest;
-}
 export interface HostedTaskReviewTarget extends HostedTaskTarget { reviewId: string }
 export interface HostedTaskCommit extends HostedTaskReviewTarget { resolution: import("./approvals").ApprovalResolutionRequest }
-export interface HostedTaskControlResult {
-  collaboration: import("./collaboration").CollaborationSnapshot;
-  taskResult?: HostedTaskResult;
-  reconcileRequired: boolean;
-}
 export interface HostedProviderScope { workspaceId: string; agentId: string }
 export interface HostedProviderEnroll extends HostedProviderScope { providerId: HostedTextProviderId; credentialId?: string; expectedRevision?: number }
 export interface HostedProviderRevoke extends HostedProviderScope { credentialId: string; revision: number }
