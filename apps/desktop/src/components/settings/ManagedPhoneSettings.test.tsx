@@ -13,7 +13,7 @@ function api(): ManagedPhoneApi {
 beforeEach(() => setActiveRuntimeDataScope("workspace", "account-a"));
 afterEach(() => { clearActiveRuntimeDataScope(); vi.useRealTimers(); vi.unstubAllGlobals(); });
 
-it("connects deliberately without renderer configuration, copies the native link, and disconnects its exact identity", async () => {
+it("connects deliberately with native scope only, copies the native link, and disconnects its exact identity", async () => {
   const native = api();
   const writeText = vi.fn().mockResolvedValue(undefined);
   vi.stubGlobal("navigator", { clipboard: { writeText } });
@@ -23,12 +23,21 @@ it("connects deliberately without renderer configuration, copies the native link
   expect(screen.getByText(/Keep this computer awake/)).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "Connect phone" }));
   expect(await screen.findByLabelText("Phone link")).toHaveValue(connected.phoneUrl);
-  expect(native.connect).toHaveBeenCalledWith();
+  expect(native.connect).toHaveBeenCalledWith({ workspaceId: stopped.workspaceId, cloudWorkspaceId: stopped.cloudWorkspaceId, deviceId: stopped.deviceId });
   fireEvent.click(screen.getByRole("button", { name: "Copy phone link" }));
   await waitFor(() => expect(writeText).toHaveBeenCalledWith(connected.phoneUrl));
   fireEvent.click(screen.getByRole("button", { name: "Disconnect phone" }));
   await waitFor(() => expect(native.disconnect).toHaveBeenCalledWith({ connectionId: connected.connectionId, epoch: connected.epoch }));
   await waitFor(() => expect(screen.queryByLabelText("Phone link")).toBeNull());
+});
+
+it("requires native cloud workspace and device provenance before Connect", async () => {
+  const native = api();
+  vi.mocked(native.status).mockResolvedValue({ state: "stopped", workspaceId: "workspace" });
+  render(<ManagedPhoneSettings workspaceId="workspace" api={native} />);
+  expect(await screen.findByRole("status")).toHaveTextContent("Connect this computer to the selected account workspace");
+  expect(screen.getByRole("button", { name: "Connect phone" })).toBeDisabled();
+  expect(native.connect).not.toHaveBeenCalled();
 });
 
 it("fails closed when native status belongs to another workspace", async () => {

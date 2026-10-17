@@ -1,13 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
 import { Copy } from "@phosphor-icons/react/dist/csr/Copy";
-import type { PhoneRelayDisconnectRequest, PhoneRelayStatus } from "@mivlet/protocol";
+import type { PhoneRelayConnectRequest, PhoneRelayDisconnectRequest, PhoneRelayStatus } from "@mivlet/protocol";
 import { connectPhoneRelay, disconnectPhoneRelay, getPhoneRelayStatus } from "../../runtime/domains/phone-relay";
 import { getActiveRuntimeDataScope } from "../../runtime-scope";
 
 export interface ManagedPhoneApi {
   status: () => Promise<PhoneRelayStatus>;
-  connect: () => Promise<PhoneRelayStatus>;
+  connect: (request: PhoneRelayConnectRequest) => Promise<PhoneRelayStatus>;
   disconnect: (request: PhoneRelayDisconnectRequest) => Promise<PhoneRelayStatus>;
 }
 const nativeApi: ManagedPhoneApi = { status: getPhoneRelayStatus, connect: connectPhoneRelay, disconnect: disconnectPhoneRelay };
@@ -89,6 +89,8 @@ export function ManagedPhoneSettings({ workspaceId, api = nativeApi }: { workspa
   const owned = current() && status?.workspaceId === workspaceId;
   const connected = owned && status.state === "connected";
   const active = owned && (status.state === "connected" || status.state === "connecting");
+  const connectScope = owned && status.cloudWorkspaceId && status.deviceId
+    ? { workspaceId, cloudWorkspaceId: status.cloudWorkspaceId, deviceId: status.deviceId } : null;
   const exactConnection = owned && status.connectionId && status.epoch ? { connectionId: status.connectionId, epoch: status.epoch } : null;
   // The address is displayed as text only. Native controls its destination and credentials.
   const phoneUrl = connected && !error && !uncertain ? status.phoneUrl : undefined;
@@ -104,7 +106,7 @@ export function ManagedPhoneSettings({ workspaceId, api = nativeApi }: { workspa
     <p className="mcp-description">This connection uses the selected workspace on this computer. Manual MCP access must be stopped before connecting.</p>
     {phoneUrl && <label>Phone link<input readOnly value={phoneUrl} onFocus={event => event.target.select()} /></label>}
     <div className="profile-action-row">
-      {!active && <button type="button" className="button button--primary" disabled={!owned || Boolean(busy) || Boolean(error) || uncertain} onClick={() => void change("Connecting…", api.connect)}>{busy === "Connecting…" ? busy : "Connect phone"}</button>}
+      {!active && <button type="button" className="button button--primary" disabled={!connectScope || Boolean(busy) || Boolean(error) || uncertain} onClick={() => { if (connectScope) void change("Connecting…", () => api.connect(connectScope)); }}>{busy === "Connecting…" ? busy : "Connect phone"}</button>}
       {phoneUrl && <button type="button" className="button button--secondary" disabled={Boolean(busy)} onClick={() => {
         if (!current()) return;
         void navigator.clipboard.writeText(phoneUrl).then(() => { if (current()) setNotice("Phone link copied. Open it on your phone, then approve access here."); }, () => { if (current()) setNotice("Copy the phone link from the field above."); });
@@ -115,6 +117,7 @@ export function ManagedPhoneSettings({ workspaceId, api = nativeApi }: { workspa
     {busy && <p role="status">{busy}</p>}
     {error && <p className="mcp-notice mcp-notice--error" role="alert">{error}{uncertain && " The request may have completed. Check phone status before another connection action; nothing will be retried automatically."}</p>}
     {!error && status?.error && owned && <p className="mcp-notice" role="status">{status.error}</p>}
+    {!error && owned && !connectScope && !status.error && <p role="status">Connect this computer to the selected account workspace before connecting your phone.</p>}
     {notice && <p role="status">{notice}</p>}
   </section>;
 }
