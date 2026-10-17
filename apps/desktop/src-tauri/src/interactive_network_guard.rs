@@ -3,7 +3,7 @@ use serde_json::{json, Value};
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{
-    atomic::{AtomicBool, Ordering},
+    atomic::{AtomicBool, AtomicU32, Ordering},
     Arc, Mutex,
 };
 use webview2_com::{
@@ -11,12 +11,13 @@ use webview2_com::{
     DevToolsProtocolEventReceivedEventHandler,
     Microsoft::Web::WebView2::Win32::{
         ICoreWebView2, ICoreWebView2DevToolsProtocolEventReceivedEventArgs2,
-        ICoreWebView2DevToolsProtocolEventReceiver, ICoreWebView2_11,
+        ICoreWebView2DevToolsProtocolEventReceiver, ICoreWebView2_11, ICoreWebView2_2,
     },
 };
 use windows::core::{Interface, HSTRING, PWSTR};
 static READY: AtomicBool = AtomicBool::new(false);
 static FAILED: AtomicBool = AtomicBool::new(false);
+static BROWSER_MAJOR: AtomicU32 = AtomicU32::new(0);
 const MAX_FRAMES: usize = 128;
 type Frames = HashMap<String, String>;
 #[derive(Default)]
@@ -89,6 +90,37 @@ pub(crate) fn require_ready() -> Result<(), String> {
                 .into(),
         )
     }
+}
+pub(crate) fn require_connection_allowlist() -> Result<(), String> {
+    require_ready()?;
+    require_modern_runtime()?;
+    if crate::connection_allowlist_probe::verified() {
+        Ok(())
+    } else {
+        Err("The native connection allowlist has not yet proved its loopback fetch and data-only WebRTC boundary. No app preview was exposed.".into())
+    }
+}
+fn require_modern_runtime() -> Result<(), String> {
+    if BROWSER_MAJOR.load(Ordering::Acquire) >= 152 {
+        Ok(())
+    } else {
+        Err("Running-app previews require Microsoft Edge WebView2 with Chromium 152 or newer for native connection allowlists. Update the desktop runtime and reopen Mivlet; no app preview was exposed.".into())
+    }
+}
+pub(crate) async fn verify_connection_allowlist(
+    window: &tauri::WebviewWindow,
+    check: impl Fn() -> Result<(), String>,
+) -> Result<(), String> {
+    require_ready()?;
+    require_modern_runtime()?;
+    crate::connection_allowlist_probe::verify(window, check).await
+}
+fn browser_major(version: &str) -> Option<u32> {
+    let first = version.split('.').next()?;
+    if first.is_empty() || first.len() > 4 || !first.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    first.parse().ok().filter(|major| *major > 0)
 }
 fn command(
     core: &ICoreWebView2,
@@ -181,6 +213,15 @@ fn subscribe(
 }
 pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
     let _: ICoreWebView2_11 = core.cast()?;
+    let environment = unsafe { core.cast::<ICoreWebView2_2>()?.Environment()? };
+    let mut version = PWSTR::null();
+    unsafe {
+        environment.BrowserVersionString(&mut version)?;
+    }
+    BROWSER_MAJOR.store(
+        browser_major(&take_pwstr(version)).unwrap_or(0),
+        Ordering::Release,
+    );
     let fence = Arc::new(Mutex::new(Fence::default()));
     let requests = fence.clone();
     let handler_core = core.clone();
@@ -221,7 +262,8 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
                         uri,
                         crate::mcp_app_host::is_registered_mcp_url(uri)
                             || crate::local_computer::live_preview::registered_origin(uri)
-                                .is_some(),
+                                .is_some()
+                            || crate::connection_allowlist_probe::registered(uri),
                     )
                 })
                 .unwrap_or(false),
@@ -273,7 +315,8 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
                     target,
                     uri,
                     crate::mcp_app_host::is_registered_mcp_url(uri)
-                        || crate::local_computer::live_preview::registered_origin(uri).is_some(),
+                        || crate::local_computer::live_preview::registered_origin(uri).is_some()
+                        || crate::connection_allowlist_probe::registered(uri),
                 )
             })
             .unwrap_or(false)
@@ -324,6 +367,20 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn connection_allowlist_runtime_version_is_native_observed_and_strictly_parsed() {
+        assert_eq!(browser_major("155.0.4283.60"), Some(155));
+        assert_eq!(browser_major("152.0.0.0 beta"), Some(152));
+        for invalid in [
+            "Chrome/155.0.0.0",
+            "155x.0.0.0",
+            "",
+            "0.0.0.0",
+            "99999.0.0.0",
+        ] {
+            assert!(browser_major(invalid).is_none());
+        }
+    }
     #[test]
     fn pins_resources_before_the_first_request_and_keeps_process_swap_identity() {
         let mut frames = Frames::new();

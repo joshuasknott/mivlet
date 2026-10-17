@@ -25,6 +25,8 @@ mod codex_app_server;
 mod codex_images;
 mod collaboration;
 mod collaboration_connectors;
+#[cfg(windows)]
+mod connection_allowlist_probe;
 mod connector_api;
 mod connector_approvals;
 mod connector_auth;

@@ -109,6 +109,10 @@ pub(crate) fn same_registered_origin(expected: &str, uri: &str) -> bool {
     })
 }
 pub(crate) fn navigation_allowed(expected: &str, uri: &str) -> Option<bool> {
+    #[cfg(windows)]
+    if let Some(allowed) = crate::connection_allowlist_probe::navigation(expected, uri) {
+        return Some(allowed);
+    }
     let parsed = url::Url::parse(expected).ok()?;
     let host = parsed.host_str()?;
     let token = host.strip_suffix(".localhost")?;
@@ -302,6 +306,39 @@ pub async fn native_command_preview(
     }
     #[cfg(windows)]
     {
+        state.validate_target(&workspace_id, &agent_id)?;
+        let proof_session = if close != Some(true) {
+            if crate::background_worker::commands::should_route("command-output")? {
+                return Err("This command is owned by background execution. Stop that exact job, turn off background execution, then start a new foreground-owned command with its approved preview port.".into());
+            }
+            let (binding, session) = state.command_preview(
+                &workspace_id,
+                &agent_id,
+                expected_generation,
+                &job_id,
+                job_generation,
+            )?;
+            session
+                .preview_spec()
+                .ok_or("Start this restricted command with an explicitly approved preview port.")?;
+            Some((binding, session))
+        } else {
+            None
+        };
+        let proof_ticket = state
+            .authority_for(&workspace_id, &agent_id)?
+            .begin_viewer(expected_generation)?;
+        let account = crate::account_session::AccountDispatchFence::capture()?;
+        if close != Some(true) {
+            crate::interactive_network_guard::verify_connection_allowlist(&window,||{state.ensure_open()?;account.with_current(|| {
+                proof_ticket.check()?;
+                if !proof_session.as_ref().is_some_and(|(binding,session)|session.is_current(binding)) {
+                    return Err("The exact command session stopped during preview verification. No app preview was exposed.".into());
+                }
+                Ok(())
+            })}).await?;
+        }
+        proof_ticket.finish(Ok(()))?;
         // Foreground/background command ownership must not be split by a view.
         let _handoff = crate::background_worker::commands::foreground_fence("command-output")?;
         if crate::background_worker::commands::should_route("command-output")? {

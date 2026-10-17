@@ -221,6 +221,31 @@ fn policy(origin: &str) -> String {
     let socket = origin.replacen("http://", "ws://", 1);
     format!("default-src 'none'; sandbox allow-scripts allow-same-origin allow-forms; script-src {origin} 'unsafe-inline' 'unsafe-eval' blob:; style-src {origin} 'unsafe-inline'; img-src {origin} data: blob:; font-src {origin} data:; connect-src {origin} {socket}; frame-src 'none'; object-src 'none'; base-uri {origin}; form-action {origin}; media-src {origin} blob:; worker-src {origin} blob:")
 }
+fn connection_policy(origin: &str) -> String {
+    // WebSocket requests are matched as their HTTP handshake URL by the native
+    // connection-allowlist implementation; a ws: pattern would not match them.
+    format!("(\"{origin}/*\"); redirects=block; webrtc=block")
+}
+fn host_only_cookie(value: &str) -> Result<String, &'static str> {
+    let mut parts = value.trim().split(';');
+    let pair = parts
+        .next()
+        .filter(|part| part.contains('='))
+        .ok_or("Invalid app cookie.")?;
+    let mut kept = vec![pair.trim()];
+    kept.extend(
+        parts
+            .filter(|part| {
+                !part
+                    .trim()
+                    .split('=')
+                    .next()
+                    .is_some_and(|key| key.trim().eq_ignore_ascii_case("domain"))
+            })
+            .map(str::trim),
+    );
+    Ok(kept.join("; "))
+}
 fn response(bytes: &[u8], origin: &str, websocket: bool) -> Result<Vec<u8>, &'static str> {
     let text = std::str::from_utf8(bytes).map_err(|_| "Invalid app response.")?;
     let mut lines = text.split("\r\n");
@@ -277,7 +302,17 @@ fn response(bytes: &[u8], origin: &str, websocket: bool) -> Result<Vec<u8>, &'st
             | "content-security-policy-report-only"
             | "report-to"
             | "reporting-endpoints"
+            | "connection-allowlist"
+            | "connection-allowlist-report-only"
+            | "allow-connection-allowlist-from"
+            | "clear-site-data"
+            | "origin-agent-cluster"
+            | "x-dns-prefetch-control"
             | "nel" => continue,
+            "set-cookie" => {
+                output.push(format!("Set-Cookie: {}", host_only_cookie(value)?));
+                continue;
+            }
             "content-security-policy" => {
                 let preserved = value
                     .split(';')
@@ -305,6 +340,12 @@ fn response(bytes: &[u8], origin: &str, websocket: bool) -> Result<Vec<u8>, &'st
         return Err("Ambiguous app response.");
     }
     output.push(format!("Content-Security-Policy: {}", policy(origin)));
+    output.push(format!(
+        "Connection-Allowlist: {}",
+        connection_policy(origin)
+    ));
+    output.push("Origin-Agent-Cluster: ?1".into());
+    output.push("X-DNS-Prefetch-Control: off".into());
     if !websocket {
         output.push("Connection: close".into());
     }
@@ -396,7 +437,7 @@ fn serve(mut socket: TcpStream, entry: Arc<Entry>) -> io::Result<()> {
             &entry.descriptor.revision,
         );
         current(&entry)?;
-        return socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/javascript; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection: close\r\n\r\n{script}",script.len()).as_bytes());
+        return socket.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: application/javascript; charset=utf-8\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Content-Type-Options: nosniff\r\nConnection-Allowlist: {}\r\nConnection: close\r\n\r\n{script}",script.len(),connection_policy(&entry.descriptor.origin)).as_bytes());
     }
     current(&entry)?;
     let mut upstream = entry
@@ -483,6 +524,19 @@ mod tests {
             assert!(!guarded.contains(forbidden));
         }
         assert!(response(b"HTTP/1.1 101 Switching Protocols\r\n\r\n", ORIGIN, false).is_err());
+    }
+    #[test]
+    fn native_connection_policy_cannot_be_overridden_and_cookies_stay_on_one_guest_host() {
+        let head=b"HTTP/1.1 200 OK\r\nConnection-Allowlist: (\"https://elsewhere.example/*\"); webrtc=allow\r\nConnection-Allowlist-Report-Only: (); report-to=leak\r\nReporting-Endpoints: leak=\"https://elsewhere.example/report\"\r\nSet-Cookie: session=guest; Domain=localhost; Path=/; HttpOnly; SameSite=Strict\r\nSet-Cookie: other=value; dOmAiN=.localhost; Secure\r\n\r\n";
+        let guarded = String::from_utf8(response(head, ORIGIN, false).unwrap()).unwrap();
+        assert!(guarded.contains(&format!(
+            "Connection-Allowlist: (\"{ORIGIN}/*\"); redirects=block; webrtc=block"
+        )));
+        assert_eq!(guarded.matches("Connection-Allowlist:").count(), 1);
+        assert!(!guarded.contains("elsewhere.example"));
+        assert!(!guarded.contains("Report-Only"));
+        assert!(!guarded.to_ascii_lowercase().contains("domain="));
+        assert!(guarded.contains("Set-Cookie: session=guest; Path=/; HttpOnly; SameSite=Strict"));
     }
     #[test]
     fn request_body_cannot_stream_past_declared_limit_or_forward_another_http_request() {

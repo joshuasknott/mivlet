@@ -104,7 +104,8 @@ fn allow_navigation(state: &mut NavigationFence, frame_id: usize, uri: &str) -> 
             false
         }
         None if is_registered_mcp_url(uri)
-            || crate::local_computer::live_preview::registered_origin(uri).is_some() =>
+            || crate::local_computer::live_preview::registered_origin(uri).is_some()
+            || crate::connection_allowlist_probe::registered(uri) =>
         {
             state.expected.insert(frame_id, uri.to_owned());
             true
@@ -312,7 +313,7 @@ fn require_navigation_guard() -> Result<(), String> {
 pub(crate) fn require_live_preview_guards() -> Result<(), String> {
     require_navigation_guard()?;
     #[cfg(windows)]
-    crate::interactive_network_guard::require_ready()?;
+    crate::interactive_network_guard::require_connection_allowlist()?;
     Ok(())
 }
 
