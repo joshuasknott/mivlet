@@ -251,9 +251,8 @@ pub(crate) fn check_office(bytes: &[u8], extension: &str) -> Result<bool, String
             .by_index(index)
             .map_err(|_| "The Office document could not be checked.")?;
         expanded_size = expanded_size.saturating_add(entry.size());
-        let name = entry
-            .name()
-            .map_err(|_| "The Office document contains an invalid file name.")?
+        let name = std::str::from_utf8(entry.name_raw())
+            .map_err(|_| "The Office document contains an invalid UTF-8 file name.")?
             .to_ascii_lowercase();
         if expanded_size > MAX_OFFICE_EXPANDED_BYTES
             || entry.enclosed_name().is_none()
