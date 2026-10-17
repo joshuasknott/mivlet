@@ -21,6 +21,19 @@ beforeEach(()=>{
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();document.body.replaceChildren();});
 const start=async()=>{await import("../../src-tauri/src/mcp_server/remote/app.js");await vi.waitFor(()=>expect(document.querySelector(".task-request")).not.toBeNull());};
 describe("phone client against shared task contracts",()=>{
+  it("discloses omitted saved results even when no complete output fits",async()=>{
+    const normal=fetch.getMockImplementation();
+    fetch.mockImplementation(async(path,options)=>{
+      if(options.body && JSON.parse(options.body).name==="mivlet_read_work") return {ok:true,status:200,json:async()=>({outputs:[],truncated:true})};
+      return normal(path,options);
+    });
+    await start();
+    Array.from(document.querySelectorAll("button")).find(button=>button.textContent==="View result").click();
+    await vi.waitFor(()=>expect(document.getElementById("result").hidden).toBe(false));
+    expect(document.getElementById("result-content").textContent).toContain("Some saved results were omitted");
+    expect(document.getElementById("result-content").textContent).toContain("Open Mivlet on your computer");
+    expect(document.getElementById("result-content").textContent).not.toContain("No saved result yet");
+  });
   it("keeps the newest result selection and does not reopen a closed pending read",async()=>{
     const normal=fetch.getMockImplementation();const reads=[];
     fetch.mockImplementation(async(path,options)=>{

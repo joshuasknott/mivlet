@@ -647,7 +647,14 @@ async fn run<R: tokio::io::AsyncRead + Unpin>(
     mut deadline: i64,
 ) -> std::result::Result<(), String> {
     let mut sequence = 0;
+    let mut maintenance = std::time::Instant::now();
     loop {
+        if maintenance.elapsed() >= Duration::from_secs(5) {
+            owner.check()?;
+            engine.expire().map_err(|e| e.to_string())?;
+            remote::push::schedule(engine.clone());
+            maintenance = std::time::Instant::now();
+        }
         let message = reader.read();
         tokio::pin!(message);
         let message = loop {
@@ -656,8 +663,11 @@ async fn run<R: tokio::io::AsyncRead + Unpin>(
                 _ = tokio::time::sleep(Duration::from_secs(1)) => {
                     owner.check()?;
                     if chrono::Utc::now().timestamp_millis() >= deadline { return Err("Phone connection authorization expired.".into()); }
-                    engine.expire().map_err(|e| e.to_string())?;
-                    remote::push::schedule(engine.clone());
+                    if maintenance.elapsed() >= Duration::from_secs(5) {
+                        engine.expire().map_err(|e| e.to_string())?;
+                        remote::push::schedule(engine.clone());
+                        maintenance = std::time::Instant::now();
+                    }
                 }
             }
         };

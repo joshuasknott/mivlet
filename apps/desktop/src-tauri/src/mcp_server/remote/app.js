@@ -125,7 +125,7 @@ function renderWork(items) {
         const result = await call("mivlet_read_work", {workspaceId:session.workspaceId,agentId:item.agentId,workId:item.id});
         if (version !== epoch || reading !== resultReadVersion) return;
         const outputs = result.outputs || [];
-        ui["result-content"].replaceChildren(...(outputs.length ? outputs.map(output => element("p",output.text,"result-text")) : [element("p","No saved result yet.")]));
+        ui["result-content"].replaceChildren(...(outputs.length ? outputs.map(output => element("p",output.text,"result-text")) : [element("p",result.truncated ? "No result text is available in this phone view." : "No saved result yet.")]));
         if (result.truncated) ui["result-content"].append(element("p","Some saved results were omitted to fit the phone view. Open Mivlet on your computer for the rest.","muted"));
         ui.result.hidden = false;
         ui["close-result"].focus();
