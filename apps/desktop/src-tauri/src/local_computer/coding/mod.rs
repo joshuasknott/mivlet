@@ -2,6 +2,7 @@
 pub(crate) mod checkpoints;
 pub(crate) mod copy_manager;
 mod git;
+pub(crate) mod job_review;
 mod jobs;
 pub(crate) mod task_binding;
 pub(crate) use task_binding::{capture_work_repository, RepositoryWorkBinding};
@@ -544,6 +545,9 @@ fn execute_observed(
                     )
                 })
                 .transpose()?;
+            if let Some(session) = session.as_mut() {
+                jobs::bind_repository(session, &repo, task)?;
+            }
             let (result, completed) = match process::native_run(
                 &root,
                 script,

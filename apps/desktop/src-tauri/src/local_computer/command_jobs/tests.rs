@@ -2,6 +2,47 @@ use super::super::authority::ComputerAuthority;
 use super::*;
 
 #[test]
+fn repository_binding_is_immutable_durable_and_missing_legacy_jobs_never_adopt_library() {
+    let root = tempfile::tempdir().unwrap();
+    let auth = ComputerAuthority::load(root.path()).unwrap();
+    let ticket = auth.begin_agent(1).unwrap();
+    let manager = JobManager::default();
+    let scope = manager.scope(root.path()).unwrap();
+    let repository = "a".repeat(48);
+    let mut session = scope
+        .start(&ticket, Some(&repository), "echo test", false, 60, true)
+        .unwrap();
+    let id = session.snapshot().unwrap().id;
+    assert!(scope.repository_binding(&id, 1).is_err());
+    let binding = super::super::coding::RepositoryWorkBinding {
+        version: 1,
+        repository_id: repository,
+        branch: "mivlet/review".into(),
+        base_commit: "b".repeat(40),
+        captured_at: "2026-10-17T12:00:00Z".into(),
+    };
+    let mut wrong = binding.clone();
+    wrong.repository_id = "c".repeat(48);
+    assert!(session.bind_repository(wrong).is_err());
+    session.bind_repository(binding.clone()).unwrap();
+    assert!(session.bind_repository(binding.clone()).is_err());
+    assert!(scope.repository_binding(&id, 2).is_err());
+    assert_eq!(scope.repository_binding(&id, 1).unwrap(), binding);
+    drop(session);
+    drop(scope);
+    drop(manager);
+    let reopened = JobManager::default();
+    assert_eq!(
+        reopened
+            .scope(root.path())
+            .unwrap()
+            .repository_binding(&id, 1)
+            .unwrap(),
+        binding
+    );
+}
+
+#[test]
 fn ownership_handoff_refuses_active_jobs_and_releases_idle_scopes() {
     let root = tempfile::tempdir().unwrap();
     let auth = ComputerAuthority::load(root.path()).unwrap();

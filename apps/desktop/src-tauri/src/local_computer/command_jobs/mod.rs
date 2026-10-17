@@ -60,6 +60,8 @@ impl JobStatus {
 pub struct JobRecord {
     pub id: String,
     pub repository_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository_binding: Option<super::coding::RepositoryWorkBinding>,
     pub generation: u64,
     pub operation_id: u64,
     pub command_id: String,
@@ -87,6 +89,9 @@ impl JobRecord {
         hex(&self.id, 48)
             && hex(&self.command_id, 64)
             && self.repository_id.as_ref().is_none_or(|id| hex(id, 48))
+            && self.repository_binding.as_ref().is_none_or(|binding| {
+                binding.valid() && self.repository_id.as_deref() == Some(&binding.repository_id)
+            })
             && self.generation > 0
             && self.operation_id > 0
             && self.input_sequence <= 9_007_199_254_740_991
@@ -287,6 +292,7 @@ impl ScopeJobs {
         let record = JobRecord {
             id: id.clone(),
             repository_id: repository_id.map(str::to_owned),
+            repository_binding: None,
             generation: binding.generation,
             operation_id: binding.operation_id,
             command_id,
@@ -372,6 +378,23 @@ impl ScopeJobs {
             .find(|r| r.id == id)
             .cloned()
             .ok_or("Command job is unavailable in this scope.".into())
+    }
+    pub(crate) fn repository_binding(
+        &self,
+        id: &str,
+        generation: u64,
+    ) -> Result<super::coding::RepositoryWorkBinding, String> {
+        let record = self.record(id)?;
+        if record.generation != generation {
+            return Err("This repository review belongs to another command generation.".into());
+        }
+        let binding = record.repository_binding.ok_or(
+            "This command has no saved repository binding. Start a fresh repository command to inspect its files; no Library copy was substituted.",
+        )?;
+        if !binding.valid() || record.repository_id.as_deref() != Some(&binding.repository_id) {
+            return Err("The command repository binding needs recovery.".into());
+        }
+        Ok(binding)
     }
     fn update(&self, id: &str, update: impl FnOnce(&mut JobRecord)) -> Result<(), String> {
         self.update_memory(id, update)?;
@@ -469,6 +492,34 @@ impl ScopeJobs {
     }
 }
 impl JobSession {
+    /// Captured before the job receipt is returned, never rebound from Library.
+    pub(crate) fn bind_repository(
+        &mut self,
+        binding: super::coding::RepositoryWorkBinding,
+    ) -> Result<(), String> {
+        if !binding.valid() {
+            return Err("Invalid command repository binding.".into());
+        }
+        let mut inner = self
+            .scope
+            .inner
+            .lock()
+            .map_err(|_| "Command jobs are unavailable.")?;
+        let record = inner
+            .records
+            .iter_mut()
+            .find(|record| record.id == self.id)
+            .ok_or("The exact command job is unavailable.")?;
+        if record.status != JobStatus::Preparing
+            || record.repository_binding.is_some()
+            || record.repository_id.as_deref() != Some(&binding.repository_id)
+        {
+            return Err("The command repository binding cannot be replaced.".into());
+        }
+        record.repository_binding = Some(binding);
+        drop(inner);
+        self.scope.persist()
+    }
     pub(crate) fn control(&self) -> Result<SessionControl, String> {
         self.scope
             .inner
