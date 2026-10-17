@@ -16,6 +16,12 @@ const labels: Record<NativeCommandJob["status"], string> = {
   failed: "Failed", stopped: "Stopped", "timed-out": "Timed out", interrupted: "Interrupted",
 };
 const message = (error: unknown) => error instanceof Error ? error.message : "The terminal is unavailable.";
+function boundedTerminalWait<T>(request: Promise<T>, timeoutMessage: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([request, new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(timeoutMessage)), 10_000);
+  })]).finally(() => clearTimeout(timer));
+}
 
 export function appendTerminalFrames(previous: NativeCommandFrame[], incoming: NativeCommandFrame[]) {
   const known = new Set(previous.map((frame) => frame.sequence));
@@ -48,6 +54,7 @@ function TerminalSession({ target: suppliedTarget, job: initialJob, writeInput =
   const [connection, setConnection] = useState<"idle" | "reading" | "connected" | "closed" | "unavailable">("idle");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [inputNotice, setInputNotice] = useState("");
   const [redacted, setRedacted] = useState(false);
   const [retry, setRetry] = useState(0);
   const [input, setInput] = useState("");
@@ -57,6 +64,7 @@ function TerminalSession({ target: suppliedTarget, job: initialJob, writeInput =
   const cursor = useRef(0);
   const retained = useRef<NativeCommandFrame[]>([]);
   const inputSequenceFence = useRef(initialJob.inputSequence ?? 0);
+  const uncertainAttempt = useRef<number | undefined>(undefined);
   const mounted = useRef(true);
   const onChange = useRef(onJobChange);
   onChange.current = onJobChange;
@@ -70,6 +78,9 @@ function TerminalSession({ target: suppliedTarget, job: initialJob, writeInput =
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let timeout: ReturnType<typeof setTimeout> | undefined;
+    // Captured only when the user explicitly opens/reconnects output. Ordinary
+    // polling cannot silently unlock input after an uncertain write.
+    const reconcileInput = uncertainAttempt.current;
     setConnection("reading");
     const poll = async () => {
       try {
@@ -85,6 +96,15 @@ function TerminalSession({ target: suppliedTarget, job: initialJob, writeInput =
         setJob({ ...result.job, inputSequence: inputSequenceFence.current });
         onChange.current?.(result.job);
         setError("");
+        if (reconcileInput !== undefined && uncertainAttempt.current === reconcileInput) {
+          if (!live(result.job)) {
+            setInputNotice("This session has ended. The uncertain line was not resent.");
+          } else if (result.job.status === "running" && (result.job.inputSequence ?? 0) >= reconcileInput) {
+            uncertainAttempt.current = undefined;
+            setUncertain(false);
+            setInputNotice("The saved input sequence was checked. The earlier line was not resent; you can send a new line.");
+          }
+        }
         if (result.outputUnavailable || !result.output) {
           setConnection("unavailable");
           setNotice("Output is no longer retained. The command has not been restarted.");
@@ -113,7 +133,7 @@ function TerminalSession({ target: suppliedTarget, job: initialJob, writeInput =
     if (stopping) return;
     setStopping(true);
     try {
-      const result = await stopNativeCommandJob(target);
+      const result = await boundedTerminalWait(stopNativeCommandJob(target), "Stop confirmation did not arrive. Reconnect output to check the existing session.");
       if (!mounted.current) return;
       if (!result || result.job.id !== target.jobId || result.job.generation !== target.jobGeneration)
         throw new Error("The terminal could not confirm Stop. Reconnect to check its status.");
@@ -130,20 +150,17 @@ function TerminalSession({ target: suppliedTarget, job: initialJob, writeInput =
     inputSequenceFence.current = inputSequence;
     setSending(true); setInput(""); setError("");
     try {
-      let timeout: ReturnType<typeof setTimeout> | undefined;
-      const receipt = await Promise.race([writeInput({ ...target, inputSequence, text }), new Promise<never>((_, reject) => {
-        timeout = setTimeout(() => reject(new Error("Input delivery is uncertain.")), 10_000);
-      })]).finally(() => clearTimeout(timeout));
+      const receipt = await boundedTerminalWait(writeInput({ ...target, inputSequence, text }), "Input delivery is uncertain.");
       if (!mounted.current) return;
       if (!receipt || receipt.jobId !== target.jobId || receipt.jobGeneration !== target.jobGeneration || receipt.inputSequence !== inputSequence || receipt.delivery !== "accepted") {
-        setUncertain(true);
-        setNotice("Input delivery was not confirmed. It will not be resent. Reconnect to check the session.");
+        uncertainAttempt.current = inputSequence; setUncertain(true);
+        setInputNotice("Input delivery was not confirmed. It will not be resent. Reconnect to check whether the session stopped or consumed the line.");
       } else {
         setJob((current) => ({ ...current, inputSequence }));
-        setNotice("Input delivered to the process. Reconnect or read output to check its result.");
+        setInputNotice("Input delivered to the process. Read output to check its result.");
       }
     } catch {
-      if (mounted.current) { setUncertain(true); setNotice("Input delivery was not confirmed. It will not be resent. Reconnect to check the session."); }
+      if (mounted.current) { uncertainAttempt.current = inputSequence; setUncertain(true); setInputNotice("Input delivery was not confirmed. It will not be resent. Reconnect to check whether the session stopped or consumed the line."); }
     } finally { if (mounted.current) setSending(false); }
   }
   return <details className="coding-terminal" open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
@@ -153,6 +170,7 @@ function TerminalSession({ target: suppliedTarget, job: initialJob, writeInput =
       {error && <p role="alert">{error}</p>}
       <pre tabIndex={0} aria-label="Terminal output">{frames.length ? frames.map((frame) => frame.text).join("") : connection === "unavailable" ? "Output unavailable." : "No output yet."}</pre>
       {notice && <p className="coding-result__notice" role="status">{notice}</p>}
+      {inputNotice && <p className="coding-result__notice" role="status">{inputNotice}</p>}
       {redacted && <p className="coding-result__notice">Some output was redacted or omitted.</p>}
       {job.interactive && <form className="coding-terminal__input" onSubmit={(event) => { event.preventDefault(); void send(); }}><label className="coding-result__sr-only" htmlFor={`terminal-input-${job.id}`}>Terminal input</label><input id={`terminal-input-${job.id}`} value={input} autoComplete="off" spellCheck={false} maxLength={4095} disabled={sending || uncertain || job.status !== "running" || !writeInput} onChange={(event) => setInput(event.target.value)} placeholder="Send a line…" /><button type="submit" disabled={sending || uncertain || !input || job.status !== "running" || !writeInput}>{sending ? "Sending…" : "Send line"}</button></form>}
     </div>}
