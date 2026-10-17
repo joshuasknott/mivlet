@@ -98,6 +98,7 @@ fn headers(reader: &mut impl Read, entry: &Entry) -> io::Result<(Vec<u8>, Vec<u8
 struct Request {
     path: String,
     websocket: bool,
+    body_length: usize,
     bytes: Vec<u8>,
 }
 fn request(bytes: &[u8], origin: &str) -> Result<Request, &'static str> {
@@ -125,8 +126,7 @@ fn request(bytes: &[u8], origin: &str) -> Result<Request, &'static str> {
         expected.port().ok_or("Missing preview port.")?
     );
     let mut host = false;
-    let mut content_length = false;
-    let mut transfer = false;
+    let mut content_length = None;
     let mut upgrade = false;
     let mut connection_upgrade = false;
     let mut forwarded = Vec::new();
@@ -156,21 +156,20 @@ fn request(bytes: &[u8], origin: &str) -> Result<Request, &'static str> {
                 }
             }
             "content-length" => {
-                if content_length
+                if content_length.is_some()
+                    || value.is_empty()
+                    || !value.bytes().all(|b| b.is_ascii_digit())
                     || value
-                        .parse::<u64>()
+                        .parse::<usize>()
                         .ok()
                         .is_none_or(|n| n > 8 * 1024 * 1024)
                 {
                     return Err("Preview request body exceeds its bound.");
                 }
-                content_length = true;
+                content_length = value.parse::<usize>().ok();
             }
             "transfer-encoding" => {
-                if transfer || !value.eq_ignore_ascii_case("chunked") {
-                    return Err("Unsupported preview body encoding.");
-                }
-                transfer = true;
+                return Err("Streaming/chunked preview request bodies require a separate bounded framing adapter.");
             }
             "upgrade" => {
                 if !value.eq_ignore_ascii_case("websocket") {
@@ -194,10 +193,14 @@ fn request(bytes: &[u8], origin: &str) -> Result<Request, &'static str> {
         }
         forwarded.push(format!("{name}: {value}"));
     }
-    if !host || content_length && transfer || upgrade != connection_upgrade {
+    if !host || upgrade != connection_upgrade {
         return Err("Ambiguous preview request.");
     }
     let websocket = upgrade && connection_upgrade;
+    let body_length = content_length.unwrap_or(0);
+    if websocket && (method != "GET" || body_length != 0) {
+        return Err("Invalid preview WebSocket handshake.");
+    }
     forwarded.push("accept-encoding: identity".into());
     forwarded.push(format!(
         "connection: {}",
@@ -206,6 +209,7 @@ fn request(bytes: &[u8], origin: &str) -> Result<Request, &'static str> {
     Ok(Request {
         path: path.into(),
         websocket,
+        body_length,
         bytes: format!(
             "{method} {path} HTTP/1.1\r\n{}\r\n\r\n",
             forwarded.join("\r\n")
@@ -301,7 +305,9 @@ fn response(bytes: &[u8], origin: &str, websocket: bool) -> Result<Vec<u8>, &'st
         return Err("Ambiguous app response.");
     }
     output.push(format!("Content-Security-Policy: {}", policy(origin)));
-    if !websocket {output.push("Connection: close".into());}
+    if !websocket {
+        output.push("Connection: close".into());
+    }
     output.push("Referrer-Policy: no-referrer".into());
     output.push("Cache-Control: no-store".into());
     output.push("X-Content-Type-Options: nosniff".into());
@@ -337,15 +343,47 @@ fn copy(mut reader: impl Read, mut writer: impl Write, entry: &Entry) -> io::Res
         }
     }
 }
+fn body(
+    mut reader: impl Read,
+    mut writer: impl Write,
+    mut remaining: usize,
+    mut check: impl FnMut() -> io::Result<()>,
+    mut count: impl FnMut(usize) -> io::Result<()>,
+) -> io::Result<()> {
+    let mut bytes = [0u8; 64 * 1024];
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while remaining > 0 {
+        check()?;
+        if Instant::now() >= deadline {
+            return Err(io::ErrorKind::TimedOut.into());
+        }
+        let wanted = remaining.min(bytes.len());
+        match reader.read(&mut bytes[..wanted]) {
+            Ok(0) => return Err(io::ErrorKind::UnexpectedEof.into()),
+            Ok(size) => {
+                count(size)?;
+                writer.write_all(&bytes[..size])?;
+                remaining -= size;
+            }
+            Err(error) if idle(&error) => continue,
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
 fn serve(mut socket: TcpStream, entry: Arc<Entry>) -> io::Result<()> {
     socket.set_read_timeout(Some(Duration::from_millis(250)))?;
     socket.set_write_timeout(Some(Duration::from_secs(2)))?;
     let (head, body) = headers(&mut socket, &entry)?;
     let request =
         request(&head, &entry.descriptor.origin).map_err(|_| io::ErrorKind::PermissionDenied)?;
+    if !request.websocket && body.len() > request.body_length {
+        return Err(io::ErrorKind::InvalidData.into());
+    }
     if request.path.starts_with("/__mivlet_preview/") {
         if request.path != "/__mivlet_preview/picker.js"
             || request.websocket
+            || request.body_length != 0
             || !body.is_empty()
             || !request.bytes.starts_with(b"GET ")
         {
@@ -376,8 +414,20 @@ fn serve(mut socket: TcpStream, entry: Arc<Entry>) -> io::Result<()> {
         .name("mivlet-preview-input".into())
         .stack_size(256 * 1024)
         .spawn(move || {
-            let _ = copy(&mut incoming, writer, &input_entry);
-            let _ = incoming.shutdown(Shutdown::Both);
+            if request.websocket {
+                let _ = copy(&mut incoming, writer, &input_entry);
+                let _ = incoming.shutdown(Shutdown::Both);
+            } else if self::body(
+                &mut incoming,
+                writer,
+                request.body_length - body.len(),
+                || current(&input_entry),
+                |size| count(&input_entry, size),
+            )
+            .is_err()
+            {
+                let _ = incoming.shutdown(Shutdown::Both);
+            }
         })?;
     let result = (|| {
         let (head, body) = headers(&mut upstream, &entry)?;
@@ -433,5 +483,39 @@ mod tests {
             assert!(!guarded.contains(forbidden));
         }
         assert!(response(b"HTTP/1.1 101 Switching Protocols\r\n\r\n", ORIGIN, false).is_err());
+    }
+    #[test]
+    fn request_body_cannot_stream_past_declared_limit_or_forward_another_http_request() {
+        let head = format!(
+            "POST /submit HTTP/1.1\r\nHost: {}\r\nContent-Length: 3\r\n\r\n",
+            ORIGIN.trim_start_matches("http://")
+        );
+        let parsed = request(head.as_bytes(), ORIGIN).unwrap();
+        assert_eq!(parsed.body_length, 3);
+        for changed in [
+            head.replace("Content-Length: 3", "Transfer-Encoding: chunked"),
+            head.replace("Content-Length: 3", "Content-Length: 8388609"),
+            head.replace("Content-Length: 3", "Content-Length: +3"),
+        ] {
+            assert!(request(changed.as_bytes(), ORIGIN).is_err());
+        }
+        let mut input = io::Cursor::new(b"abcGET /second HTTP/1.1\r\n\r\n");
+        let mut output = Vec::new();
+        body(
+            &mut input,
+            &mut output,
+            parsed.body_length,
+            || Ok(()),
+            |_| Ok(()),
+        )
+        .unwrap();
+        assert_eq!(output, b"abc");
+        assert_eq!(input.position(), 3);
+        assert_eq!(
+            body(io::Cursor::new(b"ab"), Vec::new(), 3, || Ok(()), |_| Ok(()))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::UnexpectedEof
+        );
     }
 }
