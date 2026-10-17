@@ -163,14 +163,16 @@ function PreviewSession({ target, readPreview, closePreview, validatePreviewPick
     </div></div>
     {error && <p role="alert">{error}</p>}
     {state && state.status !== "ready" && <p className="coding-result__notice">{state.message}</p>}
-    {preview && <><p className="coding-preview__address">Running preview</p><iframe ref={iframe} key={`${preview.id}:${preview.revision}`} src={preview.url} title="Running project preview" sandbox="allow-scripts allow-same-origin" referrerPolicy="no-referrer" onLoad={() => { setLoaded(true); setError(""); }} onError={() => { setError("The preview could not load. Refresh to reconnect."); setLoaded(false); }} /></>}
+    {preview && <><p className="coding-preview__address">Running preview</p><iframe ref={iframe} key={`${preview.id}:${preview.revision}`} src={preview.url} title="Running project preview" sandbox="allow-scripts allow-same-origin allow-forms" referrerPolicy="no-referrer" onLoad={() => { setLoaded(true); setError(""); }} onError={() => { setError("The preview could not load. Refresh to reconnect."); setLoaded(false); }} /></>}
     {preview && <p className="coding-result__notice">This session holds the project files. Stop it before editing, then start a new preview.</p>}
     {picking && <p className="coding-result__notice" role="status">Select a public page element, or choose Cancel picking.</p>}
     {validating && <p className="coding-result__notice" role="status">Checking the selected element…</p>}
     {selection && <form className="coding-preview__feedback" onSubmit={(event) => {
       event.preventDefault();
       if (!preview || !validPreviewDescriptor(preview, nativeTarget) || !note.trim() || busy) return;
-      callbacks.current.onDraft(feedbackDraft(selection, note)); setSelection(undefined); setNote("");
+      try {
+        callbacks.current.onDraft(feedbackDraft(selection, note)); setSelection(undefined); setNote(""); setError("");
+      } catch (failure) { setError(failureText(failure)); }
     }}><label htmlFor={`preview-note-${selection.previewId}`}>Change selected {selection.tag}</label><p className="coding-preview__selection">{selection.label || selection.path}</p><div><textarea id={`preview-note-${selection.previewId}`} value={note} onChange={(event) => setNote(event.target.value)} maxLength={2000} rows={2} placeholder="Describe what you want to change…" /><button type="submit" disabled={!note.trim() || busy}>Add to message</button></div><p className="coding-result__notice">Review your feedback in the message before sending.</p></form>}
   </section>;
 }
