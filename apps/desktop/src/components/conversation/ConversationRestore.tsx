@@ -85,7 +85,7 @@ function RestoreContent({ workspaceId, conversationId, agentId, blockedReason, o
       {!!listing?.points.length && <small>Up to 24 points and 24 restore records are retained. Remove old file checkpoints in Files when storage is full. Removing a linked point keeps its file checkpoint.</small>}
       {review && <section aria-label="Conversation and file restore preview">
         <h4>{review.direction === "revert-files" ? "Revert the file restore" : `Before “${review.point.label}”`}</h4>
-        <p>{review.checkpoint.files.length} file changes in this agent’s private copy. {review.direction === "restore" ? review.point.targetHeadId ? "Conversation returns to the message before this request." : "Conversation returns to an empty starting point." : "The conversation stays at its current point."} Current code is saved before restoring. Git HEAD and external actions stay in place; run checks again afterward.</p>
+        <p>{review.checkpoint.files.length} file changes in this agent’s private copy. {review.direction === "restore" ? review.point.targetHeadId ? "Conversation returns to the saved point before this coding turn." : "Conversation returns to an empty starting point." : "The conversation stays at its current point."} Current code is saved before restoring. Git HEAD and external actions stay in place; run checks again afterward.</p>
         <ul>{review.checkpoint.files.map((file) => <li key={file.path}><code>{file.path}</code><span>{file.status}</span></li>)}</ul>
         <pre tabIndex={0} aria-label="Recovery file diff">{review.checkpoint.diff || "No code changes."}</pre>
         {review.checkpoint.truncated && <p role="status">Diff truncated. Review the full files before approving.</p>}

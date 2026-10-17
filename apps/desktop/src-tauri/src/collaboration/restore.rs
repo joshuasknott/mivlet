@@ -22,7 +22,7 @@ pub(crate) struct Point {
     pub work_generation: u32,
     pub run_id: String,
     pub target_head_id: Option<String>,
-    pub request_message_id: String,
+    pub request_message_id: Option<String>,
     pub label: String,
     pub created_at: String,
     pub scope_id: String,
@@ -93,11 +93,43 @@ fn outstanding(ledger: &Ledger) -> bool {
         .any(|intent| !matches!(intent.state.as_str(), "complete" | "reverted" | "cancelled"))
 }
 
+/// Continued turns and child assignments intentionally have no new user row.
+/// Their source remains canonical Work; rewind only this run's branch suffix.
+fn capture_anchor(
+    rows: &[message::MessageRow],
+    run: &str,
+    source_runs: &[String],
+) -> (Option<String>, Option<String>) {
+    if let Some(user) = rows
+        .iter()
+        .find(|row| row.kind == "user" && row.run_id.as_deref() == Some(run))
+    {
+        return (Some(user.id.clone()), user.parent_message_id.clone());
+    }
+    let request = rows
+        .iter()
+        .rev()
+        .find(|row| {
+            row.kind == "user"
+                && row
+                    .run_id
+                    .as_ref()
+                    .is_some_and(|id| source_runs.contains(id))
+        })
+        .map(|row| row.id.clone());
+    let target = rows
+        .iter()
+        .find(|row| row.run_id.as_deref() == Some(run))
+        .map(|row| row.parent_message_id.clone())
+        .unwrap_or_else(|| rows.last().map(|row| row.id.clone()));
+    (request, target)
+}
+
 /// Native canonical Work and computer scope, never a renderer association.
 pub(crate) fn capture_context(
     scope_id: &str,
     repository: &crate::local_computer::coding::Repository,
-) -> std::result::Result<Option<(Work, String, Option<String>)>, String> {
+) -> std::result::Result<Option<(Work, Option<String>, Option<String>)>, String> {
     #[cfg(test)]
     if crate::account_session::binding().is_err() {
         return Ok(None);
@@ -122,15 +154,16 @@ pub(crate) fn capture_context(
         if saved.points.iter().any(|point| point.work_id == item.id && point.work_generation == item.generation && point.run_id == run) { return Ok(None); }
         if saved.points.len() >= MAX_POINTS || outstanding(&saved) { return Err(invalid("Recovery points are full or a restore needs reconciliation. Review recovery before changing files.")); }
         let rows = message::list_selected(conn, store, &scope.data, &item.conversation_id)?;
-        let user = rows.iter().find(|row| row.kind == "user" && row.run_id.as_deref() == Some(run))
-            .ok_or_else(|| invalid("Wait for the exact user request to be saved before changing repository files."))?;
-        Ok(Some((item, user.id.clone(), user.parent_message_id.clone())))
+        let root: Work = repo::get(conn, store, &scope.private, Kind::Work, &item.root_id)?.ok_or_else(|| invalid("The originating request is unavailable."))?;
+        let source_runs: Vec<_> = root.run_ids.iter().chain(item.run_ids.iter()).cloned().collect();
+        let (request, target) = capture_anchor(&rows, run, &source_runs);
+        Ok(Some((item, request, target)))
     }).map_err(|error| error.to_string())
 }
 
 pub(crate) fn record_point(
     item: &Work,
-    request_message_id: String,
+    request_message_id: Option<String>,
     target_head_id: Option<String>,
     scope_id: String,
     checkpoint: Checkpoint,

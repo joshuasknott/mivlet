@@ -53,7 +53,7 @@ fn intent(room: &str) -> Intent {
                 work_generation: 1,
                 run_id: "run-one".into(),
                 target_head_id: None,
-                request_message_id: "user-one".into(),
+                request_message_id: Some("user-one".into()),
                 label: "Change site".into(),
                 created_at: "2026-10-17T00:00:00Z".into(),
                 scope_id: "native-scope".into(),
@@ -151,6 +151,67 @@ fn recovery_ledger_is_account_scoped_and_retains_partial_intent_receipts() {
             Some("other-member"),
         )?;
         assert!(ui_repo::get::<Ledger>(ctx.conn, ctx.store, &other, room, KEY)?.is_none());
+        Ok(())
+    });
+}
+
+#[test]
+fn continued_turn_anchor_preserves_prior_results_without_inventing_a_new_user_message() {
+    fixture(|ctx, room| {
+        message::append_with_parent(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            room,
+            "prior-result",
+            "assistant",
+            &json!({}),
+            Some("run-one"),
+            2,
+            1,
+            Some("user-one"),
+            None,
+            "prior-result",
+            "prior-revision",
+            "terminal",
+            "initial",
+            &json!("First section complete"),
+            ctx.time,
+        )?;
+        let before = message::list_selected(ctx.conn, ctx.store, &ctx.scope.data, room)?;
+        assert_eq!(
+            capture_anchor(&before, "run-two", &["run-one".into()]),
+            (Some("user-one".into()), Some("prior-result".into()))
+        );
+        message::append_with_parent(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            room,
+            "current-read",
+            "tool",
+            &json!({}),
+            Some("run-two"),
+            3,
+            2,
+            Some("prior-result"),
+            None,
+            "current-read",
+            "read-revision",
+            "terminal",
+            "initial",
+            &json!("Read-only inspection"),
+            ctx.time,
+        )?;
+        let during = message::list_selected(ctx.conn, ctx.store, &ctx.scope.data, room)?;
+        assert_eq!(
+            capture_anchor(&during, "run-two", &["run-one".into()]),
+            (Some("user-one".into()), Some("prior-result".into()))
+        );
+        assert_eq!(
+            capture_anchor(&before, "child-run", &[]),
+            (None, Some("prior-result".into()))
+        );
         Ok(())
     });
 }

@@ -8,7 +8,7 @@ export interface ConversationRestorePoint extends ConversationRestoreOwner {
   workGeneration: number;
   runId: string;
   targetHeadId: string | null;
-  requestMessageId: string;
+  requestMessageId: string | null;
   label: string;
   createdAt: string;
   repository: RepositoryWorkBinding;
