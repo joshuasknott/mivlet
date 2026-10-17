@@ -81,6 +81,13 @@ export interface LocalComputerAttachmentStageRequest extends LocalComputerTarget
   attachments: readonly LocalComputerAttachmentStageInput[];
 }
 
+/** Native derives the source only from this queued Work's canonical ancestry. */
+export interface LocalComputerWorkAttachmentRequest extends LocalComputerEpochRequest {
+  workId: string;
+  expectedWorkGeneration: number;
+  attachmentIds: readonly string[];
+}
+
 /** Credential-free proof of the exact bytes and relative path staged. */
 export interface LocalComputerAttachmentReceipt {
   computerId: string;
