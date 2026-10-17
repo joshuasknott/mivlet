@@ -8,7 +8,7 @@ pub(crate) struct Transfer {
     base: Url,
     scope: directory::HostedComputerScope,
     account: AccountDispatchFence,
-    identity: u64,
+    identity: crate::clerk_identity::NativeIdentityGenerationSnapshot,
     binding: Binding,
     authorization: Value,
     direction: String,
@@ -113,19 +113,20 @@ impl Transfer {
                 .map_err(|_| "Coding transfer request encoding failed.".into())
         })?;
         let mut send = Box::pin(self.client.execute(request));
-        let guarded = futures_util::future::poll_fn(
-            |cx| match super::super::dispatch::with_current(&self.binding, || {
-                ticket.with_current(|| self.account.with_current(|| Ok(send.as_mut().poll(cx))))
-            }) {
-                Ok(value) => value.map(|value| {
-                    value.map_err(|_| {
-                        "Coding transfer delivery is uncertain. No task effect was replayed."
-                            .to_string()
-                    })
-                }),
-                Err(error) => Poll::Ready(Err(error)),
-            },
-        );
+        let guarded =
+            futures_util::future::poll_fn(|cx| {
+                match super::super::dispatch::with_current(&self.binding, || {
+                    ticket.with_current(|| self.account.with_current(|| Ok(send.as_mut().poll(cx))))
+                }) {
+                    Ok(value) => value.map(|value| {
+                        value.map_err(|_| {
+                            "Coding transfer delivery is uncertain. No task effect was replayed."
+                                .to_string()
+                        })
+                    }),
+                    Err(error) => Poll::Ready(Err(error)),
+                }
+            });
         tokio::pin!(guarded);
         let response = loop {
             tokio::select! {value=&mut guarded=>break value?,_=tokio::time::sleep(Duration::from_millis(100))=>self.check(ticket)?,}
