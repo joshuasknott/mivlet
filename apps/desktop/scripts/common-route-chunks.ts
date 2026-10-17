@@ -14,21 +14,26 @@ export function commonRouteChunk(id: string): string | undefined {
   // the technical views only when requested. Shared command/checkpoint wrappers
   // stay outside: conversation controls also import those wrappers.
   if (/\/src\/components\/navigation\/(?:WorkspaceLibrary|NativeExecutionSetup|NativeCommandJobs|RepositoryFiles|RepositoryCopies|RepositoryCheckpoints|PullRequestReview)\.tsx$/.test(path)
-    || /\/src\/components\/navigation\/(?:repository-files|repository-copies|repository-checkpoints|pull-request-review)\.css$/.test(path)) return "repository-inspection";
+    || /\/src\/components\/navigation\/(?:native-command-jobs|repository-files|repository-copies|repository-checkpoints|pull-request-review)\.css$/.test(path)
+    || /\/src\/hooks\/useWorkspaceLocalFiles\.ts$/.test(path)) return "repository-inspection";
   if (/\/src\/runtime\/domains\/(?:coding|repository-copies)\.ts$/.test(path)) return "repository-inspection";
   // These editors share a deferred setup boundary. Appearance and model pickers
   // are deliberately excluded: onboarding and conversation import them too.
   if (/\/src\/components\/agents\/(?:AgentEditor|AgentLearningDialog)\.tsx$/.test(path)
-    || /\/src\/components\/projects\/(?:ProjectDetailsDialog|ProjectContextPanel|ConversationDialogs|TeamReadiness)\.tsx$/.test(path)) return "workspace-editors";
+    || /\/src\/components\/projects\/(?:ProjectDetailsDialog|ProjectContextPanel|ProjectFiles|ConversationDialogs|TeamReadiness)\.tsx$/.test(path)
+    || /\/src\/components\/projects\/projects\.css$/.test(path)) return "workspace-editors";
   // Load the optional workspace inspection surfaces together without mounting
   // inactive views. Do not include hosted-computer helpers: execution also owns
   // them. History, artifact preview and CopyButton have conversation accounting.
   if (/\/src\/shell\/ComputerInspector\.tsx$/.test(path)
+    || /\/src\/components\/agents\/(?:LiveWorkRail|NativeComputerPanel)\.tsx$/.test(path)
     || /\/src\/components\/navigation\/WorkspaceMemories\.tsx$/.test(path)
     || /\/src\/components\/navigation\/workspace-memories\.css$/.test(path)
     || /\/src\/components\/conversation\/SideChats\.tsx$/.test(path)
     || /\/src\/components\/search\/(?:SearchOverlay|SearchResults)\.tsx$/.test(path)
-    || /\/src\/components\/search\/search\.css$/.test(path)) return "workspace-inspection";
+    || /\/src\/components\/search\/search\.css$/.test(path)
+    || /\/src\/lib\/search\/(?:useWorkspaceSearch|results)\.ts$/.test(path)
+    || /\/src\/runtime\/domains\/search\.ts$/.test(path)) return "workspace-inspection";
   return undefined;
 }
 

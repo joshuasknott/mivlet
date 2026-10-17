@@ -25,6 +25,7 @@ it("keeps correlated deferred cloud/repository fragments in common-accounted coh
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/navigation/${name}.tsx`)).toBe("repository-inspection");
   for (const name of ["coding", "repository-copies"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/runtime/domains/${name}.ts`)).toBe("repository-inspection");
+  expect(commonRouteChunk("/mivlet/apps/desktop/src/hooks/useWorkspaceLocalFiles.ts")).toBe("repository-inspection");
   // Do not move the eager shell, native shared runtime, unrelated route or
   // existing separately-accounted conversation/history feature into the group.
   for (const path of ["shell/WorkspaceContextPanel.tsx", "components/pages/SettingsPage.tsx", "runtime/domains/local-computer.ts", "runtime/domains/command-jobs.ts", "runtime/domains/repository-checkpoints.ts", "runtime/bridge.ts", "shell/WorkspaceHistory.tsx"])
@@ -32,7 +33,7 @@ it("keeps correlated deferred cloud/repository fragments in common-accounted coh
 });
 
 it("groups deferred workspace editors without pulling them into onboarding or conversation", () => {
-  for (const path of ["agents/AgentEditor", "agents/AgentLearningDialog", "projects/ProjectDetailsDialog", "projects/ProjectContextPanel", "projects/ConversationDialogs", "projects/TeamReadiness"])
+  for (const path of ["agents/AgentEditor", "agents/AgentLearningDialog", "projects/ProjectDetailsDialog", "projects/ProjectContextPanel", "projects/ProjectFiles", "projects/ConversationDialogs", "projects/TeamReadiness"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/${path}.tsx`)).toBe("workspace-editors");
   for (const path of ["agents/AgentAppearancePicker", "agents/AgentColourPicker", "ModelPicker", "pages/OnboardingPage", "pages/FirstAgentOnboardingPage"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/${path}.tsx`)).toBeUndefined();
@@ -40,7 +41,7 @@ it("groups deferred workspace editors without pulling them into onboarding or co
 });
 
 it("groups optional inspection views while preserving execution and feature boundaries", () => {
-  for (const path of ["shell/ComputerInspector.tsx", "components/navigation/WorkspaceMemories.tsx", "components/navigation/workspace-memories.css", "components/conversation/SideChats.tsx", "components/search/SearchOverlay.tsx", "components/search/SearchResults.tsx", "components/search/search.css"])
+  for (const path of ["shell/ComputerInspector.tsx", "components/agents/LiveWorkRail.tsx", "components/agents/NativeComputerPanel.tsx", "components/navigation/WorkspaceMemories.tsx", "components/navigation/workspace-memories.css", "components/conversation/SideChats.tsx", "components/search/SearchOverlay.tsx", "components/search/SearchResults.tsx", "components/search/search.css", "lib/search/useWorkspaceSearch.ts", "lib/search/results.ts", "runtime/domains/search.ts"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBe("workspace-inspection");
   for (const path of ["shell/ExecutionWorker.tsx", "hooks/useHostedComputer.ts", "hooks/useHostedBrowserController.ts", "lib/hosted-computer-scope.ts", "runtime/domains/hosted-computer.ts", "shell/WorkspaceHistory.tsx", "components/conversation/ArtifactPreview.tsx", "components/CopyButton.tsx", "components/search/SearchFileDialog.tsx", "components/conversation/SideChatContextNotice.tsx"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBeUndefined();
