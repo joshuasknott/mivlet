@@ -4,13 +4,15 @@ const work={id:"task-1",agentId:"atlas",request:"<img src=x onerror=alert(1)>",s
 const replies={"/remote/session":{workspaceId:"default",access:"request-tasks",agents:[{id:"atlas",name:"Atlas"}]},"mivlet_work":{work:[work],truncated:false},"mivlet_request_task":work,"mivlet_stop_work":{...work,status:"cancelled"},"mivlet_read_work":{outputs:[{text:"Result text"}]}};
 let calls;
 let failNextMutation;
+let failNextRead;
 beforeEach(()=>{
   vi.resetModules();vi.useFakeTimers();document.body.innerHTML=page;
   Object.defineProperty(document,"hidden",{configurable:true,value:false});
-  calls=[];failNextMutation=false;
+  calls=[];failNextMutation=false;failNextRead=false;
   vi.stubGlobal("fetch",vi.fn(async(path,options)=>{
     const body=options.body && JSON.parse(options.body);calls.push({path,options,body});
     if(failNextMutation && body?.name==="mivlet_request_task"){failNextMutation=false;throw new TypeError("Network error");}
+    if(failNextRead && body?.name==="mivlet_work"){failNextRead=false;throw new TypeError("Network error");}
     const value=replies[body?.name || path];
     return {ok:true,status:200,json:async()=>value};
   }));
@@ -18,6 +20,15 @@ beforeEach(()=>{
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();document.body.replaceChildren();});
 const start=async()=>{await import("../../src-tauri/src/mcp_server/remote/app.js");await vi.waitFor(()=>expect(document.querySelector(".task-request")).not.toBeNull());};
 describe("phone client against shared task contracts",()=>{
+  it("clears only connection-owned notices after reconnecting",async()=>{
+    await start();failNextRead=true;
+    document.getElementById("refresh").click();
+    await vi.waitFor(()=>expect(document.getElementById("connection").textContent).toBe("Offline"));
+    expect(document.getElementById("notice").textContent).toContain("unavailable");
+    document.getElementById("refresh").click();
+    await vi.waitFor(()=>expect(document.getElementById("connection").textContent).toBe("Connected"));
+    expect(document.getElementById("notice").textContent).toBe("");
+  });
   it("renders untrusted task text without HTML and posts only closed action data",async()=>{
     await start();
     expect(document.querySelector(".task-request").textContent).toBe(work.request);

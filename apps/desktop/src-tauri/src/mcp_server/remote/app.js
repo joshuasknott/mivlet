@@ -13,7 +13,8 @@ const seen = new Map();
 const labels = {queued:"Queued",running:"Working",waiting:"Waiting",completed:"Complete",failed:"Failed",cancelled:"Stopped",blocked:"Blocked","awaiting-user":"Needs you","awaiting-approval":"Needs approval",interrupted:"Interrupted"};
 const terminal = new Set(["completed","failed","cancelled"]);
 const attention = new Set(["blocked","awaiting-user","awaiting-approval","interrupted"]);
-const notice = (message = "") => { ui.notice.textContent = message; };
+let noticeOwner;
+const notice = (message = "", owner) => { ui.notice.textContent = message; noticeOwner = owner; };
 function lock(value) {
   busy = value;
   ui.send.disabled = value || Boolean(pendingMutation) || session?.access !== "request-tasks";
@@ -152,11 +153,12 @@ async function refresh() {
     ui.truncated.hidden = !result.truncated;
     ui.connection.textContent = "Connected";
     ui.connection.classList.add("connected");
+    if (noticeOwner === "connection") notice();
   } catch (error) {
     if (version !== epoch || reading !== readVersion || !session) return;
     ui.connection.textContent = "Offline";
     ui.connection.classList.remove("connected");
-    notice("Your computer is unavailable. Its last shared status is shown; keep it awake with Mivlet open.");
+    if (!pendingMutation) notice("Your computer is unavailable. Its last shared status is shown; keep it awake with Mivlet open.", "connection");
   } finally { if (version === epoch && reading === readVersion && session) timer = setTimeout(() => void refresh(), 10000); }
 }
 ui.connect.addEventListener("click", async () => {

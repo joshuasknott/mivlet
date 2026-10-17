@@ -2,7 +2,7 @@ import type {
   McpConsentDecision,
   McpServerConfig,
   McpServerStatus,
-} from "@mivlet/protocol/domains/mcp-server";
+} from "@mivlet/protocol";
 import { getRuntimeAdapter } from "../adapters/select";
 import { toRuntimeError } from "../errors";
 
