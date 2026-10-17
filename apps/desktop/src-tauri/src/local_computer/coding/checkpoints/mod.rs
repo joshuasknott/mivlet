@@ -83,6 +83,16 @@ pub(super) fn execute(
             {
                 return Err("The copy or checkpoint changed after review. Preview again and request a fresh approval.".into());
             }
+            // The saga may have been cancelled while this approved call waited
+            // for repository custody. Re-resolve its native intent under the
+            // same lock used by cancellation before changing any files.
+            let restore = conversation::restore_task_for_request(directory, ticket, request_id)?;
+            if task.is_some_and(|task| task.requires_restore_intent()) && restore.is_none() {
+                return Err("The reviewed restore intent is no longer available. No files were restored; review a fresh restore.".into());
+            }
+            if let Some(restore) = restore {
+                restore.binding.check(repo)?;
+            }
             // The pre-restore state remains a normal immutable checkpoint, even
             // after successful transaction cleanup. It can itself be restored.
             let before = storage::capture(
