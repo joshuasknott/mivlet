@@ -397,11 +397,23 @@ pub(super) struct BrowserProcess {
     tabs: Option<observations::TabSnapshot>,
     sessions: std::collections::HashMap<String, String>,
     navigation: std::collections::HashMap<String, navigation::Choice>,
+    activation: std::collections::HashMap<String, navigation::Choice>,
     controls: std::collections::HashMap<String, controls::Choice>,
     scroll: Option<(String, scrolling::Choice)>,
 }
 
 impl BrowserProcess {
+    pub(super) fn activate(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        navigation::activate(self, hwnd, generation, reference, origin, check, dispatch)
+    }
     pub(super) fn scroll(
         &mut self,
         hwnd: u64,
@@ -639,6 +651,7 @@ impl BrowserProcess {
                 tabs: None,
                 sessions: std::collections::HashMap::new(),
                 navigation: std::collections::HashMap::new(),
+                activation: std::collections::HashMap::new(),
                 controls: std::collections::HashMap::new(),
                 scroll: None,
             })

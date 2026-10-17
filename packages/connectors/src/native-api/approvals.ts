@@ -173,7 +173,7 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || isProtectedSecretTool(toolName)) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || toolName.startsWith("local-browser-") || isProtectedSecretTool(toolName)) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 
@@ -206,6 +206,8 @@ export function buildToolApproval(
     ? parsed.deliveryMode === "foreground"
       ? "Bring the selected Windows app forward and allow approved actions to use its foreground window. This may interrupt your work."
       : "Select the Windows app for supported background controls without bringing it forward. Each action still follows your approval settings."
+    : toolName === "local-browser-activate" && isRegistered
+    ? "Switch the selected foreground browser to this exact observed tab once. Inspect the current page before further input."
     : isRegistered
     ? `Execute the ${toolName} tool via ${providerId} with the given arguments.`
     : `Refuse unregistered tool ${toolName} — not in Mivlet's tool registry.`;

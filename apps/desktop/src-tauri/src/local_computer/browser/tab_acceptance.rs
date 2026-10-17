@@ -153,6 +153,20 @@ pub(super) fn run(
     if !has_text(&verified, "Activated once") || has_text(&verified, "Not activated") {
         return Err("Tab QA visible second-page click did not produce its fresh result.".into());
     }
+    let list = listed(process, hwnd, check)?;
+    let activation_ref = text(tab(&list, "Mivlet browser fixture")?, "activationRef")?.to_owned();
+    super::navigation::activate(process, hwnd, 1, &activation_ref, origin, check, dispatch)?;
+    if super::navigation::activate(process, hwnd, 1, &activation_ref, origin, check, dispatch)
+        .is_ok()
+    {
+        return Err("Tab QA replayed a consumed activation choice.".into());
+    }
+    let selected = observe(process, hwnd, origin, "Mivlet browser fixture", check)?;
+    if selected["tabVisible"] != true || !has_text(&selected, "Not activated") {
+        return Err(
+            "Tab QA explicit activation did not select the exact unchanged first page.".into(),
+        );
+    }
     eprintln!("Owned browser two-tab fixture: visible tab clicked once and freshly verified; originally valid hidden-tab choice refused without input; hidden observation offered no controls despite spoofed page visibility getter.");
     Ok(())
 }

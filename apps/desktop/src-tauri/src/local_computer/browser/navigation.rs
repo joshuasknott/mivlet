@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 const STALE: &str = "The browser navigation choice expired or its document changed. List its tabs again before choosing a new action.";
 const UNKNOWN: &str = "Browser navigation was not confirmed. It may have changed the page or started a browser-managed download. No input was replayed and no Mivlet artifact was imported; start a fresh request and inspect the current state.";
 
+#[derive(Clone)]
 pub(super) struct Choice {
     hwnd: u64,
     generation: u64,
@@ -116,6 +117,7 @@ pub(super) fn navigate(
     // Clear every older tab/action choice before checking or sending input.
     process.tabs = None;
     process.navigation.clear();
+    process.activation.clear();
     process.controls.clear();
     process.scroll = None;
     let (window, pages) = observations::targets(process, hwnd, check)?;
@@ -166,6 +168,47 @@ pub(super) fn navigate(
     }
     check().map_err(|_| UNKNOWN)?;
     Ok(json!({"status":"navigation-dispatched","inputDispatched":true,"verified":false,"destinationOrigin":destination.origin().ascii_serialization(),"requiresObservation":true,"message":"List current tabs and observe the destination to verify the result. A dispatched request does not prove that the page loaded. No browser input was replayed and no file was imported."}).to_string())
+}
+
+pub(super) fn activate(
+    process: &mut BrowserProcess,
+    hwnd: u64,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+    check: &dyn Fn() -> Result<(), String>,
+    dispatch: &super::super::super::control::NativeDispatch<'_>,
+) -> Result<String, String> {
+    let choice = process.activation.remove(reference).ok_or(STALE)?;
+    process.tabs = None;
+    process.navigation.clear();
+    process.activation.clear();
+    process.controls.clear();
+    process.scroll = None;
+    let (window, pages) = observations::targets(process, hwnd, check)?;
+    if !pages
+        .iter()
+        .any(|page| page["targetId"] == choice.target && page["url"] == choice.frame.url)
+    {
+        return Err(STALE.into());
+    }
+    let current = observations::call(
+        process,
+        Command::Frames,
+        json!({}),
+        Some(&choice.session),
+        check,
+    )?;
+    choice.check(hwnd, generation, origin, window, &current)?;
+    check()?;
+    process._pipe.as_mut().ok_or("The browser's native connection is unavailable.")?
+        .activate(&choice.target, check, dispatch)
+        .map_err(|_| "Browser tab activation outcome is uncertain. Do not replay it; list tabs and inspect the current page in a fresh request.")?;
+    check()
+        .map_err(|_| "Browser tab activation outcome is uncertain. No activation was replayed.")?;
+    Ok(json!({"status":"tab-activation-dispatched","inputDispatched":true,"verified":false,
+        "requiresObservation":true,"origin":origin,
+        "message":"List tabs and observe the selected page to verify its current state before further input."}).to_string())
 }
 
 #[cfg(test)]

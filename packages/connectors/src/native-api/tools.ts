@@ -178,6 +178,12 @@ const TOOL_DEFINITIONS: BackendTool[] = [
     parameters: toolParameters({ tabRef: textParameter, origin: textParameter }, ["tabRef", "origin"], true)
   },
   {
+    name: "local-browser-activate",
+    description: "Select an owned tab once: 30s activationRef and exact origin. Requires selected foreground browser. List/observe afterward; no replay.",
+    defaultMode: "full-access", defaultRisk: "high",
+    parameters: toolParameters({ activationRef: textParameter, origin: textParameter }, ["activationRef", "origin"], true)
+  },
+  {
     name: "local-browser-navigate",
     description: "Navigate once: 30s navigationRef, exact source origin, HTTP(S) URL. Selected foreground only. Observe; no replay/file import.",
     defaultMode: "full-access", defaultRisk: "high",

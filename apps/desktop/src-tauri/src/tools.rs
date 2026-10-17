@@ -28,6 +28,7 @@ use reqwest::header::{HeaderMap, HeaderValue};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use url::Url;
+mod browser_actions;
 
 use crate::approvals::resolve_approval;
 use crate::connector_api;
@@ -83,7 +84,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 60] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 61] = [
     "repository-pr-read",
     "repository-pr-local",
     "repository-pr-action",
@@ -129,6 +130,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 60] = [
     "local-browser-tabs",
     "local-browser-observe",
     "local-browser-navigate",
+    "local-browser-activate",
     "local-browser-click",
     "local-browser-scroll",
     "local-app-select",
@@ -342,7 +344,7 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "web-fetch" => Some(("read-only", "medium")),
         "local-app-list" => Some(("read-only", "low")),
         "local-browser-open" => Some(("full-access", "high")),
-        "local-browser-navigate" => Some(("full-access", "high")),
+        "local-browser-navigate" | "local-browser-activate" => Some(("full-access", "high")),
         "local-browser-click" | "local-browser-scroll" => Some(("full-access", "critical")),
         "local-browser-tabs" | "local-browser-observe" => Some(("read-only", "medium")),
         "local-app-select" => Some(("read-only", "medium")),
@@ -443,6 +445,7 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-browser-tabs"
             | "local-browser-observe"
             | "local-browser-navigate"
+            | "local-browser-activate"
             | "local-browser-click"
             | "local-browser-scroll"
             | "local-app-select"
@@ -533,6 +536,7 @@ pub(crate) fn validate_tool_approval_binding(
             | "create-pdf"
             | "workspace-run"
     ) || tool.starts_with("repository-")
+        || tool.starts_with("local-browser-")
         || is_protected_secret_tool(tool)
         || tool.starts_with("command-")
         || tool == "workspace-start"
@@ -1788,6 +1792,23 @@ async fn execute_native_tool(
         .map_err(|_| "Browser click outcome is uncertain. Do not replay it.")??;
         return Ok(ToolResult { ok: true, output });
     }
+    if browser_actions::supported(&tool) {
+        return browser_actions::execute(
+            &tool,
+            arguments,
+            local_computers.inner().clone(),
+            request
+                .workspace_id
+                .clone()
+                .ok_or("Browser actions require a workspace.")?,
+            request
+                .agent_id
+                .clone()
+                .ok_or("Browser actions require an agent.")?,
+            computer_generation,
+        )
+        .await;
+    }
     if tool == "local-browser-navigate" {
         #[derive(Deserialize)]
         #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -2622,6 +2643,36 @@ mod connector_authority_tests {
             },
         )
         .unwrap();
+    }
+
+    #[test]
+    fn browser_approval_binds_the_full_payload_beyond_bounded_previews() {
+        let mut approved = request("local-browser-activate");
+        approved.arguments = serde_json::json!({"activationRef":"a".repeat(48), "origin":format!("https://{}.example", "x".repeat(260))});
+        approved.approval.request.data_used =
+            approval_argument_previews(&approved.tool, &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved
+            .approval
+            .request
+            .data_used
+            .push(argument_digest(&approved.arguments).unwrap());
+        validate_tool_approval_binding(
+            &approved.tool,
+            &approved.arguments,
+            &approved.approval.request,
+        )
+        .unwrap();
+        let mut changed = approved.arguments.clone();
+        changed["origin"] = format!("https://{}.different", "x".repeat(260)).into();
+        assert!(validate_tool_approval_binding(
+            &approved.tool,
+            &changed,
+            &approved.approval.request
+        )
+        .is_err());
     }
 
     #[test]

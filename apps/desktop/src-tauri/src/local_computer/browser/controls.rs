@@ -242,6 +242,7 @@ pub(super) fn click(
     let choice = process.controls.remove(reference).ok_or(STALE)?;
     process.controls.clear();
     process.navigation.clear();
+    process.activation.clear();
     process.scroll = None;
     process.tabs = None;
     let (window, pages) = observations::targets(process, scope.0, check)?;
