@@ -104,5 +104,10 @@ describe("generation-fenced cloud task", () => {
     await task.admit(cap, taskFixture(now)); vi.setSystemTime(now + 86_400_001); await task.alarm();
     expect(await task.read(cap)).toMatchObject({ snapshot: { status: "expired" }, text: "" });
     expect(JSON.stringify(Array.from(storage.values))).not.toContain("Explain the seasons");
+    const expired = await task.read(cap); await task.alarm();
+    expect((await task.read(cap)).snapshot.generation).toBe(expired.snapshot.generation);
+    vi.setSystemTime(now + 8 * 86_400_000 + 2); await task.alarm();
+    expect(storage.values.size).toBe(0); expect(storage.alarmAt).toBeUndefined();
+    await expect(task.read(cap)).rejects.toThrow("task-not-found");
   });
 });

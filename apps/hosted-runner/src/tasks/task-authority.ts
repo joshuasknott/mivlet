@@ -23,7 +23,7 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
         if (existing.digest !== digest) throw new Error("task-admission-conflict");
         return existing.snapshot;
       }
-      if (value.binding.expiresAt <= now) throw new Error("task-admission-expired");
+      if (value.binding.expiresAt <= Date.now()) throw new Error("task-admission-expired");
       const snapshot: HostedTaskSnapshot = { binding: value.binding, generation: 1, status: "queued", sequence: 1,
         resultBytes: 0, createdAt: now, updatedAt: now, retainedUntil: now + L.retentionMs };
       await tx.put("task", { accountId: cap.accountId, digest, admission: value, snapshot } satisfies StoredTask);
@@ -46,6 +46,7 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
       if (row.snapshot.status !== "cancelled" && row.snapshot.status !== "expired") {
         row.snapshot = { ...row.snapshot, generation: row.snapshot.generation + 1, status: "cancelled", sequence: row.snapshot.sequence + 1, updatedAt: Date.now(), resultBytes: 0 };
         delete row.text; delete row.admission; delete row.attemptNonce;
+        delete row.snapshot.resultSha256; delete row.snapshot.usage;
         await tx.put("task", row); await tx.setAlarm(row.snapshot.retainedUntil);
       }
       return row;
@@ -60,7 +61,7 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
     const now = Date.now(); const nonce = crypto.randomUUID();
     const start = await this.ctx.storage.transaction(async tx => {
       const row = await tx.get<StoredTask>("task"); if (!row) return undefined;
-      if (row.purgeAt !== undefined && row.purgeAt <= now) { await tx.delete("task"); await tx.deleteAlarm(); return undefined; }
+      if (row.purgeAt !== undefined && row.purgeAt <= now) return { purge: true as const, row };
       if (row.snapshot.status === "expired" && row.purgeAt !== undefined) { await tx.setAlarm(row.purgeAt); return undefined; }
       if (row.snapshot.retainedUntil <= now) return { expire: true as const, row };
       if (terminal(row.snapshot.status)) { await tx.setAlarm(row.snapshot.retainedUntil); return undefined; }
@@ -83,6 +84,18 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
       return { run: true as const, row };
     });
     if (!start) return;
+    if ("purge" in start) {
+      // SQLite DO deleteAll also reclaims its storage/billing metadata. Hold
+      // only this small storage critical section, then re-read so a concurrent
+      // admission/read cannot be erased by a stale purge decision.
+      await this.ctx.blockConcurrencyWhile(async () => {
+        const current = await this.ctx.storage.get<StoredTask>("task");
+        if (current?.purgeAt !== undefined && current.purgeAt <= Date.now()) {
+          await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll();
+        }
+      });
+      return;
+    }
     if ("expire" in start) { await this.expire(); return; }
     const custody = this.env.PROVIDER_CUSTODY.getByName(start.row.accountId);
     if ("release" in start) { await custody.release(start.row.accountId, start.row.snapshot.binding.taskId, start.row.digest); return; }

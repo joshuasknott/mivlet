@@ -137,6 +137,11 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
   async alarm(): Promise<void> {
     const row = await this.ctx.storage.get<Account>("account"); if (!row) return;
     await this.change(row.accountId, value => this.prune(value, Date.now()));
+    await this.ctx.blockConcurrencyWhile(async () => {
+      if (!await this.ctx.storage.get<Account>("account")) {
+        await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll();
+      }
+    });
   }
   private prune(row: Account, now: number): void {
     row.credentials = row.credentials.filter(c => c.expiresAt > now);
@@ -149,8 +154,9 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
       const row = await tx.get<Account>("account") ?? { accountId, credentials: [], reservations: [], nonces: [], days: [] };
       if (row.accountId !== accountId) throw new Error("task-account-mismatch");
       const result = update(row); await tx.put("account", row);
-      const next = [...row.credentials.map(c => c.expiresAt), ...row.reservations.map(r => r.retainedUntil), ...row.nonces.map(n => n.until)];
+      const next = [...row.credentials.map(c => c.expiresAt), ...row.reservations.map(r => r.retainedUntil), ...row.nonces.map(n => n.until), ...row.days.map(d => (d.day + 2) * 86_400_000)];
       if (next.length) await tx.setAlarm(Math.max(Date.now() + 1000, Math.min(...next))); else await tx.deleteAlarm();
+      if (!next.length) await tx.delete("account");
       return result;
     });
   }

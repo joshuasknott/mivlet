@@ -14,11 +14,12 @@ export class MemoryTaskStorage {
   async get<T>(key: string): Promise<T | undefined> { return structuredClone(this.values.get(key)) as T | undefined; }
   async put(key: string, value: unknown): Promise<void> { this.values.set(key, structuredClone(value)); }
   async delete(key: string): Promise<void> { this.values.delete(key); }
+  async deleteAll(): Promise<void> { this.values.clear(); }
   async setAlarm(at: number): Promise<void> { this.alarmAt = at; }
   async deleteAlarm(): Promise<void> { this.alarmAt = undefined; }
   async transaction<T>(fn: (tx: MemoryTaskStorage) => Promise<T>): Promise<T> {
     const before = structuredClone(this.values); const alarm = this.alarmAt;
     try { return await fn(this); } catch (error) { this.values.clear(); for (const [k, v] of before) this.values.set(k, v); this.alarmAt = alarm; throw error; }
   }
-  context(): DurableObjectState { return { storage: this } as unknown as DurableObjectState; }
+  context(): DurableObjectState { return { storage: this, blockConcurrencyWhile: async <T>(fn: () => Promise<T>) => await fn() } as unknown as DurableObjectState; }
 }
