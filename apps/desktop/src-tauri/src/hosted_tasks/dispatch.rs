@@ -58,8 +58,9 @@ pub(crate) fn with_current<T>(
     if gate.cancelled || gate.binding != *binding {
         return Err(STOPPED.into());
     }
-    // The callback performs only nonblocking HTTP future polls. No Store,
-    // credential capture, account resolution, or other async work under lock.
+    // The callback performs a nonblocking HTTP poll or a prepared native file
+    // commit. No Store, credential capture, account resolution, or async waits
+    // under this lock. File hashing and staging happen before entering it.
     operation()
 }
 pub(crate) struct AdmissionGuard {
