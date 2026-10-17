@@ -251,7 +251,11 @@ pub(crate) async fn hosted_text_admit(
                 )
             })
         }
-        Err(_) => hosted::result(&app, &ticket, &target, None),
+        Err(error) => {
+            super::coding::admission_failed(offer.admission.binding.version, &error, || {
+                hosted::result(&app, &ticket, &target, None)
+            })
+        }
     }
 }
 async fn refresh(
