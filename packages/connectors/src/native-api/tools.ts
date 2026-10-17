@@ -173,7 +173,7 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   },
   {
     name: "local-browser-observe",
-    description: "Read public top-frame text at exact origin/tabRef; 30s controlRefs/scrollRef+viewport. Private fields stop reads; no input grant.",
+    description: "Read public top-frame text at exact origin/tabRef; 30s controlRefs/scrollRef/empty-text fieldRefs + viewport. Values omitted; private fields stop reads; no input grant.",
     defaultMode: "read-only", defaultRisk: "medium",
     parameters: toolParameters({ tabRef: textParameter, origin: textParameter }, ["tabRef", "origin"], true)
   },
@@ -182,6 +182,12 @@ const TOOL_DEFINITIONS: BackendTool[] = [
     description: "Select an owned tab once: 30s activationRef and exact origin. Requires selected foreground browser. List/observe afterward; no replay.",
     defaultMode: "full-access", defaultRisk: "high",
     parameters: toolParameters({ activationRef: textParameter, origin: textParameter }, ["activationRef", "origin"], true)
+  },
+  {
+    name: "local-browser-fill",
+    description: "Enter public text once in an empty ordinary text/search/textarea field: fresh fieldRef, exact origin/name and text. Foreground only. Existing values/private/sign-in/payment/file fields excluded. Observe afterward; no script/selector or replay.",
+    defaultMode:"full-access",defaultRisk:"critical",
+    parameters:toolParameters({fieldRef:textParameter,origin:textParameter,name:textParameter,text:{type:"string",minLength:1,maxLength:2048}},["fieldRef","origin","name","text"],true)
   },
   {
     name: "local-browser-navigate",

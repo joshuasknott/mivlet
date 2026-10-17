@@ -280,7 +280,26 @@ selected foreground browser, rechecks the exact source document/window/generatio
 and invalidates older choices before one fenced native activation. It never
 restores a window or changes delivery mode. List and observe again before input;
 an interrupted activation is uncertain and is never replayed.
-Form editing and native upload/download custody remain pending.
+Public form entry uses `local-browser-fill`: one fresh 30-second `fieldRef`, exact
+origin/name and 1–2048 bytes of approved public text. Observation offers only empty
+ordinary text/search inputs and textareas. Existing values, rich editors, private
+sign-in/payment identifiers, password/OTP controls and file fields are excluded.
+The model never receives current values. Native code rechecks document, node,
+privacy, empty state, metadata, visibility, geometry and hit identity.
+
+One fixed native function in a separate isolated world sets that exact node's
+value and emits input/change events. The function is compiled into Mivlet; text is
+passed only as a data argument. It atomically refuses a populated, replaced,
+disabled, hidden or changed field. There is no caller JavaScript, selector,
+focus/select-all sequence, CSP bypass, universal access or user-gesture grant.
+The one bounded write retains account/lease/generation/Stop fences. The reply
+contains status and character count, no field value. Page event handlers may send
+entered text to the website, so the normal exact approval binds the full payload
+digest. Fresh observation is required; errors after dispatch remain uncertain and
+are never replayed. Editing populated fields and native upload/download custody
+remain pending. The closed native operation uses the official
+[DOM node resolution](https://chromedevtools.github.io/devtools-protocol/tot/DOM/#method-resolveNode)
+and [Runtime function-call protocol](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-callFunctionOn).
 
 For a visible HTTP(S) tab, observation also exposes a bounded subset of named,
 enabled top-frame buttons and HTTP links as opaque `controlRef` choices.

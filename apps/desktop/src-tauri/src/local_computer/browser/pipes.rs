@@ -13,6 +13,8 @@ use windows_sys::Win32::{
 
 const FAILURE: &str = "The private browser pipe failed. No browser input was retried.";
 const MAX_FRAME: usize = 1024 * 1024;
+#[path = "forms_script.rs"]
+mod forms_script;
 
 #[cfg(test)]
 #[path = "pipes_tests.rs"]
@@ -262,7 +264,17 @@ fn write_once(
     check: &dyn Fn() -> Result<(), String>,
     dispatch: &super::super::super::control::NativeDispatch<'_>,
 ) -> Result<(), String> {
-    if message.len() > 4096 || message.contains(&0) {
+    write_once_bounded(file, message, deadline, check, dispatch, 4096)
+}
+fn write_once_bounded(
+    file: &File,
+    message: &[u8],
+    deadline: Instant,
+    check: &dyn Fn() -> Result<(), String>,
+    dispatch: &super::super::super::control::NativeDispatch<'_>,
+    limit: usize,
+) -> Result<(), String> {
+    if message.len() > limit || message.contains(&0) {
         return Err("The private browser request exceeded its limit.".into());
     }
     let mut frame = message.to_vec();
@@ -318,6 +330,9 @@ pub(super) enum Command {
     DescribeNode,
     Navigate,
     Activate,
+    ResolveField,
+    FillEmpty,
+    ReleaseObject,
     Quads,
     Layout,
     Hit,
@@ -338,6 +353,9 @@ impl Command {
             Self::DescribeNode => "DOM.describeNode",
             Self::Navigate => "Page.navigate",
             Self::Activate => "Target.activateTarget",
+            Self::ResolveField => "DOM.resolveNode",
+            Self::FillEmpty => "Runtime.callFunctionOn",
+            Self::ReleaseObject => "Runtime.releaseObject",
             Self::Quads => "DOM.getContentQuads",
             Self::Layout => "Page.getLayoutMetrics",
             Self::Hit => "DOM.getNodeForLocation",
@@ -349,6 +367,70 @@ impl Command {
     }
 }
 impl ControlPipe {
+    pub(super) fn fill_empty(
+        &mut self,
+        frame: &str,
+        session: &str,
+        backend: u64,
+        origin: &str,
+        metadata: &serde_json::Value,
+        text: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        let world = self.exchange(
+            Command::IsolatedWorld,
+            serde_json::json!({"frameId":frame,
+            "worldName":"mivlet-native-public-field-v1","grantUniveralAccess":false,
+            "contentSecurityPolicy":"default-src 'none'; script-src 'none'"}),
+            Some(session),
+            check,
+            None,
+        )?;
+        let context = world["executionContextId"]
+            .as_u64()
+            .filter(|id| *id > 0 && *id <= i32::MAX as u64)
+            .ok_or("The private native field context is unavailable.")?;
+        let object = self.exchange(
+            Command::ResolveField,
+            serde_json::json!({"backendNodeId":backend,"executionContextId":context}),
+            Some(session),
+            check,
+            None,
+        )?;
+        let object = object["object"]["objectId"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 512)
+            .ok_or("The native field identity is unavailable.")?;
+        let result = self.exchange(
+            Command::FillEmpty,
+            serde_json::json!({"objectId":object,
+            "functionDeclaration":forms_script::FILL_EMPTY,
+            "arguments":[{"value":text},{"value":origin},{"value":metadata}],
+            "returnByValue":true,"generatePreview":false,"silent":true,"userGesture":false,
+            "awaitPromise":false,"throwOnSideEffect":false}),
+            Some(session),
+            check,
+            Some(dispatch),
+        )?;
+        if result.get("exceptionDetails").is_some() || result["result"]["type"] != "string" {
+            return Err("The browser form operation did not confirm its exact outcome.".into());
+        }
+        let status = result["result"]["value"]
+            .as_str()
+            .filter(|value| matches!(*value, "filled" | "stale" | "unsupported" | "not-empty"))
+            .ok_or("The browser form operation returned an unsupported outcome.")?
+            .to_owned();
+        // No object identity or field value crosses this private native method.
+        self.exchange(
+            Command::ReleaseObject,
+            serde_json::json!({"objectId":object}),
+            Some(session),
+            check,
+            None,
+        )?;
+        Ok(status)
+    }
     pub(super) fn new(input: File, output: File) -> Self {
         Self {
             input,
@@ -366,11 +448,21 @@ impl ControlPipe {
     ) -> Result<serde_json::Value, String> {
         if matches!(
             command,
-            Command::Navigate | Command::Activate | Command::Click | Command::Scroll
+            Command::Navigate
+                | Command::Activate
+                | Command::FillEmpty
+                | Command::Click
+                | Command::Scroll
         ) {
             return Err("Browser input requires the native dispatch fence.".into());
         }
-        if matches!(command, Command::IsolatedWorld | Command::Visibility) {
+        if matches!(
+            command,
+            Command::IsolatedWorld
+                | Command::Visibility
+                | Command::ResolveField
+                | Command::ReleaseObject
+        ) {
             return Err("Only the fixed native visibility probe may create or evaluate its private context.".into());
         }
         self.exchange(command, params, session, check, None)
@@ -483,7 +575,18 @@ impl ControlPipe {
             let deadline = Instant::now() + Duration::from_secs(5);
             let message = message.to_string();
             if let Some(dispatch) = dispatch {
-                write_once(&self.input, message.as_bytes(), deadline, check, dispatch)?;
+                if matches!(command, Command::FillEmpty) {
+                    write_once_bounded(
+                        &self.input,
+                        message.as_bytes(),
+                        deadline,
+                        check,
+                        dispatch,
+                        32768,
+                    )?;
+                } else {
+                    write_once(&self.input, message.as_bytes(), deadline, check, dispatch)?;
+                }
             } else {
                 write(&self.input, message.as_bytes(), deadline, check)?;
             }

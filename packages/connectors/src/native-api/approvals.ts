@@ -208,6 +208,8 @@ export function buildToolApproval(
       : "Select the Windows app for supported background controls without bringing it forward. Each action still follows your approval settings."
     : toolName === "local-browser-activate" && isRegistered
     ? "Switch the selected foreground browser to this exact observed tab once. Inspect the current page before further input."
+    : toolName === "local-browser-fill" && isRegistered
+    ? "Enter this exact public text into the observed empty field. Page handlers may send it to the website. Preserve existing values and private fields; inspect the page afterward."
     : isRegistered
     ? `Execute the ${toolName} tool via ${providerId} with the given arguments.`
     : `Refuse unregistered tool ${toolName} — not in Mivlet's tool registry.`;
