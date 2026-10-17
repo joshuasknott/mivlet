@@ -36,6 +36,13 @@ const toolLabels: Record<string, [string, string]> = {
   "web-fetch": ["Reading an exact web page", "Read an exact web page"],
   "local-app-list": ["Listing open applications", "Listed open applications"],
   "local-browser-tabs": ["Checking browser tabs", "Checked browser tabs"],
+  "local-browser-activate": ["Selecting a browser tab", "Selected a browser tab"],
+  "local-browser-fill": ["Filling a public field", "Text sent; awaiting observation"],
+  "local-browser-download": ["Receiving a file", "Received a verified file"],
+  "local-browser-upload-choices": ["Checking empty file fields", "Checked empty file fields"],
+  "local-browser-upload": ["Attaching an approved file", "File attached; review in browser"],
+  "local-browser-handover": ["Handing the browser to you", "Waiting for your input"],
+  "command-input": ["Sending session input", "Session input sent"],
   "local-browser-observe": [
     "Reading the browser page",
     "Read the browser page",

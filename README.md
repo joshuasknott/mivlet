@@ -51,8 +51,11 @@ a deployed or production-validated service.
   [coding workflow and its limits](docs/architecture/coding-workflow.md).
   File checkpoints save named code states in the private copy, preview real file
   changes, and restore an explicitly approved tree with a recoverable before-restore
-  checkpoint. Original checkouts, Git HEAD and conversation history stay intact;
-  restored files need fresh verification. See [checkpoint limits and recovery](docs/architecture/coding-workflow.md#file-checkpoints).
+  checkpoint. Connected undo can restore the associated conversation branch and
+  private-copy files together, with explicit Finish/Revert recovery after an
+  uncertain result. Original checkouts and Git HEAD stay intact; restored files
+  need fresh verification. Work keeps its exact repository copy across continuations.
+  See [checkpoint limits and recovery](docs/architecture/coding-workflow.md#file-checkpoints).
 - Bounded live command logs and native persistent jobs for repository snapshots
   or selected workspace files. Library's Commands section shows status and Stop.
   Persistent jobs require an explicit lifetime, retain isolation and repository
@@ -60,6 +63,17 @@ a deployed or production-validated service.
   the opt-in [background owner](docs/architecture/work-execution.md#opt-in-native-background-text-execution-on-windows)
   retains approved commands after the window closes. Restart never replays jobs.
   See the [native lifecycle](docs/architecture/native-execution.md#live-output-and-controlled-jobs).
+- Approved interactive jobs accept bounded line input with reconnectable output
+  and independent Stop. Native Node HTTP previews can open beside a command
+  result; selecting an element stages a revision request with validated evidence.
+  Preview transport remains isolated, and installed WebView network enforcement
+  must pass its native probe. Sessions use a fixed snapshot: stop, edit and restart
+  to see repository changes. Full-screen terminal/resize support is not offered.
+- Conversation queues can be held, edited and reordered before admission. Explicit
+  goals record success criteria and turn/token limits; continuation checks fresh
+  reports before scheduling another turn. Codex supports live turn guidance;
+  other routes retain guidance for the next supported boundary. These controls
+  operate on the same encrypted Work records as foreground/background execution.
 - GitHub PR review for attached repositories: paginated changes, checks and
   comments, revision-aware viewed files, local review drafts, explicitly approved
   managed-branch updates and review actions, and bounded optional PR watches
@@ -127,7 +141,9 @@ a deployed or production-validated service.
   intact. Shared tools create passive DOCX, formula-bearing XLSX, editable
   16:9 PPTX and PDF reports with tables and vector bar charts. Uploaded images and text can be previewed
   during the current session (bounded to 32 MB of preview memory). Upload pixels
-  are not added to saved conversations; unavailable originals ask for reattachment.
+  are not embedded in saved conversation text. Work retains verified private image
+  copies and hash-bound references for continuation and explicit recipient sharing;
+  unavailable or changed originals ask for reattachment.
   Saved workspace text files remain previewable through their scoped file path.
 - Provider and plugin-style Connections, including connector and MCP
   boundaries. App connections use browser sign-in through native OAuth or official remote services.
@@ -144,6 +160,11 @@ a deployed or production-validated service.
   read-only defaults, expiry, revocation and scoped access history preserve
   Mivlet authority. Remote access requires an operator-provided HTTPS proxy;
   the app does not publish an endpoint. See [external assistants](docs/architecture/mcp-server.md).
+- An opt-in phone/web view shares those granted agents and Work, with task
+  requests, bounded results and Stop for tasks the browser started. Native OAuth
+  custody and HttpOnly cookies keep bearer credentials out of browser JavaScript.
+  Opt-in push notifications contain no task content. HTTPS, browser permission
+  and an awake, reachable desktop are required; this is not hosted execution.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.
@@ -229,8 +250,11 @@ a deployed or production-validated service.
   delivery and a protected system installation with a verified publisher.
   The agent then lists and selects the window through normal computer tools.
   Stop leaves this browser open for human takeover; account changes and app
-  closure close it. This currently uses Windows controls; DOM browser tools and
-  managed uploads/downloads remain incomplete.
+  closure close it. Fresh DOM references support tab activation, observation,
+  clicks and empty public text fields. Private fields require human handover.
+  Managed downloads close the owned browser before sealing passive files into
+  workspace custody; uploads attach an exact verified published passive artifact
+  to a fresh empty file field. Both are bounded to 8 MiB and require exact approval.
 - Runtime-detected operating-system dictation. It fails closed when speech
   recognition is unavailable and does not retain raw audio.
 

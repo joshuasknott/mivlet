@@ -10,5 +10,5 @@
     "strict": true,
     "noEmit": true
   },
-  "include": ["vite.config.ts", "scripts/icon-weights.ts", "scripts/compact-style-names.ts"]
+  "include": ["vite.config.ts", "scripts/icon-weights.ts", "scripts/compact-style-names.ts", "scripts/assistant-primitives.ts"]
 }

@@ -3,9 +3,11 @@ import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { pruneUnusedIconWeights } from "./scripts/icon-weights";
 import { compactStyleNames } from "./scripts/compact-style-names";
+import { treeShakeAssistantPrimitives } from "./scripts/assistant-primitives";
 
 export default defineConfig({
   plugins: [
+    treeShakeAssistantPrimitives(),
     compactStyleNames(fileURLToPath(new URL("./src", import.meta.url))),
     react(),
     pruneUnusedIconWeights([
@@ -68,6 +70,10 @@ export default defineConfig({
       output: {
         onlyExplicitManualChunks: true,
         manualChunks(id) {
+          // These small session controls share one deferred conversation island.
+          // Opening a session no longer fetches four mutually importing chunks.
+          if (/[/\\]components[/\\]conversation[/\\]coding[/\\]/.test(id))
+            return "ConversationPane-sessions";
           // The PDF engine is loaded only when a verified PDF preview opens.
           if (/[/\\]node_modules[/\\]pdfjs-dist[/\\]/.test(id))
             return "pdf-renderer";

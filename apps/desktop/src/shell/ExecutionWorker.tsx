@@ -25,7 +25,7 @@ import {
   conversationToolsForModel,
 } from "../lib/computer-tools";
 import { COMPUTER_WORK_INSTRUCTIONS } from "../lib/computer-instructions";
-import { loadGeneratedUiInstructions } from "../lib/generated-interface";
+import { loadGeneratedUiInstructions } from "../lib/generated-ui-instructions";
 import { capturedFileExclusions } from "../lib/context-selection";
 import { builtinPluginInstructions } from "../lib/builtin-plugins";
 import { composerImageInputs } from "../lib/composer-images";

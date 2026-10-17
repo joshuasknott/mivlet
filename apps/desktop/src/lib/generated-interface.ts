@@ -277,12 +277,3 @@ export function validateGeneratedInterface(
     };
   }
 }
-
-export const GENERATED_UI_INSTRUCTIONS = `Mivlet supports an optional interactive response format: OpenUI. Use Markdown for ordinary answers. When interaction helps, add one fenced openui-v2 block. Local controls update immediately; follow-up buttons stage a reply for review and never grant tool authority. Never request credentials.`;
-
-export async function loadGeneratedUiInstructions() {
-  const { default: catalogue } =
-    await import("./rich-interface-instructions.json");
-  const { GENERATED_HTML_INSTRUCTIONS } = await import("./generated-html");
-  return `${GENERATED_UI_INSTRUCTIONS}\n${catalogue.instructions}\n${GENERATED_HTML_INSTRUCTIONS}`;
-}

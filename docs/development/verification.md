@@ -109,6 +109,14 @@ assistant-ui graph and separates the generated-interface schema engine from
 eager vendor code. The schema chunk still counts against the common budget.
 Budget ceilings and asset accounting remain unchanged.
 
+The assistant-ui build transform converts the pinned package's generated
+primitive getter barrels into native ESM namespace imports. This removes unused
+controls while preserving the used implementations and live bindings; package
+entry changes fail the build for review. Its bundle regression checks both retained
+controls and omitted rendering/viewport/dictation modules. Session controls share
+one deferred conversation chunk. Provider instruction loading and live tool
+updates remain independent of saved-history and generated-response parsing.
+
 Generated-response regressions exercise the shipped provider-prompt example
 through extraction, the production AST guard, rendering, saved state and a
 deliberate follow-up. `ui:check` regenerates actual component signatures while
