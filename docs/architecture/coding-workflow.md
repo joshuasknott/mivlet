@@ -172,7 +172,8 @@ isolated snapshot; all writes are discarded, including on success. The repositor
 stays locked until the job and all descendants end. Use `command-stop` or the
 Commands panel's Stop job control, then approve a new start to pick up changes.
 Network remains off by default; approval does not add a loopback exemption or
-host-browser access. There is no interactive terminal. Closing the native owner
+host-browser access. Explicitly interactive jobs accept bounded line input;
+full-screen terminal applications and resize are unsupported. Closing the native owner
 ends its jobs; restart retains nonsecret status, reports uncertainty and never
 replays commands. See [the lifecycle contract](native-execution.md#live-output-and-controlled-jobs).
 

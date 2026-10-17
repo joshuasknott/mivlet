@@ -98,7 +98,8 @@ project content. Output redaction is additional protection, not secret detection
 
 The environment is constructed from scratch. No host PATH, provider connection,
 Git credential pipe or native-store handle is inherited. An explicit handle list
-contains only empty stdin and bounded stdout/stderr pipes. A private desktop and
+contains empty stdin (or the explicitly approved private interactive input pipe)
+and bounded stdout/stderr pipes. A private desktop and
 job UI restrictions prevent this lane from becoming interactive Computer Use.
 
 The job is attached atomically during suspended process creation, has no breakaway
