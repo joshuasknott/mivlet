@@ -482,8 +482,27 @@ fn retention_keeps_uncertain_import_and_scope_states_until_exact_terminal_acknow
             &snapshot,
             || panic!("unacknowledged Stop retired")
         )?);
+        Ok(())
+    });
+    fixture(&store(), |ctx| {
+        let (target, review) = prepared(ctx, true)?;
+        let _gate = cloud::dispatch::AdmissionGuard::retain(&review.admission.binding);
+        let saved = claim_at(ctx, &target, &review.review_id)?;
+        let task =
+            TaskIdentity::from_binding(&target.workspace_id, &saved.admission.binding).unwrap();
+        let snapshot = saved
+            .admission
+            .binding
+            .repository
+            .as_ref()
+            .unwrap()
+            .snapshot
+            .clone();
+        let (_, next) = stop_at(ctx, &target)?;
+        let target = next.unwrap();
         // Authenticated cancellation is a later sequence, with no output or
-        // retained proposal. Uncertain provider outcomes remain excluded.
+        // retained proposal, before any completed output. An already completed
+        // server result cannot be rewritten as a successful cancellation.
         let mut ack = completed(&saved, true, false);
         ack.snapshot.status = "cancelled".into();
         ack.snapshot.generation += 1;
