@@ -3,7 +3,7 @@ import { PHONE_RELAY_LIMITS, type PhoneRelayReply } from "@mivlet/protocol";
 export interface PhoneEnv extends PhoneRelayBindings {
   MIVLET_PHONE_RELAY_SIGNING_KEY: string;
 }
-export const SESSION = /^[A-Za-z0-9_-]{43}$/;
+const SESSION = /^[A-Za-z0-9_-]{43}$/;
 export const OPERATIONS = new Set(["begin", "consent", "session", "call", "disconnect", "push-status", "push-subscribe"]);
 export function json(value: unknown, status = 200, headers?: HeadersInit): Response {
   const result = new Headers(headers);

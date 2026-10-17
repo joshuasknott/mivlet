@@ -1,5 +1,5 @@
 import { canonicalHostedTaskJson, hostedTaskSha256, hostedTextContentFailure, HOSTED_TEXT_TASK_LIMITS as L, type HostedTaskAdmission, type HostedTaskCapability, type HostedTextProviderId } from "@mivlet/protocol";
-export const PROVIDERS = ["openai", "anthropic", "gemini", "xai", "deepseek"] as const;
+const PROVIDERS = ["openai", "anthropic", "gemini", "xai", "deepseek"] as const;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/;
 export function identifier(value: unknown): string {
   if (typeof value !== "string" || !ID.test(value)) throw new Error("invalid-task-target");

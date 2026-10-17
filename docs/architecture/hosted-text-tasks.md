@@ -97,16 +97,17 @@ generated secrets were configured through deployment-secret APIs; their local
 recovery copy is protected by Windows DPAPI, outside the repository. No provider
 API key was supplied or model call made by this deployment check.
 
-The existing Convex project retains its legacy name, `fable`. The temporary
+The existing Convex project retains its legacy name, `fable`. The persistent
 development deployment `chatty-roadrunner-66` contains the account functions and
 native capability endpoint, with the existing Clerk issuer/audience and the
-separate task signing key and URL. This development deployment expires around
-October 20, 2026; it is not the persistent release target. Its generated bindings
+separate task signing key and URL. Its expiry was cleared through the supported
+management API and verified without changing any other deployment metadata.
+It remains a development deployment. Its generated bindings
 were produced by the Convex CLI. The eager auth configuration was also verified
 by an actual function deployment; mock-auth restrictions remain in place.
 
 Local verification passed protocol compatibility/spine checks, connector and
-both Worker builds, 93 Worker unit tests, and the task Worker deployment dry run.
+the Worker builds, 100 Worker unit tests including the phone relay, and deployment dry runs.
 Live checks exercised service health, a real SQLite Durable Object scoped read,
 missing/wrong/expired capability rejection, exact body hashing, single-use nonce
 replay rejection and an absent-task response. The Convex endpoint rejected
