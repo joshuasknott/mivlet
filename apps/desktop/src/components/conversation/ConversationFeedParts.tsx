@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { ApprovalResolutionRequest } from "@mivlet/protocol";
 import type { McpAppApprovalPreview } from "../../lib/mcp-app-host";
 import {
@@ -8,6 +8,8 @@ import {
 } from "../../lib/conversation-presentation";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { McpAppResult } from "./McpAppResult";
+import { nativeCommandResult } from "../../lib/native-command-result";
+const NativeCodingResult = lazy(() => import("./coding/NativeCodingResult").then(module => ({ default: module.NativeCodingResult })));
 
 export function ConversationFeedMessageTime({ value }: { value?: string }) {
   if (!value || !Number.isFinite(Date.parse(value))) return null;
@@ -27,6 +29,7 @@ export function ConversationFeedPart({
   cancelled = false,
   onOpenConnector,
   workspaceId,
+  agentId,
   conversationId,
   generation,
   isCurrent,
@@ -40,6 +43,7 @@ export function ConversationFeedPart({
   cancelled?: boolean;
   onOpenConnector?: (connectorId: string) => void;
   workspaceId: string;
+  agentId?: string;
   conversationId: string;
   generation?: number;
   isCurrent?: () => boolean;
@@ -67,6 +71,7 @@ export function ConversationFeedPart({
   const pending = part.state === "running" && !running;
   const halted = part.terminalStatus ?? (pending ? cancelled ? "cancelled" : "interrupted" : undefined);
   const failed = part.state === "failed" && !halted;
+  const commandJob = part.state === "succeeded" && !halted ? nativeCommandResult(part.tool, part.content) : null;
   return (
     <div
       className={`turn-tool${failed ? " turn-tool--failed" : ""}`}
@@ -100,6 +105,8 @@ export function ConversationFeedPart({
           ) : null}
         </p>
       ) : null}
+      {commandJob && agentId ? <Suspense fallback={null}><NativeCodingResult key={`${workspaceId}:${agentId}:${commandJob.id}:${commandJob.generation}`}
+        workspaceId={workspaceId} agentId={agentId} jobId={commandJob.id} jobGeneration={commandJob.generation} onDraft={onDraft} /></Suspense> : null}
       {part.state === "succeeded" && part.mcpApp && part.connectorId && part.resultRevisionId ? (
         <McpAppResult
           descriptor={part.mcpApp}
