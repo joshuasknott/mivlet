@@ -648,7 +648,12 @@ pub(crate) fn acceptance() -> Result<(), String> {
                     }
                     Err(error) => { eprintln!("{error}"); 2 }
                 };
-                handle.exit(code);
+                let closing = handle.clone();
+                if window.with_webview(move |webview| {
+                    crate::interactive_network_guard::dispose_acceptance();
+                    let _ = unsafe { webview.controller().Close() };
+                    closing.exit(code);
+                }).is_err() { handle.exit(2); }
             });
             Ok(())
         })
@@ -697,10 +702,7 @@ mod tests {
     fn probe() -> Probe {
         Probe {
             attempt: 4,
-            origin: format!(
-                "http://mivlet-proof-{}.localhost:12345",
-                "a".repeat(48)
-            ),
+            origin: format!("http://mivlet-proof-{}.localhost:12345", "a".repeat(48)),
             frame_id: "frame".into(),
             baseline_nonce: "base-native-nonce".into(),
             restricted_nonce: "restricted-native-nonce".into(),
@@ -729,7 +731,9 @@ mod tests {
         let value = probe();
         let origin = url::Url::parse(&value.origin).unwrap();
         let host = origin.host_str().unwrap();
-        assert!(host.split('.').all(|label| !label.is_empty() && label.len() <= 63));
+        assert!(host
+            .split('.')
+            .all(|label| !label.is_empty() && label.len() <= 63));
         assert!(host.starts_with("mivlet-proof-"));
     }
     #[test]
