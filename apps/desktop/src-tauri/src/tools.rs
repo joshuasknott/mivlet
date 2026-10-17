@@ -84,7 +84,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 66] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 67] = [
     "repository-pr-read",
     "repository-pr-local",
     "repository-pr-action",
