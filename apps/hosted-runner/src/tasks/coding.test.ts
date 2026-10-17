@@ -12,8 +12,8 @@ import { capabilityFixture, MemoryTaskStorage, taskFixture } from "./testing/fix
 
 const key = "unit-provider-key-not-valid-at-any-provider";
 const content = "export const value = 1;\n";
-async function fixture() {
-  const source = utf8.encode(content); const sha256 = await byteSha256(source); const path = utf8.encode("main.js");
+async function fixture(sourceContent = content) {
+  const source = utf8.encode(sourceContent); const sha256 = await byteSha256(source); const path = utf8.encode("main.js");
   const tree = new Uint8Array(8 + path.length + 32); new DataView(tree.buffer).setBigUint64(0, BigInt(path.length), true); tree.set(path, 8); tree.set(Uint8Array.from(sha256.match(/../g)!, pair => parseInt(pair, 16)), 8 + path.length);
   const unsigned = { version: 1 as const, snapshotId: "a".repeat(48), repositoryId: "b".repeat(48), branch: "main", baseCommit: "c".repeat(40), inputTreeId: await byteSha256(tree), files: [{ path: "main.js", sizeBytes: source.length, sha256 }], writablePaths: ["main.js", "new.js"], totalBytes: source.length };
   const snapshot: HostedRepositorySnapshot = { ...unsigned, manifestSha256: await hostedTaskSha256(unsigned) };
@@ -119,6 +119,27 @@ describe("real provider adapters over closed scratch tools", () => {
     vi.stubGlobal("fetch", vi.fn(async () => sse(tool("scratch_check", { id: "syntax" }, "check_stop"))));
     const access = { ...c.access, bytes: async () => { controller.abort(); return value.source; } };
     await expect(runRealCoding(value.binding, value.input, key, controller.signal, c.journal, access, service)).rejects.toMatchObject({ uncertain: true });
+    expect(service.file).not.toHaveBeenCalled(); expect(service.run).not.toHaveBeenCalled(); expect(service.cancel).toHaveBeenCalled();
+  });
+  it.each(["tool-name", "argument-property"] as const)("rejects a Unicode-escaped current key in a decoded %s before retaining a proposal", async location => {
+    const value = await fixture(); const c = await custody(value); const service = runtime();
+    const escaped = [...key].map(char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`).join("");
+    const payload = location === "tool-name" ? tool(key, {}, "escaped_name")
+      : tool("unknown_tool", { [key]: "ordinary value" }, "escaped_property");
+    let wire = JSON.stringify(payload);
+    // The outer JSON escapes names once; the arguments JSON string is escaped twice.
+    wire = wire.replace(key, location === "tool-name" ? escaped : escaped.replaceAll("\\", "\\\\"));
+    expect(wire).not.toContain(key);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(`data: ${wire}\n\n`, { headers: { "content-type": "text/event-stream" } })));
+    const seal = vi.spyOn(c.access, "sealOutput");
+    await expect(runRealCoding(value.binding, value.input, key, new AbortController().signal, c.journal, c.access, service)).rejects.toMatchObject({ code: "coding-content-refused" });
+    expect(seal).not.toHaveBeenCalled(); expect(service.file).not.toHaveBeenCalled();
+    expect(await c.files.manifest()).toEqual(value.binding.repository.snapshot.files);
+  });
+  it("refuses the exact separately enrolled key in selected source before sandbox materialization", async () => {
+    const value = await fixture(`export const ordinary = "${key}";\n`); const c = await custody(value); const service = runtime();
+    vi.stubGlobal("fetch", vi.fn(async () => sse(tool("scratch_check", { id: "syntax" }, "source_key"))));
+    await expect(runRealCoding(value.binding, value.input, key, new AbortController().signal, c.journal, c.access, service)).rejects.toMatchObject({ code: "coding-content-refused" });
     expect(service.file).not.toHaveBeenCalled(); expect(service.run).not.toHaveBeenCalled(); expect(service.cancel).toHaveBeenCalled();
   });
 });

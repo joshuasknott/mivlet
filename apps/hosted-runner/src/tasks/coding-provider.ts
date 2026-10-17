@@ -24,7 +24,7 @@ export interface CodingFileAccess {
 }
 function hasSecret(value: unknown, key: string): boolean {
   if (typeof value === "string") return value.includes(key);
-  return Array.isArray(value) ? value.some(item => hasSecret(item, key)) : !!value && typeof value === "object" && Object.values(value).some(item => hasSecret(item, key));
+  return Array.isArray(value) ? value.some(item => hasSecret(item, key)) : !!value && typeof value === "object" && Object.entries(value).some(([name, item]) => name.includes(key) || hasSecret(item, key));
 }
 function addUsage(previous: HostedTaskUsage | undefined, next: HostedTaskUsage): HostedTaskUsage {
   const sum = (field: "cachedInputTokens" | "cacheWriteTokens" | "reasoningTokens") => previous?.[field] === undefined && next[field] === undefined ? undefined : (previous?.[field] ?? 0) + (next[field] ?? 0);
@@ -45,10 +45,12 @@ export async function runRealCoding(binding: HostedCodingTaskBinding, input: Hos
   const progress = async (proposal?: HostedCodingProposal): Promise<ProviderResult> => {
     signal.throwIfAborted(); const state = await journal.progress(); const output = await files.sealOutput(); signal.throwIfAborted();
     const coding: HostedCodingProgress = { modelCalls: state.modelCalls, toolCalls: state.toolCalls, allocatedOutputTokens: state.allocatedOutputTokens, completedChecks: state.completedChecks, output, ...(proposal ? { proposal } : {}) };
-    return { text: proposal ? "Needs a fresh task review for the recorded additional file or command scope. The retained scratch candidate has not been imported locally." : text, coding, ...(usage ? { usage } : {}) };
+    const result = { text: proposal ? "Needs a fresh task review for the recorded additional file or command scope. The retained scratch candidate has not been imported locally." : text, coding, ...(usage ? { usage } : {}) };
+    safe(result, L.admissionBytes + binding.budget.maxResultBytes);
+    return result;
   };
   const propose = async (call: NativeToolCall, reason: HostedCodingProposal["reason"]): Promise<never> => {
-    safe(call.arguments, 8192);
+    safe(call, 8192);
     throw new ScopeProposal({ tool: call.tool, arguments: call.arguments, argumentsSha256: await hostedTaskSha256(call.arguments), reason });
   };
   try {
@@ -91,7 +93,8 @@ export async function runRealCoding(binding: HostedCodingTaskBinding, input: Hos
         else if (event.type === "tool-call") {
           if (!event.callId || !/^[a-zA-Z0-9_-]{1,160}$/.test(event.callId) || seen.has(event.callId) || event.arguments.length > 64000) throw new ProviderFailure("coding-tool-call-refused", false);
           seen.add(event.callId); safe(event.arguments, 64000);
-          calls.push({ callId: event.callId, tool: event.tool, arguments: event.arguments, continuationToken: event.continuationToken });
+          const call = { callId: event.callId, tool: event.tool, arguments: event.arguments, continuationToken: event.continuationToken };
+          safe(call, 64000); calls.push(call);
         } else if (event.type === "usage") nextUsage = usageRecord(event);
         else if (event.type === "done") finish = event.finishReason;
         else if (event.type === "error" || event.type === "cancelled") failed = true;
@@ -132,7 +135,12 @@ export async function runRealCoding(binding: HostedCodingTaskBinding, input: Hos
           try {
             const taskSha256 = await hostedTaskSha256(binding); signal.throwIfAborted();
             await runtime.begin({ leaseId, taskSha256, stepId: toolStep, deadline: state.deadline, scope: binding.repository.scope, files: manifest, candidateSha256 });
-            for (const file of manifest) { signal.throwIfAborted(); const bytes = await files.bytes(file); signal.throwIfAborted(); await runtime.file(leaseId, file.path, new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+            for (const file of manifest) {
+              signal.throwIfAborted(); const bytes = await files.bytes(file); signal.throwIfAborted();
+              const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+              safe(source, L.fileBytes * 6 + 2); signal.throwIfAborted();
+              await runtime.file(leaseId, file.path, source);
+            }
             signal.throwIfAborted(); result = await runtime.run(leaseId, args.id); signal.throwIfAborted();
             if (result.leaseId !== leaseId || result.stepId !== toolStep || result.candidateSha256 !== candidateSha256 || result.id !== args.id) throw new Error("coding-check-outcome-uncertain");
           } finally { signal.removeEventListener("abort", cancel); await runtime.cancel(leaseId); }
