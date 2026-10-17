@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::sync::{
     atomic::{AtomicBool, AtomicU32, Ordering},
-    Arc, Mutex,
+    Arc, Mutex, OnceLock,
 };
 use webview2_com::{
     take_pwstr, CallDevToolsProtocolMethodCompletedHandler,
@@ -18,6 +18,14 @@ use windows::core::{Interface, HSTRING, PWSTR};
 static READY: AtomicBool = AtomicBool::new(false);
 static FAILED: AtomicBool = AtomicBool::new(false);
 static BROWSER_MAJOR: AtomicU32 = AtomicU32::new(0);
+static BROWSER_VERSION: OnceLock<String> = OnceLock::new();
+#[cfg(debug_assertions)]
+pub(crate) fn diagnostic_version() -> &'static str {
+    BROWSER_VERSION
+        .get()
+        .map(String::as_str)
+        .unwrap_or("unavailable")
+}
 const MAX_FRAMES: usize = 128;
 type Frames = HashMap<String, String>;
 #[derive(Default)]
@@ -218,10 +226,9 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
     unsafe {
         environment.BrowserVersionString(&mut version)?;
     }
-    BROWSER_MAJOR.store(
-        browser_major(&take_pwstr(version)).unwrap_or(0),
-        Ordering::Release,
-    );
+    let version = take_pwstr(version);
+    BROWSER_MAJOR.store(browser_major(&version).unwrap_or(0), Ordering::Release);
+    let _ = BROWSER_VERSION.set(version.chars().take(128).collect());
     let fence = Arc::new(Mutex::new(Fence::default()));
     let requests = fence.clone();
     let handler_core = core.clone();
