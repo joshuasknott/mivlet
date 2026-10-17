@@ -103,6 +103,7 @@
     "repository-recover": "connector-write",
     "workspace-agents": "coordination",
     "continuation-read": "coordination",
+    "goal-report": "coordination",
     "teammate-assign": "coordination",
     "teammate-message": "coordination",
     "project-record": "coordination",

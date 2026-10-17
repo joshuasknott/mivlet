@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { hostedTaskSha256, hostedCodingTaskPolicy, validateHostedCodingScope, HOSTED_CODING_IMAGE, type HostedCodingTaskBinding, type HostedRepositorySnapshot } from "@mivlet/protocol";
+import { hostedTaskSha256, hostedCodingTaskPolicy, validateHostedCodingScope, signHostedTaskCapability, HOSTED_CODING_IMAGE, type HostedCodingTaskBinding, type HostedRepositorySnapshot } from "@mivlet/protocol";
+import worker from "./index";
 import { admission } from "./contracts";
 import { byteSha256, codingEntries, codingRepository, encodeCodingChunk, utf8 } from "./coding-contracts";
 import { CodingFiles } from "./coding-custody";
@@ -39,6 +40,24 @@ function runtime(): CodingRuntimeBinding {
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
 describe("reviewed isolated scratch admission", () => {
+  it("rejects missing runtime before consuming admission authority or reserving provider work", async () => {
+    const value = await fixture(); const body = { binding: value.binding, input: value.input };
+    const cap = { ...capabilityFixture(), requestSha256: await hostedTaskSha256(body) };
+    const signingKey = "unit-signing-material-at-least-thirty-two";
+    const consume = vi.fn(); const reserve = vi.fn(); const task = vi.fn(); const send = vi.fn();
+    vi.stubGlobal("fetch", send);
+    const env = { MIVLET_HOSTED_TASK_SIGNING_KEY: signingKey, PROVIDER_CUSTODY: { getByName: () => ({ consume, reserve }) }, TASK_AUTHORITY: { getByName: task } } as unknown as TaskEnv;
+    const authorization = `MivletTask ${await signHostedTaskCapability(signingKey, cap)}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const response = await worker.fetch(new Request(`https://tasks.example/v1/tasks/${cap.resourceId}/admit`, {
+        method: "POST", headers: { authorization, "content-type": "application/json" }, body: JSON.stringify(body),
+      }), env);
+      expect(response.status).toBe(503); expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(await response.json()).toEqual({ error: "hosted-coding-runtime-required" });
+    }
+    expect(consume).not.toHaveBeenCalled(); expect(reserve).not.toHaveBeenCalled();
+    expect(task).not.toHaveBeenCalled(); expect(send).not.toHaveBeenCalled();
+  });
   it("binds every exported hash, writable path, argv and fixed network/image to exact policy", async () => {
     const value = await fixture(); const cap = capabilityFixture(); cap.requestSha256 = await hostedTaskSha256({ binding: value.binding, input: value.input });
     await expect(admission({ binding: value.binding, input: value.input }, cap)).resolves.toMatchObject({ binding: { version: 3 } });
