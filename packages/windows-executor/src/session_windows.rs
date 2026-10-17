@@ -14,7 +14,7 @@ use windows_sys::Win32::{
         Authorization::ConvertStringSidToSidW, Isolation::GetAppContainerNamedObjectPath, *,
     },
     Storage::FileSystem::*,
-    System::{JobObjects::*, Pipes::*, Threading::*, IO::*},
+    System::{JobObjects::*, Pipes::*, RemoteDesktop::ProcessIdToSessionId, Threading::*, IO::*},
 };
 
 #[derive(Clone)]
