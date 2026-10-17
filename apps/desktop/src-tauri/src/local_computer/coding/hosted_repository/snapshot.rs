@@ -139,7 +139,7 @@ pub(crate) fn read_snapshot_chunk(
         .iter()
         .find(|entry| entry.path == path)
         .ok_or("This source path was not reviewed for export.")?;
-    if offset > entry.size_bytes || offset % CHUNK_BYTES as u64 != 0 {
+    if offset > entry.size_bytes || !offset.is_multiple_of(CHUNK_BYTES as u64) {
         return Err("Invalid source chunk offset.".into());
     }
     let bytes = files::read(&root.join("input").join(path), FILE_BYTES, || {

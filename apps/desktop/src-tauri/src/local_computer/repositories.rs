@@ -99,7 +99,7 @@ fn extract_archive(bytes: &[u8], destination: &Path) -> Result<(usize, usize, u6
         }
         let name = std::str::from_utf8(entry.name_raw())
             .map_err(|_| "The repository archive contains an invalid UTF-8 file name.")?;
-        let path = entry_path(&name)?;
+        let path = entry_path(name)?;
         total = total
             .checked_add(entry.size())
             .ok_or("The repository archive is too large.")?;
