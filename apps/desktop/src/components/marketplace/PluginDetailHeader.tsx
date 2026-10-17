@@ -13,7 +13,7 @@ export function PluginDetailHeader({ name, description, icon, status, statusClas
     <div className="integration-panel-detail__header">
       {icon}
       <div><h2 id={titleId}>{name}</h2>{description ? <p>{description}</p> : null}</div>
-      <span className={`integration-panel-detail__status${statusClass ? ` integration-panel-detail__status--${statusClass}` : ""}`}>{status}</span>
+      <span className={`integration-panel-detail__status ${statusClass ? `integration-panel-detail__status--${statusClass}` : ""}`}>{status}</span>
     </div>
   </>;
 }
