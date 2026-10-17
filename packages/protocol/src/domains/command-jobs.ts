@@ -1,4 +1,5 @@
 import type { LocalComputerEpochRequest } from "./local-computer.js";
+import type { CodingRepository, CodingRepositoryStatus, RepositoryWorkBinding } from "./coding.js";
 
 export type NativeCommandJobStatus =
   | "preparing"
@@ -13,6 +14,8 @@ export type NativeCommandJobStatus =
 export interface NativeCommandJob {
   id: string;
   repositoryId: string | null;
+  /** Immutable native capture; legacy jobs cannot invent a repository binding. */
+  repositoryBinding?: RepositoryWorkBinding | null;
   generation: number;
   operationId: number;
   commandId: string;
@@ -61,4 +64,17 @@ export interface NativeCommandInputReceipt {
   inputSequence: number;
   /** Pipe delivery only; application success still requires observed output. */
   delivery: "accepted" | "uncertain";
+}
+
+/** Read-only current task-copy state, never the command's discarded snapshot. */
+export interface NativeCommandRepositoryReview {
+  jobId: string;
+  jobGeneration: number;
+  repository: CodingRepository;
+  changes: CodingRepositoryStatus["changes"];
+  /** At most 200 paths and 64 KiB of UTF-8 names in total. */
+  files: string[];
+  truncated: boolean;
+  busy: boolean;
+  recoveryRequired: boolean;
 }
