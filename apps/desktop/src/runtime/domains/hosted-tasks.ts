@@ -29,8 +29,9 @@ async function invoke<T>(command: string, request: object): Promise<T> {
 }
 export const prepareHostedTextTask = (request: HostedTaskPrepare) =>
   invoke<HostedTaskReview>("hosted_text_prepare", request);
-export const prepareHostedPublicWebTask = (request: HostedPublicWebTaskPrepare) =>
-  invoke<HostedTaskReview>("hosted_task_prepare_public_web", request);
+export const prepareHostedPublicWebTask = (
+  request: HostedPublicWebTaskPrepare,
+) => invoke<HostedTaskReview>("hosted_task_prepare_public_web", request);
 export const prepareHostedCodingTask = (request: HostedCodingTaskPrepare) =>
   invoke<HostedTaskReview>("hosted_task_prepare_coding", request);
 export const cancelHostedTextReview = (request: HostedTaskReviewTarget) =>
