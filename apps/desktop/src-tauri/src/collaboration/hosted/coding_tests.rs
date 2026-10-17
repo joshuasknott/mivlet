@@ -271,3 +271,48 @@ fn coding_receipts_reject_scope_expansion_or_missing_manifest_and_keep_permissio
         Ok(())
     });
 }
+
+#[test]
+fn missing_runtime_is_clear_after_persisting_uncertainty_without_reclassifying_network_failure() {
+    fixture(&store(), |ctx| {
+        let (target, review) = prepared(ctx, true)?;
+        let _gate = cloud::dispatch::AdmissionGuard::retain(&review.admission.binding);
+        claim_at(ctx, &target, &review.review_id)?;
+        let unavailable = cloud::coding::admission_failed(
+            3,
+            "Cloud task request failed (hosted-coding-runtime-required).",
+            || super::super::result_at(ctx, &target, None).map_err(|error| error.to_string()),
+        );
+        assert!(unavailable.unwrap_err().contains("Workers Paid Containers"));
+        let item = ctx.item(&target.work_id)?;
+        assert_eq!(item.execution_owner.as_deref(), Some("hosted"));
+        assert_eq!(item.hosted_task.as_ref().unwrap().phase, "dispatching");
+        assert_eq!(item.run_ids.len(), 1);
+        assert!(item.outputs.is_empty());
+        for (version, error) in [
+            (3, "Cloud task connection interrupted."),
+            (3, "Cloud task request failed (some-other-error)."),
+            (
+                1,
+                "Cloud task request failed (hosted-coding-runtime-required).",
+            ),
+            (
+                2,
+                "Cloud task request failed (hosted-coding-runtime-required).",
+            ),
+        ] {
+            assert_eq!(
+                cloud::coding::admission_failed(version, error, || Ok(7)).unwrap(),
+                7
+            );
+        }
+        // A superseding Stop/account error from saving remains authoritative.
+        let stopped: std::result::Result<(), String> = cloud::coding::admission_failed(
+            3,
+            "Cloud task request failed (hosted-coding-runtime-required).",
+            || Err("The exact Work stopped.".into()),
+        );
+        assert_eq!(stopped.unwrap_err(), "The exact Work stopped.");
+        Ok(())
+    });
+}
