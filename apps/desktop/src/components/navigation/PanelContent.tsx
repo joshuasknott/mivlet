@@ -10,13 +10,17 @@ import { getRuntimeOutput } from "../../runtime/domains/outputs";
 import type { OutputDocument } from "../../lib/output-revisions";
 import type { OutputSource } from "../../lib/output-revisions";
 import { subscribeOutputRevisionApplied } from "../../lib/output-revision-events";
-import { OutputEditor } from "../conversation/OutputEditor";
 
 export { OpenWebPreview } from "./open-web-preview";
 
 const ArtifactPreview = lazy(() =>
   import("../conversation/ArtifactPreview").then((module) => ({
     default: module.ArtifactPreview,
+  })),
+);
+const OutputEditor = lazy(() =>
+  import("../conversation/ArtifactPreview").then((module) => ({
+    default: module.OutputEditor,
   })),
 );
 
@@ -171,12 +175,14 @@ export function PanelOutput({
           {origin.branchId ? ` · branch ${origin.branchId}` : ""}
         </p>
       </details>
-      <OutputEditor
-        output={output}
-        source={editorSource}
-        workspaceId={workspaceId}
-        onChange={setOutput}
-      />
+      <Suspense fallback={<p role="status">Loading saved editor…</p>}>
+        <OutputEditor
+          output={output}
+          source={editorSource}
+          workspaceId={workspaceId}
+          onChange={setOutput}
+        />
+      </Suspense>
     </section>
   );
 }

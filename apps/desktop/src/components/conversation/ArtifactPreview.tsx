@@ -15,6 +15,9 @@ import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { type OfficeCellSelection } from "./OfficePreview";
 import { OfficeOutputEditor } from "./OfficeOutputEditor";
 import { OutputEditor } from "./OutputEditor";
+// Shared preview engines load through this existing deferred artifact entry.
+export { OutputEditor };
+export { OfficePreview } from "./OfficePreview";
 import type { OutputRevisionRequest } from "../../lib/output-revisions";
 import {
   emitOutputRevisionRequest,
