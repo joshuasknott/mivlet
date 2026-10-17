@@ -2,7 +2,9 @@
 use super::super::tests::{fixture, store};
 use super::*;
 use sha2::Digest;
-fn start(ctx: &Context<'_>) -> Result<(Prepare, HostedComputerScope, Vec<ProviderConnection>)> {
+pub(super) fn start(
+    ctx: &Context<'_>,
+) -> Result<(Prepare, HostedComputerScope, Vec<ProviderConnection>)> {
     let room = chats::open_main(ctx, "lead")?;
     work::start(
         ctx,
@@ -288,7 +290,7 @@ fn stop_before_claim_cancels_review_and_prevents_the_delayed_approved_dispatch()
         Ok(())
     });
 }
-fn answer(offer: &Offer) -> TaskResult {
+pub(super) fn answer(offer: &Offer) -> TaskResult {
     let text = "Seasons follow Earth's tilt around the Sun.";
     let now = chrono::Utc::now().timestamp_millis();
     TaskResult {

@@ -1,5 +1,7 @@
 //! Explicit cloud text tasks. Canonical Work and the native approval ledger own
 //! admission; the task Worker owns one API request. There is no native fallback.
+pub(crate) mod coding;
+mod coding_transfer;
 mod commands;
 pub(crate) mod dispatch;
 pub(crate) mod models;
@@ -69,7 +71,10 @@ pub(crate) fn validate_result(
     result: &models::TaskResult,
 ) -> Result<(), String> {
     let s = &result.snapshot;
-    public_web::validate_receipt(binding, s)?;
+    coding::validate_receipt(binding, s)?;
+    if binding.version != 3 {
+        public_web::validate_receipt(binding, s)?;
+    }
     let latest_retention = s
         .created_at
         .checked_add(86_400_000)
@@ -84,7 +89,14 @@ pub(crate) fn validate_result(
         || s.result_bytes > binding.budget.max_result_bytes
         || !matches!(
             s.status.as_str(),
-            "queued" | "running" | "completed" | "failed" | "cancelled" | "uncertain" | "expired"
+            "queued"
+                | "running"
+                | "completed"
+                | "needs-review"
+                | "failed"
+                | "cancelled"
+                | "uncertain"
+                | "expired"
         )
         || s.error_code.as_ref().is_some_and(|v| {
             v.len() > 80 || !v.bytes().all(|c| c.is_ascii_lowercase() || c == b'-')
@@ -98,7 +110,10 @@ pub(crate) fn validate_result(
     {
         return Err("The cloud task receipt did not match its immutable native admission.".into());
     }
-    if s.status == "completed" {
+    if matches!(s.status.as_str(), "completed" | "needs-review") {
+        if s.status == "needs-review" && binding.version != 3 {
+            return Err("Only an explicit coding task may park a scope proposal.".into());
+        }
         if result.text.trim().is_empty()
             || result.text.len() != s.result_bytes
             || s.result_sha256.as_deref()

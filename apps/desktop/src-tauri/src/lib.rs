@@ -400,6 +400,7 @@ pub fn run() {
             hosted_computer::hosted_computer_status,
             hosted_tasks::hosted_text_prepare,
             hosted_tasks::hosted_task_prepare_public_web,
+            hosted_tasks::hosted_task_prepare_coding,
             hosted_tasks::hosted_text_review_cancel,
             hosted_tasks::hosted_text_admit,
             hosted_tasks::hosted_text_refresh,
