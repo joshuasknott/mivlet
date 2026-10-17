@@ -200,3 +200,17 @@ request/message/read/Stop and an idempotent retry. This does not establish a liv
 paid-provider run, production account sign-in, installed-package acceptance, or a
 deployed HTTPS proxy. Follow the repository verification guide for native, types,
 build and UI checks before release.
+
+On October 17, 2026, the managed phone Worker was deployed to
+`https://mivlet-phone-relay.joshhknott.workers.dev` in the existing Cloudflare
+account. Its distinct signing key is configured in the Worker and the persistent
+`chatty-roadrunner-66` development deployment within the existing `fable` Convex
+project. The local recovery copy uses Windows DPAPI outside the repository.
+
+Fourteen live boundary checks passed against Cloudflare and its SQLite Durable
+Object: fixed client/CSP and device-scoped service worker, origin/body limits,
+native WSS admission, capability replay rejection, opaque secure cookies,
+cross-device cookie isolation, renewal, unknown writes without replay and
+expiry at the original session deadline. These used a synthetic native peer;
+they do not establish signed-in desktop admission or physical-phone delivery.
+Evidence is in the ignored integration `output/agent-phone-live-boundaries.json`.
