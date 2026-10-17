@@ -876,7 +876,7 @@ function ProviderConnectionFlow({
                         .catch(() =>
                           setFeedback({
                             message:
-                              "Could not open your browser. Visit platform.openai.com/api-keys to create a key.",
+                              "Browser unavailable. Create a key at platform.openai.com/api-keys.",
                             tone: "danger",
                           }),
                         );
@@ -1070,13 +1070,13 @@ function ProviderConnectionFlow({
                   </strong>
                   <p>
                     {selectedMethod.kind === "oauth-browser"
-                      ? "Mivlet opens the official provider page and waits for the provider-owned flow to finish."
-                      : "Mivlet uses the provider's official local runtime and reads only its connection state."}{" "}
+                      ? "Mivlet opens the provider's official page and waits for sign-in."
+                      : "Mivlet reads only connection state from the provider's official local runtime."}{" "}
                     Credentials never enter the Mivlet interface.
                   </p>
                   <p>
                     {selectedMethod.provider.installHint ??
-                      "Mivlet reads the provider runtime's connection state; it never collects subscription tokens."}
+                      "Only runtime connection state is read; subscription tokens are never collected."}
                   </p>
                 </div>
               </div>
@@ -1157,7 +1157,7 @@ function ProviderConnectionFlow({
                 <span>
                   {selectedMethod.provider.backendType === "native-api" &&
                   !methodVerifiedHere
-                    ? "This connection is configured. A live model request is the final check."
+                    ? "Configured. A live model request is the final check."
                     : "This connection is ready."}
                 </span>
                 <div>
@@ -1219,8 +1219,8 @@ function ProviderConnectionFlow({
                 </strong>
                 <p>
                   {selectedMethod.provider.backendType === "native-api"
-                    ? "Mivlet will delete its local credential. This does not revoke the key at the provider; revoke it there too if it may be compromised."
-                    : "Mivlet will remove the local Antigravity profile and its Google session from this account."}
+                    ? "Deletes Mivlet's local key. This does not revoke the key at the provider; revoke it there if it may be compromised."
+                    : "Removes this account's local Antigravity profile and Google session."}
                 </p>
                 <div>
                   <button
