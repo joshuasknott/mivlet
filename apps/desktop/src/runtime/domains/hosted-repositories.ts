@@ -6,21 +6,14 @@ import type {
   HostedRepositoryImportTarget,
   HostedRepositoryTarget,
 } from "@mivlet/protocol";
-import { getRuntimeAdapter } from "../adapters/select";
-import { toRuntimeError } from "../errors";
+import { invokeRequiredNative } from "../required-native";
 
-async function invoke<T>(command: string, request: object): Promise<T> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind !== "native")
-    throw new Error(
-      "Hosted source review and file import require the installed Mivlet desktop app.",
-    );
-  try {
-    return await adapter.invoke<T>(command, { request });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
+const invoke = <T>(command: string, request: object): Promise<T> =>
+  invokeRequiredNative<T>(
+    command,
+    { request },
+    "Hosted source review and file import require the installed Mivlet desktop app.",
+  );
 export const listHostedRepositoryCandidates = (
   request: HostedRepositoryTarget,
 ) =>

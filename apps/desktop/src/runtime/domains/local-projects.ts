@@ -7,20 +7,14 @@ import type {
   RemoveProjectContextShareInput,
   UpdateLocalProjectInput,
 } from "@mivlet/protocol";
-import { getRuntimeAdapter } from "../adapters/select";
-import { toRuntimeError } from "../errors";
+import { invokeRequiredNative } from "../required-native";
 
-async function invoke<T>(command: string, request: object): Promise<T> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind === "preview") {
-    throw new Error("Projects require the installed desktop app.");
-  }
-  try {
-    return await adapter.invoke<T>(command, { request });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
+const invoke = <T>(command: string, request: object): Promise<T> =>
+  invokeRequiredNative<T>(
+    command,
+    { request },
+    "Projects require the installed desktop app.",
+  );
 
 export const createLocalProject = (request: CreateLocalProjectInput) =>
   invoke<LocalProject>("local_project_create", request);

@@ -12,21 +12,14 @@ import type {
   HostedTaskReviewTarget,
   HostedTaskTarget,
 } from "@mivlet/protocol";
-import { getRuntimeAdapter } from "../adapters/select";
-import { toRuntimeError } from "../errors";
+import { invokeRequiredNative } from "../required-native";
 
-async function invoke<T>(command: string, request: object): Promise<T> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind !== "native")
-    throw new Error(
-      "Cloud tasks require the installed desktop app and a separately connected cloud API provider.",
-    );
-  try {
-    return await adapter.invoke<T>(command, { request });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
+const invoke = <T>(command: string, request: object): Promise<T> =>
+  invokeRequiredNative<T>(
+    command,
+    { request },
+    "Cloud tasks require the installed desktop app and a separately connected cloud API provider.",
+  );
 export const prepareHostedTextTask = (request: HostedTaskPrepare) =>
   invoke<HostedTaskReview>("hosted_text_prepare", request);
 export const prepareHostedPublicWebTask = (

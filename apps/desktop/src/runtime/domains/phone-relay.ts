@@ -3,22 +3,14 @@ import type {
   PhoneRelayDisconnectRequest,
   PhoneRelayStatus,
 } from "@mivlet/protocol";
-import { getRuntimeAdapter } from "../adapters/select";
-import { toRuntimeError } from "../errors";
+import { invokeRequiredNative } from "../required-native";
 
-async function invoke(
-  command: string,
-  args?: Record<string, unknown>,
-): Promise<PhoneRelayStatus> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind !== "native")
-    throw new Error("Connect your phone in the signed-in Mivlet desktop app.");
-  try {
-    return await adapter.invoke<PhoneRelayStatus>(command, args);
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
-}
+const invoke = (command: string, args?: Record<string, unknown>) =>
+  invokeRequiredNative<PhoneRelayStatus>(
+    command,
+    args,
+    "Connect your phone in the signed-in Mivlet desktop app.",
+  );
 export const getPhoneRelayStatus = () => invoke("phone_relay_status");
 export const connectPhoneRelay = (request: PhoneRelayConnectRequest) =>
   invoke("phone_relay_connect", { request });
