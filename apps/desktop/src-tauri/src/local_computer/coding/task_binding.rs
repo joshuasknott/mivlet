@@ -74,7 +74,7 @@ impl TaskRepository {
 }
 
 impl RepositoryWorkBinding {
-    fn from_repository(repo: &Repository, captured_at: &str) -> Result<Self, String> {
+    pub(super) fn from_repository(repo: &Repository, captured_at: &str) -> Result<Self, String> {
         let binding = Self {
             version: 1,
             repository_id: repo.id.clone(),
@@ -86,7 +86,7 @@ impl RepositoryWorkBinding {
         Ok(binding)
     }
 
-    pub(super) fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         fn hex(value: &str, size: usize) -> bool {
             value.len() == size && value.bytes().all(|byte| byte.is_ascii_hexdigit())
         }

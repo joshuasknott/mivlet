@@ -100,6 +100,9 @@ pub(super) enum Action {
         generation: u64,
         input: crate::local_computer::command_jobs::input::InputRequest,
     },
+    RepositoryReview {
+        target: crate::local_computer::coding::job_review::ReviewRequest,
+    },
 }
 
 pub(crate) async fn execute(request: ToolExecutionRequest) -> Result<ToolResult, String> {
@@ -136,6 +139,12 @@ pub(crate) async fn input(
         input,
     })
     .await
+}
+
+pub(crate) async fn review_repository(
+    target: crate::local_computer::coding::job_review::ReviewRequest,
+) -> Result<Value, String> {
+    call(Action::RepositoryReview { target }).await
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -184,6 +193,10 @@ pub(super) async fn dispatch(app: &tauri::AppHandle, action: Action) -> Result<V
     let state = app.state::<Arc<crate::local_computer::LocalComputerState>>();
     state.refresh_background_plugins()?;
     match action {
+        Action::RepositoryReview { target } => {
+            crate::local_computer::coding::job_review::receive_review(state.inner().clone(), target)
+                .await
+        }
         Action::Input {
             workspace,
             agent,

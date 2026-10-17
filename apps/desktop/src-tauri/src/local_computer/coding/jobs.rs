@@ -2,6 +2,19 @@ use super::*;
 use crate::local_computer::command_jobs::ScopeJobs;
 use std::sync::atomic::Ordering;
 
+pub(super) fn bind_repository(
+    session: &mut super::super::command_jobs::JobSession,
+    repo: &Repository,
+    task: Option<&task_binding::TaskRepository>,
+) -> Result<(), String> {
+    let binding = match task {
+        Some(task) => task.binding.clone(),
+        None => RepositoryWorkBinding::from_repository(repo, &super::super::command_jobs::now())?,
+    };
+    binding.check(repo)?;
+    session.bind_repository(binding)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Start {
@@ -60,6 +73,7 @@ pub(super) fn start(
                         preview_port: input.preview_port,
                     },
                 )?;
+                bind_repository(&mut session, &repo, task.as_ref())?;
                 let snapshot = session.snapshot()?;
                 if ready.send(Ok(snapshot)).is_err() {
                     return Err("Command start observer disconnected before admission.".into());

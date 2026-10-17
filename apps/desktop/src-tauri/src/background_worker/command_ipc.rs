@@ -132,12 +132,16 @@ pub(super) async fn serve(app: tauri::AppHandle, mut pipe: NamedPipeServer) {
                 Ok(Ok(request)) => {
                     // Input may wait on a full child pipe. Keep the separate
                     // control capacity available to Status and immediate Stop.
-                    let tool_permit =
-                        if matches!(&request.action, Action::Tool { .. } | Action::Input { .. }) {
-                            Some(tools.try_acquire_owned())
-                        } else {
-                            None
-                        };
+                    let tool_permit = if matches!(
+                        &request.action,
+                        Action::Tool { .. }
+                            | Action::Input { .. }
+                            | Action::RepositoryReview { .. }
+                    ) {
+                        Some(tools.try_acquire_owned())
+                    } else {
+                        None
+                    };
                     if tool_permit.as_ref().is_some_and(Result::is_err) {
                         Err("Background command capacity is full. Inspect current jobs before retrying.".into())
                     } else {
