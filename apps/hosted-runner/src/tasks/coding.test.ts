@@ -153,6 +153,14 @@ describe("real provider adapters over closed scratch tools", () => {
     await expect(runRealCoding(value.binding, value.input, key, new AbortController().signal, c.journal, access, service)).rejects.toMatchObject({ code: "coding-content-refused" });
     expect(service.begin).not.toHaveBeenCalled(); expect(service.file).not.toHaveBeenCalled(); expect(service.run).not.toHaveBeenCalled();
   });
+  it("materializes UTF-8 BOM source without changing its reviewed bytes", async () => {
+    const original = `\uFEFF${content}`; const value = await fixture(original); const c = await custody(value); const service = runtime(); let calls = 0;
+    vi.stubGlobal("fetch", vi.fn(async () => ++calls === 1 ? sse(tool("scratch_check", { id: "syntax" }, "bom_source"))
+      : sse({ choices: [{ delta: { content: "The reviewed source check completed." }, finish_reason: "stop" }] })));
+    await runRealCoding(value.binding, value.input, key, new AbortController().signal, c.journal, c.access, service);
+    expect(service.file).toHaveBeenCalledWith(expect.any(String), "main.js", original);
+    expect(utf8.encode(vi.mocked(service.file).mock.calls[0][2])).toEqual(value.source);
+  });
 });
 
 describe("immutable-manifest transfer leases", () => {

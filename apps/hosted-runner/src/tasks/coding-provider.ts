@@ -138,7 +138,7 @@ export async function runRealCoding(binding: HostedCodingTaskBinding, input: Hos
             await runtime.begin({ leaseId, taskSha256, stepId: toolStep, deadline: state.deadline, scope: binding.repository.scope, files: manifest, candidateSha256 });
             for (const file of manifest) {
               signal.throwIfAborted(); const bytes = await files.bytes(file); signal.throwIfAborted();
-              const source = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+              const source = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
               safe(source, L.fileBytes * 6 + 2); signal.throwIfAborted();
               await runtime.file(leaseId, file.path, source);
             }
