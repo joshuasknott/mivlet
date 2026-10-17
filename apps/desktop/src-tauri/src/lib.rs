@@ -417,6 +417,7 @@ pub fn run() {
             local_computer::local_computer_file_preview,
             local_computer::local_computer_stage_attachment,
             local_computer::attachment_images::local_computer_restore_image_attachment,
+            local_computer::attachment_shares::local_computer_stage_work_attachments,
             local_computer::local_computer_discard_attachment_batch,
             mcp_process::spawn_mcp_process,
             mcp_process::write_mcp_frame,

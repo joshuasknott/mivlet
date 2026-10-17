@@ -444,6 +444,11 @@ inline pixels. Deliberate continuation restores saved images only after native
 scope, size, SHA-256 and image-format validation under the current computer
 generation. Historical messages never automatically resend pixels. Older
 metadata-only image references and missing or changed files require reattachment.
+For a queued child task, native code follows its saved parent relationships to
+the original upload and verifies the exact attachment identity, type, size and
+hash. It copies those bytes into the receiving agent's own attachment storage,
+then rechecks task generations before returning a receipt. This recovers shared
+uploads after restart without granting arbitrary access to another agent's files.
 This path grants no screenshot tools. Claude Stop terminates its supervised turn directly,
 without waiting for a blocked stdin payload writer. Wire and real subprocess
 fixtures establish local framing and cancellation; live Claude account acceptance

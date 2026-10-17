@@ -1,6 +1,7 @@
 //! Account-private teammates and durable coordination. Membership and
 //! contributions never grant provider, connector, file or computer authority.
 pub(crate) mod background;
+pub(crate) mod attachment_sources;
 mod capture_summary;
 mod chats;
 mod commands;

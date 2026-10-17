@@ -2,6 +2,7 @@
 pub(crate) mod activity;
 pub(crate) mod artifacts;
 pub(crate) mod attachment_images;
+pub(crate) mod attachment_shares;
 pub(crate) mod authority;
 pub(crate) mod browser;
 pub(crate) mod coding;
