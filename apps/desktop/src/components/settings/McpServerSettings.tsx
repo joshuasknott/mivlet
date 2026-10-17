@@ -8,7 +8,7 @@ import type {
   McpClientAccess,
   McpConsentRequest,
   McpServerStatus,
-} from "@mivlet/protocol/domains/mcp-server";
+} from "@mivlet/protocol";
 import {
   decideMcpClient,
   getMcpServerStatus,
