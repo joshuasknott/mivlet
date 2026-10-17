@@ -84,6 +84,9 @@ mod tests {
             "research":{"modelCalls":2,"pageReads":1,"sourceBytes":32,"sources":[{"citationId":format!("web-{}", "a".repeat(24)),"title":"Public source","finalUri":"https://example.com/","fetchedAt":"1970-01-01T00:00:01.500Z","contentSha256":"a".repeat(64),"contentBytes":32,"truncated":false}]}})).unwrap();
         validate_receipt(&binding, &snapshot).unwrap();
         let original = snapshot.clone();
+        snapshot.updated_at = i64::MAX;
+        assert!(validate_receipt(&binding, &snapshot).is_err());
+        snapshot = original.clone();
         snapshot.research.as_mut().unwrap().sources[0].final_uri = "https://other.com/".into();
         assert!(validate_receipt(&binding, &snapshot).is_err());
         snapshot = original.clone();
@@ -227,6 +230,10 @@ pub(crate) fn validate_receipt(binding: &Binding, snapshot: &TaskSnapshot) -> Re
         return Err("The research source counts did not match its budget.".into());
     }
     let mut bytes = 0usize;
+    let latest_read = snapshot
+        .updated_at
+        .checked_add(5000)
+        .ok_or("The research receipt supplied an invalid update timestamp.")?;
     for source in &research.sources {
         url(&source.final_uri, scope)?;
         if source.title.is_empty()
@@ -246,7 +253,7 @@ pub(crate) fn validate_receipt(binding: &Binding, snapshot: &TaskSnapshot) -> Re
         let fetched = chrono::DateTime::parse_from_rfc3339(&source.fetched_at)
             .map_err(|_| "Invalid research read time.")?
             .timestamp_millis();
-        if fetched < snapshot.created_at || fetched > snapshot.updated_at + 5000 {
+        if fetched < snapshot.created_at || fetched > latest_read {
             return Err("The research read time did not match this task.".into());
         }
         bytes = bytes

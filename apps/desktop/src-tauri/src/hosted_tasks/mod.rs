@@ -70,13 +70,17 @@ pub(crate) fn validate_result(
 ) -> Result<(), String> {
     let s = &result.snapshot;
     public_web::validate_receipt(binding, s)?;
+    let latest_retention = s
+        .created_at
+        .checked_add(86_400_000)
+        .ok_or("The cloud task supplied an invalid retention timestamp.")?;
     if &s.binding != binding
         || s.generation == 0
         || s.sequence == 0
         || s.created_at <= 0
         || s.updated_at < s.created_at
         || s.retained_until < s.created_at
-        || s.retained_until > s.created_at + 86_400_000
+        || s.retained_until > latest_retention
         || s.result_bytes > binding.budget.max_result_bytes
         || !matches!(
             s.status.as_str(),
