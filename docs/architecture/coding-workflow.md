@@ -1,5 +1,28 @@
 # Local coding workflow
 
+Connected recovery records one immutable file checkpoint before a native Work
+turn's first approved repository write, command or commit. Its link binds the
+account, agent, conversation, user-message parent, Work/run generations and exact
+retained private copy. Older tasks have no invented restore point. Existing
+checkpoint count and storage bounds apply; snapshots are never deleted
+automatically.
+
+The conversation recovery control previews the actual file diff and conversation
+target, then uses the existing exact single-use checkpoint approval. A native
+encrypted intent is written before file execution. Native before/after receipts
+permit the conversation compare-and-swap while the restored copy stays locked
+and matches the reviewed tree. A first-turn rewind creates an explicit empty
+root checkpoint rather than treating an omitted head as empty. Older message
+branches and the before-restore file checkpoint remain saved.
+
+Files and conversation restore in a recoverable sequence. Interrupted or partial
+outcomes remain visible. Inspect the actual tree and immutable backup receipts
+before deliberately finishing the conversation step, cancelling an unchanged
+pending restore, or reviewing a fresh approval to revert files. No mutation
+replays on reload. Sent messages, remote publication and other external effects
+remain in place; restored code needs new checks. Removing linked metadata keeps
+file checkpoints; delete old snapshots explicitly in Files when storage is full.
+
 An agent can work on a real local Git repository through Mivlet-owned tools.
 Open Library, expand Repository, select a named agent and attach the repository
 using the native folder picker. Ask that agent to inspect the project, make a
