@@ -8,6 +8,7 @@ let timer;
 let busy = false;
 let pendingMutation;
 let notifications = false;
+let notificationWorker;
 const seen = new Map();
 const labels = {queued:"Queued",running:"Working",waiting:"Waiting",completed:"Complete",failed:"Failed",cancelled:"Stopped",blocked:"Blocked","awaiting-user":"Needs you","awaiting-approval":"Needs approval",interrupted:"Interrupted"};
 const terminal = new Set(["completed","failed","cancelled"]);
@@ -91,8 +92,8 @@ function renderWork(items) {
   for (const item of items) {
     const before = seen.get(item.id);
     if (notifications && before && before !== item.status && (attention.has(item.status) || ["completed","failed"].includes(item.status))) {
-      try { new Notification("Mivlet", {body: attention.has(item.status) ? "An agent needs your attention." : item.status === "completed" ? "An agent finished a task." : "An agent task failed.", tag: item.id}); }
-      catch { notifications = false; }
+      const options = {body: attention.has(item.status) ? "An agent needs your attention." : item.status === "completed" ? "An agent finished a task." : "An agent task failed.", tag: item.id};
+      if (notificationWorker) void notificationWorker.showNotification("Mivlet",options).catch(() => { notifications=false; });
     }
     seen.set(item.id, item.status);
     const card = element("article", undefined, "card");
@@ -172,10 +173,16 @@ ui.disconnect.addEventListener("click",async () => {
 ui.refresh.addEventListener("click",() => void refresh());
 ui.agent.addEventListener("change",() => { ++epoch; ui.result.hidden=true; void refresh(); });
 ui["close-result"].addEventListener("click",() => { ui.result.hidden=true; ui.refresh.focus(); });
-ui.notifications.hidden = !("Notification" in window);
+ui.notifications.hidden = !("Notification" in window) || !("serviceWorker" in navigator);
 ui.notifications.addEventListener("click",async () => {
-  const permission = await Notification.requestPermission();
-  notifications = permission === "granted";
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission === "granted") {
+      await navigator.serviceWorker.register("/remote/sw.js",{scope:"/remote"});
+      notificationWorker = await navigator.serviceWorker.ready;
+      notifications = true;
+    }
+  } catch { notifications = false; }
   ui.notifications.textContent = notifications ? "Notifications on while this page is open" : "Notifications unavailable";
 });
 document.addEventListener("visibilitychange",() => { if (!document.hidden) void refresh(); else clearTimeout(timer); });

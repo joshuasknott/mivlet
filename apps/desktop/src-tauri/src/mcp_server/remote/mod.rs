@@ -26,6 +26,7 @@ pub(super) fn router() -> Router<Arc<Engine>> {
         .route("/remote", get(page))
         .route("/remote/app.js", get(script))
         .route("/remote/styles.css", get(styles))
+        .route("/remote/sw.js", get(worker))
         .route("/remote/connect", post(connect))
         .route("/remote/callback", get(callback))
         .route("/remote/session", get(current))
@@ -45,6 +46,18 @@ async fn styles() -> impl IntoResponse {
     (
         [(header::CONTENT_TYPE, "text/css; charset=utf-8")],
         include_str!("styles.css"),
+    )
+}
+async fn worker() -> impl IntoResponse {
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (
+                header::HeaderName::from_static("service-worker-allowed"),
+                "/remote",
+            ),
+        ],
+        include_str!("sw.js"),
     )
 }
 
