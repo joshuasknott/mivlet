@@ -54,7 +54,7 @@ fn digest(bytes: &[u8]) -> String {
 }
 fn public_path(path: &str) -> Result<(), String> {
     files::relative(path)?;
-    if path.len() > 512
+    if path.len() > 240
         || !path.is_ascii()
         || path.starts_with('/')
         || path.split('/').any(|part| {
@@ -62,6 +62,7 @@ fn public_path(path: &str) -> Result<(), String> {
             matches!(
                 lower.as_str(),
                 ".git"
+                    | "node_modules"
                     | ".mivlet"
                     | ".codex"
                     | ".claude"
@@ -81,6 +82,9 @@ fn public_path(path: &str) -> Result<(), String> {
                     | "agents.md"
                     | "claude.md"
                     | "credentials"
+                    | "credential"
+                    | "secret"
+                    | "secrets"
                     | "credentials.json"
                     | "secrets.json"
                     | "id_rsa"
@@ -203,7 +207,25 @@ fn output_digest(value: &OutputManifest) -> Result<String, String> {
 pub(crate) fn validate_snapshot(value: &Snapshot) -> Result<(), String> {
     validate_entries(&value.files, value.total_bytes)?;
     validate_writable(&value.writable_paths)?;
-    if value.version != 1
+    // Input and newly writable names share one Windows namespace, including
+    // directory casing. Validate the union before any source disclosure.
+    let paths: BTreeSet<_> = value
+        .files
+        .iter()
+        .map(|entry| entry.path.clone())
+        .chain(value.writable_paths.iter().cloned())
+        .collect();
+    let names: Vec<_> = paths
+        .into_iter()
+        .map(|path| Entry {
+            path,
+            size_bytes: 0,
+            sha256: "0".repeat(64),
+        })
+        .collect();
+    validate_entries(&names, 0)?;
+    if value.files.is_empty()
+        || value.version != 1
         || !hex(&value.snapshot_id, 48)
         || !hex(&value.repository_id, 48)
         || value.input_tree_id != tree_id(&value.files)
