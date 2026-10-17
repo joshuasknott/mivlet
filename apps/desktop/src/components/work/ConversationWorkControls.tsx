@@ -50,6 +50,10 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
     finally { setPending(false); }
   };
   const goal = goalDraft ?? goalWork?.outcomeGoal;
+  const canStartGoal = !goalDraft && goalWork && (
+    !["queued", "running", "waiting", "awaiting-approval"].includes(goalWork.status)
+    || !["active", "paused"].includes(goalWork.outcomeGoal!.status)
+  );
   const pageIndex = Math.min(page, Math.max(0, Math.ceil(queue.length / 6) - 1));
   const live = Boolean(active?.status === "running" && active.modelOptionId.startsWith("codex::") && !active.executionOwner);
   const lastLive = active?.liveSteering?.at(-1);
@@ -67,6 +71,7 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
               {goalWork.outcomeGoal!.status === "paused" ? "Resume" : "Pause"}
             </button> : null}
         <button type="button" aria-expanded={details} onClick={() => setDetails(!details)}><ListBullets size={16} aria-hidden="true" />Details</button>
+        {canStartGoal ? <button type="button" disabled={busy} aria-expanded={goalForm} onClick={() => { setObjective(""); setCriteria(""); setGoalForm(true); }}>New goal for next request</button> : null}
       </div>
     </div> : <button className="conversation-goal-add" type="button" disabled={busy} onClick={() => setGoalForm(!goalForm)} aria-expanded={goalForm}><Target size={16} aria-hidden="true" />Add an outcome goal</button>}
     {details && goal ? <div className="conversation-work-detail">

@@ -59,6 +59,41 @@ describe("useScopedComposer", () => {
   });
   afterEach(() => vi.useRealTimers());
 
+  it("appends reviewed feedback to the latest shared draft while preserving its files, recipient and goal", async () => {
+    const currentScope = scope("lead", "preview-feedback");
+    const first = renderHook(() => useScopedComposer(currentScope));
+    const second = renderHook(() => useScopedComposer(currentScope));
+    await act(async () => {});
+    const appendFeedback = first.result.current.appendText;
+    const goal = { objective: "Finish review", successCriteria: "Check the heading", maxTurns: 6, maxTokens: 32000 };
+    act(() => {
+      second.result.current.setText("Keep my unsent request");
+      second.result.current.setRecipient("reviewer");
+      second.result.current.setOutcomeGoal(goal);
+      second.result.current.setAttachments(() => [{ id: "file", name: "notes.txt", type: "text/plain", sizeBytes: 5 }]);
+      appendFeedback("Make the selected heading smaller.");
+    });
+    expect(first.result.current.text).toBe("Keep my unsent request\n\nMake the selected heading smaller.");
+    expect(second.result.current.text).toBe(first.result.current.text);
+    expect(first.result.current.attachments[0].name).toBe("notes.txt");
+    expect(first.result.current.recipientId).toBe("reviewer");
+    expect(first.result.current.outcomeGoal).toEqual(goal);
+    await act(async () => first.result.current.flush());
+    expect(JSON.parse(mocks.saves.at(-1)!.content).text).toBe(first.result.current.text);
+  });
+
+  it("does not append feedback through a retained callback after account change", async () => {
+    const original = scope("lead", "feedback-account");
+    const pane = renderHook(({ value }) => useScopedComposer(value), { initialProps: { value: original } });
+    await act(async () => {});
+    const appendFeedback = pane.result.current.appendText;
+    pane.rerender({ value: { ...original, accountId: "other-account" } });
+    await act(async () => {});
+    act(() => appendFeedback("Old private feedback"));
+    expect(pane.result.current.text).toBe("");
+    expect(mocks.saves).toEqual([]);
+  });
+
   it("notifies matching panes without rerendering unrelated or inactive composers on each edit", async () => {
     const first = renderHook(() => useScopedComposer(scope("chief", "shared")));
     const sharedRender = vi.fn(() => useScopedComposer(scope("chief", "shared")));

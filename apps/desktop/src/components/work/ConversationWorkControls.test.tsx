@@ -61,6 +61,20 @@ describe("conversation Work controls", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Live guidance saved");
   });
 
+  it.each(["completed", "blocked", "budget-exhausted"] as const)("allows a new goal after a %s report while retaining its history", (status) => {
+    const { onGoalDraftChange, command } = setup([item("previous", { status: "completed", outcomeGoal: {
+      objective: "Previous outcome", successCriteria: "Previous evidence", status,
+    } })]);
+    expect(screen.getByText("Goal: Previous outcome")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "New goal for next request" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Outcome" }), { target: { value: "Next outcome" } });
+    fireEvent.change(screen.getByRole("textbox", { name: "Success criteria" }), { target: { value: "Next evidence" } });
+    fireEvent.click(screen.getByRole("button", { name: "Use for next request" }));
+    expect(onGoalDraftChange).toHaveBeenCalledWith({ objective: "Next outcome", successCriteria: "Next evidence", maxTurns: 6, maxTokens: 128000 });
+    expect(command).not.toHaveBeenCalled();
+    expect(screen.getByText("Goal: Previous outcome")).toBeTruthy();
+  });
+
   it("never advertises in-flight steering for unsupported or native background routes", async () => {
     const { service } = setup([item("active", { status: "running", runIds: ["run"], modelOptionId: "claude::fixture" })]);
     fireEvent.click(screen.getByRole("button", { name: "Guide active work" }));

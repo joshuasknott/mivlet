@@ -188,6 +188,10 @@ export function useScopedComposer(scope?: ComposerScope) {
     setReplyWork: (replyWorkId: string | undefined) => mutate(content => ({ ...content, replyWorkId })),
     setRecipient: (recipientId: string) => mutate(content => ({ ...content, recipientId })),
     setText: (text: string) => mutate((content) => ({ ...content, text })),
+    appendText: (text: string) => mutate((content) => ({
+      ...content,
+      text: `${content.text}${content.text && !/\s$/.test(content.text) ? "\n\n" : ""}${text}`,
+    })),
     setAttachments: (update: (attachments: ComposerAttachment[]) => ComposerAttachment[]) => mutate((content) => ({ ...content, attachments: update(content.attachments) })),
     flush: () => entry ? persist(entry) : Promise.resolve(),
     saveNewThreadDraft: async (threadId: string, text: string) => {
