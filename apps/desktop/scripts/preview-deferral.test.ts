@@ -79,3 +79,15 @@ it("keeps the Side Chat list/editor off the shell and conversation notice graph"
   visit(source);
   expect(dynamicImports).toContain("../components/conversation/SideChats");
 });
+
+it("loads phone and external access controls only through their Settings disclosure", () => {
+  const entry = resolve(sourceRoot, "components/pages/SettingsPage.tsx");
+  const settings = resolve(sourceRoot, "components/settings/McpServerSettings.tsx");
+  const phone = resolve(sourceRoot, "components/settings/ManagedPhoneSettings.tsx");
+  expect(staticGraph(entry).has(settings)).toBe(false);
+  expect(staticGraph(entry).has(phone)).toBe(false);
+  expect(staticGraph(settings).has(phone)).toBe(true);
+  const source = readFileSync(entry, "utf8");
+  expect(source).toContain('import("../settings/McpServerSettings")');
+  expect(source).toContain("externalOpen && <Suspense");
+});
