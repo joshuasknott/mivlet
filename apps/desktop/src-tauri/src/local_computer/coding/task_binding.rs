@@ -20,6 +20,7 @@ pub(crate) struct TaskRepository {
     account: String,
     workspace: String,
     agent: String,
+    restore_intent: bool,
 }
 impl TaskRepository {
     /// Native saga intent supplies the immutable binding after matching its
@@ -37,7 +38,11 @@ impl TaskRepository {
             account: crate::account_session::binding()?.into(),
             workspace: workspace.into(),
             agent: agent.into(),
+            restore_intent: true,
         })
+    }
+    pub(crate) fn requires_restore_intent(&self) -> bool {
+        self.restore_intent
     }
     pub(super) fn load(&self, directory: &Path) -> Result<Repository, String> {
         let repo = copy_manager::owned_repository_in_account(
@@ -63,6 +68,7 @@ impl TaskRepository {
             account: account.into(),
             workspace: workspace.into(),
             agent: agent.into(),
+            restore_intent: false,
         }
     }
 }
@@ -189,6 +195,7 @@ pub(super) fn executing_binding(
                 account: account.into(),
                 workspace: workspace.into(),
                 agent: agent.into(),
+                restore_intent: false,
             })
         })
         .map_err(|error| error.to_string())
