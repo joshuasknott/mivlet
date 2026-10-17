@@ -52,9 +52,9 @@ function ProviderSettings({ workspaceId, agentId, api = defaultApi }: HostedProv
     return () => { live.current = false; };
   }, []);
   return <section className="settings-group hosted-provider-settings" aria-label="Cloud task connections">
-    <header className="hosted-card__heading"><h2>Cloud tasks</h2><span>Text tasks only</span></header>
-    <p>Let an explicitly reviewed text task finish while your computer is asleep.</p>
-    <p className="hosted-muted">Connect a separate API key for cloud use. Your local provider connections are never transferred. Cloud keys expire after 30 days; task text is retained for 24 hours. This uses a temporary development service.</p>
+    <header className="hosted-card__heading"><h2>Cloud tasks</h2><span>Text and public web research</span></header>
+    <p>Let a reviewed text or public web research task finish while your computer is asleep.</p>
+    <p className="hosted-muted">Connect a separate API key for cloud use. Your local provider connections are never transferred. Cloud keys expire after 30 days; task and page text are retained for 24 hours. This uses Mivlet’s development service.</p>
     <div className="hosted-provider-list">{(Object.keys(hostedProviderLabels) as HostedTextProviderId[]).flatMap(providerId => {
       const matching = current() ? connections.filter(value => value.providerId === providerId && value.enabled).sort((left, right) => right.updatedAt - left.updatedAt) : [];
       const rows: (HostedProviderConnection | undefined)[] = matching.length ? matching : [undefined];

@@ -29,6 +29,7 @@ function lock(value) {
   for (const control of ui.work.querySelectorAll("[data-mutation]")) control.disabled = value || Boolean(pendingMutation);
 }
 async function request(path, body) {
+  const version = epoch;
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
@@ -40,7 +41,7 @@ async function request(path, body) {
       // A relay/server timeout can follow a committed native write. Preserve
       // its original request ID for explicit reconciliation/retry.
       error.rejected = response.status < 500 && response.status !== 408;
-      if (response.status === 401) reset("Access expired or was revoked. Connect this browser again.");
+      if (response.status === 401 && version === epoch) reset("Access expired or was revoked. Connect this browser again.");
       throw error;
     }
     return result;
@@ -167,6 +168,7 @@ async function refresh() {
   } finally { if (version === epoch && reading === readVersion && session) timer = setTimeout(() => void refresh(), 10000); }
 }
 ui.connect.addEventListener("click", async () => {
+  if (busy) return;
   lock(true);
   const version = epoch;
   try {
@@ -263,6 +265,7 @@ ui.notifications.addEventListener("click",async () => {
 });
 document.addEventListener("visibilitychange",() => { if (!document.hidden) void refresh(); else clearTimeout(timer); });
 async function initialize() {
+  lock(true);
   const version = epoch;
   try {
     const saved = await request("/remote/session");

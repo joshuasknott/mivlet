@@ -21,6 +21,20 @@ beforeEach(()=>{
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();document.body.replaceChildren();});
 const start=async()=>{await import("../../src-tauri/src/mcp_server/remote/app.js");await vi.waitFor(()=>expect(document.querySelector(".task-request")).not.toBeNull());};
 describe("phone client against shared task contracts",()=>{
+  it("waits for the initial session check before allowing a new pairing request",async()=>{
+    let finish;
+    fetch.mockImplementation(async(path)=>{
+      calls.push({path});
+      if(path==="/remote/session") return new Promise(resolve=>{finish=()=>resolve({ok:false,status:401,json:async()=>({error:"Connect first"})});});
+      return {ok:true,status:200,json:async()=>({})};
+    });
+    await import("../../src-tauri/src/mcp_server/remote/app.js");
+    expect(document.getElementById("connect").disabled).toBe(true);
+    document.getElementById("connect").dispatchEvent(new Event("click"));
+    expect(calls.map(call=>call.path)).toEqual(["/remote/session"]);
+    finish();
+    await vi.waitFor(()=>expect(document.getElementById("connect").disabled).toBe(false));
+  });
   it("discloses omitted saved results even when no complete output fits",async()=>{
     const normal=fetch.getMockImplementation();
     fetch.mockImplementation(async(path,options)=>{

@@ -14,7 +14,7 @@ const review = (): HostedTaskReview => ({
 });
 const result = { collaboration: { revision: 1 }, reconcileRequired: false } as unknown as HostedTaskControlResult;
 function api(over: Partial<HostedTaskApi> = {}): HostedTaskApi {
-  return { list: vi.fn().mockResolvedValue([connection]), prepare: vi.fn().mockImplementation(async () => review()), cancel: vi.fn().mockResolvedValue(result), admit: vi.fn().mockResolvedValue(result), refresh: vi.fn().mockResolvedValue(result), stop: vi.fn().mockResolvedValue(result), approve: vi.fn().mockImplementation(async resolution => ({ persisted: true, auditEntry: { requestId: resolution.request.id, decision: "once" }, effectiveRequest: resolution.request, dismissed: true } as ApprovalResolutionResponse)), ...over };
+  return { list: vi.fn().mockResolvedValue([connection]), prepare: vi.fn().mockImplementation(async () => review()), preparePublicWeb: vi.fn(), cancel: vi.fn().mockResolvedValue(result), admit: vi.fn().mockResolvedValue(result), refresh: vi.fn().mockResolvedValue(result), stop: vi.fn().mockResolvedValue(result), approve: vi.fn().mockImplementation(async resolution => ({ persisted: true, auditEntry: { requestId: resolution.request.id, decision: "once" }, effectiveRequest: resolution.request, dismissed: true } as ApprovalResolutionResponse)), ...over };
 }
 async function openReview() {
   fireEvent.click(screen.getByRole("button", { name: "Continue in cloud…" }));
@@ -137,6 +137,37 @@ it("keeps Stop independent of a stalled refresh", async () => {
   await act(async () => finish(result));
 });
 
+it("keeps Stop reachable during admission and uses the prepared held generation", async () => {
+  let finish!: (value: HostedTaskControlResult) => void;
+  const actions = api({ admit: vi.fn().mockImplementation(() => new Promise(resolve => { finish = resolve; })) });
+  render(<HostedTaskControls item={item} api={actions} onChanged={vi.fn().mockResolvedValue(undefined)} />);
+  await openReview();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "SEND" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue in cloud once" }));
+  await waitFor(() => expect(actions.admit).toHaveBeenCalledTimes(1));
+  const stop = screen.getByRole("button", { name: "Stop task" });
+  expect(stop.closest('[role="dialog"]')).not.toBeNull();
+  expect(stop).toBeEnabled();
+  fireEvent.click(stop);
+  await waitFor(() => expect(actions.stop).toHaveBeenCalledWith({ workspaceId: "workspace", agentId: "agent", workId: "work", expectedGeneration: 4 }));
+  await act(async () => finish(result));
+  expect(screen.queryByRole("dialog")).toBeNull();
+});
+
+it("does not dispatch after Stop while one-time approval is still being recorded", async () => {
+  let finish!: (value: ApprovalResolutionResponse | null) => void;
+  const actions = api({ approve: vi.fn().mockImplementation(() => new Promise(resolve => { finish = resolve; })) });
+  render(<HostedTaskControls item={item} api={actions} onChanged={vi.fn().mockResolvedValue(undefined)} />);
+  await openReview();
+  fireEvent.change(screen.getByRole("textbox"), { target: { value: "SEND" } });
+  fireEvent.click(screen.getByRole("button", { name: "Continue in cloud once" }));
+  await waitFor(() => expect(actions.approve).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("button", { name: "Stop task" }));
+  await waitFor(() => expect(actions.stop).toHaveBeenCalledTimes(1));
+  await act(async () => finish(null));
+  expect(actions.admit).not.toHaveBeenCalled();
+});
+
 it("invalidates review after a different task generation and preserves captured text", async () => {
   const actions = api();
   const changed = vi.fn().mockResolvedValue(undefined);
@@ -170,4 +201,43 @@ it("bounds a stalled status read and allows another explicit read", async () => 
   expect(screen.getByRole("alert")).toHaveTextContent("Refresh status before trying another action");
   expect(screen.getByRole("button", { name: "Refresh cloud status" })).toBeEnabled();
   expect(actions.admit).not.toHaveBeenCalled();
+});
+
+it("prepares an exact public website scope and shows captured research limits before approval", async () => {
+  const captured = review();
+  captured.admission.binding = { ...captured.admission.binding, version: 2, mode: "public-web-research",
+    webScope: { allowedDomains: ["example.com"], initialUrls: ["https://example.com/releases"] },
+    budget: { maxModelCalls: 4, maxPageReads: 6, maxSourceBytes: 65536, maxOutputTokens: 4096, maxElapsedMs: 120000, maxResultBytes: 65536 } };
+  const actions = api({ preparePublicWeb: vi.fn().mockResolvedValue(captured) });
+  render(<HostedTaskControls item={item} api={actions} onChanged={vi.fn().mockResolvedValue(undefined)} />);
+  fireEvent.click(screen.getByRole("button", { name: "Continue in cloud…" }));
+  const select = await screen.findByRole("combobox");
+  await waitFor(() => expect(select).toBeEnabled());
+  fireEvent.change(select, { target: { value: "cloud-key" } });
+  fireEvent.click(screen.getByRole("radio", { name: "Research public pages" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Starting pages" }), { target: { value: "https://example.com/releases#updates" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review cloud task" }));
+  await screen.findByRole("dialog", { name: "Research in cloud" });
+  expect(actions.preparePublicWeb).toHaveBeenCalledWith({ workspaceId: "workspace", agentId: "agent", workId: "work", expectedGeneration: 3, credentialId: "cloud-key", credentialRevision: 4, mode: "public-web-research", webScope: { allowedDomains: ["example.com"], initialUrls: ["https://example.com/releases"] } });
+  expect(screen.getByRole("region", { name: "Reviewed websites" })).toHaveTextContent("https://example.com/releases");
+  expect(screen.getByText(/Up to 4 model calls/)).toHaveTextContent("6 page reads · up to 120 seconds");
+  expect(screen.getByText(/4,096 output tokens across all calls/)).toBeVisible();
+  expect(actions.prepare).not.toHaveBeenCalled();
+  expect(actions.admit).not.toHaveBeenCalled();
+});
+
+it("does not hold or send a research task with missing or invalid starting pages", async () => {
+  const actions = api();
+  render(<HostedTaskControls item={item} api={actions} onChanged={vi.fn().mockResolvedValue(undefined)} />);
+  fireEvent.click(screen.getByRole("button", { name: "Continue in cloud…" }));
+  const select = await screen.findByRole("combobox");
+  await waitFor(() => expect(select).toBeEnabled());
+  fireEvent.change(select, { target: { value: "cloud-key" } });
+  fireEvent.click(screen.getByRole("radio", { name: "Research public pages" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Starting pages" }), { target: { value: "https://user:password@example.com/" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review cloud task" }));
+  await screen.findByText(/Starting pages must use public HTTPS/);
+  expect(actions.preparePublicWeb).not.toHaveBeenCalled();
+  expect(actions.prepare).not.toHaveBeenCalled();
+  expect(actions.approve).not.toHaveBeenCalled();
 });
