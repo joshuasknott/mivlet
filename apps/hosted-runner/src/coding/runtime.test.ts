@@ -61,7 +61,7 @@ describe("private offline runtime authority", () => {
     const mkdir = vi.fn(async () => { await pending; }); calls.get.mockReturnValue({ mkdir, writeFile: write, retire });
     const authority = new CodingAuthority(storage.context(), environment() as never); await authority.begin(await value());
     const stage = authority.file("main.js", "export const value = 1;\n");
-    while (!mkdir.mock.calls.length) await Promise.resolve();
+    await vi.waitFor(() => expect(mkdir).toHaveBeenCalledOnce(), { timeout: 1000 });
     await authority.cancel(); release(); await expect(stage).rejects.toThrow("coding-check-not-current");
     expect(write).not.toHaveBeenCalled(); expect(retire).toHaveBeenCalledOnce(); await expect(authority.run("syntax")).rejects.toThrow();
   });
