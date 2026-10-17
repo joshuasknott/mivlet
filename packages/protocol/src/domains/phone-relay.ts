@@ -34,6 +34,7 @@ export interface PhoneRelayStatus {
   error?: string;
 }
 export interface PhoneRelayDisconnectRequest { connectionId: string; epoch: string }
+export interface PhoneRelayConnectRequest { workspaceId: string; cloudWorkspaceId: string; deviceId: string }
 export type PhoneRelayOperation = "begin" | "consent" | "session" | "call" | "disconnect";
 export interface PhoneRelayRequest {
   version: 1;
