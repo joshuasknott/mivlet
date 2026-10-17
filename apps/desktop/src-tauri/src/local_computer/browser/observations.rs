@@ -168,11 +168,13 @@ pub(super) fn tabs(
 ) -> Result<String, String> {
     process.tabs = None;
     process.navigation.clear();
+    process.activation.clear();
     process.controls.clear();
     process.scroll = None;
     let (window, pages) = targets(process, hwnd, check)?;
     let mut choices = HashMap::new();
     let mut navigation = HashMap::new();
+    let mut activation = HashMap::new();
     let mut tabs = Vec::new();
     let live: HashSet<_> = pages
         .iter()
@@ -192,6 +194,7 @@ pub(super) fn tabs(
         let raw_url = page["url"].as_str().unwrap_or_default();
         let mut origin = url_origin(raw_url);
         let mut navigation_ref = None;
+        let mut activation_ref = None;
         if origin.is_some() || raw_url == "about:blank" {
             let session = session(process, &target, check)?;
             let value = call(process, Command::Frames, json!({}), Some(&session), check)?;
@@ -201,9 +204,12 @@ pub(super) fn tabs(
             let reference = super::super::super::desktop_tools::opaque_id()?;
             origin = Some(choice.origin.clone());
             navigation_ref = Some(reference.clone());
+            let activate_reference = super::super::super::desktop_tools::opaque_id()?;
+            activation_ref = Some(activate_reference.clone());
+            activation.insert(activate_reference, choice.clone());
             navigation.insert(reference, choice);
         }
-        tabs.push(json!({"tabRef":reference,"navigationRef":navigation_ref,"title":title,"origin":origin}));
+        tabs.push(json!({"tabRef":reference,"navigationRef":navigation_ref,"activationRef":activation_ref,"title":title,"origin":origin}));
     }
     check()?;
     process.tabs = Some(TabSnapshot {
@@ -214,6 +220,7 @@ pub(super) fn tabs(
         choices,
     });
     process.navigation = navigation;
+    process.activation = activation;
     Ok(json!({"tabs":tabs,"trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 

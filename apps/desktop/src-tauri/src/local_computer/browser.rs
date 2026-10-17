@@ -193,6 +193,23 @@ enum Request<'a> {
     Navigate(&'a str, &'a str, &'a str),
     Click(&'a str, &'a str, &'a str),
     Scroll(&'a str, &'a str, &'a str),
+    Activate(&'a str, &'a str),
+}
+pub(crate) fn activate(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Activate(reference, origin),
+    )
 }
 pub(crate) fn scroll(
     computers: &LocalComputerState,
@@ -288,6 +305,14 @@ fn execute(
                 })
             };
             match arguments {
+                Request::Activate(reference, origin) => process.activate(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    &check,
+                    &checked_dispatch,
+                ),
                 Request::Read(Some((reference, origin))) => {
                     process.observe_tab(window.identity.hwnd, generation, reference, origin, &check)
                 }

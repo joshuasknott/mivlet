@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn tab_activation_cannot_use_the_read_channel_and_dispatches_one_fixed_native_target() {
+    use serde_json::{json, Value};
+    let input = Pair::new(false).unwrap();
+    let mut output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    assert!(control
+        .read_command(
+            Command::Activate,
+            json!({"targetId":"untrusted"}),
+            None,
+            &|| Ok(())
+        )
+        .is_err());
+    let worker = std::thread::spawn(move || {
+        let mut reader = Framed::new(input.child);
+        let message: Value = serde_json::from_slice(
+            &reader
+                .read(Instant::now() + Duration::from_secs(5), &|| Ok(()))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(message["method"], "Target.activateTarget");
+        assert_eq!(message["params"], json!({"targetId":"native-target"}));
+        assert!(message.get("sessionId").is_none());
+        output
+            .child
+            .write_all(format!("{}\0", json!({"id":message["id"],"result":{}})).as_bytes())
+            .unwrap();
+    });
+    let calls = std::cell::Cell::new(0);
+    control
+        .activate("native-target", &|| Ok(()), &|start| {
+            calls.set(calls.get() + 1);
+            start()
+        })
+        .unwrap();
+    worker.join().unwrap();
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
 fn visibility_probe_accepts_only_a_plain_known_state_without_exceptions() {
     use serde_json::json;
     assert!(visibility(&json!({"result":{"type":"string","value":"visible"}})).unwrap());

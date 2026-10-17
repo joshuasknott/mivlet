@@ -314,6 +314,7 @@ pub(super) fn scroll(
     let (native_ref, choice) = process.scroll.take().ok_or(STALE)?;
     process.controls.clear();
     process.navigation.clear();
+    process.activation.clear();
     process.tabs = None;
     if native_ref != reference {
         return Err(STALE.into());

@@ -274,7 +274,13 @@ Credential-shaped output is refused. Page text remains explicitly untrusted.
 Reads invalidate older desktop action observations. A cancelled or malformed pipe
 exchange disables further agent commands while keeping the pipe handles alive for
 human use; close that private window and open a fresh browser to resume agent reads.
-Form editing, automatic tab switching and native upload/download custody remain pending.
+An explicit `local-browser-activate` may select a public tab from the same list's
+30-second, single-use `activationRef` and exact origin. It requires the already
+selected foreground browser, rechecks the exact source document/window/generation,
+and invalidates older choices before one fenced native activation. It never
+restores a window or changes delivery mode. List and observe again before input;
+an interrupted activation is uncertain and is never replayed.
+Form editing and native upload/download custody remain pending.
 
 For a visible HTTP(S) tab, observation also exposes a bounded subset of named,
 enabled top-frame buttons and HTTP links as opaque `controlRef` choices.
