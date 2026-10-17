@@ -39,7 +39,7 @@ impl ReviewRequest {
         if self.job_id.len() != 48
             || !self.job_id.bytes().all(|b| b.is_ascii_hexdigit())
             || self.job_generation == 0
-            || self.job_generation != self.expected_generation
+            || self.expected_generation == 0
         {
             return Err("Refresh the exact command job before reviewing its repository.".into());
         }
@@ -263,6 +263,9 @@ fn inspect_in(
 ) -> Result<Value, String> {
     target.validate()?;
     check()?;
+    if ticket.generation != target.expected_generation {
+        return Err("The repository viewer authority changed. Refresh before reviewing.".into());
+    }
     let binding = jobs.repository_binding(&target.job_id, target.job_generation)?;
     let repo = copy_manager::owned_repository_in_account(
         directory,
