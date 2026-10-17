@@ -122,6 +122,7 @@ const provider: BackendProvider = {
   ],
 };
 const modelOptions = providerModelOptions([{ provider, models: provider.models }]);
+const invalidateHarnessOwners: Array<() => void> = [];
 
 function profile(id: string, name: string, instructions: string, modelId: string): MivletAgentProfile {
   return {
@@ -203,6 +204,7 @@ function makeHarness(options: {
   const agentName = agentId === "reviewer" ? "Reviewer" : "Lead";
   const modelId = agentId === "reviewer" ? "review-model" : "lead-model";
   let current = true;
+  invalidateHarnessOwners.push(() => { current = false; });
   const snapshot = {
     data: {
       conversations: [{
@@ -262,6 +264,7 @@ async function renderWorker(options: {
 } = {}) {
   const setup = makeHarness(options);
   const activeRuntime = runtime(options.activeProvider);
+  const previousRuns = harness.run.mock.calls.length;
   await act(async () => {
     render(
       <ExecutionWorker
@@ -272,7 +275,8 @@ async function renderWorker(options: {
       />,
     );
   });
-  await waitFor(() => expect(harness.run).toHaveBeenCalled());
+  await waitFor(() => expect(harness.run).toHaveBeenCalledTimes(previousRuns + 1));
+  await waitFor(() => expect(setup.service.released).toHaveBeenCalledWith(setup.session));
   return { ...setup, runtime: activeRuntime };
 }
 
@@ -298,8 +302,26 @@ describe("ExecutionWorker coordination reachability", () => {
     harness.resolveWorkAttachments.mockReturnValue({ attachments: [] });
     harness.composerImageInputs.mockReturnValue({ ok: true, images: [] });
   });
-  afterEach(() => {
-    cleanup();
+  afterEach(async () => {
+    // Real WorkspaceExecution.dispose invalidates canonical ownership before
+    // workers unmount. A React view is never independent execution authority.
+    for (const invalidate of invalidateHarnessOwners.splice(0)) invalidate();
+    await act(async () => { cleanup(); });
+  });
+
+  it("does not dispatch a provider after canonical ownership ends while context preparation is pending", async () => {
+    const setup = makeHarness();
+    const selectedRuntime = runtime();
+    let finish!: (context: { messages: Array<{ role: string; content: string }> }) => void;
+    vi.mocked(selectedRuntime.assembleConversationContext).mockImplementationOnce(() => new Promise(resolve => { finish = resolve as typeof finish; }));
+    const view = render(<ExecutionWorker session={setup.session as never} service={setup.service as never} runtime={selectedRuntime} projects={[]} />);
+    await waitFor(() => expect(selectedRuntime.assembleConversationContext).toHaveBeenCalled());
+    setup.setCurrent(false);
+    view.unmount();
+    await act(async () => finish({ messages: [{ role: "user", content: "prepared too late" }] }));
+    await waitFor(() => expect(setup.service.released).toHaveBeenCalled());
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(setup.commands).not.toContainEqual(expect.objectContaining({ action: "bind-work" }));
   });
 
   it.each([true, false])("admits current images only when the executing managed route supports them (%s)", async supported => {
