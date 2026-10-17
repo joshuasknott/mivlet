@@ -4,6 +4,8 @@ import type { CollaborationWorkItem } from "@mivlet/protocol";
 import type { WorkspaceExecution } from "../../lib/workspace-execution";
 import { ConversationWorkControls } from "./ConversationWorkControls";
 
+vi.mock("../hosted/HostedTaskControls", () => ({ HostedTaskControls: ({ item }: { item: CollaborationWorkItem }) => <div data-testid="cloud-control">Cloud control {item.id}</div> }));
+
 const item = (id: string, patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem => ({
   id, rootId: id, workspaceId: "workspace", conversationId: "room", agentId: "agent", agentName: "Atlas",
   prompt: `Request ${id}`, userRequest: `Request ${id}`, permissionMode: "read-only", status: "queued",
@@ -20,6 +22,12 @@ function setup(work: CollaborationWorkItem[], command = vi.fn().mockResolvedValu
 }
 
 describe("conversation Work controls", () => {
+  it("keeps reconciled cloud history out of the composer while unresolved work stays reachable", async () => {
+    const hosted = (phase: NonNullable<CollaborationWorkItem["hostedTask"]>["phase"]) => ({ phase }) as NonNullable<CollaborationWorkItem["hostedTask"]>;
+    setup([item("old", { status: "completed", hostedTask: hosted("reconciled") }), item("pending", { status: "awaiting-user", hostedTask: hosted("reconcile-required") })]);
+    expect(await screen.findByText("Cloud control pending")).toBeVisible();
+    expect(screen.queryByText("Cloud control old")).toBeNull();
+  });
   it("uses exact generation-bound queue edits and preserves failed input", async () => {
     const command = vi.fn().mockRejectedValue(new Error("The request already started."));
     setup([item("one")], command);

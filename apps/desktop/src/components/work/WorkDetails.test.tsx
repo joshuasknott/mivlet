@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from "vitest";
 import type { CollaborationWorkItem } from "@mivlet/protocol";
 import { WorkDetails } from "./WorkDetails";
 
+vi.mock("../hosted/HostedTaskControls", () => ({ HostedTaskControls: ({ item, onChanged }: { item: CollaborationWorkItem; onChanged: () => Promise<void> }) => <button onClick={() => void onChanged()}>Inspect cloud history {item.id}</button> }));
+
 const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem => ({
   id: "work", rootId: "work", workspaceId: "workspace", conversationId: "room",
   agentId: "agent", agentName: "Researcher", prompt: "Read the brief and summarize", userRequest: "Summarize the brief for me",
@@ -31,6 +33,12 @@ const item = (patch: Partial<CollaborationWorkItem> = {}): CollaborationWorkItem
 });
 
 describe("Work details", () => {
+  it("keeps completed cloud history reachable with canonical refresh", async () => {
+    const onChanged = vi.fn().mockResolvedValue(undefined);
+    render(<WorkDetails item={item({ status: "completed", hostedTask: { phase: "reconciled" } as NonNullable<CollaborationWorkItem["hostedTask"]> })} onChanged={onChanged} onOpen={vi.fn()} onStop={vi.fn()} onContinue={vi.fn()} onSteer={vi.fn()} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Inspect cloud history work" }));
+    expect(onChanged).toHaveBeenCalledOnce();
+  });
   it("reopens a saved result at its exact conversation source", () => {
     const onOpen = vi.fn();
     render(<WorkDetails item={item()} onOpen={onOpen} onStop={vi.fn()} onContinue={vi.fn()} onSteer={vi.fn()} />);

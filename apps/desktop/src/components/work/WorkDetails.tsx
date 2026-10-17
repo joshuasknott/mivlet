@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import type { CollaborationCommand, CollaborationSnapshot, CollaborationWorkItem, WorkOutput } from "@mivlet/protocol";
 import { activeWork } from "../../lib/workspace-execution";
 import {
@@ -8,6 +8,8 @@ import {
 import { WorkStatusBadge } from "./WorkStatusBadge";
 import { ProviderResetControl } from "../usage/ProviderResetControl";
 import "./work.css";
+
+const HostedTaskControls = lazy(() => import("../hosted/HostedTaskControls").then(module => ({ default: module.HostedTaskControls })));
 
 const ATTACHMENT_KINDS: Record<string, string> = {
   "workspace-file": "Verified workspace file",
@@ -31,6 +33,7 @@ export function WorkDetails({
   onSteer,
   onPromote,
   onProviderReset,
+  onChanged,
 }: {
   item: CollaborationWorkItem;
   onOpen: (
@@ -38,6 +41,7 @@ export function WorkDetails({
     source?: Pick<WorkOutput, "branchId" | "messageId" | "sourceRevisionId">,
   ) => void;
   onProviderReset?: (command: CollaborationCommand) => Promise<CollaborationSnapshot>;
+  onChanged?: () => Promise<void>;
   onStop: (id: string) => void | Promise<void>;
   onContinue: (id: string, expectedGeneration: number) => void | Promise<void>;
   onSteer: (
@@ -127,6 +131,9 @@ export function WorkDetails({
           <p className="work-details-reason">{item.reason}</p>
         ) : null}
         <ProviderResetControl key={`${item.id}:${item.generation}`} item={item} onCommand={onProviderReset} />
+        {item.hostedTask && onChanged && <Suspense fallback={<p role="status">Loading cloud task…</p>}>
+          <HostedTaskControls item={item} onChanged={onChanged} />
+        </Suspense>}
         {uncertain ? (
           <p className="work-details-notice">
             This request was interrupted or steered after provider activity

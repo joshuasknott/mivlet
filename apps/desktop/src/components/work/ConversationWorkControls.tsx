@@ -26,7 +26,7 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
 }) {
   const queue = editableQueue(work, conversationId);
   const roots = work.filter(item => item.conversationId === conversationId && !item.parentId);
-  const cloudTasks = roots.filter(item => item.hostedTask);
+  const cloudTasks = roots.filter(item => item.hostedTask && item.hostedTask.phase !== "reconciled");
   const [cloudReviewId, setCloudReviewId] = useState<string>();
   const goalWork = [...roots].reverse().find(item => item.outcomeGoal && item.status !== "cancelled");
   const active = [...roots].reverse().find(item => item.status === "running" || item.status === "awaiting-approval");
