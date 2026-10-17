@@ -216,7 +216,7 @@ function HostedTaskConsent({ review, task, agentName, pending, attempted, stoppi
       <li><Clock size={20} aria-hidden="true" /><span>{binding.version === 2 ? `Up to ${binding.budget.maxModelCalls} model calls · ${binding.budget.maxPageReads} page reads` : "One model call"} · up to {binding.budget.maxElapsedMs / 1000} seconds</span></li>
       <li><FileText size={20} aria-hidden="true" /><span>Up to {binding.budget.maxOutputTokens.toLocaleString()} output tokens{binding.version === 2 ? " across all calls" : ""} · {review.inputBytes.toLocaleString()} input bytes · 64 KiB input/output limits{binding.version === 2 ? ` · ${binding.budget.maxSourceBytes / 1024} KiB total page text` : ""}</span></li>
     </ul>
-    <p className="hosted-muted">Task text{binding.version === 2 ? " and page text are" : " is"} retained for 24 hours; receipts for 7 days; your separate cloud key for 30 days. This uses Mivlet’s development service. Provider charges apply; no price cap is promised.</p>
+    <p className="hosted-muted">{binding.version === 2 ? "Cloud copies of task text, page text and website receipts are retained for 24 hours." : "Cloud task text is retained for 24 hours; receipts for 7 days."} Your separate cloud key expires after 30 days. This uses Mivlet’s development service. Provider charges apply; no price cap is promised.</p>
     <details className="hosted-consent__destination"><summary>Cloud service</summary><code>{review.runnerUrl}</code></details>
     <p>{review.approval.consequence}</p>
     {review.approval.confirmationPhrase && <label>Type <code>{review.approval.confirmationPhrase}</code><input autoComplete="off" disabled={pending} value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>}

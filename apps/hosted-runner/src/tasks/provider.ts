@@ -50,7 +50,9 @@ export async function runRealText(binding: HostedTaskBinding, input: HostedTaskT
     // This is the only provider dispatch. Neither Fetch nor our pure loop has
     // an application retry path; an interrupted send is never replayed.
     dispatched = true;
-    const response = await fetch(endpoint, { method: "POST", redirect: "error", headers, body: JSON.stringify(body), signal });
+    // Workers Fetch supports manual/follow. Manual keeps credentials at this
+    // fixed provider endpoint; every non-success (including redirects) fails.
+    const response = await fetch(endpoint, { method: "POST", redirect: "manual", headers, body: JSON.stringify(body), signal });
     if (!response.ok) {
       await response.body?.cancel();
       if ([400, 401, 403, 404, 422, 429].includes(response.status)) definitiveRejection = response.status === 401 || response.status === 403 ? "hosted-provider-authentication-required" : response.status === 429 ? "hosted-provider-rate-limited" : "hosted-provider-request-rejected";

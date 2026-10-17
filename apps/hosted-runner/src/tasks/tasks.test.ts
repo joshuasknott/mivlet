@@ -40,7 +40,7 @@ describe("single real provider request", () => {
     await expect(runRealText(value.binding, value.input, secret, new AbortController().signal)).resolves.toEqual({ text: "A real fixture answer." });
     expect(send).toHaveBeenCalledTimes(1);
     const [url, request] = send.mock.calls[0] as unknown as [string, RequestInit];
-    expect(url).toBe("https://api.openai.com/v1/chat/completions"); expect(request.redirect).toBe("error");
+    expect(url).toBe("https://api.openai.com/v1/chat/completions"); expect(request.redirect).toBe("manual");
     const body = JSON.parse(String(request.body)); expect(body.messages).toEqual(value.input.messages); expect(body.tools).toBeUndefined(); expect(body.max_tokens).toBe(100);
   });
   it("never retries an interrupted possible send or accepts a truncated SSE answer", async () => {
@@ -49,6 +49,13 @@ describe("single real provider request", () => {
     await expect(runRealText(value.binding, value.input, secret, new AbortController().signal)).rejects.toMatchObject({ uncertain: true }); expect(send).toHaveBeenCalledTimes(1);
     send.mockImplementation(async () => sse({ choices: [{ delta: { content: "Incomplete" } }] }));
     await expect(runRealText(value.binding, value.input, secret, new AbortController().signal)).rejects.toBeInstanceOf(ProviderFailure); expect(send).toHaveBeenCalledTimes(2);
+  });
+  it("rejects provider redirects without forwarding credentials or replaying", async () => {
+    const send = vi.fn(async () => new Response(null, { status: 307, headers: { location: "https://other.com/" } })); vi.stubGlobal("fetch", send);
+    const value = taskFixture();
+    await expect(runRealText(value.binding, value.input, secret, new AbortController().signal)).rejects.toBeInstanceOf(ProviderFailure);
+    expect(send).toHaveBeenCalledOnce();
+    expect((send.mock.calls[0] as unknown as [string, RequestInit])[1].redirect).toBe("manual");
   });
   it("keeps known provider rejection distinct and prevents a split secret echo", async () => {
     const send = vi.fn(async () => new Response("not forwarded", { status: 401 })); vi.stubGlobal("fetch", send); const value = taskFixture();
