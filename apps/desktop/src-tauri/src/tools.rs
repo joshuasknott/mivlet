@@ -2695,40 +2695,72 @@ mod connector_authority_tests {
     }
 
     #[test]
-    fn browser_upload_permit_rejects_changed_artifact_field_origin_or_reference_and_consumes_once()
-    {
-        let root = tempfile::tempdir().unwrap();
-        let path = root.path().join("upload-permits.json");
-        let mut approved = request("local-browser-upload");
-        approved.arguments = json!({"uploadRef":"a".repeat(48),"origin":"https://example.test","name":"Upload report","artifactId":format!("artifact-{}","b".repeat(64))});
-        approved.workspace_id = Some("workspace".into());
-        approved.agent_id = Some("agent".into());
-        approved.computer_generation = Some(7);
-        approved.approval.request.data_used =
-            approval_argument_previews(&approved.tool, &approved.arguments)
-                .unwrap()
-                .into_iter()
-                .collect();
-        approved.approval.request.data_used.extend([
-            argument_digest(&approved.arguments).unwrap(),
-            "Computer workspace: workspace".into(),
-            "Computer agent: agent".into(),
-            "Computer generation: 7".into(),
-        ]);
-        persist_permit(&path, &approved);
-        for (key, value) in [
-            ("artifactId", format!("artifact-{}", "c".repeat(64))),
-            ("origin", "https://other.test".into()),
-            ("name", "Other file field".into()),
-            ("uploadRef", "d".repeat(48)),
+    fn browser_transfer_permits_bind_exact_payload_scope_freshness_and_consume_once() {
+        for (tool, arguments, changes) in [
+            (
+                "local-browser-upload",
+                json!({"uploadRef":"a".repeat(48),"origin":"https://example.test","name":"Upload report","artifactId":format!("artifact-{}","b".repeat(64))}),
+                vec![
+                    ("artifactId", json!(format!("artifact-{}", "c".repeat(64)))),
+                    ("origin", json!("https://other.test")),
+                    ("name", json!("Other file field")),
+                    ("uploadRef", json!("d".repeat(48))),
+                ],
+            ),
+            (
+                "local-browser-download",
+                json!({"downloadRef":"a".repeat(48),"origin":"https://example.test","name":"Download report","url":"https://example.test/report.csv","fileName":"report.csv","timeoutSeconds":8}),
+                vec![
+                    ("downloadRef", json!("d".repeat(48))),
+                    ("origin", json!("https://other.test")),
+                    ("name", json!("Other download")),
+                    ("url", json!("https://example.test/other.csv")),
+                    ("fileName", json!("other.csv")),
+                    ("timeoutSeconds", json!(9)),
+                ],
+            ),
         ] {
-            let mut changed: ToolExecutionRequest =
+            let root = tempfile::tempdir().unwrap();
+            let path = root.path().join("transfer-permits.json");
+            let mut approved = request(tool);
+            approved.arguments = arguments;
+            approved.workspace_id = Some("workspace".into());
+            approved.agent_id = Some("agent".into());
+            approved.computer_generation = Some(7);
+            approved.approval.request.data_used =
+                approval_argument_previews(&approved.tool, &approved.arguments)
+                    .unwrap()
+                    .into_iter()
+                    .collect();
+            approved.approval.request.data_used.extend([
+                argument_digest(&approved.arguments).unwrap(),
+                "Computer workspace: workspace".into(),
+                "Computer agent: agent".into(),
+                "Computer generation: 7".into(),
+            ]);
+            persist_permit(&path, &approved);
+            for (key, value) in changes {
+                let mut changed: ToolExecutionRequest =
+                    serde_json::from_value(serde_json::to_value(&approved).unwrap()).unwrap();
+                changed.arguments[key] = value;
+                assert!(verify_execution_permit(&path, &changed).is_err());
+            }
+            let mut wrong_generation: ToolExecutionRequest =
                 serde_json::from_value(serde_json::to_value(&approved).unwrap()).unwrap();
-            changed.arguments[key] = value.into();
-            assert!(verify_execution_permit(&path, &changed).is_err());
+            wrong_generation.computer_generation = Some(8);
+            assert!(verify_execution_permit(&path, &wrong_generation).is_err());
+            verify_execution_permit(&path, &approved).unwrap();
+            assert!(verify_execution_permit(&path, &approved).is_err());
+
+            let stale_path = root.path().join("stale-transfer-permits.json");
+            let stale_time = decided_at_offset(
+                -(crate::execution_approvals::EXECUTION_APPROVAL_TTL_SECONDS + 1),
+            );
+            approved.approval.decided_at = stale_time.clone();
+            approved.approval.request.requested_at = stale_time;
+            persist_permit(&stale_path, &approved);
+            assert!(verify_execution_permit(&stale_path, &approved).is_err());
         }
-        verify_execution_permit(&path, &approved).unwrap();
-        assert!(verify_execution_permit(&path, &approved).is_err());
     }
 
     #[test]
