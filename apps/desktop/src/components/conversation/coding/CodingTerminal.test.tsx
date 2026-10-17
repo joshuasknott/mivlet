@@ -67,6 +67,20 @@ describe("native result terminal", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("4 KiB");
     expect(writeInput).not.toHaveBeenCalled();
   });
+  it("allows a new line only after deliberate reconnect confirms the consumed sequence", async () => {
+    const writeInput = vi.fn().mockRejectedValue(new Error("Lost receipt"));
+    render(<CodingTerminal target={target} job={job} writeInput={writeInput} />); open();
+    await screen.findByText("Output connected");
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "first" } });
+    fireEvent.click(screen.getByRole("button", { name: "Send line" }));
+    await screen.findByText(/Input delivery was not confirmed/);
+    expect(screen.getByRole("textbox")).toBeDisabled();
+    vi.mocked(readNativeCommandOutput).mockResolvedValue({ ...output(), job: { ...job, inputSequence: 3 } });
+    fireEvent.click(screen.getByRole("button", { name: "Reconnect output" }));
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeEnabled());
+    expect(screen.getByRole("textbox")).toHaveValue("");
+    expect(writeInput).toHaveBeenCalledTimes(1);
+  });
   it("keeps Stop independent from an unanswered input write", async () => {
     const writeInput = vi.fn(() => new Promise<never>(() => {}));
     render(<CodingTerminal target={target} job={job} writeInput={writeInput} />); open();

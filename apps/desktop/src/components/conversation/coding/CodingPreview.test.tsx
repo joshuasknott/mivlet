@@ -35,7 +35,7 @@ describe("native running-app preview", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Make the heading smaller and give it more space." } });
     fireEvent.click(screen.getByRole("button", { name: "Add to message" }));
     expect(props.onDraft).toHaveBeenCalledWith(expect.stringContaining("Make the heading smaller"));
-    expect(props.onDraft).toHaveBeenCalledWith(expect.stringContaining("untrusted page content"));
+    expect(props.onDraft).toHaveBeenCalledWith(expect.stringContaining("untrusted page evidence"));
     expect(frame()).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
   });
   it("renders an unavailable native state without an iframe or synthetic URL", async () => {
@@ -62,5 +62,16 @@ describe("native running-app preview", () => {
     await screen.findByText("Closed by native.");
     expect(props.closePreview).toHaveBeenCalledWith({ ...target, previewId: "preview" });
     expect(screen.queryByTitle("Running project preview")).toBeNull();
+  });
+  it("keeps Stop available during an unanswered preview close", async () => {
+    const { props, view } = setup();
+    const onStop = vi.fn().mockResolvedValue(undefined);
+    props.closePreview.mockImplementationOnce(() => new Promise(() => {}));
+    view.rerender(<CodingPreview {...props} onStop={onStop} />);
+    await screen.findByTitle("Running project preview");
+    fireEvent.click(screen.getByRole("button", { name: "Close preview" }));
+    expect(screen.getByRole("button", { name: "Stop" })).toBeEnabled();
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(onStop).toHaveBeenCalledTimes(1));
   });
 });
