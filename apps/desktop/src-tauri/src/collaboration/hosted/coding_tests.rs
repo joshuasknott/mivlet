@@ -434,7 +434,7 @@ fn four_cancelled_preparations_release_slots_but_matching_or_live_preparation_st
 #[test]
 fn retention_keeps_uncertain_import_and_scope_states_until_exact_terminal_acknowledgement() {
     fixture(&store(), |ctx| {
-        let (mut target, review) = prepared(ctx, true)?;
+        let (target, review) = prepared(ctx, true)?;
         let _gate = cloud::dispatch::AdmissionGuard::retain(&review.admission.binding);
         let saved = claim_at(ctx, &target, &review.review_id)?;
         let task =
@@ -475,7 +475,10 @@ fn retention_keeps_uncertain_import_and_scope_states_until_exact_terminal_acknow
         }
         ctx.work(&original)?;
         let (_, next) = stop_at(ctx, &target)?;
-        target = next.unwrap();
+        assert_eq!(
+            next.unwrap().expected_generation,
+            target.expected_generation + 1
+        );
         assert!(!crate::collaboration::hosted_repository::retire_at(
             ctx,
             &task,
