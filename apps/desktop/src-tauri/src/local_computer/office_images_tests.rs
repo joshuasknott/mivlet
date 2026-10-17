@@ -57,7 +57,7 @@ fn rewrite(bytes: &[u8], name: &str, content: Vec<u8>) -> Vec<u8> {
     let mut parts = Vec::new();
     for index in 0..archive.len() {
         let mut entry = archive.by_index(index).unwrap();
-        let path = entry.name().to_string();
+        let path = entry.name().unwrap().into_owned();
         let mut bytes = Vec::new();
         entry.read_to_end(&mut bytes).unwrap();
         parts.push((
