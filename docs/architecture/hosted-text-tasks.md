@@ -120,6 +120,105 @@ untrusted evidence, with no instruction authority. Page text, URL-bearing bindin
 and source receipts are purged after 24 hours; the v1 seven-day receipt rule does
 not retain research URLs.
 
+## Isolated offline coding
+
+The separately typed v3 `offline-coding` operation is implemented across native
+admission, task custody, the private coding runtime and native file import. It is
+activation-gated: the existing Free task deployment has no `CODING_RUNTIME`
+binding, and rejects coding before reserving or dispatching a provider request.
+The account currently requires Workers Paid for Containers. No paid upgrade or
+container deployment was performed by this work. The private runtime must pass
+its real network and child-isolation checks before any coding model call.
+
+Native preparation holds one unstarted root Work item, captures source from its
+immutable `repositoryBinding`, and shows the complete source manifest, writable
+names, exact check argv, image, messages and limits. The renderer supplies names,
+never file bytes, archive paths or success claims. Snapshots bind the account,
+computer scope, Work generation, task/run IDs, full retained-copy tree and HEAD;
+only selected ordinary UTF-8 files and their public manifest cross the boundary.
+Private, credential and control paths, links, aliases and LFS pointers are
+rejected. Omitted files and the full local tree digest remain native.
+
+One consumed task admission authorizes only that reviewed scratch operation;
+it does not inherit local tool approvals or Full Access. Its private tools are
+`scratch_list`, `scratch_read`, `scratch_write` and `scratch_check`. Writes and
+deletions require exact writable names, which may be empty for read-only tasks.
+Checks select a reviewed ID and argv array; no shell expansion or installs are
+added. Each model/tool step journals its digest and budget before effects. An
+unfinished effect is uncertain and is not automatically repeated.
+
+The limits are four model calls, eight scratch tools, 4,096 aggregate requested
+output tokens, 120 seconds, 32 MiB per tree, 2,000 files, 256 KiB per file and a
+64 KiB answer. The full admission, including metadata, has a separate 512 KiB
+limit; long paths reduce the reachable file count. A conservative native check
+rejects oversized metadata before snapshot capture. Model messages remain
+limited to 64 KiB; compact policy binds the full manifest digest, and bounded
+listing exposes names on demand. Four coding tasks can be retained per account.
+Immutable input/output transfer leases bind exact manifests, owner, device,
+nonce and expiry, with 64 KiB chunks. Partial input transfer does not extend the
+original deadline. Stop fences every subsequent chunk and seal. Refresh may
+retry immutable result reads; it does not restart an admission or check.
+
+`wrangler.coding.jsonc` defines a separate private service with no public route,
+provider/account secrets, mounts, preview ports or outbound handlers. Its SDK is
+the existing pinned `@cloudflare/sandbox@0.13.0-next.738.2`. Coding uses the same
+release's Python image, pinned immutably as
+`docker.io/cloudflare/sandbox:0.13.0-next.738.2-python@sha256:545b3df29a246f83e6fdb907180ea3169a91ee567d5478823a2248604c6bc353`.
+The default image omits Python, so it cannot run the fixed custody wrapper. The
+release's [Dockerfile](https://github.com/cloudflare/sandbox-sdk/blob/e952c0c41432cf91d2dedd1c9726f47c8a582ba4/packages/sandbox/Dockerfile)
+defines `/usr/bin/python3` and `/usr/local/bin/node` in this variant. This does
+not change the existing computer deployment's image or SDK version.
+
+The runtime sets `enableInternet=false` before launch, using the platform's
+[outbound-traffic boundary](https://developers.cloudflare.com/containers/configuration/outbound-traffic/).
+Before project data is staged, fixed trusted probes compare reachable public
+HTTP, HTTPS, DNS and resolver controls with the offline runtime. A failed private
+TCP connect without a reachable positive control is not independent private-TCP
+conformance evidence. Project children additionally run as UID/GID 65534 with
+cleared groups, closed inherited descriptors, resource limits, `no_new_privs`
+and an inherited amd64 seccomp filter. This is required because the pinned
+container's local SDK control server is not a project trust boundary. The filter
+denies network and control-escape syscalls, including socket/connect, ptrace,
+process-memory access, `pidfd_getfd` and io_uring; unsupported ABI/filter setup
+fails closed. Fixed pre-project positive loopback/Unix controls establish that
+the corresponding filtered attempts are actually denied. No project code or
+task text enters these probes. A proof is cached for at most eight hours for
+the exact image/isolation marker; cancellation retires the exact runtime before
+later staging or launch can wake it again.
+
+The cloud provider key stays in encrypted provider custody. Entire decoded tool
+calls, JSON property names, source contents, filename/argv metadata, check output
+and final results are checked against the exact enrolled key before the relevant
+model, sandbox or result boundary. Checks materialize a fresh candidate tree;
+their filesystem changes are discarded, and receipts bind the candidate digest.
+Task source, output and proposals are purged from cloud task storage after 24
+hours. Native source custody remains bounded to four snapshots per copy.
+
+An unreviewed file/check/tool request parks its exact proposal and authenticated
+partial candidate as `needs-review`, with canonical Work awaiting the user.
+There is no same-attempt scope expansion or functional Resume control: broader
+work requires a new complete task review. The partial candidate may be reviewed
+for import separately. Ordinary completed candidates remain `awaiting-import`;
+neither state appends a success answer or changes local files merely because
+the cloud returned one. Authenticated unchanged output may finish without a
+file import because it has no local effects.
+
+Native output staging validates the original snapshot, exact output manifest,
+per-file hashes and writable paths. A separate one-use import approval rechecks
+the original copy tree/HEAD, Work/run/generation and authority, creates a recovery
+checkpoint, then applies only returned changes through the existing durable
+filesystem journal. Omitted local files remain intact. Refresh repairs only an
+already acknowledged native import receipt after lost IPC; it never reapplies
+files. Canonical completion requires that exact encrypted native receipt. Stop,
+changed conversation heads or reduced authority retain results separately.
+
+Source and mocked checks establish these contracts, not a working deployed
+Container. Activation requires a deliberately configured private coding service
+binding, Workers Paid entitlement, successful installed-image network/child
+conformance, and an actual separately enrolled provider completion. Dynamic
+hosted browser execution and an asleep approval inbox remain unavailable; there
+is no browser or host-shell fallback.
+
 ## Deployment and evidence
 
 On October 17, 2026, the text-only Worker was deployed to the existing Cloudflare
