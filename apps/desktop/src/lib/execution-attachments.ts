@@ -71,6 +71,7 @@ function liveAttachmentCovers(
       return Boolean(attachment.imageInput);
     case "transient":
       return (
+        Boolean(attachment.imageInput) ||
         Boolean(attachment.transientBytes) ||
         Boolean(attachment.workspaceFile) ||
         Boolean(attachment.durableRef)

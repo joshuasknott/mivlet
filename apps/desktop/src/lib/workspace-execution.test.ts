@@ -9,6 +9,7 @@ import {
   WorkspaceExecution,
   restrictedPermission,
   enqueueWorkspaceDispose,
+  assignmentAttachments,
 } from "./workspace-execution";
 import { providerModelOptions } from "./provider-models";
 
@@ -118,6 +119,15 @@ function fixture(work: CollaborationWorkItem[]) {
 }
 
 describe("native background custody", () => {
+  it("shares deliberate original pixels while dropping another agent's file receipt", () => {
+    const original = { id: "image", name: "image.png", type: "image/png", sizeBytes: 68,
+      imageInput: { id: "image", name: "image.png", mediaType: "image/png" as const, sizeBytes: 68, width: 1, height: 1, dataUrl: "data:image/png;base64,pixels" },
+      workspaceFile: { computerId: "primary-computer", batchId: "batch", attachmentId: "image", originalName: "image.png", mimeType: "image/png", relativePath: "Attachments/primary/image.png", sizeBytes: 68, sha256: "a".repeat(64), stagedAt: "2026-10-17T00:00:00Z" } };
+    const child = fixtureWork("child", "b", { rootId: "root", parentId: "root" });
+    expect(assignmentAttachments(child, [original])[0]).toMatchObject({ imageInput: original.imageInput, workspaceFile: undefined, durableRef: undefined });
+    expect(assignmentAttachments(fixtureWork("root"), [original])[0].workspaceFile).toBe(original.workspaceFile);
+    expect(original.workspaceFile.computerId).toBe("primary-computer");
+  });
   it("honors canonical queue order and held roots before creating sessions", async () => {
     const { service } = fixture([
       fixtureWork("held", "a", { queue: { held: true, order: 1 } }),

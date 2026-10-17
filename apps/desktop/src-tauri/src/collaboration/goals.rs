@@ -115,7 +115,7 @@ pub(super) fn finished(item: &mut Work, run: &str) {
                 "The agent reported a goal blocker. Review its evidence before continuing.".into(),
             );
         }
-        _ => {
+        Some("continue") => {
             item.status = WorkStatus::Queued;
             item.reason = Some(
                 if goal.status == "paused" {
@@ -125,6 +125,12 @@ pub(super) fn finished(item: &mut Work, run: &str) {
                 }
                 .into(),
             );
+        }
+        _ => {
+            goal.status = "blocked".into();
+            item.status = WorkStatus::AwaitingUser;
+            item.awaiting_user = false;
+            item.reason = Some("No fresh goal progress report was saved for this turn. Review the result and remaining criteria before explicitly continuing.".into());
         }
     }
 }

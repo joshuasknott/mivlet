@@ -35,6 +35,21 @@ const scope = (agentId: string, threadId?: string): ComposerScope => ({
 });
 
 describe("useScopedComposer", () => {
+  it("persists the next request goal in the same scoped draft and clears it after submission", async () => {
+    const currentScope = scope("lead", "goal-room");
+    const draft = renderHook(() => useScopedComposer(currentScope));
+    await act(async () => {});
+    const goal = { objective: "Ready to publish", successCriteria: "Review and checks pass", maxTurns: 6, maxTokens: 32000 };
+    act(() => draft.result.current.setOutcomeGoal(goal));
+    await act(async () => draft.result.current.flush());
+    expect(JSON.parse(mocks.saves.at(-1)!.content).outcomeGoal).toEqual(goal);
+    const otherPane = renderHook(() => useScopedComposer(currentScope));
+    await act(async () => {});
+    expect(otherPane.result.current.outcomeGoal).toEqual(goal);
+    await act(async () => draft.result.current.consume(draft.result.current.revision));
+    expect(otherPane.result.current.outcomeGoal).toBeUndefined();
+    expect(JSON.parse(mocks.saves.at(-1)!.content).outcomeGoal).toBeUndefined();
+  });
   beforeEach(() => {
     testScope++;
     vi.useFakeTimers();

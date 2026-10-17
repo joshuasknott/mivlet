@@ -8,6 +8,7 @@ mod context;
 mod exchanges;
 pub(crate) mod external;
 mod goals;
+mod handover;
 pub(crate) mod models;
 mod output_revisions;
 pub(crate) mod pr_watches;
@@ -783,6 +784,33 @@ pub(crate) fn suspend_account(
         }
     }
     Ok(())
+}
+
+/// Persist the source agent's unique live Work before native computer Stop.
+/// The browser remains open for human input; fresh continuation is deliberate.
+pub(crate) fn browser_handover(
+    workspace: &str,
+    agent: &str,
+    reason: &str,
+) -> std::result::Result<(), String> {
+    let store = crate::store::try_global().ok_or("The native Work store is unavailable.")?;
+    store
+        .transaction(|conn| {
+            let scope = authorized_scope::resolve(conn, Some(workspace), None, ScopeAccess::Write)?;
+            let time = now();
+            handover::pause(
+                &Context {
+                    conn,
+                    store,
+                    scope: &scope,
+                    profiles: &[],
+                    time: &time,
+                },
+                agent,
+                reason,
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 /// Canonical messages and journal writes must still belong to a live assignment.

@@ -29,6 +29,11 @@ import { compareQueuedWork, workCanDispatch } from "./work-queue";
 
 export const activeWork = (work: CollaborationWorkItem) =>
   ["queued", "running", "waiting", "awaiting-approval"].includes(work.status);
+/** Shared originals may be staged deliberately for a recipient; a different
+ * agent's receipt and saved path never become that recipient's authority. */
+export function assignmentAttachments(work: CollaborationWorkItem, attachments: readonly ComposerAttachment[]): ComposerAttachment[] {
+  return work.parentId ? attachments.map(attachment => ({ ...attachment, workspaceFile: undefined, durableRef: undefined })) : [...attachments];
+}
 const workKey = (work: CollaborationWorkItem) =>
   `${work.id}:${work.generation}:${work.runIds.length}`;
 export const restrictedPermission = (
@@ -541,12 +546,12 @@ export class WorkspaceExecution {
           work.permissionMode,
           permissionModeFor(profile.permissionLabel),
         ),
-        attachments:
+        attachments: assignmentAttachments(work,
           this.attachments.get(work.id) ??
           (work.parentId
             ? this.effortAttachments.get(work.rootId)
             : undefined) ??
-          [],
+          []),
         cancelled: false,
         started: false,
         approvalIds: new Set(),

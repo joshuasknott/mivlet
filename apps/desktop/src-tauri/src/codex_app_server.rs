@@ -1711,6 +1711,12 @@ impl SteeringDelivery {
     }
 }
 
+fn steering_reply_accepted(value: &Value, expected: &str) -> bool {
+    value.get("method").is_none()
+        && value.get("error").is_none()
+        && value.pointer("/result/turnId").and_then(Value::as_str) == Some(expected)
+}
+
 fn observe_steering_route(request_id: &str, value: &Value) {
     let Ok(mut runs) = active_runs().lock() else {
         return;
@@ -1724,10 +1730,7 @@ fn observe_steering_route(request_id: &str, value: &Value) {
         .filter(|_| value.get("method").is_none())
     {
         if let Some((expected, sender)) = run.steering.remove(id) {
-            let _ = sender.send(
-                value.get("error").is_none()
-                    && value.pointer("/result/turnId").and_then(Value::as_str) == Some(&expected),
-            );
+            let _ = sender.send(steering_reply_accepted(value, &expected));
         }
     }
     if is_rpc_response(value, 2) {
@@ -1760,8 +1763,7 @@ pub(crate) fn steer_active_turn(attempt: &str, event: &str, text: &str) -> Steer
     };
     let rpc = format!("mivlet-steer:{event}");
     let (send, receive) = mpsc::channel();
-    let mut registered = false;
-    let write = fence.with_current(|| {
+    let prepared = fence.with_current(|| {
         let mut runs = active_runs().lock().map_err(|_| "Codex state is unavailable.")?;
         let run = runs.values_mut().find(|run| run.run_id.as_deref() == Some(attempt)).ok_or("The exact Codex attempt is no longer active.")?;
         let thread = run.thread_id.clone().ok_or("The Codex thread has not started.")?;
@@ -1770,8 +1772,21 @@ pub(crate) fn steer_active_turn(attempt: &str, event: &str, text: &str) -> Steer
             return Err("Codex steering is unavailable.".into());
         }
         run.steering.insert(rpc.clone(), (turn.clone(), send));
-        registered = true;
-        write_json_line(&run.stdin, &json!({"id":rpc,"method":"turn/steer","params":{"threadId":thread,"expectedTurnId":turn,"input":[{"type":"text","text":text.trim()}]}}))
+        Ok((run.stdin.clone(), run.image_delivery_stopped.clone(), json!({"id":rpc,"method":"turn/steer","params":{"threadId":thread,"expectedTurnId":turn,"input":[{"type":"text","text":text.trim()}]}})))
+    });
+    let Ok((writer, stopped, payload)) = prepared else {
+        return SteeringDelivery::Rejected;
+    };
+    // A stalled provider pipe must not retain the global run registry lock:
+    // Stop/shutdown can always remove the run and terminate its child.
+    let write = fence.with_current(|| {
+        if *stopped
+            .lock()
+            .map_err(|_| "Codex stop state is unavailable.")?
+        {
+            return Err("Codex was stopped.".into());
+        }
+        write_json_line(&writer, &payload)
     });
     if write.is_err() {
         // Before registration, nothing was sent. A registered write failure may
@@ -1784,11 +1799,7 @@ pub(crate) fn steer_active_turn(attempt: &str, event: &str, text: &str) -> Steer
                 run.steering.remove(&rpc);
             }
         }
-        return if registered {
-            SteeringDelivery::Uncertain
-        } else {
-            SteeringDelivery::Rejected
-        };
+        return SteeringDelivery::Uncertain;
     }
     let delivery = match receive.recv_timeout(Duration::from_secs(3)) {
         Ok(true) => SteeringDelivery::Accepted,
@@ -1925,6 +1936,30 @@ fn public_web_search_event(value: &Value) -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn steering_receipts_accept_only_the_exact_turn_response() {
+        use serde_json::json;
+        assert!(super::steering_reply_accepted(
+            &json!({"result":{"turnId":"active-turn"}}),
+            "active-turn"
+        ));
+        assert!(!super::steering_reply_accepted(
+            &json!({"result":{"turnId":"newer-turn"}}),
+            "active-turn"
+        ));
+        assert!(!super::steering_reply_accepted(
+            &json!({"error":{"code":-32601},"result":{"turnId":"active-turn"}}),
+            "active-turn"
+        ));
+        assert!(!super::steering_reply_accepted(
+            &json!({"method":"item/tool/call","result":{"turnId":"active-turn"}}),
+            "active-turn"
+        ));
+        assert!(!super::steering_reply_accepted(
+            &json!({"result":{}}),
+            "active-turn"
+        ));
+    }
     fn desktop_pending() -> super::PendingApproval {
         super::PendingApproval {
             kind: super::ApprovalKind::DynamicTool,
