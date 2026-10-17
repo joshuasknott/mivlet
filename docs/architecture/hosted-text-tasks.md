@@ -244,7 +244,9 @@ were produced by the Convex CLI. The eager auth configuration was also verified
 by an actual function deployment; mock-auth restrictions remain in place.
 
 Local verification passed protocol compatibility/spine checks, connector and
-the Worker builds, 100 Worker unit tests including the phone relay, and deployment dry runs.
+all four Worker builds, 139 Worker unit tests including the phone relay, and
+deployment dry runs. One HTMLRewriter test requires the actual Workers runtime
+and is skipped in Node; its separate edge evidence is described below.
 Live checks exercised service health, a real SQLite Durable Object scoped read,
 missing/wrong/expired capability rejection, exact body hashing, single-use nonce
 replay rejection and an absent-task response. The Convex endpoint rejected
@@ -274,7 +276,15 @@ redirects, without sending credentials to another URL. The temporary verificatio
 Worker was removed after checks. Evidence is in
 `output/agent-public-web-edge.json`. The native `hosted_` suite then passed all
 25 tests, including research receipts and Stop during admission. The task Worker
-was deployed as version `200e974d-ede0-46ba-9281-76d7e8b93ec5` (183.40 KiB,
-45.67 KiB gzip; 2 ms startup), and all nine live authorization boundary checks
-passed again with text and research modes advertised. No valid provider key or
-paid completion was used.
+was subsequently deployed as version `3e4c6d8e-2125-4308-9412-4a94f804a8da`
+(229.35 KiB, 54.76 KiB gzip; 3 ms startup). All twelve live authorization checks
+passed with text and research modes advertised. A correctly signed synthetic
+coding admission returned the exact missing-runtime 503 before consuming its
+capability; a second identical request received the same response, and a scoped
+read confirmed that no task had been created. No valid provider key or paid
+completion was used.
+
+The private coding deployment passed its packaging dry run with both remote
+digest-pinned container images and all three Durable Object bindings (679.05 KiB,
+144.44 KiB gzip). This required no local Docker build. No coding service or
+Container was deployed, and the task service still has no coding runtime binding.
