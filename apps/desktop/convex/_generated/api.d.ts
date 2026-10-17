@@ -17,6 +17,7 @@ import type * as hostedExecution from "../hostedExecution.js";
 import type * as hostedExecutionPolicy from "../hostedExecutionPolicy.js";
 import type * as hostedTasks from "../hostedTasks.js";
 import type * as http from "../http.js";
+import type * as phoneRelay from "../phoneRelay.js";
 import type * as workspace from "../workspace.js";
 
 import type {
@@ -35,6 +36,7 @@ declare const fullApi: ApiFromModules<{
   hostedExecutionPolicy: typeof hostedExecutionPolicy;
   hostedTasks: typeof hostedTasks;
   http: typeof http;
+  phoneRelay: typeof phoneRelay;
   workspace: typeof workspace;
 }>;
 
