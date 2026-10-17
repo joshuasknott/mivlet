@@ -14,7 +14,7 @@
 .turn-activity__body > .message-markdown { font-size: 14px; }
 .turn-current { margin: 0; font-size: 12px; color: var(--ink-muted); line-height: 1.6; }
 .turn-tool { display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px; min-width: 0; margin: 0; font-size: 12px; color: var(--ink-muted); }
-.turn-tool > .mcp-app-frame { flex: 1 0 100%; min-width: 0; }
+.turn-tool > .plugin-config-app-frame { flex: 1 0 100%; min-width: 0; }
 .turn-tool > span { flex: 0 0 12px; text-align: center; }
 .turn-warning, .turn-tool--failed { color: var(--destructive); }
 .turn-tool__error { margin: 6px 0 8px 20px; max-width: 65ch; overflow-wrap: anywhere; font-size: var(--text-12); line-height: 1.5; }

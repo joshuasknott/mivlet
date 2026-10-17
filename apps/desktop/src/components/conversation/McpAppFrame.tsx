@@ -358,15 +358,15 @@ export function McpAppFrame(props: McpAppFrameProps) {
       ref={frameRef}
       role={expanded && !panelTarget ? "dialog" : undefined}
       aria-modal={(expanded && !panelTarget) || undefined}
-      className={`mcp-app-frame${expanded ? " mcp-app-frame--expanded" : ""}${panelTarget ? " mcp-app-frame--panel" : ""}`}
+      className={`plugin-config-app-frame${expanded ? " plugin-config-app-frame--expanded" : ""}${panelTarget ? " plugin-config-app-frame--panel" : ""}`}
       aria-label={props.title ?? "Interactive MCP App"}
       data-status={view.status}
     >
-      <div className="mcp-app-frame__controls">
+      <div className="plugin-config-app-frame__controls">
       <button
         ref={expandRef}
         type="button"
-        className="mcp-app-frame__expand"
+        className="plugin-config-app-frame__expand"
         onClick={() => {
           if (expanded && panelTarget) announceMcpAppPanelClosed(panelId);
           setExpanded(!expanded);
@@ -378,7 +378,7 @@ export function McpAppFrame(props: McpAppFrameProps) {
       {props.onRequestTeardown ? (
         <button
           type="button"
-          className="mcp-app-frame__expand"
+          className="plugin-config-app-frame__expand"
           onClick={closeResult}
         >
           Close interactive result
@@ -386,13 +386,13 @@ export function McpAppFrame(props: McpAppFrameProps) {
       ) : null}
       </div>
       {view.status === "loading" && (
-        <p className="mcp-app-frame__status" role="status">
+        <p className="plugin-config-app-frame__status" role="status">
           Loading interactive result…
         </p>
       )}
       {(view.status === "error" || view.status === "stale") && (
         <div
-          className="mcp-app-frame__status mcp-app-frame__status--error"
+          className="plugin-config-app-frame__status plugin-config-app-frame__status--error"
           role="alert"
         >
           <strong>
@@ -415,7 +415,7 @@ export function McpAppFrame(props: McpAppFrameProps) {
         (view.status === "loading" || view.status === "ready") && (
           <iframe
             ref={iframeRef}
-            className="mcp-app-frame__iframe"
+            className="plugin-config-app-frame__iframe"
             title={props.title ?? snapshot.appName ?? "Interactive MCP App"}
             // Keep the initial document inert. McpAppHostSession installs the
             // AppBridge listener first, then assigns the isolated loopback URL.

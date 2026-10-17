@@ -120,7 +120,7 @@ export function McpAppResult({
     return (
       <button
         type="button"
-        className="mcp-app-frame__expand"
+        className="plugin-config-app-frame__expand"
         onClick={() => setShow(true)}
       >
         Open interactive result
@@ -128,14 +128,14 @@ export function McpAppResult({
     );
   if (error)
     return (
-      <div className="mcp-app-result__fallback" role="status">
+      <div className="plugin-config-app-result__fallback" role="status">
         <p>Interactive result unavailable: {error}</p>
         <button type="button" onClick={() => setShow(false)}>Close and reconnect</button>
       </div>
     );
   if (!opened)
     return (
-      <p className="mcp-app-result__fallback" role="status">
+      <p className="plugin-config-app-result__fallback" role="status">
         Reconnecting to interactive result…
       </p>
     );
@@ -144,7 +144,7 @@ export function McpAppResult({
   ) as unknown as Tool | undefined;
   if (!tool)
     return (
-      <p className="mcp-app-result__fallback" role="status">
+      <p className="plugin-config-app-result__fallback" role="status">
         This MCP App tool is no longer available.
       </p>
     );

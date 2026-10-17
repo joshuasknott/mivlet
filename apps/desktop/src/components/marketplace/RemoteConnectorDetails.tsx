@@ -65,7 +65,7 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
   const connected = Boolean(discovery && remoteConnectionReady(discovery));
   const disabled = busy || !available;
   return <article className="connector-detail" aria-label={`${entry.name} connection`} aria-busy={busy}>
-    <PluginDetailHeader name={entry.name} description={entry.description} icon={<span className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}><MarketplaceIcon id={entry.id} icon={entry.icon} /></span>} titleId={titleId} status={busy ? "Connecting…" : connected ? "Connected" : failed || saved ? "Needs attention" : "Available"} />
+    <PluginDetailHeader name={entry.name} description={entry.description} icon={<span className={`plugin-catalogue-connector-icon plugin-catalogue-connector-icon--${entry.icon}`}><MarketplaceIcon id={entry.id} icon={entry.icon} /></span>} titleId={titleId} status={busy ? "Connecting…" : connected ? "Connected" : failed || saved ? "Needs attention" : "Available"} />
     <p className="connector-detail__intro">{connected ? "Ready to use with any of your agents." : `Sign in to use ${entry.name} in your conversations.`}</p>
     <div className="connector-detail__actions">
       {connected && onUseConnector ? <button type="button" disabled={disabled} onClick={() => onUseConnector({ id: entry.id, name: entry.name, status: "connected", connectionRoute: "remote", permissions: [], healthSummary: "Connected", lastCheckedAt: discovery?.discoveredAt ?? "" })}>Use in chat</button> : null}

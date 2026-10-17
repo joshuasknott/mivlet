@@ -212,7 +212,7 @@ export function PluginPanel({
     return (
       <button
         type="button"
-        className="marketplace-connector-row"
+        className="plugin-catalogue-connector-row"
         key={`${placement}-${entry.id}`}
         data-connector-id={entry.id}
         data-availability={connectable ? "available" : "planned"}
@@ -220,18 +220,18 @@ export function PluginPanel({
         aria-label={ariaLabel}
       >
         <span
-          className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}
+          className={`plugin-catalogue-connector-icon plugin-catalogue-connector-icon--${entry.icon}`}
           aria-hidden="true"
         >
           <MarketplaceIcon id={entry.id} icon={entry.icon} />
         </span>
-        <span className="marketplace-connector-row__copy">
+        <span className="plugin-catalogue-connector-row__copy">
           <strong>{entry.name}</strong>
           <span>{entry.description}</span>
           {!connectable ? <small>Planned</small> : null}
         </span>
         <span
-          className={`marketplace-connector-row__action${connected ? " marketplace-connector-row__action--connected" : ""}`}
+          className={`plugin-catalogue-connector-row__action${connected ? " plugin-catalogue-connector-row__action--connected" : ""}`}
           aria-hidden="true"
         >
           {connected ? (
@@ -248,12 +248,12 @@ export function PluginPanel({
 
   return (
     <section className="connectors-marketplace" aria-label="Plugins">
-      <header className="marketplace-page-header">
+      <header className="plugin-catalogue-page-header">
         <div>
           <h1>Plugins</h1>
           <p>Give your agents access to the tools you use.</p>
         </div>
-        {workspaceId ? <button type="button" className="button button--secondary marketplace-add-custom" onClick={() => {
+        {workspaceId ? <button type="button" className="button button--secondary plugin-catalogue-add-custom" onClick={() => {
           setCustomServerId(undefined); setToolServerStatus(""); setToolServersOpen(true);
         }}><Plus size={16} aria-hidden="true" />Add custom plugin</button> : null}
         <label className="connections-search">
@@ -269,16 +269,16 @@ export function PluginPanel({
       </header>
       {!toolServersOpen && toolServerStatus ? <p role="status">{toolServerStatus}</p> : null}
       <section
-        className="marketplace-section marketplace-section--installed"
+        className="plugin-catalogue-section plugin-catalogue-section--installed"
         aria-labelledby="installed-connections-title"
       >
         <h2 id="installed-connections-title">Installed</h2>
         {installedManifests.length || visibleCustomServers.length ? (
-          <div className="marketplace-installed-list">
+          <div className="plugin-catalogue-installed-list">
             {visibleCustomServers.map(server => <button type="button"
-              className="marketplace-installed-connector" key={`custom-${server.id}`} aria-label={`Manage ${server.displayName} custom plugin`}
+              className="plugin-catalogue-installed-connector" key={`custom-${server.id}`} aria-label={`Manage ${server.displayName} custom plugin`}
               onClick={() => { setCustomServerId(server.id); setToolServerStatus(""); setToolServersOpen(true); }}>
-              <span className="marketplace-installed-connector__icon" aria-hidden="true"><PluginsIcon size={26} /></span>
+              <span className="plugin-catalogue-installed-connector__icon" aria-hidden="true"><PluginsIcon size={26} /></span>
               <span>{server.displayName}</span>
             </button>)}
             {installedManifests.map((connector) => {
@@ -287,14 +287,14 @@ export function PluginPanel({
               return (
                 <button
                   type="button"
-                  className="marketplace-installed-connector"
+                  className="plugin-catalogue-installed-connector"
                   key={connector.id}
                   onClick={() => openEntry(entry)}
                   title={connector.name}
                   aria-label={`Manage ${connector.name} from Installed`}
                 >
                   <span
-                    className={`marketplace-installed-connector__icon marketplace-connector-icon--${entry.icon}`}
+                    className={`plugin-catalogue-installed-connector__icon plugin-catalogue-connector-icon--${entry.icon}`}
                     aria-hidden="true"
                   >
                     <MarketplaceIcon
@@ -312,7 +312,7 @@ export function PluginPanel({
             })}
           </div>
         ) : (
-          <p className="marketplace-section__empty">
+          <p className="plugin-catalogue-section__empty">
             {query.trim()
               ? "No installed plugins match this search."
               : "Connect an app and it will appear here."}
@@ -328,9 +328,9 @@ export function PluginPanel({
         const limit = section.id === "featured" ? 6 : 4;
         const shown = expanded ? section.connectors : section.connectors.slice(0, limit);
         const remaining = section.connectors.slice(limit);
-        return <section className="marketplace-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
+        return <section className="plugin-catalogue-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
           <h2 id={`marketplace-section-${section.id}`}>{section.title}</h2>
-          <div className="marketplace-connector-grid">
+          <div className="plugin-catalogue-connector-grid">
             {section.id === "featured" ? (<>
             {visibleBuiltins.map((entry) => (
               <BuiltinPluginCard
@@ -347,7 +347,7 @@ export function PluginPanel({
           {section.id === "featured" ? (<>
           {builtin.plugins === null ? (
             <p
-              className="marketplace-section__empty"
+              className="plugin-catalogue-section__empty"
               role={builtin.loadError ? "status" : undefined}
             >
               {builtin.loadError
@@ -358,15 +358,15 @@ export function PluginPanel({
             </p>
           ) : null}
           </>) : null}
-          {remaining.length ? <button className="marketplace-see-more" type="button" aria-expanded={expanded} onClick={() => setExpandedSections((current) => expanded ? current.filter((id) => id !== section.id) : [...current, section.id])}>
-            {!expanded ? <span className="marketplace-see-more__icons" aria-hidden="true">{remaining.slice(0, 3).map((entry) => <MarketplaceIcon key={entry.id} id={entry.id} icon={entry.icon} size={17} />)}</span> : null}
+          {remaining.length ? <button className="plugin-catalogue-see-more" type="button" aria-expanded={expanded} onClick={() => setExpandedSections((current) => expanded ? current.filter((id) => id !== section.id) : [...current, section.id])}>
+            {!expanded ? <span className="plugin-catalogue-see-more__icons" aria-hidden="true">{remaining.slice(0, 3).map((entry) => <MarketplaceIcon key={entry.id} id={entry.id} icon={entry.icon} size={17} />)}</span> : null}
             {expanded ? "Show less" : `See ${remaining.slice(0, 2).map((entry) => entry.name).join(", ")}${remaining.length > 2 ? ", and more" : ""}`}
           </button> : null}
         </section>;
       })}
 
       {!hasDirectoryMatches && !visibleCustomServers.length ? (
-        <p className="marketplace-search-empty" role="status">
+        <p className="plugin-catalogue-search-empty" role="status">
           {query.trim() ? `No plugins match “${query.trim()}”.` : "No plugins found."}
         </p>
       ) : null}
@@ -460,7 +460,7 @@ function PlannedConnectorDetails({
       <p className="connector-detail__eyebrow">Plugins</p>
     <div className="connector-detail__header">
         <span
-          className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}
+          className={`plugin-catalogue-connector-icon plugin-catalogue-connector-icon--${entry.icon}`}
           aria-hidden="true"
         >
           <MarketplaceIcon id={entry.id} icon={entry.icon} />

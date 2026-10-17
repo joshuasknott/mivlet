@@ -89,20 +89,20 @@ export function McpServerSettings({
     }
   };
   return (
-    <div className="mcp-settings" aria-busy={busy}>
+    <div className="plugin-config-settings" aria-busy={busy}>
       <ManagedPhoneSettings workspaceId={workspaceId} />
-      <details className="mcp-manual-setup">
+      <details className="plugin-config-manual-setup">
         <summary>Advanced: manual MCP and external assistants</summary>
-      <section className="mcp-server-panel" aria-label="MCP server">
-        <header className="mcp-panel-heading">
-          <span className="mcp-panel-icon">
+      <section className="plugin-config-server-panel" aria-label="MCP server">
+        <header className="plugin-config-panel-heading">
+          <span className="plugin-config-panel-icon">
             <LinkSimple size={24} aria-hidden="true" />
           </span>
           <div>
-            <div className="mcp-title-row">
+            <div className="plugin-config-title-row">
               <h3>MCP server</h3>
               <span
-                className={`mcp-state${status?.endpoint && !statusError ? " mcp-state--running" : ""}`}
+                className={`plugin-config-state${status?.endpoint && !statusError ? " plugin-config-state--running" : ""}`}
               >
                 {statusError
                   ? "Unavailable"
@@ -113,12 +113,12 @@ export function McpServerSettings({
                       : "Stopped"}
               </span>
             </div>
-            <p className="mcp-description">
+            <p className="plugin-config-description">
               Connect an external assistant to selected agents and Work. New
               clients start with read-only access. Keep Mivlet open and signed
               in for requests to run.
             </p>
-            <p className="mcp-description">Disconnect the managed phone connection before starting this server.</p>
+            <p className="plugin-config-description">Disconnect the managed phone connection before starting this server.</p>
           </div>
         </header>
         {status?.endpoint ? (
@@ -243,12 +243,12 @@ export function McpServerSettings({
       </details>
       {!status && !statusError && <p role="status">Loading client access…</p>}
       {statusError && (
-        <p className="mcp-notice mcp-notice--error" role="alert">
+        <p className="plugin-config-notice plugin-config-notice--error" role="alert">
           {statusError} New access is paused until status refreshes.
         </p>
       )}
       {(busy || message) && (
-        <p className="mcp-notice" role="status">
+        <p className="plugin-config-notice" role="status">
           {busy ? "Processing request…" : message}
         </p>
       )}
@@ -277,16 +277,16 @@ export function McpServerSettings({
         />
       ))}
       {status && (
-        <section className="mcp-access-panel" aria-label="Client access">
-          <h3 className="mcp-title-row">
+        <section className="plugin-config-access-panel" aria-label="Client access">
+          <h3 className="plugin-config-title-row">
             Client access{" "}
-            <span className="mcp-count">{status.grants.length}</span>
+            <span className="plugin-config-count">{status.grants.length}</span>
           </h3>
           {!status.grants.length && (
-            <p className="mcp-empty">No clients have access.</p>
+            <p className="plugin-config-empty">No clients have access.</p>
           )}
           {!!status.grants.length && (
-            <ul className="mcp-grants">
+            <ul className="plugin-config-grants">
               {status.grants.map((grant) => (
                 <li key={grant.id}>
                   <strong>{grant.clientName}</strong>
@@ -332,7 +332,7 @@ export function McpServerSettings({
               ))}
             </ul>
           )}
-          <details className="mcp-history">
+          <details className="plugin-config-history">
             <summary>
               <Clock size={18} aria-hidden="true" /> Access history (
               {status.history.length})
@@ -390,33 +390,33 @@ function Consent({
   const [hours, setHours] = useState(8);
   return (
     <form
-      className="mcp-consent"
+      className="plugin-config-consent"
       onSubmit={(event) => {
         event.preventDefault();
         if (busy) return;
         void onDecide(true, agentIds, workIds, access, hours);
       }}
     >
-      <header className="mcp-panel-heading">
-        <span className="mcp-panel-icon">
+      <header className="plugin-config-panel-heading">
+        <span className="plugin-config-panel-icon">
           <ShieldCheck size={24} aria-hidden="true" />
         </span>
         <div>
-          <p className="mcp-eyebrow">Connection request</p>
+          <p className="plugin-config-eyebrow">Connection request</p>
           <h3>{request.clientName} wants to connect</h3>
         </div>
       </header>
-      <p className="mcp-request-code">
+      <p className="plugin-config-request-code">
         <span>Match this code to the sign-in you started:</span>
         <strong>{request.id}</strong>
       </p>
-      <p className="mcp-return-address">
+      <p className="plugin-config-return-address">
         Returns access to <code>{request.redirectUri}</code>
       </p>
       <fieldset disabled={busy}>
         <legend>Agents this client may see and request</legend>
         {agents.map((agent) => (
-          <label className="mcp-choice" key={agent.id}>
+          <label className="plugin-config-choice" key={agent.id}>
             <input
               type="checkbox"
               checked={agentIds.includes(agent.id)}
@@ -433,7 +433,7 @@ function Consent({
           </label>
         ))}
       </fieldset>
-      <div className="mcp-consent-options">
+      <div className="plugin-config-consent-options">
         <label>
           Access
           <select
@@ -477,7 +477,7 @@ function Consent({
         {status.shareableWork
           .filter((work) => agentIds.includes(work.agentId))
           .map((work) => (
-            <label className="mcp-choice" key={work.id}>
+            <label className="plugin-config-choice" key={work.id}>
               <input
                 type="checkbox"
                 disabled={busy}
@@ -498,7 +498,7 @@ function Consent({
           Other conversations, attachments and private context are excluded.
         </p>
       </details>
-      <div className="profile-action-row mcp-consent-actions">
+      <div className="profile-action-row plugin-config-consent-actions">
         <button
           className="button button--primary"
           type="submit"

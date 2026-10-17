@@ -31,7 +31,7 @@ export function BuiltinPluginDetails({
     <article className="connector-detail" aria-label={`${entry.name} details`} aria-busy={busy}>
       <p className="connector-detail__eyebrow">Plugins</p>
       <div className="connector-detail__header">
-        <span className="marketplace-connector-icon" aria-hidden="true">
+        <span className="plugin-catalogue-connector-icon" aria-hidden="true">
           <MarketplaceIcon id={entry.id} />
         </span>
         <div>

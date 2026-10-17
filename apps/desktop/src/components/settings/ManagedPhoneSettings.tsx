@@ -96,15 +96,15 @@ export function ManagedPhoneSettings({ workspaceId, api = nativeApi }: { workspa
   const phoneUrl = connected && !error && !uncertain ? status.phoneUrl : undefined;
   const label = !current() ? "Unavailable" : error ? "Status unavailable" : !status ? "Checking" : status.state === "connected" ? "Connected" : status.state === "connecting" ? "Connecting" : status.state === "disconnected" ? "Disconnected" : "Not connected";
 
-  return <section className="mcp-server-panel" aria-label="Connect your phone" aria-busy={Boolean(busy)}>
-    <header className="mcp-panel-heading">
-      <span className="mcp-panel-icon"><DeviceMobile size={24} aria-hidden="true" /></span>
-      <div><div className="mcp-title-row"><h3>Your phone</h3><span className={`mcp-state${connected && !error ? " mcp-state--running" : ""}`}>{label}</span></div>
-        <p className="mcp-description">Follow shared work and send permitted tasks from your phone.</p></div>
+  return <section className="plugin-config-server-panel" aria-label="Connect your phone" aria-busy={Boolean(busy)}>
+    <header className="plugin-config-panel-heading">
+      <span className="plugin-config-panel-icon"><DeviceMobile size={24} aria-hidden="true" /></span>
+      <div><div className="plugin-config-title-row"><h3>Your phone</h3><span className={`plugin-config-state${connected && !error ? " plugin-config-state--running" : ""}`}>{label}</span></div>
+        <p className="plugin-config-description">Follow shared work and send permitted tasks from your phone.</p></div>
     </header>
     <p>Keep this computer awake with Mivlet open and signed in. Approve each phone here; tool approvals stay on this computer.</p>
-    <p className="mcp-description">Cloudflare carries the requests, status and results you choose to share over an encrypted connection. The relay keeps temporary connection records, not task content. Provider keys stay on this computer.</p>
-    <p className="mcp-description">This connection uses the selected workspace on this computer. Manual MCP access must be stopped before connecting.</p>
+    <p className="plugin-config-description">Cloudflare carries the requests, status and results you choose to share over an encrypted connection. The relay keeps temporary connection records, not task content. Provider keys stay on this computer.</p>
+    <p className="plugin-config-description">This connection uses the selected workspace on this computer. Manual MCP access must be stopped before connecting.</p>
     {phoneUrl && <label>Phone link<input readOnly value={phoneUrl} onFocus={event => event.target.select()} /></label>}
     <div className="profile-action-row">
       {!active && <button type="button" className="button button--primary" disabled={!connectScope || Boolean(busy) || Boolean(error) || uncertain} onClick={() => { if (connectScope) void change("Connecting…", () => api.connect(connectScope)); }}>{busy === "Connecting…" ? busy : "Connect phone"}</button>}
@@ -116,8 +116,8 @@ export function ManagedPhoneSettings({ workspaceId, api = nativeApi }: { workspa
       <button type="button" className="button button--secondary" disabled={Boolean(busy) || !current()} onClick={() => { setNotice(""); void read(); }}>Check phone status</button>
     </div>
     {busy && <p role="status">{busy}</p>}
-    {error && <p className="mcp-notice mcp-notice--error" role="alert">{error}{uncertain && " The request may have completed. Check phone status before another connection action; nothing will be retried automatically."}</p>}
-    {!error && status?.error && owned && <p className="mcp-notice" role="status">{status.error}</p>}
+    {error && <p className="plugin-config-notice plugin-config-notice--error" role="alert">{error}{uncertain && " The request may have completed. Check phone status before another connection action; nothing will be retried automatically."}</p>}
+    {!error && status?.error && owned && <p className="plugin-config-notice" role="status">{status.error}</p>}
     {!error && owned && !connectScope && !status.error && <p role="status">Connect this computer to the selected account workspace before connecting your phone.</p>}
     {notice && <p role="status">{notice}</p>}
   </section>;
