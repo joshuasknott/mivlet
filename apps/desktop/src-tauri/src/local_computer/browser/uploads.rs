@@ -12,7 +12,7 @@ use std::{
     collections::HashMap,
     fs::{File, OpenOptions},
     io::Write,
-    os::windows::fs::OpenOptionsExt,
+    os::windows::fs::{FileExt, OpenOptionsExt},
     path::Path,
     sync::Arc,
     time::{Duration, Instant},
@@ -161,11 +161,44 @@ fn accepts(metadata: &Value, file_name: &str, mime: &str) -> bool {
 fn validate_staged(
     root: &Path,
     path: &Path,
+    file: &File,
     source: &super::super::super::artifacts::VerifiedUploadArtifact,
 ) -> Result<(), String> {
-    let staged = super::super::super::artifacts::read_bounded_limit(root, path, MAX_BYTES as u64)?;
-    if staged.len() != source.bytes.len() || hex::encode(Sha256::digest(&staged)) != source.sha256 {
-        return Err("The staged upload no longer matches its immutable artifact receipt; no file was attached.".into());
+    let changed =
+        "The staged upload no longer matches its immutable artifact receipt; no file was attached.";
+    let root = crate::paths::strict_canonicalize(root).map_err(|_| changed)?;
+    let path = crate::paths::strict_canonicalize(path).map_err(|_| changed)?;
+    if !path.starts_with(&root) || super::super::super::artifacts::opened_path(file)? != path {
+        return Err(changed.into());
+    }
+    let metadata = file.metadata().map_err(|_| changed)?;
+    if !metadata.is_file()
+        || metadata.len() > MAX_BYTES as u64
+        || metadata.len() != source.bytes.len() as u64
+    {
+        return Err(changed.into());
+    }
+    // Custody already denies writes and deletion. Hash that exact retained
+    // handle; reopening it exclusively would conflict with our own read lock.
+    let mut hash = Sha256::new();
+    let mut offset = 0u64;
+    let mut buffer = [0u8; 16 * 1024];
+    while offset < metadata.len() {
+        let limit = (metadata.len() - offset).min(buffer.len() as u64) as usize;
+        let read = file
+            .seek_read(&mut buffer[..limit], offset)
+            .map_err(|_| changed)?;
+        if read == 0 {
+            return Err(changed.into());
+        }
+        hash.update(&buffer[..read]);
+        offset += read as u64;
+    }
+    if hex::encode(hash.finalize()) != source.sha256
+        || file.metadata().map_err(|_| changed)?.len() != metadata.len()
+        || crate::paths::strict_canonicalize(&path).map_err(|_| changed)? != path
+    {
+        return Err(changed.into());
     }
     Ok(())
 }
@@ -421,7 +454,7 @@ pub(super) fn upload(
     {
         return Err("Upload staging changed; no file was attached.".into());
     }
-    validate_staged(native_root, &path, source)?;
+    validate_staged(native_root, &path, &file, source)?;
     let mut custody = Custody {
         job: None,
         _file: file,
@@ -581,14 +614,37 @@ mod tests {
         };
         let path = root.path().join("report.csv");
         fs::write(&path, &source.bytes).unwrap();
-        validate_staged(root.path(), &path, &source).unwrap();
+        let held = OpenOptions::new()
+            .read(true)
+            .share_mode(FILE_SHARE_READ)
+            .open(&path)
+            .unwrap();
+        validate_staged(root.path(), &path, &held, &source).unwrap();
+        // Exercise the same Windows sharing mode as production: verification
+        // succeeds while bytes remain locked against concurrent changes.
+        assert!(OpenOptions::new().write(true).open(&path).is_err());
+        assert!(fs::remove_file(&path).is_err());
+        assert!(super::super::super::super::artifacts::read_bounded_limit(
+            root.path(),
+            &path,
+            MAX_BYTES as u64
+        )
+        .is_err());
         source.sha256 = "0".repeat(64);
-        assert!(validate_staged(root.path(), &path, &source).is_err());
+        assert!(validate_staged(root.path(), &path, &held, &source).is_err());
         source.sha256 = hex::encode(Sha256::digest(&source.bytes));
-        fs::write(&path, b"different\n").unwrap();
-        assert!(validate_staged(root.path(), &path, &source).is_err());
+        let wrong = root.path().join("other.csv");
+        fs::write(&wrong, &source.bytes).unwrap();
+        assert!(validate_staged(root.path(), &wrong, &held, &source).is_err());
+        drop(held);
+        let mut changed_bytes = source.bytes.clone();
+        changed_bytes[0] ^= 1;
+        fs::write(&path, changed_bytes).unwrap();
+        let changed = File::open(&path).unwrap();
+        assert!(validate_staged(root.path(), &path, &changed, &source).is_err());
         let foreign = outside.path().join("report.csv");
         fs::write(&foreign, &source.bytes).unwrap();
-        assert!(validate_staged(root.path(), &foreign, &source).is_err());
+        let foreign_handle = File::open(&foreign).unwrap();
+        assert!(validate_staged(root.path(), &foreign, &foreign_handle, &source).is_err());
     }
 }
