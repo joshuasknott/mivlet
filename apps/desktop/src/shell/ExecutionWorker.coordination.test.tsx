@@ -30,7 +30,7 @@ const harness = vi.hoisted(() => {
     stopCurrentWork: vi.fn(async () => true),
   };
   return {
-    composerImageInputs: vi.fn(() => ({ ok: true, images: [] as NativeImageInput[] })),
+    composerImageInputs: vi.fn((_attachments?: unknown[]) => ({ ok: true, images: [] as NativeImageInput[] })),
     controller,
     run,
     prepareExecutionAttachments: vi.fn(async (attachments: unknown[]) => ({
@@ -89,7 +89,7 @@ vi.mock("../lib/builtin-plugins", () => ({
 }));
 
 vi.mock("../lib/composer-images", () => ({
-  composerImageInputs: () => harness.composerImageInputs(),
+  composerImageInputs: (attachments: unknown[]) => harness.composerImageInputs(attachments),
 }));
 
 vi.mock("../lib/execution-attachments", () => ({
