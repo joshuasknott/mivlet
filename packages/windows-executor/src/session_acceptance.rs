@@ -46,9 +46,9 @@ server.on('upgrade',(req,socket)=>{
  const key=req.headers['sec-websocket-key'];
  const accept=crypto.createHash('sha1').update(key+'258EAFA5-E914-47DA-95CA-C5AB0DC85B11').digest('base64');
  socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: '+accept+'\r\n\r\n');
- socket.on('data',data=>{if(data.length!==13||data[0]!==0x81||data[1]!==0x87)return socket.destroy();const text=Buffer.from(data.subarray(6));for(let i=0;i<7;i++)text[i]^=data[2+i%4];socket.write(Buffer.concat([Buffer.from([0x81,7]),text]));});
+ let frame=Buffer.alloc(0);socket.on('data',data=>{frame=Buffer.concat([frame,data]);if(frame.length<13)return;if(frame.length!==13||frame[0]!==0x81||frame[1]!==0x87)return socket.destroy();const text=Buffer.from(frame.subarray(6));for(let i=0;i<7;i++)text[i]^=frame[2+i%4];socket.write(Buffer.concat([Buffer.from([0x81,7]),text]));frame=Buffer.alloc(0);});
 });
-process.stdin.once('data',data=>console.log('INPUT_DIGEST='+crypto.createHash('sha256').update(data).digest('hex')));
+let input=Buffer.alloc(0);process.stdin.on('data',data=>{input=Buffer.concat([input,data]);if(input.length>4096)throw Error('input too large');if(input.includes(10))console.log('INPUT_DIGEST='+crypto.createHash('sha256').update(input).digest('hex'));});
 server.listen(4173,'127.0.0.1',()=>console.log('PRIVATE_SESSION_READY'));
 setInterval(()=>{},1000);
 "#).unwrap();
@@ -88,13 +88,22 @@ setInterval(()=>{},1000);
             |launch| launch(),
         )
     });
-    struct Stop(SessionControl);
+    struct Stop {
+        control: SessionControl,
+        worker: Option<std::thread::JoinHandle<Result<CompletedRun, String>>>,
+    }
     impl Drop for Stop {
         fn drop(&mut self) {
-            self.0.stop();
+            self.control.stop();
+            if let Some(worker) = self.worker.take() {
+                let _ = worker.join();
+            }
         }
     }
-    let _stop = Stop(control.clone());
+    let mut owned = Stop {
+        control: control.clone(),
+        worker: Some(worker),
+    };
     let deadline = Instant::now() + Duration::from_secs(120);
     loop {
         let ready = observed
@@ -105,11 +114,17 @@ setInterval(()=>{},1000);
         if ready {
             break;
         }
-        if worker.is_finished() || Instant::now() >= deadline {
+        if owned.worker.as_ref().unwrap().is_finished() || Instant::now() >= deadline {
             control.stop();
             panic!(
                 "Native session prerequisite or launch failed: {:?}",
-                worker.join().unwrap().map(|run| run.receipt().clone())
+                owned
+                    .worker
+                    .take()
+                    .unwrap()
+                    .join()
+                    .unwrap()
+                    .map(|run| run.receipt().clone())
             );
         }
         std::thread::sleep(Duration::from_millis(25));
@@ -167,7 +182,7 @@ setInterval(()=>{},1000);
     control.stop();
     assert!(!control.is_current(&binding));
     assert!(control.open_preview(&binding).is_err());
-    let completed = worker.join().unwrap().unwrap();
+    let completed = owned.worker.take().unwrap().join().unwrap().unwrap();
     assert!(completed.receipt().interrupted && completed.receipt().persistent);
     assert!(completed.receipt().output_id.is_none());
     assert!(completed.import_repository(source.path()).is_err());
