@@ -50,16 +50,17 @@ closed, including when the nonce store is unavailable. Re-running ensure on a
 computer that already has a generation bumps that generation so prior
 capabilities cannot target the replacement.
 
-Browser navigation accepts only public HTTPS targets, rejects embedded
-credentials and private or reserved destinations (including DNS answers),
-strips fragments, and revalidates redirects and subrequests. Cloudflare
-Browser Rendering cannot pin Chromium TCP peers (`route.continue()` would
-re-resolve). The Worker completes HTTPS with a lookup bound to the validated
-public address set, then fulfills the route. A later private, loopback,
-link-local, or cloud-metadata answer is aborted. Observations and actions are bounded to
-opaque current references; password, one-time-code, payment, transaction, and
-WebAuthn fields are excluded or blocked. Screens and temporary human takeover
-credentials stay in the trusted UI path.
+Dynamic hosted browser routes currently fail closed with
+`hosted-browser-network-prerequisite`, before launching or reconnecting a
+browser. The earlier custom `node:https` lookup was only exercised in Node
+fixtures. Cloudflare's [HTTP compatibility documentation](https://developers.cloudflare.com/workers/runtime-apis/nodejs/http/#request)
+explicitly excludes `lookup` and `createConnection`, so those fixtures do not
+establish edge peer pinning. Page request interception also does not establish
+a boundary for every Chromium network API. A supported platform boundary and
+actual edge conformance are prerequisites for restoring dynamic browsing.
+Static public web research uses a separately reviewed task mode and the
+platform's strictly public Fetch boundary; it does not run page JavaScript or
+provide interactive browsing.
 
 Deleting a hosted computer invalidates its computer and browser authority. A
 stale generation or capability cannot target its replacement. Process

@@ -7,10 +7,17 @@ import {
 } from "./browser-route";
 import { setPublicAddressLookupForTests } from "./contracts";
 
-describe("hosted browser route pin", () => {
+describe("hosted browser route policy fixtures (not edge pin proof)", () => {
   afterEach(() => {
     setPublicAddressLookupForTests();
     setPinnedBrowserTransportForTests();
+  });
+  it("refuses production network transport even after a public DNS check", async () => {
+    setPublicAddressLookupForTests(async () => ["93.184.216.34"]);
+    setPinnedBrowserTransportForTests();
+    const probe = fakeRoute("https://example.com/path");
+    await settleHostedBrowserRoute(probe.route);
+    expect(probe.events).toEqual(["abort"]); expect(probe.fulfilled).toEqual([]);
   });
 
   it("fulfills a public target with the pinned address set and never continues Chromium DNS", async () => {
