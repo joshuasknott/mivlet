@@ -21,6 +21,23 @@ beforeEach(()=>{
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();document.body.replaceChildren();});
 const start=async()=>{await import("../../src-tauri/src/mcp_server/remote/app.js");await vi.waitFor(()=>expect(document.querySelector(".task-request")).not.toBeNull());};
 describe("phone client against shared task contracts",()=>{
+  it("keeps the newest result selection and does not reopen a closed pending read",async()=>{
+    const normal=fetch.getMockImplementation();const reads=[];
+    fetch.mockImplementation(async(path,options)=>{
+      if(options.body && JSON.parse(options.body).name==="mivlet_read_work") return new Promise(resolve=>{reads.push(text=>resolve({ok:true,status:200,json:async()=>({outputs:[{text}]})}));});
+      return normal(path,options);
+    });
+    await start();
+    const view=Array.from(document.querySelectorAll("button")).find(button=>button.textContent==="View result");
+    view.click();view.click();await vi.waitFor(()=>expect(reads).toHaveLength(2));
+    reads[1]("Latest selected result");await vi.waitFor(()=>expect(document.getElementById("result-content").textContent).toBe("Latest selected result"));
+    reads[0]("Older slow result");await vi.advanceTimersByTimeAsync(0);
+    expect(document.getElementById("result-content").textContent).toBe("Latest selected result");
+    view.click();await vi.waitFor(()=>expect(reads).toHaveLength(3));
+    document.getElementById("close-result").click();reads[2]("Should stay closed");await vi.advanceTimersByTimeAsync(0);
+    expect(document.getElementById("result").hidden).toBe(true);
+    expect(document.activeElement).toBe(document.getElementById("refresh"));
+  });
   it("uses only its managed base path and keeps the entire consent exchange native",async()=>{
     const prefix=`/d/${"a".repeat(64)}`;history.replaceState(null,"",`${prefix}/remote`);
     let connected=false;

@@ -158,13 +158,18 @@ a deployed or production-validated service.
 - An authenticated local MCP server lets external assistants inspect explicitly
   shared Work and request tasks from selected agents. Native desktop consent,
   read-only defaults, expiry, revocation and scoped access history preserve
-  Mivlet authority. Remote access requires an operator-provided HTTPS proxy;
-  the app does not publish an endpoint. See [external assistants](docs/architecture/mcp-server.md).
+  Mivlet authority. Manual remote MCP access requires an operator-provided HTTPS
+  proxy. See [external assistants](docs/architecture/mcp-server.md).
 - An opt-in phone/web view shares those granted agents and Work, with task
   requests, bounded results and Stop for tasks the browser started. Native OAuth
   custody and HttpOnly cookies keep bearer credentials out of browser JavaScript.
-  Opt-in push notifications contain no task content. HTTPS, browser permission
-  and an awake, reachable desktop are required; this is not hosted execution.
+  Managed phone access uses a separate Free Cloudflare relay with fixed client
+  assets and closed native operations; it requires no user-operated tunnel.
+  Cloudflare carries the selected shared requests/results over TLS without
+  retaining their text in relay storage. Opt-in push contains no task content.
+  Deployment configuration, browser permission and an awake, signed-in desktop
+  are required. Account credential refresh or relink ends the link and requires
+  reconnecting; this is not hosted task execution or proof of real-phone delivery.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.

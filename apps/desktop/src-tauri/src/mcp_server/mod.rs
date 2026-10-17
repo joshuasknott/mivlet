@@ -3,7 +3,10 @@
 mod http;
 mod models;
 mod oauth;
+mod relay;
+mod relay_socket;
 mod remote;
+pub use relay::*;
 pub(crate) mod repository;
 #[cfg(test)]
 mod tests;
@@ -137,6 +140,11 @@ pub async fn mcp_server_start(
     if current.is_some() {
         return Err("Stop the current MCP server before changing its address.".into());
     }
+    if relay::active(&app) {
+        return Err(
+            "Disconnect managed phone access before starting the manual MCP server.".into(),
+        );
+    }
     let engine = Arc::new(Engine {
         store,
         origin: config
@@ -227,10 +235,14 @@ pub fn mcp_server_status(
     let store = crate::store::try_global().ok_or("Sign in to Mivlet first.")?;
     let server = app.state::<Server>();
     let mut current = server.0.lock().map_err(|_| "MCP server unavailable.")?;
-    let pending = current
+    let consent_engine = current
         .as_ref()
-        .map(|r| {
-            r.engine
+        .map(|r| r.engine.clone())
+        .or_else(|| relay::engine(&app));
+    let pending = consent_engine
+        .as_ref()
+        .map(|engine| {
+            engine
                 .oauth
                 .lock()
                 .map(|mut state| state.pending())
@@ -272,11 +284,12 @@ pub fn mcp_server_decide(
     main(&window)?;
     let server = app.state::<Server>();
     let current = server.0.lock().map_err(|_| "MCP server unavailable.")?;
-    let engine = &current
+    let engine = current
         .as_ref()
-        .ok_or("Start the MCP server first.")?
-        .engine;
-    oauth::decide(engine, decision).map_err(|e| e.to_string())
+        .map(|running| running.engine.clone())
+        .or_else(|| relay::engine(&app))
+        .ok_or("Start external access before approving this browser.")?;
+    oauth::decide(&engine, decision).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

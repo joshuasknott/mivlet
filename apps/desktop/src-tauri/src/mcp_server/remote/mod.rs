@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc};
 use zeroize::Zeroizing;
 
+pub(crate) mod managed;
 pub(super) mod push;
 mod session;
 pub(super) use session::Sessions;
@@ -189,6 +190,15 @@ async fn call(State(engine): State<Arc<Engine>>, headers: HeaderMap, body: Bytes
     let Ok(request) = serde_json::from_slice::<Call>(&body) else {
         return failure(StatusCode::BAD_REQUEST, "Invalid task request.");
     };
+    if session::authenticated(&engine, &headers).is_err() {
+        return failure(StatusCode::UNAUTHORIZED, "Connect this browser again.");
+    }
+    match invoke_call(&engine, &headers, request) {
+        Ok(value) => Json(value).into_response(),
+        Err(error) => failure(StatusCode::BAD_REQUEST, &error.to_string()),
+    }
+}
+fn invoke_call(engine: &Engine, headers: &HeaderMap, request: Call) -> Result<Value> {
     if ![
         "mivlet_work",
         "mivlet_read_work",
@@ -198,18 +208,10 @@ async fn call(State(engine): State<Arc<Engine>>, headers: HeaderMap, body: Bytes
     ]
     .contains(&request.name.as_str())
     {
-        return failure(
-            StatusCode::BAD_REQUEST,
-            "This action is unavailable from the phone view.",
-        );
+        return Err(invalid("This action is unavailable from the phone view."));
     }
-    let Ok((token, _)) = session::authenticated(&engine, &headers) else {
-        return failure(StatusCode::UNAUTHORIZED, "Connect this browser again.");
-    };
-    match tools::invoke(&engine, &token, &request.name, request.arguments) {
-        Ok(value) => Json(value).into_response(),
-        Err(error) => failure(StatusCode::BAD_REQUEST, &error.to_string()),
-    }
+    let (token, _) = session::authenticated(engine, headers)?;
+    tools::invoke(engine, &token, &request.name, request.arguments)
 }
 
 async fn disconnect(State(engine): State<Arc<Engine>>, headers: HeaderMap) -> Response {

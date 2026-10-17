@@ -1,6 +1,7 @@
 use super::*;
 
 struct Pending {
+    ticket: String,
     client_id: String,
     verifier: Zeroizing<String>,
     state: String,
@@ -74,6 +75,7 @@ pub(super) fn begin(engine: &Engine, headers: &HeaderMap) -> Result<(String, Str
     sessions.pending.insert(
         hash(&id),
         Pending {
+            ticket: ticket.clone(),
             client_id,
             verifier,
             state,
@@ -81,6 +83,40 @@ pub(super) fn begin(engine: &Engine, headers: &HeaderMap) -> Result<(String, Str
         },
     );
     Ok((id, ticket))
+}
+
+/// The managed client polls a closed transition. OAuth code/state/verifier and
+/// callback URL are resolved entirely inside native memory.
+pub(super) fn managed_finish(
+    engine: &Engine,
+    headers: &HeaderMap,
+) -> Result<Option<(String, i64)>> {
+    let id = cookie(engine, headers)?;
+    let ticket = {
+        let mut sessions = engine
+            .remote
+            .lock()
+            .map_err(|_| invalid("Connection unavailable."))?;
+        sessions.prune();
+        sessions
+            .pending
+            .get(&hash(&id))
+            .map(|pending| pending.ticket.clone())
+            .ok_or_else(|| invalid("Connection expired."))?
+    };
+    match oauth::wait(engine, &ticket)? {
+        oauth::Wait::Pending(_) => Ok(None),
+        oauth::Wait::Redirect(target) => {
+            let target =
+                url::Url::parse(&target).map_err(|_| invalid("Connection unavailable."))?;
+            if target.origin().ascii_serialization() != engine.origin
+                || target.path() != "/remote/callback"
+            {
+                return Err(invalid("Connection target changed."));
+            }
+            finish(engine, headers, target.query().unwrap_or_default()).map(Some)
+        }
+    }
 }
 
 pub(super) fn finish(engine: &Engine, headers: &HeaderMap, query: &str) -> Result<(String, i64)> {

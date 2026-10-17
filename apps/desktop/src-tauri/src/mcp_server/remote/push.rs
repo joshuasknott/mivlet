@@ -118,32 +118,32 @@ fn changed(previous: &Seen, current: &Seen) -> bool {
 }
 
 pub(super) async fn status(State(engine): State<Arc<Engine>>, headers: HeaderMap) -> Response {
-    let result = (|| {
-        session::authenticated(&engine, &headers)?;
-        if !engine.origin.starts_with("https://") {
-            return Err(invalid(
-                "Phone notifications require your public HTTPS address.",
-            ));
-        }
-        let browser = hash(&cookie(&engine, &headers)?);
-        let mut state = engine
-            .push
-            .inner
-            .lock()
-            .map_err(|_| invalid("Notifications unavailable."))?;
-        let public_key = URL_SAFE_NO_PAD.encode(key(&mut state)?.public_key().as_ref());
-        let subscription = state.subscriptions.get(&browser);
-        Ok(
-            json!({"publicKey":public_key,"enabled":subscription.is_some(),"deliveryFailed":subscription.is_some_and(|s| s.delivery_failed)}),
-        )
-    })();
-    match result {
+    match status_value(&engine, &headers) {
         Ok(value) => Json(value).into_response(),
         Err(_) => failure(
             StatusCode::BAD_REQUEST,
             "Connect through HTTPS before enabling phone notifications.",
         ),
     }
+}
+pub(super) fn status_value(engine: &Engine, headers: &HeaderMap) -> Result<serde_json::Value> {
+    session::authenticated(&engine, &headers)?;
+    if !engine.origin.starts_with("https://") {
+        return Err(invalid(
+            "Phone notifications require your public HTTPS address.",
+        ));
+    }
+    let browser = hash(&cookie(&engine, &headers)?);
+    let mut state = engine
+        .push
+        .inner
+        .lock()
+        .map_err(|_| invalid("Notifications unavailable."))?;
+    let public_key = URL_SAFE_NO_PAD.encode(key(&mut state)?.public_key().as_ref());
+    let subscription = state.subscriptions.get(&browser);
+    Ok(
+        json!({"publicKey":public_key,"enabled":subscription.is_some(),"deliveryFailed":subscription.is_some_and(|s| s.delivery_failed)}),
+    )
 }
 
 #[derive(Deserialize)]
@@ -156,54 +156,54 @@ pub(super) async fn subscribe(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let result = (|| {
-        if headers
-            .get(header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            != Some("application/json")
-        {
-            return Err(invalid("Use a JSON notification request."));
-        }
-        let request: Subscribe =
-            serde_json::from_slice(&body).map_err(|_| invalid("Invalid notification request."))?;
-        let (token, _) = session::authenticated(&engine, &headers)?;
-        let browser = hash(&cookie(&engine, &headers)?);
-        if !engine.origin.starts_with("https://") {
-            return Err(invalid("Phone notifications require HTTPS."));
-        }
-        let Some(raw) = request.endpoint else {
-            remove(&engine, &browser);
-            return Ok(());
-        };
-        endpoint(&raw)?;
-        let seen = snapshot(&engine, &token)?;
-        let mut state = engine
-            .push
-            .inner
-            .lock()
-            .map_err(|_| invalid("Notifications unavailable."))?;
-        if state.subscriptions.len() >= 32 && !state.subscriptions.contains_key(&browser) {
-            return Err(invalid("Too many browsers have notifications enabled."));
-        }
-        key(&mut state)?;
-        state
-            .subscriptions
-            .retain(|_, sub| sub.endpoint.as_str() != raw);
-        state.subscriptions.insert(
-            browser,
-            Subscription {
-                endpoint: Zeroizing::new(raw),
-                token,
-                seen,
-                delivery_failed: false,
-            },
-        );
-        Ok(())
-    })();
-    match result {
+    match subscribe_value(&engine, &headers, &body) {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => failure(StatusCode::BAD_REQUEST, &error.to_string()),
     }
+}
+pub(super) fn subscribe_value(engine: &Engine, headers: &HeaderMap, body: &[u8]) -> Result<()> {
+    if headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        != Some("application/json")
+    {
+        return Err(invalid("Use a JSON notification request."));
+    }
+    let request: Subscribe =
+        serde_json::from_slice(&body).map_err(|_| invalid("Invalid notification request."))?;
+    let (token, _) = session::authenticated(&engine, &headers)?;
+    let browser = hash(&cookie(&engine, &headers)?);
+    if !engine.origin.starts_with("https://") {
+        return Err(invalid("Phone notifications require HTTPS."));
+    }
+    let Some(raw) = request.endpoint else {
+        remove(&engine, &browser);
+        return Ok(());
+    };
+    endpoint(&raw)?;
+    let seen = snapshot(&engine, &token)?;
+    let mut state = engine
+        .push
+        .inner
+        .lock()
+        .map_err(|_| invalid("Notifications unavailable."))?;
+    if state.subscriptions.len() >= 32 && !state.subscriptions.contains_key(&browser) {
+        return Err(invalid("Too many browsers have notifications enabled."));
+    }
+    key(&mut state)?;
+    state
+        .subscriptions
+        .retain(|_, sub| sub.endpoint.as_str() != raw);
+    state.subscriptions.insert(
+        browser,
+        Subscription {
+            endpoint: Zeroizing::new(raw),
+            token,
+            seen,
+            delivery_failed: false,
+        },
+    );
+    Ok(())
 }
 
 pub(super) fn remove(engine: &Engine, browser: &str) {

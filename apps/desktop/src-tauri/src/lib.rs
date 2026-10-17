@@ -125,6 +125,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .manage(mcp_server::Server::default())
+        .manage(mcp_server::PhoneRelay::default())
         .setup(|app| {
             let handle = app.handle().clone();
             if account_session::initialize(&handle)? {
@@ -249,6 +250,9 @@ pub fn run() {
             mcp_server::mcp_server_status,
             mcp_server::mcp_server_decide,
             mcp_server::mcp_server_revoke,
+            mcp_server::phone_relay_status,
+            mcp_server::phone_relay_connect,
+            mcp_server::phone_relay_disconnect,
             collaboration::collaboration_load,
             collaboration::provider_continuation::provider_continuation_preview,
             collaboration::provider_continuation_read::provider_continuation_read,

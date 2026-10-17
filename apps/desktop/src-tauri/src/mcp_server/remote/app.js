@@ -7,6 +7,7 @@ const ui = Object.fromEntries(["connection","subtitle","notice","connect-panel",
 let session;
 let epoch = 0;
 let readVersion = 0;
+let resultReadVersion = 0;
 let timer;
 let busy = false;
 let pendingMutation;
@@ -47,6 +48,7 @@ async function request(path, body) {
 }
 function reset(message) {
   ++epoch;
+  ++resultReadVersion;
   clearTimeout(timer);
   session = undefined;
   pendingMutation = undefined;
@@ -118,14 +120,16 @@ function renderWork(items) {
     const view = element("button","View result");
     view.addEventListener("click",async () => {
       const version = epoch;
+      const reading = ++resultReadVersion;
       try {
         const result = await call("mivlet_read_work", {workspaceId:session.workspaceId,agentId:item.agentId,workId:item.id});
-        if (version !== epoch) return;
+        if (version !== epoch || reading !== resultReadVersion) return;
         const outputs = result.outputs || [];
         ui["result-content"].replaceChildren(...(outputs.length ? outputs.map(output => element("p",output.text,"result-text")) : [element("p","No saved result yet.")]));
+        if (result.truncated) ui["result-content"].append(element("p","Some saved results were omitted to fit the phone view. Open Mivlet on your computer for the rest.","muted"));
         ui.result.hidden = false;
         ui["close-result"].focus();
-      } catch (error) { if (version === epoch) notice(error.message); }
+      } catch (error) { if (version === epoch && reading === resultReadVersion) notice(error.message); }
     });
     actions.append(view);
     if (item.canControl && !terminal.has(item.status)) {
@@ -195,8 +199,8 @@ ui.disconnect.addEventListener("click",async () => {
   catch { notice("Could not disconnect. Revoke this browser in Mivlet Settings to end its access."); }
 });
 ui.refresh.addEventListener("click",() => void refresh());
-ui.agent.addEventListener("change",() => { ++epoch; ui.result.hidden=true; void refresh(); });
-ui["close-result"].addEventListener("click",() => { ui.result.hidden=true; ui.refresh.focus(); });
+ui.agent.addEventListener("change",() => { ++epoch; ++resultReadVersion; ui.result.hidden=true; void refresh(); });
+ui["close-result"].addEventListener("click",() => { ++resultReadVersion; ui.result.hidden=true; ui.refresh.focus(); });
 ui.notifications.hidden = !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window);
 byId("notification-help").hidden = ui.notifications.hidden;
 function notificationLabel(failed = false) {
