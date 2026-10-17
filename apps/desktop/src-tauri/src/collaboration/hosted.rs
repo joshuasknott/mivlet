@@ -233,6 +233,7 @@ fn prepare_at(
         version: if web_scope.is_some() { 2 } else { 1 },
         mode: web_scope.as_ref().map(|_| "public-web-research".into()),
         web_scope: web_scope.clone(),
+        repository: None,
         task_id: cloud::opaque("task").map_err(StoreError::Invalid)?,
         admission_id: cloud::opaque("admission").map_err(StoreError::Invalid)?,
         run_id: run_id.clone(),
@@ -257,6 +258,7 @@ fn prepare_at(
             max_result_bytes: 65_536,
             max_page_reads: web_scope.as_ref().map(|_| 6),
             max_source_bytes: web_scope.as_ref().map(|_| 65_536),
+            max_tool_calls: None,
         },
         expires_at: expires,
     };
