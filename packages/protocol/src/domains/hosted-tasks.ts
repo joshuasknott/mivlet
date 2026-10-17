@@ -97,6 +97,8 @@ export interface HostedWorkExecution {
 export interface HostedTaskTarget { workspaceId: string; agentId: string; workId: string; expectedGeneration: number }
 export interface HostedTaskPrepare extends HostedTaskTarget { credentialId: string; credentialRevision: number }
 export interface HostedTaskReview {
+  collaboration: import("./collaboration").CollaborationSnapshot;
+  runnerUrl: string;
   reviewId: string;
   workId: string;
   workGeneration: number;
