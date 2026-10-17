@@ -79,7 +79,7 @@ function RestoreContent({ workspaceId, conversationId, agentId, blockedReason, o
       {!incomplete.length && !review && listing && <ul>{listing.points.slice().reverse().map((point) => <li key={point.id}>
         <div><strong>{point.label}</strong><small>{new Date(point.createdAt).toLocaleString()} · {point.checkpoint.fileCount} saved files</small></div>
         <button type="button" disabled={pending || !!blockedReason} onClick={() => void preview({ pointId: point.id })}>Preview restore</button>
-        <button type="button" disabled={pending} title="Remove this conversation link; the saved file checkpoint stays in Files" onClick={() => void perform(async () => { await conversationRestore(owner, { action: "forget-point", pointId: point.id }); await load(); })}>Remove linked point</button>
+        <button type="button" disabled={pending || !!blockedReason} title="Remove this conversation link; the saved file checkpoint stays in Files" onClick={() => void perform(async () => { await conversationRestore(owner, { action: "forget-point", pointId: point.id }); await load(); })}>Remove linked point</button>
       </li>)}</ul>}
       {listing && listing.intents.some((intent) => ["complete", "reverted", "cancelled"].includes(intent.state)) && <button type="button" disabled={pending} title="File checkpoints and conversation messages stay saved" onClick={() => void perform(async () => { await conversationRestore(owner, { action: "clear-completed" }); await load(); })}>Clear completed restore records</button>}
       {!!listing?.points.length && <small>Up to 24 points and 24 restore records are retained. Remove old file checkpoints in Files when storage is full. Removing a linked point keeps its file checkpoint.</small>}
