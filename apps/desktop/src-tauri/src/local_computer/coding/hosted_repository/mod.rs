@@ -4,6 +4,7 @@ mod candidates;
 mod import;
 mod models;
 mod output;
+mod retention;
 mod snapshot;
 mod storage;
 #[cfg(test)]
@@ -14,6 +15,7 @@ pub(crate) use import::*;
 use mivlet_windows_executor::{repository_files as files, Limits};
 pub(crate) use models::{Entry, ImportReceipt, OutputManifest, Snapshot, Target, TaskIdentity};
 pub(crate) use output::{retained_output, AuthenticatedHostedRepositoryOutput, OutputStager};
+pub(crate) use retention::{is_preparing, preparing};
 use sha2::{Digest, Sha256};
 pub(crate) use snapshot::{capture_snapshot, read_snapshot_chunk};
 use std::{

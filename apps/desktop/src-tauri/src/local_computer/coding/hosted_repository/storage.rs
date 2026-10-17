@@ -75,6 +75,15 @@ pub(super) fn load(
 ) -> Result<(PathBuf, models::Record), String> {
     let root = snapshot_root(&home(directory, repo)?, snapshot_id)?;
     let record: models::Record = read(&root.join("snapshot.json"), ticket)?;
+    validate_record(&record, repo, ticket, snapshot_id)?;
+    Ok((root, record))
+}
+pub(super) fn validate_record(
+    record: &models::Record,
+    repo: &Repository,
+    ticket: &OperationTicket,
+    snapshot_id: &str,
+) -> Result<(), String> {
     validate_snapshot(&record.snapshot)?;
     record.task.validate()?;
     record.repository.check(repo)?;
@@ -93,15 +102,19 @@ pub(super) fn load(
                 .into(),
         );
     }
-    Ok((root, record))
+    Ok(())
 }
 pub(super) fn reserve(home: &Path) -> Result<tempfile::TempDir, String> {
     let count = fs::read_dir(home)
         .map_err(|_| "Cannot inspect hosted source custody.")?
+        .filter(|entry| match entry {
+            Ok(entry) => entry.file_name() != "repository.lock",
+            Err(_) => true,
+        })
         .take(MAX_SNAPSHOTS + 1)
         .count();
     if count >= MAX_SNAPSHOTS {
-        return Err("This copy has reached its four retained source snapshots. Review its existing hosted work before exporting more source.".into());
+        return Err("This copy has four protected or unfinished source snapshots. Finish or cancel their exact tasks and Refresh to confirm terminal outcomes before retrying. Active reviews, uncertain tasks and unknown preparation/recovery data remain protected.".into());
     }
     tempfile::Builder::new()
         .prefix("preparing-")
