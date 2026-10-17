@@ -109,12 +109,17 @@ pub(crate) fn execute(engine: &Engine, request: Request) -> Reply {
                 if request.body != json!({}) {
                     return Err(invalid("Invalid connection request."));
                 }
-                let (id, _) = session::begin(engine, &headers)?;
+                let (id, ticket) = session::begin(engine, &headers)?;
+                let oauth::Wait::Pending(consent) = oauth::wait(engine, &ticket)? else {
+                    return Err(invalid("This browser connection request changed."));
+                };
                 reply.session = Some(Cookie {
                     value: id,
                     expires_in: 300,
                 });
-                Ok(json!({"pending":true}))
+                // This is the desktop's public request/pairing code, never an
+                // OAuth authorization code, state, ticket or bearer.
+                Ok(json!({"pending":true,"pairingCode":consent.id}))
             }
             "consent" => {
                 if request.body != json!({}) {
@@ -216,10 +221,12 @@ mod tests {
         let engine = crate::mcp_server::tests::engine("https://phone.example");
         let begin = execute(&engine, request("begin", None, json!({})));
         assert_eq!(begin.status, 200);
-        assert_eq!(begin.data, json!({"pending":true}));
+        assert_eq!(begin.data["pending"], true);
         let opaque = begin.session.unwrap().value;
         let pending = engine.oauth.lock().unwrap().pending();
         assert_eq!(pending.len(), 1);
+        assert_eq!(begin.data["pairingCode"], pending[0].id);
+        assert_eq!(begin.data.as_object().unwrap().len(), 2);
         let waiting = execute(&engine, request("consent", Some(opaque.clone()), json!({})));
         assert_eq!(waiting.data, json!({"pending":true}));
         oauth::decide(

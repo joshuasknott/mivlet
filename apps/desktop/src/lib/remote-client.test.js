@@ -58,13 +58,14 @@ describe("phone client against shared task contracts",()=>{
       const body=options.body && JSON.parse(options.body);calls.push({path,options,body});
       const route=path.slice(prefix.length);
       if(route==="/remote/session" && !connected) return {ok:false,status:401,json:async()=>({error:"Connect first"})};
-      if(route==="/remote/connect") return {ok:true,status:200,json:async()=>({pending:true})};
+      if(route==="/remote/connect") return {ok:true,status:200,json:async()=>({pending:true,pairingCode:"pairing-code"})};
       if(route==="/remote/consent") {connected=true;return {ok:true,status:200,json:async()=>({connected:true})};}
       return {ok:true,status:200,json:async()=>replies[body?.name || route]};
     });
     await import("../../src-tauri/src/mcp_server/remote/app.js");
     await vi.waitFor(()=>expect(document.getElementById("notice").textContent).toContain("Connect this browser"));
     document.getElementById("connect").click();
+    await vi.waitFor(()=>expect(document.getElementById("notice").textContent).toContain("Pairing code: pairing-code"));
     await vi.advanceTimersByTimeAsync(1501);
     await vi.waitFor(()=>expect(document.querySelector(".task-request")).not.toBeNull());
     expect(calls.every(call=>call.path.startsWith(`${prefix}/remote/`))).toBe(true);

@@ -415,6 +415,18 @@ async fn send(owner: &Owner, writer: &Writer, value: &Value) -> std::result::Res
 async fn connect(app: &tauri::AppHandle, owner: &Arc<Owner>) -> std::result::Result<(), String> {
     let cap = capability(owner).await?;
     let base = validate_capability(&cap)?;
+    // Exact cleanup identity is available before any engine/Store admission.
+    // A failed COMMIT/Stop can therefore be retried without publishing a live
+    // URL or allowing a stale dialog to close a replacement owner.
+    delivery_current(&owner.delivery, &owner.cancelled, || {
+        let mut status = owner
+            .status
+            .lock()
+            .map_err(|_| "Phone status unavailable.")?;
+        status.connection_id = Some(cap.connection_id.clone());
+        status.expires_at = Some(cap.session_expires_at);
+        Ok(())
+    })?;
     let mut url = base.clone();
     url.set_path(&format!("/v1/phone/{}/connect", cap.connection_id));
     crate::ensure_rustls_provider();

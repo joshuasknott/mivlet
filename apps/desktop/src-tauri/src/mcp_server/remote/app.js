@@ -172,8 +172,8 @@ ui.connect.addEventListener("click", async () => {
   try {
     const response = await request("/remote/connect",{});
     if (basePath) {
-      if (response.pending !== true) throw new Error("The connection request was invalid.");
-      notice("Approve this browser in Mivlet Settings on your computer. Choose the agents and access to share.");
+      if (response.pending !== true || typeof response.pairingCode !== "string" || !/^[A-Za-z0-9_-]{12}$/.test(response.pairingCode)) throw new Error("The connection request was invalid.");
+      notice(`Pairing code: ${response.pairingCode}. Approve this exact code in Mivlet Settings on your computer, then choose the agents and access to share.`);
       const deadline = Date.now() + 300000;
       while (version === epoch && Date.now() < deadline) {
         await new Promise(resolve => setTimeout(resolve, 1500));
