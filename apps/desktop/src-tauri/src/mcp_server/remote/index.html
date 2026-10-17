@@ -6,6 +6,8 @@
   <meta name="theme-color" content="#faf9f7">
   <title>Mivlet · Your agents</title>
   <link rel="stylesheet" href="/remote/styles.css">
+  <link rel="manifest" href="/remote/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/remote/icon.png">
   <script type="module" src="/remote/app.js"></script>
 </head>
 <body>
@@ -32,7 +34,8 @@
         <p id="read-only" class="muted" hidden>This browser has read-only access. Change access in Mivlet to request tasks.</p>
       </form>
       <div id="retry-panel" class="card" hidden><p>The connection ended before the result arrived. Check the task list, or retry the same request safely.</p><button id="retry">Retry same request</button></div>
-      <button id="notifications" class="text-button">Notify while this view is active</button>
+      <button id="notifications" class="text-button">Notify when work changes</button>
+      <p id="notification-help" class="muted" hidden>Keep your computer awake and Mivlet open. On iPhone or iPad, add this page to your Home Screen first.</p>
     </section>
   </main>
 </body>

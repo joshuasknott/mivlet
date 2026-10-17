@@ -69,6 +69,7 @@ pub(super) fn begin(engine: &Engine, headers: &HeaderMap) -> Result<(String, Str
     let id = random()?;
     if let Ok(old) = cookie(engine, headers) {
         sessions.remove(&hash(&old));
+        push::remove(engine, &hash(&old));
     }
     sessions.pending.insert(
         hash(&id),
@@ -153,19 +154,60 @@ pub(super) fn authenticated(
     headers: &HeaderMap,
 ) -> Result<(Zeroizing<String>, super::super::models::Grant)> {
     let id = cookie(engine, headers)?;
-    let token = {
-        let mut sessions = engine
-            .remote
-            .lock()
-            .map_err(|_| invalid("Connection unavailable."))?;
-        sessions.prune();
-        sessions
-            .connected
-            .get(&hash(&id))
-            .map(|entry| entry.token.clone())
-            .ok_or_else(|| invalid("Connect this browser again."))?
-    };
+    let token = browser_token(engine, &hash(&id))?;
     let grant = engine
         .transaction(|_, _, saved| repository::authenticate(saved, &token, &engine.resource()))?;
     Ok((token, grant))
+}
+
+pub(super) fn browser_token(engine: &Engine, browser: &str) -> Result<Zeroizing<String>> {
+    let mut sessions = engine
+        .remote
+        .lock()
+        .map_err(|_| invalid("Connection unavailable."))?;
+    sessions.prune();
+    sessions
+        .connected
+        .get(browser)
+        .map(|entry| entry.token.clone())
+        .ok_or_else(|| invalid("Connect this browser again."))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn notification_authority_ends_with_the_browser_session() {
+        let engine = crate::mcp_server::tests::engine("https://mivlet.example");
+        let future = chrono::Utc::now().timestamp() + 60;
+        engine.remote.lock().unwrap().connected.insert(
+            "browser".into(),
+            Connected {
+                token: Zeroizing::new("native-only-token".into()),
+                expires: future,
+            },
+        );
+        assert_eq!(
+            browser_token(&engine, "browser").unwrap().as_str(),
+            "native-only-token"
+        );
+        engine
+            .remote
+            .lock()
+            .unwrap()
+            .connected
+            .get_mut("browser")
+            .unwrap()
+            .expires = 0;
+        assert!(browser_token(&engine, "browser").is_err());
+        engine.remote.lock().unwrap().connected.insert(
+            "browser".into(),
+            Connected {
+                token: Zeroizing::new("native-only-token".into()),
+                expires: future,
+            },
+        );
+        engine.remote.lock().unwrap().remove("browser");
+        assert!(browser_token(&engine, "browser").is_err());
+    }
 }

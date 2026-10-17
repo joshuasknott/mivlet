@@ -179,7 +179,7 @@ async fn guard(State(engine): State<Arc<Engine>>, request: Request, next: Next) 
     headers.insert("x-content-type-options", "nosniff".parse().unwrap());
     headers.insert(header::CONTENT_SECURITY_POLICY,"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'".parse().unwrap());
     if remote_page {
-        headers.insert(header::CONTENT_SECURITY_POLICY, "default-src 'none'; script-src 'self'; worker-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'".parse().unwrap());
+        headers.insert(header::CONTENT_SECURITY_POLICY, "default-src 'none'; script-src 'self'; worker-src 'self'; manifest-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'".parse().unwrap());
     }
     if let Some(origin) = origin {
         if let Ok(value) = origin.parse() {

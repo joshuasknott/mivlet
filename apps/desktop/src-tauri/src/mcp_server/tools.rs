@@ -82,7 +82,7 @@ pub(super) fn shareable(
             .collect(),
     )
 }
-fn shared(item: &Work, grant: &Grant) -> bool {
+pub(super) fn shared(item: &Work, grant: &Grant) -> bool {
     grant.agent_ids.contains(&item.agent_id)
         && (grant.work_ids.contains(&item.id)
             || item

@@ -16,6 +16,7 @@ use sha2::{Digest, Sha256};
 use std::{collections::HashMap, sync::Arc};
 use zeroize::Zeroizing;
 
+pub(super) mod push;
 mod session;
 pub(super) use session::Sessions;
 #[cfg(test)]
@@ -27,6 +28,9 @@ pub(super) fn router() -> Router<Arc<Engine>> {
         .route("/remote/app.js", get(script))
         .route("/remote/styles.css", get(styles))
         .route("/remote/sw.js", get(worker))
+        .route("/remote/manifest.webmanifest", get(manifest))
+        .route("/remote/icon.png", get(icon))
+        .route("/remote/push", get(push::status).post(push::subscribe))
         .route("/remote/connect", post(connect))
         .route("/remote/callback", get(callback))
         .route("/remote/session", get(current))
@@ -35,6 +39,22 @@ pub(super) fn router() -> Router<Arc<Engine>> {
 }
 async fn page() -> Html<&'static str> {
     Html(include_str!("index.html"))
+}
+async fn manifest() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "application/manifest+json")],
+        Json(json!({
+            "id":"/remote", "name":"Mivlet", "short_name":"Mivlet", "start_url":"/remote",
+            "scope":"/remote", "display":"standalone", "background_color":"#faf9f7", "theme_color":"#faf9f7",
+            "icons":[{"src":"/remote/icon.png","sizes":"256x256","type":"image/png"}]
+        })),
+    )
+}
+async fn icon() -> impl IntoResponse {
+    (
+        [(header::CONTENT_TYPE, "image/png")],
+        &include_bytes!("../../../icons/128x128@2x.png")[..],
+    )
 }
 async fn script() -> impl IntoResponse {
     (
@@ -194,6 +214,7 @@ async fn call(State(engine): State<Arc<Engine>>, headers: HeaderMap, body: Bytes
 
 async fn disconnect(State(engine): State<Arc<Engine>>, headers: HeaderMap) -> Response {
     if let Ok(id) = cookie(&engine, &headers) {
+        push::remove(&engine, &hash(&id));
         if let Ok(mut sessions) = engine.remote.lock() {
             sessions.remove(&hash(&id));
         }

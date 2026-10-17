@@ -92,9 +92,17 @@ desktop Settings to stop its outstanding tasks and invalidate all access.
 
 The client renders untrusted results as text, polls only while visible and retains
 the exact request ID after an uncertain write. It never retries a write
-automatically. Opt-in browser notifications describe status changes without task
-content while the view is active. Polling pauses when the page is hidden. This does not provide background or closed-page Web Push or a
-hosted relay. The desktop must stay running, awake and reachable. Use the remote
+automatically. Opt-in Web Push sends a payload-free, VAPID-signed wake signal
+through supported browser-vendor push services. The service worker shows a generic
+notification, including when this page is closed; task content never enters the
+push service. The native host checks grant expiry/revocation and current shared
+Work, pins public DNS addresses, rejects redirects/proxies and bounds delivery.
+Subscriptions and signing keys live only in native memory and end with browser
+disconnect, access expiry, or server restart. Failed or uncertain delivery is not
+retried automatically. Page polling still pauses when hidden. Delivery requires
+an awake signed-in host, HTTPS, browser permission, and on iOS a Home Screen web
+app. Protocol and mocked checks do not establish real-device delivery. This is
+not a hosted relay. The desktop must stay running, awake and reachable. Use the remote
 HTTPS setup below for a phone outside the computer; a loopback URL is local only.
 
 Remote mode requires a user-operated HTTPS reverse proxy or tunnel reachable by
