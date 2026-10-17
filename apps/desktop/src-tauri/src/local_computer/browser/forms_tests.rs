@@ -25,6 +25,10 @@ fn only_named_empty_public_text_fields_offer_choices() {
     }
     let mut missing = node();
     missing.as_object_mut().unwrap().remove("value");
+    // AX omission permits only a candidate; capture still requires a positive
+    // isolated native value-getter proof, and fill rechecks it atomically.
+    assert_eq!(candidate(&missing), Some((42, "Public topic".into())));
+    missing["value"] = json!({"type":"string"});
     assert!(candidate(&missing).is_none());
 }
 #[test]

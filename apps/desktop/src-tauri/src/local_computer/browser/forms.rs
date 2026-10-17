@@ -55,7 +55,10 @@ fn candidate(node: &Value) -> Option<(u64, String)> {
     let name = node["name"]["value"].as_str()?;
     if node["ignored"] != false
         || !matches!(node["role"]["value"].as_str()?, "textbox" | "searchbox")
-        || node["value"]["value"].as_str()? != ""
+        // Chromium omits the optional AX value for some empty native inputs.
+        // Missing is only a candidate: the isolated native getter below must
+        // positively prove emptiness before an offer exists.
+        || node.get("value").is_some_and(|value| value["value"].as_str() != Some(""))
         || name.trim().is_empty()
         || name.chars().count() > 160
         || name.chars().any(char::is_control)
@@ -176,6 +179,14 @@ pub(super) fn capture(
         let Some(metadata) = metadata(&described["node"]) else {
             continue;
         };
+        if !process
+            ._pipe
+            .as_mut()
+            .ok_or(STALE)?
+            .empty_text(&frame.id, session, backend, origin, &metadata, check)?
+        {
+            continue;
+        }
         let reference = super::super::super::desktop_tools::opaque_id()?;
         display.push(json!({"fieldRef":reference,"name":name,"empty":true}));
         choices.insert(

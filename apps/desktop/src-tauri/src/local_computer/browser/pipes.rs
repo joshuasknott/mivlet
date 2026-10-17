@@ -339,6 +339,7 @@ pub(super) enum Command {
     ReleaseObject,
     DownloadPolicy,
     ProbeFile,
+    ProbeText,
     AttachFile,
     Quads,
     Layout,
@@ -365,6 +366,7 @@ impl Command {
             Self::ReleaseObject => "Runtime.releaseObject",
             Self::DownloadPolicy => "Browser.setDownloadBehavior",
             Self::ProbeFile => "Runtime.callFunctionOn",
+            Self::ProbeText => "Runtime.callFunctionOn",
             Self::AttachFile => "DOM.setFileInputFiles",
             Self::Quads => "DOM.getContentQuads",
             Self::Layout => "Page.getLayoutMetrics",
@@ -377,6 +379,49 @@ impl Command {
     }
 }
 impl ControlPipe {
+    pub(super) fn empty_text(
+        &mut self,
+        frame: &str,
+        session: &str,
+        backend: u64,
+        origin: &str,
+        metadata: &serde_json::Value,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let world = self.exchange(Command::IsolatedWorld, serde_json::json!({"frameId":frame,"worldName":"mivlet-native-empty-text-v1","grantUniveralAccess":false}),Some(session),check,None)?;
+        let context = world["executionContextId"]
+            .as_u64()
+            .filter(|id| *id > 0 && *id <= i32::MAX as u64)
+            .ok_or("The native field context is unavailable.")?;
+        let object = self.exchange(
+            Command::ResolveField,
+            serde_json::json!({"backendNodeId":backend,"executionContextId":context}),
+            Some(session),
+            check,
+            None,
+        )?;
+        let object = object["object"]["objectId"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 512)
+            .ok_or("The native field identity is unavailable.")?;
+        let result = self.exchange(Command::ProbeText,serde_json::json!({"objectId":object,"functionDeclaration":forms_script::EMPTY_TEXT,"arguments":[{"value":origin},{"value":metadata}],"returnByValue":true,"generatePreview":false,"silent":true,"userGesture":false,"awaitPromise":false,"throwOnSideEffect":true}),Some(session),check,None)?;
+        if result.get("exceptionDetails").is_some() || result["result"]["type"] != "string" {
+            return Err("The browser could not confirm an empty public text field.".into());
+        }
+        let empty = match result["result"]["value"].as_str() {
+            Some("empty") => true,
+            Some("occupied" | "stale" | "unsupported") => false,
+            _ => return Err("The browser returned an unsupported field state.".into()),
+        };
+        self.exchange(
+            Command::ReleaseObject,
+            serde_json::json!({"objectId":object}),
+            Some(session),
+            check,
+            None,
+        )?;
+        Ok(empty)
+    }
     pub(super) fn empty_file(
         &mut self,
         frame: &str,
@@ -566,6 +611,7 @@ impl ControlPipe {
                 | Command::ResolveField
                 | Command::ReleaseObject
                 | Command::ProbeFile
+                | Command::ProbeText
         ) {
             return Err("Only the fixed native visibility probe may create or evaluate its private context.".into());
         }
