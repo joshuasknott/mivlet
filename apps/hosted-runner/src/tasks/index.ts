@@ -19,13 +19,14 @@ const SAFE_FAILURES = new Set([
   "credential-scope-mismatch", "credential-revision-mismatch", "hosted-credential-limit", "hosted-provider-connection-required",
   "task-admission-conflict", "task-admission-expired", "task-generation-mismatch", "task-not-found", "hosted-task-quota",
   "task-capability-expired", "task-capability-replayed", "task-capability-rate-limited", "task-custody-configuration-required",
+  "invalid-research-domain", "invalid-research-url", "invalid-research-scope", "research-url-outside-scope", "research-secret-url", "research-policy-review-required",
 ]);
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
 export default {
   async fetch(request: Request, env: TaskEnv): Promise<Response> {
     const url = new URL(request.url);
-    if (request.method === "GET" && url.pathname === "/health") return json({ service: "mivlet-hosted-tasks", mode: "text-only", version: 1 });
+    if (request.method === "GET" && url.pathname === "/health") return json({ service: "mivlet-hosted-tasks", modes: ["text-only", "public-web-research"], version: 2 });
     const path = url.pathname.split("/");
     if (request.method !== "POST" || path.length !== 5 || path[1] !== "v1" || url.search) return json({ error: "not-found" }, 404);
     const route = `${path[2]}/${path[4]}` as keyof typeof ROUTES; const scope = ROUTES[route];

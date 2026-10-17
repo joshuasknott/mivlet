@@ -6,18 +6,18 @@ import { shapeGeminiRequest } from "@mivlet/connectors/native-api/gemini";
 import type { HttpTransport } from "@mivlet/connectors/native-api/transport";
 import type { BackendAgentEvent, HostedTaskBinding, HostedTaskTextInput, HostedTaskUsage, NativeCompletionRequest } from "@mivlet/protocol";
 
-const ENDPOINTS = {
+export const ENDPOINTS = {
   openai: "https://api.openai.com/v1/chat/completions",
   anthropic: "https://api.anthropic.com/v1/messages",
   xai: "https://api.x.ai/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
 } as const;
-export interface ProviderResult { text: string; usage?: HostedTaskUsage }
+export interface ProviderResult { text: string; usage?: HostedTaskUsage; research?: import("@mivlet/protocol").HostedPublicWebProgress }
 /** Safe fixed code only. Never forward a provider error body or secret. */
 export class ProviderFailure extends Error {
   constructor(readonly code: string, readonly uncertain: boolean) { super(code); }
 }
-async function* lines(response: Response, signal: AbortSignal): AsyncIterable<string> {
+export async function* lines(response: Response, signal: AbortSignal): AsyncIterable<string> {
   if (!response.body) throw new Error("provider-response-unavailable");
   const reader = response.body.getReader(); const decoder = new TextDecoder("utf-8", { fatal: true }); let pending = ""; let bytes = 0;
   try {
@@ -34,6 +34,7 @@ async function* lines(response: Response, signal: AbortSignal): AsyncIterable<st
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
 }
 export async function runRealText(binding: HostedTaskBinding, input: HostedTaskTextInput, secret: string, signal: AbortSignal): Promise<ProviderResult> {
+  if (binding.version !== 1 || binding.budget.maxModelCalls !== 1) throw new ProviderFailure("hosted-text-only", false);
   let calls = 0; let dispatched = false; let definitiveRejection: string | undefined; let wireTerminal = false;
   const transport: HttpTransport = { async *stream(request) {
     signal.throwIfAborted();
@@ -95,7 +96,7 @@ export async function runRealText(binding: HostedTaskBinding, input: HostedTaskT
     throw new ProviderFailure(definitiveRejection ?? (dispatched ? "hosted-provider-outcome-uncertain" : "hosted-provider-not-dispatched"), dispatched && !definitiveRejection);
   }
 }
-function usageRecord(event: Extract<BackendAgentEvent, { type: "usage" }>): HostedTaskUsage {
+export function usageRecord(event: Extract<BackendAgentEvent, { type: "usage" }>): HostedTaskUsage {
   for (const value of [event.inputTokens, event.outputTokens, event.cachedInputTokens, event.cacheWriteTokens, event.reasoningTokens]) if (value !== undefined && (!Number.isSafeInteger(value) || value < 0 || value > 2_000_000)) throw new Error("hosted-provider-usage-invalid");
   if (!Number.isFinite(event.costUsd) || event.costUsd < 0) throw new Error("hosted-provider-usage-invalid");
   return { inputTokens: event.inputTokens, outputTokens: event.outputTokens,

@@ -3,6 +3,7 @@
   "name": "mivlet-hosted-tasks",
   "main": "src/tasks/index.ts",
   "compatibility_date": "2026-08-28",
+  "compatibility_flags": ["global_fetch_strictly_public"],
   // Distinct deployment secrets: MIVLET_HOSTED_TASK_SIGNING_KEY (also Convex)
   // and MIVLET_HOSTED_TASK_ENCRYPTION_KEY (Worker only). Neither may reuse
   // computer lifecycle credentials or users' local provider connections.
