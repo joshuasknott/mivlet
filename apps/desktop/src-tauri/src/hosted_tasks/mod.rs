@@ -118,14 +118,14 @@ pub(crate) fn validate_result(
                 "costUnknown",
             ]
             .contains(&k.as_str())
-        }) || !object
+        }) || object
             .get("inputTokens")
             .and_then(Value::as_u64)
-            .is_some_and(|v| v <= 2_000_000)
-            || !object
+            .is_none_or(|v| v > 2_000_000)
+            || object
                 .get("outputTokens")
                 .and_then(Value::as_u64)
-                .is_some_and(|v| v <= binding.budget.max_output_tokens.into())
+                .is_none_or(|v| v > binding.budget.max_output_tokens.into())
             || !object
                 .get("costUsd")
                 .and_then(Value::as_f64)
@@ -140,7 +140,7 @@ pub(crate) fn validate_result(
                 .any(|k| {
                     object
                         .get(*k)
-                        .is_some_and(|v| !v.as_u64().is_some_and(|v| v <= 2_000_000))
+                        .is_some_and(|v| v.as_u64().is_none_or(|v| v > 2_000_000))
                 })
         {
             return Err("Invalid cloud usage receipt.".into());

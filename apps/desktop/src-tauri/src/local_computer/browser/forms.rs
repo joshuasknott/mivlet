@@ -137,10 +137,9 @@ fn metadata(node: &Value) -> Option<Value> {
         if matches!(
             key.as_str(),
             "name" | "id" | "aria-label" | "placeholder" | "autocomplete"
-        ) {
-            if private_identifier(value) {
-                return None;
-            }
+        ) && private_identifier(value)
+        {
+            return None;
         }
     }
     Some(json!({"tag":node["nodeName"],"attributes":attrs}))

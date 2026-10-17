@@ -142,10 +142,10 @@ pub(super) fn dispatchable(item: &Work, all: &[Work]) -> bool {
         }
         let earlier = all.iter().find(|w| w.id == other.root_id).unwrap_or(other);
         !earlier.queue.as_ref().is_some_and(|q| q.held)
-            && !earlier
+            && earlier
                 .outcome_goal
                 .as_ref()
-                .is_some_and(|g| g.status != "active")
+                .is_none_or(|g| g.status == "active")
             && compare(earlier, root).is_lt()
     })
 }

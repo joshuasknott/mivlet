@@ -228,7 +228,7 @@ pub(super) fn owned_repository(
     owned_repository_in_account(
         directory,
         id,
-        &crate::account_session::binding()?,
+        crate::account_session::binding()?,
         workspace,
         agent,
     )
