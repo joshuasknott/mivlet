@@ -37,15 +37,42 @@ pub(crate) async fn hosted_text_prepare(
     request: Prepare,
 ) -> Result<Review, String> {
     main(&window)?;
+    if super::public_web::requested(&request)?.is_some() {
+        return Err(
+            "Use the separate public web research review before enabling page reads.".into(),
+        );
+    }
+    prepare_review(&app, &state, request).await
+}
+#[tauri::command]
+pub(crate) async fn hosted_task_prepare_public_web(
+    app: tauri::AppHandle,
+    window: tauri::WebviewWindow,
+    state: tauri::State<'_, Arc<LocalComputerState>>,
+    request: Prepare,
+) -> Result<Review, String> {
+    main(&window)?;
+    if super::public_web::requested(&request)?.is_none() {
+        return Err(
+            "Choose an explicit public web scope before preparing this research task.".into(),
+        );
+    }
+    prepare_review(&app, &state, request).await
+}
+async fn prepare_review(
+    app: &tauri::AppHandle,
+    state: &LocalComputerState,
+    request: Prepare,
+) -> Result<Review, String> {
     crate::execution_control::ensure_active_execution_allowed()?;
     valid_id(&request.credential_id)?;
-    let ticket = ticket(&state, &request.workspace_id, &request.agent_id)?;
-    let (request, originally_held) = hosted::begin_prepare(&app, &ticket, &request)?;
+    let ticket = ticket(state, &request.workspace_id, &request.agent_id)?;
+    let (request, originally_held) = hosted::begin_prepare(app, &ticket, &request)?;
     let scope = transport::cloud_scope()?;
     let (connections, runner) = transport::connections(&ticket, &scope, &request.agent_id).await?;
     commit(&ticket, || {
         hosted::prepare(
-            &app,
+            app,
             &ticket,
             &request,
             &scope,

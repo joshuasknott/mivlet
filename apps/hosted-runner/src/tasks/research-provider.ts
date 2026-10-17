@@ -1,5 +1,6 @@
 import { runAgentLoop } from "@mivlet/connectors/native-api/agent-loop";
 import { registeredToolSpecs } from "@mivlet/connectors/native-api/tools";
+import { catalogueCapabilities } from "@mivlet/connectors/native-api/model-catalogue";
 import { shapeOpenAiRequest } from "@mivlet/connectors/native-api/openai-compat";
 import { shapeAnthropicRequest } from "@mivlet/connectors/native-api/anthropic";
 import { shapeGeminiRequest } from "@mivlet/connectors/native-api/gemini";
@@ -34,7 +35,7 @@ export async function runRealResearch(binding: HostedPublicWebTaskBinding, input
   let sent = false; let calls = 0; let allocated = 0;
   let providerFailure: ProviderFailure | undefined;
   const tools = registeredToolSpecs().filter(tool => tool.name === "web-fetch");
-  if (tools.length !== 1) throw new ProviderFailure("research-tool-unavailable", false);
+  if (tools.length !== 1 || catalogueCapabilities(binding.providerId, binding.model)?.tools !== true) throw new ProviderFailure("research-tool-model-required", false);
   const transport: HttpTransport = { async *stream(request) {
     try {
     signal.throwIfAborted();

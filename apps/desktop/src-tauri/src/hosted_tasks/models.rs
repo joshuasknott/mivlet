@@ -9,11 +9,19 @@ pub(crate) struct Budget {
     pub max_output_tokens: u32,
     pub max_elapsed_ms: u64,
     pub max_result_bytes: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_page_reads: Option<u8>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_source_bytes: Option<usize>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct Binding {
     pub version: u8,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_scope: Option<PublicWebScope>,
     pub task_id: String,
     pub admission_id: String,
     pub run_id: String,
@@ -70,6 +78,8 @@ pub(crate) struct TaskSnapshot {
     pub created_at: i64,
     pub updated_at: i64,
     pub retained_until: i64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub research: Option<PublicWebProgress>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -109,6 +119,35 @@ pub(crate) struct Prepare {
     pub expected_generation: u32,
     pub credential_id: String,
     pub credential_revision: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_scope: Option<PublicWebScope>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PublicWebScope {
+    pub allowed_domains: Vec<String>,
+    pub initial_urls: Vec<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PublicWebProgress {
+    pub model_calls: u8,
+    pub page_reads: u8,
+    pub source_bytes: usize,
+    pub sources: Vec<PublicWebSource>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct PublicWebSource {
+    pub citation_id: String,
+    pub title: String,
+    pub final_uri: String,
+    pub fetched_at: String,
+    pub content_sha256: String,
+    pub content_bytes: usize,
+    pub truncated: bool,
 }
 impl Prepare {
     pub(crate) fn target(&self) -> Target {
