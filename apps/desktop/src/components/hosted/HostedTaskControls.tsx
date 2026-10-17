@@ -17,6 +17,7 @@ import type { HostedCodingApi } from "./hosted-coding-api";
 import { emptyCodingSelection, prepareCodingSelection } from "./hosted-coding-selection";
 import { HostedCodingScope, HostedCodingSelection } from "./HostedCodingSelection";
 import { HostedCodingImport } from "./HostedCodingImport";
+import { assertHostedControl, assertHostedReview, sameHostedBinding } from "./hosted-task-custody";
 import "./hosted-controls.css";
 
 export interface HostedTaskApi {
@@ -50,6 +51,8 @@ function TaskControls({ item, onChanged, disabled = false, api = defaultApi }: H
     }
   });
   const latest = useRef(item); latest.current = item;
+  const observedGeneration = useRef(item.generation);
+  observedGeneration.current = Math.max(observedGeneration.current, item.generation);
   const blocked = useRef(disabled); blocked.current = disabled;
   const [stopping, setStopping] = useState(false);
   const stopPending = useRef(false);
@@ -69,17 +72,18 @@ function TaskControls({ item, onChanged, disabled = false, api = defaultApi }: H
   const [attempted, setAttempted] = useState(false);
   const [uncertain, setUncertain] = useState(false);
   const [outcome, setOutcome] = useState<HostedTaskResult>();
-  const target = (generation = latest.current.generation): HostedTaskTarget => ({ workspaceId: item.workspaceId, agentId: item.agentId, workId: item.id, expectedGeneration: generation });
-  const retainResult = (result: HostedTaskControlResult) => {
-    const binding = result.taskResult?.snapshot.binding;
-    if (binding && (binding.workId !== item.id || binding.workspaceId !== item.workspaceId || binding.agentId !== item.agentId))
-      throw new Error("The cloud result does not belong to this task.");
+  const target = (generation = Math.max(latest.current.generation, observedGeneration.current)): HostedTaskTarget => ({ workspaceId: item.workspaceId, agentId: item.agentId, workId: item.id, expectedGeneration: generation });
+  const retainResult = (result: HostedTaskControlResult, expected = review?.admission.binding ?? latest.current.hostedTask?.binding, allowReleased = false) => {
+    const minimum = Math.max(observedGeneration.current, latest.current.generation, expected?.workGeneration ?? 0);
+    const work = assertHostedControl(latest.current, result, expected, minimum, allowReleased);
+    observedGeneration.current = work.generation;
     if (current() && result.taskResult) setOutcome(result.taskResult);
   };
   // Prepare is allowed to advance exactly to its returned held generation.
   // Any different edit/restart makes this consent unusable.
   const reviewMatches = review && (item.generation === review.workGeneration || item.generation + 1 === review.workGeneration)
-    && (!item.hostedTask || item.hostedTask.reviewId === review.reviewId && item.hostedTask.phase === "review");
+    && observedGeneration.current <= review.workGeneration
+    && (!item.hostedTask || item.hostedTask.reviewId === review.reviewId && item.hostedTask.phase === "review" && sameHostedBinding(item.hostedTask.binding, review.admission.binding));
   const hosted = item.hostedTask;
   const active = hosted && !["reconciled"].includes(hosted.phase);
   const canStart = item.status === "queued" && !item.parentId && item.rootId === item.id && item.runIds.length === 0 && !hosted;
@@ -92,25 +96,29 @@ function TaskControls({ item, onChanged, disabled = false, api = defaultApi }: H
     }
   });
   const reload = () => run("refresh", async () => {
+    const expected = review?.admission.binding ?? latest.current.hostedTask?.binding;
     const result = await boundedHostedRead(api.refresh(target()));
     if (!current()) return;
-    retainResult(result);
+    retainResult(result, expected);
     await boundedHostedRead(onChanged());
     if (current()) { setUncertain(result.reconcileRequired); setReview(undefined); }
   });
   const cancel = () => run("cancel", async () => {
     const reviewId = review?.reviewId ?? hosted?.reviewId;
     if (!reviewId) throw new Error("Refresh this task to check its held review.");
-    await boundedHostedRead(api.cancel({ ...target(review?.workGeneration), reviewId }));
+    const expected = review?.admission.binding ?? latest.current.hostedTask?.binding;
+    const result = await boundedHostedRead(api.cancel({ ...target(review?.workGeneration), reviewId }));
     if (!current()) return;
+    retainResult(result, expected, true);
     setReview(undefined); setAttempted(false); setUncertain(false); await boundedHostedRead(onChanged());
   });
   const stop = () => {
     if (stopPending.current || !current()) return;
     admissionCancelled.current = true;
     stopPending.current = true; setStopping(true);
-    void boundedHostedRead(api.stop(target(Math.max(latest.current.generation, review?.workGeneration ?? 0)))).then(async result => {
-      if (current()) { retainResult(result); setReview(undefined); await boundedHostedRead(onChanged()); }
+    const expected = review?.admission.binding ?? latest.current.hostedTask?.binding;
+    void boundedHostedRead(api.stop(target(Math.max(observedGeneration.current, latest.current.generation, review?.workGeneration ?? 0)))).then(async result => {
+      if (current()) { retainResult(result, expected, true); setReview(undefined); await boundedHostedRead(onChanged()); }
     }).catch(reason => { if (current()) setError(reason instanceof Error ? reason.message : "Stop outcome is unknown. Refresh cloud status."); })
       .finally(() => { stopPending.current = false; if (current()) setStopping(false); });
   };
@@ -146,8 +154,9 @@ function TaskControls({ item, onChanged, disabled = false, api = defaultApi }: H
             ? api.preparePublicWeb({ ...request, mode: "public-web-research", webScope })
             : api.prepare(request));
           if (!current()) return;
+          const canonicalWork = assertHostedReview(latest.current, result, observedGeneration.current);
           const binding = result.admission.binding;
-          if (result.workId !== item.id || result.admission.binding.workspaceId !== item.workspaceId || result.admission.binding.agentId !== item.agentId
+          if (result.workId !== item.id || result.admission.binding.agentId !== item.agentId
             || result.admission.binding.workId !== item.id || result.admission.binding.workGeneration !== result.workGeneration
             || binding.credentialId !== selected.credentialId || binding.credentialRevision !== selected.revision
             || binding.version !== (coding ? 3 : research ? 2 : 1)
@@ -162,6 +171,7 @@ function TaskControls({ item, onChanged, disabled = false, api = defaultApi }: H
               || JSON.stringify(binding.webScope.allowedDomains) !== JSON.stringify(webScope.allowedDomains)
               || JSON.stringify(binding.webScope.initialUrls) !== JSON.stringify(webScope.initialUrls)))
             throw new Error("The cloud review does not match this task. Refresh its recorded status.");
+          observedGeneration.current = canonicalWork.generation;
           admissionCancelled.current = false;
           setReview(result); setAttempted(false); setUncertain(false); await boundedHostedRead(onChanged());
         })}>Review cloud task</button>
@@ -191,11 +201,11 @@ function TaskControls({ item, onChanged, disabled = false, api = defaultApi }: H
         throw new Error("A matching one-time native approval was not recorded. Refresh this task before continuing.");
       const latestWork = latest.current;
       if (latestWork.generation !== review.workGeneration && latestWork.generation + 1 !== review.workGeneration
-        || latestWork.hostedTask && (latestWork.hostedTask.reviewId !== review.reviewId || latestWork.hostedTask.phase !== "review"))
+        || latestWork.hostedTask && (latestWork.hostedTask.reviewId !== review.reviewId || latestWork.hostedTask.phase !== "review" || !sameHostedBinding(latestWork.hostedTask.binding, review.admission.binding)))
         throw new Error("This task changed during approval. Refresh its recorded status.");
       const result = await boundedHostedRead(api.admit({ ...target(review.workGeneration), reviewId: review.reviewId, resolution }));
       if (!current()) return;
-      retainResult(result); setReview(undefined); setUncertain(result.reconcileRequired); await boundedHostedRead(onChanged());
+      retainResult(result, review.admission.binding); setReview(undefined); setUncertain(result.reconcileRequired); await boundedHostedRead(onChanged());
     })} />}
   </div>;
 }
