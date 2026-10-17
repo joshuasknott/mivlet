@@ -1,4 +1,5 @@
 import { fileURLToPath, URL } from "node:url";
+import { realpathSync } from "node:fs";
 import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { pruneUnusedIconWeights } from "./scripts/icon-weights";
@@ -46,6 +47,14 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // Worktrees can share a pnpm dependency directory through a junction.
+    // Permit its resolved assets without exposing the surrounding checkout.
+    fs: {
+      allow: [
+        fileURLToPath(new URL("../../", import.meta.url)),
+        realpathSync(fileURLToPath(new URL("../../node_modules", import.meta.url))),
+      ],
+    },
     watch: {
       ignored: ["**/src-tauri/target/**"],
     },

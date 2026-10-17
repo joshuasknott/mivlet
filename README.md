@@ -26,9 +26,9 @@ supported production service or a signed installer release. See [LICENSE](LICENS
 Public source access does not provide a hosted Mivlet account service, provider
 subscriptions, or connector credentials; configure your own services as described below.
 
-Mivlet is pre-release Windows desktop software. This repository contains a
-substantial local product and an optional hosted-computer foundation; it is not
-a deployed or production-validated service.
+Mivlet is pre-release Windows desktop software. The local workspace has optional
+cloud task and phone services, deployed against the existing development account
+setup. Production tenancy and full signed-in service acceptance remain unverified.
 
 ### Implemented locally
 
@@ -269,12 +269,20 @@ a deployed or production-validated service.
   with short-lived generation-fenced capabilities. Local tests and packaging
   checks do not prove that Containers, Browser Rendering, Durable Objects,
   Convex, Clerk, or production secrets have been deployed.
+- The [cloud task service](docs/architecture/hosted-text-tasks.md) accepts an
+  explicitly reviewed Work item and separately connected cloud API key. Text tasks
+  make one model call; public-page research uses a bounded model/read loop within
+  exact reviewed HTTPS domains. Both can finish while the desktop is closed and
+  retain their result for reconciliation. The deployed Worker and development
+  Convex capability endpoint passed live authorization checks; a real provider
+  completion and signed-in native admission still need acceptance.
+- Cloud file work requires exact selected input files, writable paths and optional
+  check commands, followed by a separate approval to import returned changes.
+  Its isolated offline runtime requires Workers Paid and successful runtime
+  isolation checks. That runtime has not been activated or live-validated.
 - A separate OpenCode Workerd and Cloudflare Agents fixture verifies a scheduled
   task, exact approval, cancellation and durable receipt across restart. It accepts
-  fixed synthetic data only; it is separate from the explicit
-  [cloud text-task path](docs/architecture/hosted-text-tasks.md), which uses a
-  separately entered cloud API key and a frozen one-call text review. It does
-  not provide asleep coding, browser tasks, or automatic conversation transfer.
+  fixed synthetic data only and provides no additional production task authority.
   See the [SDK architecture](docs/architecture/hosted-opencode-prototype.md).
 - Account sign-in gates first-run setup. Convex sync and remote workspace code
   remain optional foundation for future shared or multi-device work and are not
@@ -292,10 +300,10 @@ a deployed or production-validated service.
 - Automatic continuation of ordinary conversations after the desktop app
   closes.
 - Secure sign-in or secret handoff inside a hosted agent computer.
-- Deployed hosted operation, live third-party validation, production tenancy,
-  metering, quotas, monitoring, disaster recovery, or multi-device sync.
+- Live hosted computer/browser operation, real-provider cloud task acceptance,
+  production tenancy, metering, monitoring, disaster recovery, or multi-device sync.
 - Signed public installers, updater channels, supported macOS/Linux releases,
-  and mobile control.
+  and physical-phone/push-delivery acceptance.
 
 The [local computer](docs/architecture/local-teammate-computer.md) and
 [hosted computer](docs/architecture/hosted-teammate-computer.md) documents define
