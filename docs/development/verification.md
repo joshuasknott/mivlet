@@ -182,6 +182,18 @@ on that graph. The October allowance records the measured pre-PDF `main`
 baseline and preserves the original baseline for comparison. Font and character
 map assets are packaged locally and loaded as needed; they are not JS/CSS.
 
+Production ESM is normalized with Uglify before Terser, then repeated string
+constants are shared only when both raw UTF-8 and gzip measurements improve.
+The final standard minifier pass is also retained only when both encodings
+improve. Public property and wire names retain their exact values. Static cycle
+participants, direct-eval chunks and source-map builds skip constant sharing.
+The optimizer regressions execute native field, DOM property and prototype
+fixtures, and an actual emitted ESM cycle. Deferred settings, marketplace,
+usage and inspector views share the common-accounted `workspace-tools` request;
+their eager owners remain outside it. Build changes require the production
+renderer budget check and native inspection as well as source tests. Neither
+the ceilings nor the asset accounting categories change for this optimization.
+
 `pnpm test` still runs every workspace test, including `@mivlet/agent-host`. Host
 fixture tests skip unless they are on Windows with the bundled executable present,
 so the chain no longer aborts on Linux.

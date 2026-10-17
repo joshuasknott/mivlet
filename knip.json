@@ -26,12 +26,18 @@
       "entry": [
         "src/main.tsx",
         "src/**/*.test.{ts,tsx}",
+        "scripts/**/*.test.ts",
         "src-tauri/tests/fixtures/*.mjs",
         "vite.config.ts",
         "convex/**/*.ts",
         "!convex/_generated/**"
       ],
-      "project": ["src/**/*.{ts,tsx}", "convex/**/*.ts", "vite.config.ts"]
+      "project": [
+        "src/**/*.{ts,tsx}",
+        "convex/**/*.ts",
+        "scripts/**/*.ts",
+        "vite.config.ts"
+      ]
     },
     "packages/connectors": {
       "entry": ["src/index.ts", "src/**/*.test.ts"],

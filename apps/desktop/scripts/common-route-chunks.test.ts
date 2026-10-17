@@ -47,6 +47,24 @@ it("groups optional inspection views while preserving execution and feature boun
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBeUndefined();
 });
 
+it("shares deferred settings, marketplace and usage code without including their eager owners", () => {
+  for (const path of [
+    "components/settings/PreferencesSettings.tsx", "components/settings/settings.css",
+    "components/pages/MarketplacePage.tsx", "components/marketplace/ConnectorCard.tsx",
+    "components/PluginPanel.tsx", "components/navigation/MemoryRecordCard.tsx",
+    "components/navigation/PanelPagination.tsx", "components/usage/UsageDashboard.tsx",
+    "components/usage/UsageHistory.tsx", "components/usage/usage-data.ts",
+    "components/usage/usage-history.css", "runtime/domains/hosted-repositories.ts",
+    "runtime/domains/phone-relay.ts",
+  ]) expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBe("workspace-tools");
+  for (const path of [
+    "components/settings/SettingsModal.tsx", "components/marketplace/remote-connectors.ts",
+    "components/marketplace/marketplace-catalog.ts",
+    "components/usage/UsageSidebar.tsx", "components/usage/provider-usage-reset.css",
+    "components/pages/SettingsPage.tsx",
+  ]) expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBeUndefined();
+});
+
 it("moves the real input/hook chain only when all consumers belong to assistant-ui", () => {
   const info = graph({ [hook]: [input], [input]: [composer] });
   expect(assistantInputDependency(input, info)).toBe(true);

@@ -6,9 +6,13 @@ import { pruneUnusedIconWeights } from "./scripts/icon-weights";
 import { compactStyleNames } from "./scripts/compact-style-names";
 import { treeShakeAssistantPrimitives } from "./scripts/assistant-primitives";
 import { assistantInputDependency, commonRouteChunk } from "./scripts/common-route-chunks";
+import { shareEmittedConstants } from "./scripts/compact-constants";
+import { normalizeEmittedCode } from "./scripts/minify-workspace";
 
 export default defineConfig({
   plugins: [
+    normalizeEmittedCode(),
+    shareEmittedConstants(),
     treeShakeAssistantPrimitives(),
     compactStyleNames(fileURLToPath(new URL("./src", import.meta.url))),
     react(),

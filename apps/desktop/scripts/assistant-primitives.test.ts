@@ -66,4 +66,6 @@ it("retains used assistant primitives while removing unused rendering and viewpo
     "ActionBarSpeak",
   ])
     expect(modules).not.toContain(`/${unused}.js`);
-});
+  // This builds the installed dependency graph, including cold Windows I/O.
+  // Runtime performance is guarded separately; retain every graph assertion.
+}, 30_000);

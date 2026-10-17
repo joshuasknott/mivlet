@@ -10,6 +10,18 @@ export function commonRouteChunk(id: string): string | undefined {
   const path = id.replace(/\\/g, "/").split("?")[0];
   if (/\/src\/components\/hosted\//.test(path)
     || /\/src\/runtime\/domains\/hosted-tasks\.ts$/.test(path)) return "workspace-tools";
+  // Share the deferred settings, marketplace and usage request with the other
+  // optional tools. The eager modal and shared connector catalogues stay out.
+  if (/\/src\/components\/settings\/(?!SettingsModal\.tsx$)[^/]+\.tsx$/.test(path)
+    || /\/src\/components\/pages\/MarketplacePage\.tsx$/.test(path)
+    || /\/src\/components\/usage\/(?:UsageDashboard|UsageHistory|UsageChart|UsageModelDetail|UsagePriceEditor|UsageSources|SubscriptionUsage)\.tsx$/.test(path)
+    || /\/src\/components\/usage\/(?:usage-data\.ts|usage-history\.css|provider-usage\.css)$/.test(path)
+    || /\/src\/components\/marketplace\/(?!(?:remote-connectors|marketplace-catalog)\.ts$)[^/]+\.tsx?$/.test(path)
+    || /\/src\/components\/PluginPanel\.tsx$/.test(path)
+    || /\/src\/components\/navigation\/(?:MemoryRecordCard|PanelPagination)\.tsx$/.test(path)
+    || /\/src\/components\/settings\/[^/]+\.css$/.test(path)
+    || /\/src\/runtime\/domains\/(?:hosted-repositories|phone-relay)\.ts$/.test(path)
+    || /\/packages\/protocol\/src\/domains\/(?:hosted-task-json|hosted-public-web)\.ts$/.test(path)) return "workspace-tools";
   // The optional workspace panels share one deferred code request on local disk.
   // Opening any one also fetches cloud controls and the other editors/inspectors; React mounts
   // only the selected view. Shared command/checkpoint wrappers
