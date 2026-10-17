@@ -10,7 +10,7 @@ import {
   remoteConnectorFor,
   remoteConnectorServerId,
 } from "../marketplace/remote-connectors";
-import type { McpAppDescriptor } from "../../lib/conversation-presentation";
+import type { McpAppDescriptor } from "../../lib/conversation-presentation-types";
 import { McpAppFrame } from "./McpAppFrame";
 
 interface Props {

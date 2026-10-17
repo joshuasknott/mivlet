@@ -9,11 +9,9 @@ import type {
 } from "@mivlet/protocol";
 import type { NativeAgentState } from "../../hooks/useNativeAgent";
 import type { ConversationMessageView } from "../../lib/conversation-runtime";
-import {
-  conversationTurns,
-  toolActivity,
-  type ConversationTurn,
-} from "../../lib/conversation-presentation";
+import { toolActivity } from "../../lib/conversation-presentation";
+import { conversationTurns } from "../../lib/conversation-history";
+import type { ConversationTurn } from "../../lib/conversation-presentation-types";
 import type { McpAppApprovalPreview } from "../../lib/mcp-app-host";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import { ProfileAgentAvatar } from "../agents/agent-icons";

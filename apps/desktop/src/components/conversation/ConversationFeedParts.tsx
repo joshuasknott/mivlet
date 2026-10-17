@@ -4,8 +4,8 @@ import type { McpAppApprovalPreview } from "../../lib/mcp-app-host";
 import {
   toolActivity,
   toolFailureSummary,
-  type ResponsePart,
 } from "../../lib/conversation-presentation";
+import type { ResponsePart } from "../../lib/conversation-presentation-types";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { McpAppResult } from "./McpAppResult";
 import { nativeCommandResult } from "../../lib/native-command-result";
