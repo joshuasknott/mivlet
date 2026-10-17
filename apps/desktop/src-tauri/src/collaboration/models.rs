@@ -128,6 +128,8 @@ pub struct WorkAttachment {
 #[serde(rename_all = "camelCase")]
 pub struct Work {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosted_task: Option<crate::hosted_tasks::models::Execution>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub repository_binding: Option<crate::local_computer::coding::RepositoryWorkBinding>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub queue: Option<WorkQueue>,

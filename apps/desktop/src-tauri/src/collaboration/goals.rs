@@ -39,6 +39,7 @@ pub(super) fn set(
     // Goal status uses native coordination tools. It cannot be silently moved
     // into the tool-free background text lane.
     item.execution_owner = None;
+    item.hosted_task = None;
     item.generation += 1;
     item.updated_at = ctx.time.into();
     ctx.work(&item)

@@ -360,6 +360,7 @@ fn new_work_with_parent(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        hosted_task: None,
         repository_binding: crate::local_computer::coding::capture_work_repository(
             ctx.scope.data.workspace_id(),
             &agent_id,
@@ -535,6 +536,9 @@ pub(super) fn bind(
 ) -> Result<()> {
     id(run)?;
     let mut item = current(ctx, key, generation, None)?;
+    if item.execution_owner.as_deref() == Some("hosted") {
+        return Err(invalid("Cloud Work cannot bind a local provider attempt. Refresh or cancel its authenticated cloud task first."));
+    }
     if crate::background_worker::owns_work(&item) && !crate::background_worker::is_worker() {
         return Err(invalid(
             "This Work belongs to the native background owner. Reconnect to inspect or stop it.",
@@ -789,6 +793,9 @@ pub(super) fn agent_command(
     call: &str,
     command: AgentCommand,
 ) -> Result<()> {
+    if ctx.item(key)?.execution_owner.as_deref() == Some("hosted") {
+        return Err(invalid("Cloud text tasks have no native tools, delegation, or coordination actions. Only an authenticated task receipt may finish this Work."));
+    }
     bounded(call, 256, "Tool call ID")?;
     let receipt = format!("call-{:x}", Sha256::digest(format!("{run}:{call}")));
     if let Some(old) = repo::get::<AgentCommand>(
@@ -1045,6 +1052,7 @@ pub(super) fn invalidate_descendants(
             && item.status != WorkStatus::Cancelled
         {
             item.generation += 1;
+            super::hosted::mark_stop(&mut item);
             if let Some(reset) = &mut item.reset_continuation {
                 if reset.state == "armed" {
                     reset.state = "review-required".into();

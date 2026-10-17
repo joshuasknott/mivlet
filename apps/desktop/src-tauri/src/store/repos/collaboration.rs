@@ -18,6 +18,7 @@ pub enum Kind {
     Fact,
     Layout,
     Receipt,
+    HostedTask,
 }
 
 impl Kind {
@@ -30,6 +31,7 @@ impl Kind {
             Self::Fact => "fact",
             Self::Layout => "layout",
             Self::Receipt => "receipt",
+            Self::HostedTask => "hosted-task",
         }
     }
 }

@@ -123,7 +123,8 @@ pub(super) fn move_before(
 
 pub(super) fn dispatchable(item: &Work, all: &[Work]) -> bool {
     let root = all.iter().find(|w| w.id == item.root_id).unwrap_or(item);
-    if root.queue.as_ref().is_some_and(|q| q.held)
+    if root.execution_owner.as_deref() == Some("hosted")
+        || root.queue.as_ref().is_some_and(|q| q.held)
         || root
             .outcome_goal
             .as_ref()

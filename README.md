@@ -266,7 +266,10 @@ a deployed or production-validated service.
   Convex, Clerk, or production secrets have been deployed.
 - A separate OpenCode Workerd and Cloudflare Agents fixture verifies a scheduled
   task, exact approval, cancellation and durable receipt across restart. It accepts
-  fixed synthetic data only; real hosted task/provider delegation is unavailable.
+  fixed synthetic data only; it is separate from the explicit
+  [cloud text-task path](docs/architecture/hosted-text-tasks.md), which uses a
+  separately entered cloud API key and a frozen one-call text review. It does
+  not provide asleep coding, browser tasks, or automatic conversation transfer.
   See the [SDK architecture](docs/architecture/hosted-opencode-prototype.md).
 - Account sign-in gates first-run setup. Convex sync and remote workspace code
   remain optional foundation for future shared or multi-device work and are not
