@@ -44,6 +44,7 @@ import type { ConversationTurn } from "../lib/conversation-presentation";
 import { SideChatContextNotice } from "../components/conversation/SideChats";
 import { AssistantConversationRuntime } from "../components/conversation/AssistantConversationRuntime";
 import { ConversationRecap } from "../components/conversation/ConversationRecap";
+import { ConversationRestore } from "../components/conversation/ConversationRestore";
 import {
   registerRuntimeMcpAppResource,
   releaseRuntimeMcpAppResource,
@@ -57,7 +58,7 @@ import {
   useMcpAppApprovalTarget,
 } from "../components/conversation/McpAppApprovalPortal";
 import { conversationUi } from "../runtime/domains/conversation-ui";
-import { branchInputMessageId } from "../lib/conversation-branches";
+import { branchActionBlockReason, branchInputMessageId } from "../lib/conversation-branches";
 import { useConversationOrigin } from "./useConversationOrigin";
 import type { ConversationOriginNavigation } from "./useWorkspaceNavigation";
 import { prepareExecutionAttachments } from "../lib/execution-attachments";
@@ -812,6 +813,9 @@ export function ConversationPane({
             {history ? (
               <ConversationRecap work={work} onInspect={onInspectWork} />
             ) : null}
+            {history ? <ConversationRestore workspaceId={service.workspaceId} conversationId={room.id} agentId={displayAgent.id}
+              blockedReason={branchSelectionPending || originNavigation.pending ? "Wait for the current conversation view to finish updating." : branchActionBlockReason(work)}
+              onReloadHistory={async () => { await service.loadHistory(room.id, true); await service.refresh(); }} /> : null}
             <ConversationFeed
               messages={history?.messages ?? []}
               agent={displayAgent}
