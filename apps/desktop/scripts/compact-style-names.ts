@@ -9,17 +9,6 @@ interface Source {
 }
 const styleToken =
   /(?<![a-zA-Z0-9_-])(?:--[a-z][a-z0-9-]*|[a-z][a-z0-9_]*(?:-[a-z0-9_]+)*)/g;
-// CSS names are case-sensitive. A wider alphabet keeps more frequent tokens
-// short while retaining the reserved prefixes and the same eligibility rules.
-function compactIndex(index: number): string {
-  const alphabet = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-  let name = "";
-  do {
-    name = alphabet[index % alphabet.length] + name;
-    index = Math.floor(index / alphabet.length);
-  } while (index > 0);
-  return name;
-}
 function safeModifier(node: ts.Expression | undefined): boolean {
   if (!node) return false;
   if (ts.isStringLiteralLike(node))
@@ -44,7 +33,7 @@ export function styleNameMap(
   css: string,
   sources: Source[] = [],
 ): Map<string, string> {
-  if (/\._[0-9a-zA-Z]+(?=--|[^a-zA-Z0-9_-]|$)|--_[0-9a-zA-Z]+(?![a-zA-Z0-9_-])/.test(css))
+  if (/\._[0-9a-z]+(?=[\s.:#>{])|--_[0-9a-z]+\s*:/.test(css))
     throw new Error("Reserved compact style prefix already exists.");
   const candidates = new Set(
     Array.from(
@@ -138,14 +127,14 @@ export function styleNameMap(
         !dynamic.some((prefix) => name.startsWith(prefix)),
     )
     .sort(byFrequency)
-    .forEach((name, index) => names.set(name, `_${compactIndex(index)}`));
+    .forEach((name, index) => names.set(name, `_${index.toString(36)}`));
   const variables = Array.from(
     new Set(
       Array.from(css.matchAll(/(--[a-z][a-z0-9-]*)\s*:/g), (match) => match[1]),
     ),
   ).sort(byFrequency);
   variables.filter(name => !modifierVariables.has(name)).forEach((name, index) =>
-    names.set(name, `--_${compactIndex(index)}`),
+    names.set(name, `--_${index.toString(36)}`),
   );
   return names;
 }

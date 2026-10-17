@@ -153,23 +153,3 @@ it("compacts button variants without changing the HTML element, type or role", (
   expect(compact).toContain('className="button ' + map.get("button-primary") + '"');
   expect(compactStyleText('.button-secondary:hover{}', map)).toBe('.' + map.get("button-secondary") + ':hover{}');
 });
-
-it("keeps wide compact names unique and case-sensitive across radix boundaries", () => {
-  const classes = Array.from({ length: 1300 }, (_, i) => `fixture-${i}`);
-  const css = classes.map((name, i) => `.${name}{--colour-${i}:red}`).join("");
-  const code = `<div className="${classes.join(" ")}"/>`;
-  const map = styleNameMap(css, sources(code));
-  expect(new Set(map.values()).size).toBe(2600);
-  for (const value of ["_z", "_A", "_Z", "_10", "--_A", "--_Z"])
-    expect([...map.values()]).toContain(value);
-  expect([...map.values()].filter(value => !value.startsWith("--")).every(value => value.length <= 3)).toBe(true);
-  const output = compactStyleSource(code, "fixture.tsx", map);
-  for (const name of classes) expect(output).toContain(map.get(name));
-  expect(output).not.toContain("fixture-");
-});
-
-it.each(["._A {}", "._Z:hover {}", "._A,.other {}", "._Z--active {}", "._A[hidden] {}", ":root{--_A:red}", ":root{--_Z:blue}", ".card {color:var(--_A)}"])(
-  "rejects existing uppercase compact names: %s", css => {
-    expect(() => styleNameMap(css)).toThrow("Reserved compact style prefix");
-  },
-);
