@@ -10,6 +10,7 @@ export default tseslint.config(
       "**/.wrangler/**",
       "**/_generated/**",
       "**/worker-configuration.d.ts",
+      "**/tasks-configuration.d.ts",
       "**/*.test.{ts,tsx}",
       "**/*.spec.{ts,tsx}",
       "**/tests/**",

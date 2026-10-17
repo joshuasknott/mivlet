@@ -12,7 +12,12 @@
     },
     "apps/hosted-runner": {
       "ignoreDependencies": ["cloudflare"],
-      "entry": ["src/index.ts", "src/**/*.test.ts", "vitest.config.ts"],
+      "entry": [
+        "src/index.ts",
+        "src/tasks/index.ts",
+        "src/**/*.test.ts",
+        "vitest.config.ts"
+      ],
       "project": ["src/**/*.ts", "vitest.config.ts"]
     },
     "apps/desktop": {
@@ -52,6 +57,7 @@
     "**/target/**",
     "**/_generated/**",
     "**/worker-configuration.d.ts",
+    "**/tasks-configuration.d.ts",
     "apps/hosted-runner/prototypes/opencode/**"
   ],
   "ignoreDependencies": ["@fontsource/inter"]
