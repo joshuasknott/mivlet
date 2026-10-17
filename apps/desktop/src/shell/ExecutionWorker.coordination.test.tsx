@@ -321,8 +321,29 @@ describe("ExecutionWorker coordination reachability", () => {
       await waitFor(() => expect(setup.service.released).toHaveBeenCalled());
       expect(harness.run).not.toHaveBeenCalled();
       expect(setup.commands).toContainEqual(expect.objectContaining({ action: "work-status", status: "failed",
-        reason: expect.stringContaining("Reattach images") }));
+        reason: expect.stringContaining("supported image-capable model") }));
     }
+  });
+
+  it("hydrates a durable image before selecting the model image inputs", async () => {
+    const selected = { ...provider, id: "claude", backendType: "claude-agent", driverKind: "claude-agent",
+      models: [{ id: "sonnet", label: "Claude", available: true }] } as BackendProvider;
+    const setup = makeHarness();
+    setup.session.model = providerModelOptions([{ provider: selected, models: selected.models }])[0]!;
+    const image: NativeImageInput = { id: "saved-image", name: "saved.png", mediaType: "image/png",
+      sizeBytes: 68, width: 1, height: 1, dataUrl: "data:image/png;base64,saved-pixels" };
+    const restored = { id: image.id, name: image.name, type: image.mediaType, sizeBytes: image.sizeBytes,
+      durableRef: { id: image.id, name: image.name, mimeType: image.mediaType, sizeBytes: image.sizeBytes,
+        availability: "workspace-file", relativePath: "Attachments/batch/saved.png", sha256: "a".repeat(64) } };
+    harness.resolveWorkAttachments.mockReturnValueOnce({ attachments: [restored] });
+    const hydrated = { ...restored, imageInput: image };
+    harness.prepareExecutionAttachments.mockResolvedValueOnce({ attachments: [hydrated], batch: undefined, node: undefined });
+    harness.composerImageInputs.mockReturnValue({ ok: true, images: [image] });
+    await act(async () => render(<ExecutionWorker session={setup.session as never} service={setup.service as never}
+      runtime={runtime(selected)} projects={[]} />));
+    await waitFor(() => expect(harness.run).toHaveBeenCalled());
+    expect(harness.composerImageInputs).toHaveBeenLastCalledWith([hydrated]);
+    expect(harness.run.mock.calls[0]![0]).toMatchObject({ images: [image] });
   });
 
   it("fails closed before Work binding when the automation occurrence claim is rejected", async () => {

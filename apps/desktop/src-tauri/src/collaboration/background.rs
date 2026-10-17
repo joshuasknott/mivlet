@@ -35,6 +35,7 @@ pub(crate) fn eligible(item: &Work, agent: &MivletAgentProfile) -> bool {
         && item.recipient_ids.len() <= 1
         && item.dependencies.is_empty()
         && item.outcome_goal.is_none()
+        && (item.schedule.is_none() || item.run_ids.is_empty())
         && (item.run_ids.is_empty() || item.run_ids.len() == item.outputs.len())
         && item.run_ids.iter().all(|run| {
             item.outputs

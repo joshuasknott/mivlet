@@ -6,7 +6,7 @@
 .conversation-goal-row { display: flex; align-items: center; gap: 12px; border-top: 1px solid var(--line); padding-top: 12px; min-width: 0; }
 .conversation-goal-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .conversation-work-controls small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: var(--text-12); }
-.conversation-work-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.conversation-work-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
 .conversation-work-controls .conversation-goal-add { justify-self: start; color: var(--ink-muted); background: transparent; border-color: transparent; padding-left: 0; }
 .conversation-queue-label { margin: 0 0 8px; font-size: var(--text-12); color: var(--ink-muted); }
 .conversation-work-queue ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
@@ -32,4 +32,4 @@
   .conversation-work-queue li > .conversation-work-actions button { min-height: 36px; width: 36px; }
   .conversation-queue-number { width: 24px; }
 }
-@media (pointer: coarse) { .conversation-work-controls button { min-height: 44px; } .conversation-work-queue li > .conversation-work-actions button { min-width: 36px; } }
+@media (pointer: coarse) { .conversation-work-controls button { min-height: 44px; } .conversation-work-queue li > .conversation-work-actions button { min-width: 44px; } }

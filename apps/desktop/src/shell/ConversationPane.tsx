@@ -521,6 +521,8 @@ export function ConversationPane({
         (attachment) =>
           !attachment.imageInput &&
           !attachment.sourceId &&
+          !attachment.workspaceFile &&
+          !attachment.durableRef &&
           !attachment.transientBytes,
       )
     ) {

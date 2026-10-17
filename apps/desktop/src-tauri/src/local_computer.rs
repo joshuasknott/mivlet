@@ -430,7 +430,6 @@ impl LocalComputerState {
         Ok(workspace)
     }
 }
-#[derive(Clone)]
 /// Derive the existing native scope without loading authority or creating files.
 /// Admission and execution use this same identity; callers supply an account root.
 pub(crate) fn computer_scope(
@@ -457,6 +456,7 @@ pub(crate) fn computer_scope(
     })
 }
 
+#[derive(Clone)]
 pub(crate) struct ComputerScope {
     key: String,
     computer_id: String,
