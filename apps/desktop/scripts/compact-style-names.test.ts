@@ -153,3 +153,17 @@ it("compacts button variants without changing the HTML element, type or role", (
   expect(compact).toContain('className="button ' + map.get("button-primary") + '"');
   expect(compactStyleText('.button-secondary:hover{}', map)).toBe('.' + map.get("button-secondary") + ':hover{}');
 });
+
+it("keeps task IDs and query keys distinct from their compactable presentation classes", () => {
+  const code = 'const id = `work-${attempt}`; const queries = ["native-command-jobs", "repository-copies", "local-schedules"]; const route = "agent-editor"; const node = <div className="task-panel-details command-job-list repository-copy-list schedule-list agent-profile-dialog" />;';
+  const classes = ["task-panel-details", "command-job-list", "repository-copy-list", "schedule-list", "agent-profile-dialog"];
+  const css = classes.map(name => `.${name}{display:block}`).join("");
+  const map = styleNameMap(css, sources(code));
+  expect(classes.every(name => map.has(name))).toBe(true);
+  const transformed = compactStyleSource(code, "task.tsx", map);
+  expect(transformed.split("const node")[0]).toBe(code.split("const node")[0]);
+  for (const name of classes) {
+    expect(transformed).toContain(map.get(name)!);
+    expect(compactStyleText(css, map)).toContain(`.${map.get(name)}{display:block}`);
+  }
+});

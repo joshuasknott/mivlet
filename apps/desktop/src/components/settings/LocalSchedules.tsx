@@ -36,7 +36,7 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
     catch (error) { setStatus(errorText(error)); }
     finally { setPending(false); }
   };
-  return <div className="settings-page__body local-schedules">
+  return <div className="settings-page__body schedule-list">
     <div className="settings-section-heading"><p>Run a task with a named agent at a set time. Keep Mivlet open, online, and this computer awake. Missed recurring times coalesce to one run after reopening; interrupted runs require review.</p></div>
     {project ? <p>Tasks for <strong>{project.name}</strong>. Each result becomes a shared project conversation and a recorded work item.</p> : null}
     <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Agent workflows use the same tools and approval controls as chat. The saved permission level is a ceiling; reducing the agent's access also limits future runs. Approvals appear in Activity, and Stop ends the current task. Research-only schedules use Codex web search.</p></details>

@@ -231,7 +231,7 @@ export function RepositoryCopies({
   );
   return (
     <details
-      className="repository-copies"
+      className="repository-copy-list"
       onToggle={(event) => {
         setOpen(event.currentTarget.open);
         if (!event.currentTarget.open) {
