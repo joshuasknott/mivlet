@@ -24,11 +24,11 @@ export class PhoneRelayAuthority extends DurableObject<PhoneEnv> {
       if (!token) return json({ error: "unauthorized" }, 401);
       const cap = await readPhoneRelayCapability(this.env.MIVLET_PHONE_RELAY_SIGNING_KEY, token);
       if (new URL(request.url).pathname !== `/v1/phone/${cap.connectionId}/connect`) return json({ error: "scope-mismatch" }, 401);
-      return await this.connect(cap);
+      return await this.connectNative(cap);
     } catch { return json({ error: "phone-connection-rejected" }, 401); }
   }
 
-  private async connect(cap: PhoneRelayCapability): Promise<Response> {
+  private async connectNative(cap: PhoneRelayCapability): Promise<Response> {
     const now = Date.now();
     const owner = await this.ctx.storage.transaction(async tx => {
       const previous = await tx.get<Owner>("owner");

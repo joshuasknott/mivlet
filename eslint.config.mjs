@@ -11,6 +11,8 @@ export default tseslint.config(
       "**/_generated/**",
       "**/worker-configuration.d.ts",
       "**/tasks-configuration.d.ts",
+      "**/phone-configuration.d.ts",
+      "**/runtime-configuration.d.ts",
       "**/*.test.{ts,tsx}",
       "**/*.spec.{ts,tsx}",
       "**/tests/**",

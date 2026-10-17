@@ -5,6 +5,6 @@
     "rootDir": "src/tasks",
     "types": []
   },
-  "include": ["src/tasks", "tasks-configuration.d.ts"],
+  "include": ["src/tasks", "runtime-configuration.d.ts", "tasks-configuration.d.ts"],
   "exclude": ["src/**/*.test.ts", "src/**/testing/**"]
 }

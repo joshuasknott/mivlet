@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist/phone",
+    "rootDir": "src/phone",
+    "types": []
+  },
+  "include": ["src/phone", "runtime-configuration.d.ts", "phone-configuration.d.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**"]
+}
