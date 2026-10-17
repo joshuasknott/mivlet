@@ -492,6 +492,37 @@ fn apply(
             })
             .map_err(|error| error.to_string());
     }
+    if request.action == "cancel" {
+        let intent = previous_intent
+            .as_ref()
+            .filter(|intent| intent.state == "prepared")
+            .ok_or("Only a pending unchanged restore can be cancelled.")?;
+        if observed
+            .as_ref()
+            .is_none_or(|value| value["kind"] != "unchanged")
+        {
+            return Err("The file outcome is not unchanged. Reconcile before cancelling.".into());
+        }
+        return crate::local_computer::coding::checkpoints::conversation::with_tree(
+            state,
+            &intent.review.point,
+            |actual| {
+                if intent.review.checkpoint["currentTreeId"].as_str() != Some(&actual) {
+                    return Err(
+                        "Files changed before cancellation. Reconcile this restore again.".into(),
+                    );
+                }
+                store.transaction(|conn| {
+                let scope = owner(conn, store, &request)?;
+                let mut saved = ledger(conn, store, &scope, &request.conversation_id)?;
+                let pending = saved.intents.iter_mut().find(|candidate| candidate.id == intent.id && candidate.state == "prepared").ok_or_else(|| invalid("The restore outcome changed before cancellation. Reconcile again."))?;
+                pending.state = "cancelled".into();
+                save(conn, store, &scope, &request.conversation_id, &saved)?;
+                Ok(json!({"state":"cancelled"}))
+            }).map_err(|error| error.to_string())
+            },
+        );
+    }
     if request.action == "finish" {
         let intent = previous_intent
             .as_ref()
@@ -545,6 +576,7 @@ fn apply(
         let mut saved = ledger(conn, store, &scope, &request.conversation_id)?;
         match request.action.as_str() {
             "forget-point" => {
+                super::ensure_conversation_idle(conn, store, &request.conversation_id)?;
                 let point_id = request.point_id.as_deref().ok_or_else(|| invalid("Choose a linked recovery point."))?;
                 if saved.intents.iter().any(|intent| intent.review.point.id == point_id && !matches!(intent.state.as_str(), "complete" | "reverted" | "cancelled")) { return Err(invalid("Reconcile this restore before removing its linked point.")); }
                 saved.points.retain(|point| !(point.id == point_id && point.agent_id == request.agent_id));
@@ -565,13 +597,6 @@ fn apply(
                 }
                 Ok(json!({"points":saved.points.into_iter().filter(|point| point.agent_id == request.agent_id).collect::<Vec<_>>(),"intents":saved.intents.into_iter().filter(|intent| intent.review.point.agent_id == request.agent_id).collect::<Vec<_>>(),"observed":observed}))
             },
-            "cancel" => {
-                if observed.as_ref().is_none_or(|value| value["kind"] != "unchanged") { return Err(invalid("The file outcome is not unchanged. Reconcile before cancelling.")); }
-                let intent = saved.intents.iter_mut().find(|intent| Some(&intent.id) == request.intent_id.as_ref() && intent.state == "prepared").ok_or_else(|| invalid("This pending restore cannot be cancelled."))?;
-                intent.state = "cancelled".into();
-                save(conn, store, &scope, &request.conversation_id, &saved)?;
-                Ok(json!({"state":"cancelled"}))
-            }
             "stage" => {
                 super::ensure_conversation_idle(conn, store, &request.conversation_id)?;
                 let review = saved.review.clone().filter(|review| Some(&review.id) == request.preview_id.as_ref() && review.point.agent_id == request.agent_id).ok_or_else(|| invalid("Preview this exact recovery point again before approving."))?;
