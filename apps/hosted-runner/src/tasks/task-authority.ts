@@ -12,7 +12,7 @@ interface StoredTask {
 }
 const terminal = (status: HostedTaskStatus) => status !== "queued" && status !== "running";
 
-/** One immutable admission, one possible provider send, monotonic cancellation. */
+/** Immutable mode-specific admission, dispatch journal and monotonic Stop. */
 export class TaskAuthority extends DurableObject<TaskEnv> {
   async admit(cap: HostedTaskCapability, value: HostedTaskAdmission): Promise<HostedTaskSnapshot> {
     const digest = await hostedTaskSha256(value); const now = Date.now();
@@ -111,6 +111,7 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
         current.snapshot = { ...current.snapshot, status: valid ? "completed" : result.ok || result.uncertain ? "uncertain" : "failed",
           sequence: current.snapshot.sequence + 1, updatedAt: Date.now(), resultBytes: valid ? bytes!.length : 0,
           ...(valid ? { resultSha256, usage: result.ok ? result.result.usage : undefined } : { errorCode: result.ok ? "hosted-result-limit" : result.code }) };
+        if (valid && result.ok && result.result.research) current.snapshot.research = result.result.research;
         if (valid && result.ok) current.text = result.result.text;
         delete current.admission; delete current.attemptNonce;
         await tx.put("task", current); await tx.setAlarm(current.snapshot.retainedUntil);
@@ -128,6 +129,20 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
     if (row.accountId !== cap.accountId || b.workspaceId !== cap.workspaceId || b.agentId !== cap.agentId || b.taskId !== cap.resourceId) throw new Error("task-scope-mismatch");
   }
   private async expire(): Promise<void> {
+    // Research bindings and source receipts contain public URL/query data,
+    // which may derive from the disclosed task. Do not retain them as a text
+    // mode's seven-day hash-only tombstone after their 24-hour disclosure.
+    const candidate = await this.ctx.storage.get<StoredTask>("task");
+    if (candidate?.snapshot.binding.version === 2 && candidate.snapshot.retainedUntil <= Date.now()) {
+      await this.ctx.blockConcurrencyWhile(async () => {
+        const current = await this.ctx.storage.get<StoredTask>("task");
+        if (current?.digest === candidate.digest && current.snapshot.retainedUntil <= Date.now()) {
+          await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll();
+        }
+      });
+      await this.env.PROVIDER_CUSTODY.getByName(candidate.accountId).release(candidate.accountId, candidate.snapshot.binding.taskId, candidate.digest).catch(() => undefined);
+      return;
+    }
     const expired = await this.ctx.storage.transaction(async tx => {
       const row = await tx.get<StoredTask>("task"); if (!row || row.snapshot.retainedUntil > Date.now()) return undefined;
       if (row.purgeAt !== undefined) return undefined;

@@ -77,6 +77,8 @@ export interface RunAgentLoopOptions {
   maxToolOutputCharacters?: number;
   /** Whether this provider/model should receive tool schemas at all. */
   toolsEnabled?: boolean;
+  /** Native hosted consent already includes the full fixed tool guidance. */
+  toolGuidanceAlreadyIncluded?: boolean;
 }
 
 export const MAX_TOOL_ARGUMENT_CHARACTERS = 64_000;
@@ -155,10 +157,10 @@ export async function* runAgentLoop(
   const execute = permissionGatedExecutor(options.execute, permissionMode);
   const systemPrefix = [
     options.contextPrefix?.trim(),
-    tools.some((tool) => tool.name === "connection-read")
+    options.toolGuidanceAlreadyIncluded !== true && tools.some((tool) => tool.name === "connection-read")
       ? `Mivlet tool-use policy: ${CONNECTED_SOURCE_BRIEF_GUIDANCE}`
       : undefined,
-    tools.some((tool) => tool.name === "web-fetch")
+    options.toolGuidanceAlreadyIncluded !== true && tools.some((tool) => tool.name === "web-fetch")
       ? `Mivlet web-source policy: ${WEB_SOURCE_BRIEF_GUIDANCE}`
       : undefined
   ].filter((part): part is string => Boolean(part)).join("\n\n");

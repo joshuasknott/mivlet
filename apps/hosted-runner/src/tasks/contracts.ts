@@ -1,4 +1,4 @@
-import { canonicalHostedTaskJson, hostedTaskSha256, hostedTextContentFailure, HOSTED_TEXT_TASK_LIMITS as L, type HostedTaskAdmission, type HostedTaskCapability, type HostedTextProviderId } from "@mivlet/protocol";
+import { canonicalHostedTaskJson, hostedTaskSha256, hostedTextContentFailure, HOSTED_TEXT_TASK_LIMITS as L, HOSTED_PUBLIC_WEB_LIMITS as W, validatePublicWebScope, publicWebTaskPolicy, type HostedTaskAdmission, type HostedTaskCapability, type HostedTextProviderId } from "@mivlet/protocol";
 const PROVIDERS = ["openai", "anthropic", "gemini", "xai", "deepseek"] as const;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/;
 export function identifier(value: unknown): string {
@@ -23,17 +23,22 @@ export function integer(value: unknown, minimum: number, maximum: number): numbe
 export async function admission(value: unknown, capability: HostedTaskCapability, now = Date.now()): Promise<HostedTaskAdmission> {
   const input = boundedObject(value); exactKeys(input, ["binding", "input"]);
   const b = boundedObject(input.binding); const text = boundedObject(input.input);
-  exactKeys(b, ["version", "taskId", "admissionId", "runId", "workspaceId", "agentId", "workId", "workGeneration", "conversationId", "conversationGeneration", "expectedSequence", "inputSha256", "providerId", "model", "credentialId", "credentialRevision", "budget", "expiresAt"], ["expectedHeadId", "reasoningEffort"]);
+  const research = b.version === 2 && b.mode === "public-web-research";
+  exactKeys(b, ["version", "taskId", "admissionId", "runId", "workspaceId", "agentId", "workId", "workGeneration", "conversationId", "conversationGeneration", "expectedSequence", "inputSha256", "providerId", "model", "credentialId", "credentialRevision", "budget", "expiresAt", ...(research ? ["mode", "webScope"] : [])], ["expectedHeadId", "reasoningEffort"]);
   for (const field of ["taskId", "admissionId", "runId", "workspaceId", "agentId", "workId", "conversationId", "credentialId"]) identifier(b[field]);
   if (b.expectedHeadId !== undefined) identifier(b.expectedHeadId);
-  if (b.version !== 1 || b.workspaceId !== capability.workspaceId || b.agentId !== capability.agentId || b.taskId !== capability.resourceId) throw new Error("task-scope-mismatch");
+  if ((!research && b.version !== 1) || b.workspaceId !== capability.workspaceId || b.agentId !== capability.agentId || b.taskId !== capability.resourceId) throw new Error("task-scope-mismatch");
   integer(b.workGeneration, 1, 0xffff_ffff); integer(b.conversationGeneration, 1, 0xffff_ffff); integer(b.expectedSequence, 0, Number.MAX_SAFE_INTEGER); integer(b.credentialRevision, 1, 0xffff_ffff);
   provider(b.providerId);
   if (typeof b.model !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:/-]{0,159}$/.test(b.model)) throw new Error("invalid-task-model");
   if (b.reasoningEffort !== undefined && (typeof b.reasoningEffort !== "string" || !["none", "minimal", "low", "medium", "high", "xhigh"].includes(b.reasoningEffort))) throw new Error("invalid-task-reasoning");
   integer(b.expiresAt, now + 1, now + L.capabilityMs);
-  const budget = boundedObject(b.budget); exactKeys(budget, ["maxModelCalls", "maxOutputTokens", "maxElapsedMs", "maxResultBytes"]);
-  if (budget.maxModelCalls !== 1) throw new Error("invalid-task-budget");
+  const budget = boundedObject(b.budget); exactKeys(budget, ["maxModelCalls", "maxOutputTokens", "maxElapsedMs", "maxResultBytes", ...(research ? ["maxPageReads", "maxSourceBytes"] : [])]);
+  if (research) {
+    validatePublicWebScope(b.webScope);
+    integer(budget.maxModelCalls, 1, W.modelCalls); integer(budget.maxPageReads, 1, W.pageReads); integer(budget.maxSourceBytes, 1, W.sourceBytes);
+    if (hostedTextContentFailure(canonicalHostedTaskJson(b.webScope))) throw new Error("research-secret-url");
+  } else if (budget.maxModelCalls !== 1) throw new Error("invalid-task-budget");
   integer(budget.maxOutputTokens, 1, L.outputTokens); integer(budget.maxElapsedMs, 1000, L.elapsedMs); integer(budget.maxResultBytes, 1, L.resultBytes);
   exactKeys(text, ["messages"]);
   if (!Array.isArray(text.messages) || !text.messages.length || text.messages.length > 32) throw new Error("invalid-task-input");
@@ -42,6 +47,10 @@ export async function admission(value: unknown, capability: HostedTaskCapability
     if (!["system", "user", "assistant"].includes(String(message.role)) || typeof message.content !== "string" || message.content.includes("\0")) throw new Error("hosted-text-only");
     const rejected = hostedTextContentFailure(message.content); if (rejected) throw new Error(rejected);
   }
+  if (research && !text.messages.some(raw => {
+    const message = boundedObject(raw);
+    return message.role === "system" && message.content === publicWebTaskPolicy(validatePublicWebScope(b.webScope));
+  })) throw new Error("research-policy-review-required");
   if (new TextEncoder().encode(canonicalHostedTaskJson(text)).length > L.inputBytes || await hostedTaskSha256(text) !== b.inputSha256 || await hostedTaskSha256(input) !== capability.requestSha256) throw new Error("task-input-mismatch");
   return value as HostedTaskAdmission;
 }

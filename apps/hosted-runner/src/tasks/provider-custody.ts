@@ -5,6 +5,8 @@ import {
   type HostedTaskBinding, type HostedTaskCapability, type HostedTaskTextInput,
 } from "@mivlet/protocol";
 import { ProviderFailure, runRealText, type ProviderResult } from "./provider";
+import { runRealResearch } from "./research-provider";
+import { researchJournal, researchState, type ResearchState } from "./research-journal";
 import type { TaskEnv } from "./environment";
 
 interface Credential extends HostedProviderConnection {
@@ -15,6 +17,7 @@ interface Reservation {
   createdAt: number; retainedUntil: number; active: boolean;
   /** Persisted BEFORE provider egress; recovery never repeats this request. */
   dispatched: boolean;
+  research?: ResearchState;
 }
 interface Account {
   accountId: string; credentials: Credential[]; reservations: Reservation[];
@@ -24,7 +27,7 @@ export type CustodyResult = { ok: true; result: ProviderResult } | { ok: false; 
 
 /** Encrypted cloud-only credentials and account quotas. No raw-key RPC exists. */
 export class ProviderCustody extends DurableObject<TaskEnv> {
-  private readonly running = new Map<string, AbortController>();
+  private readonly running = new Map<string, { controller: AbortController; digest: string }>();
 
   async consume(cap: HostedTaskCapability): Promise<void> {
     await this.change(cap.accountId, row => {
@@ -55,7 +58,7 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
       // A replacement is also revocation of the previous in-flight key.
       return { connection: this.publicCredential(value), tasks: row.reservations.filter(r => r.binding.credentialId === value.credentialId).map(r => r.taskId) };
     });
-    for (const id of saved.tasks) this.running.get(id)?.abort();
+    for (const id of saved.tasks) this.running.get(id)?.controller.abort();
     return saved.connection;
   }
 
@@ -69,7 +72,7 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
       c.enabled = false; c.revision += 1; c.updatedAt = Date.now(); c.encrypted = []; c.iv = [];
       return { connection: this.publicCredential(c), tasks: row.reservations.filter(r => r.binding.credentialId === c.credentialId).map(r => r.taskId) };
     });
-    for (const id of result.tasks) this.running.get(id)?.abort();
+    for (const id of result.tasks) this.running.get(id)?.controller.abort();
     return result.connection;
   }
 
@@ -92,6 +95,7 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
 
   async run(accountId: string, binding: HostedTaskBinding, input: HostedTaskTextInput, digest: string): Promise<CustodyResult> {
     let encrypted: Credential;
+    const attempt = crypto.randomUUID();
     try {
       if (await hostedTaskSha256(input) !== binding.inputSha256) throw new Error("task-input-mismatch");
       encrypted = await this.change(accountId, row => {
@@ -100,10 +104,11 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
         const c = row.credentials.find(c => c.credentialId === binding.credentialId);
         this.requireCredential(c, binding, Date.now());
         r.dispatched = true;
+        if (binding.version === 2) r.research = researchState(attempt, binding.budget.maxElapsedMs);
         return c!;
       });
     } catch { return { ok: false, code: "hosted-dispatch-not-current", uncertain: true }; }
-    const controller = new AbortController(); this.running.set(binding.taskId, controller);
+    const controller = new AbortController(); this.running.set(binding.taskId, { controller, digest });
     const timer = setTimeout(() => controller.abort(), binding.budget.maxElapsedMs);
     let secret = "";
     try {
@@ -116,22 +121,34 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
         this.requireCredential(row.credentials.find(c => c.credentialId === binding.credentialId), binding, Date.now());
         if (!r?.active || controller.signal.aborted || binding.expiresAt <= Date.now()) throw new Error("hosted-dispatch-not-current");
       });
-      const result = await runRealText(binding, input, secret, controller.signal);
+      const journal = binding.version === 2 ? researchJournal(binding, operation => this.change(accountId, row => {
+        const r = row.reservations.find(r => r.taskId === binding.taskId && r.digest === digest);
+        this.requireCredential(row.credentials.find(c => c.credentialId === binding.credentialId), binding, Date.now());
+        if (!r?.active || !r.dispatched || r.research?.attempt !== attempt
+          || canonicalHostedTaskJson(r.binding) !== canonicalHostedTaskJson(binding)) throw new Error("hosted-dispatch-not-current");
+        return operation(r.research);
+      }), controller.signal) : undefined;
+      const result = binding.version === 2
+        ? await runRealResearch(binding, input, secret, controller.signal, journal!)
+        : await runRealText(binding, input, secret, controller.signal);
       return { ok: true, result };
     } catch (error) {
       return { ok: false, code: error instanceof ProviderFailure ? error.code : "hosted-dispatch-outcome-uncertain", uncertain: !(error instanceof ProviderFailure) || error.uncertain };
     } finally {
       secret = ""; clearTimeout(timer);
-      if (this.running.get(binding.taskId) === controller) this.running.delete(binding.taskId);
+      if (this.running.get(binding.taskId)?.controller === controller) this.running.delete(binding.taskId);
     }
   }
 
   async release(accountId: string, taskId: string, digest: string): Promise<void> {
+    // Stop the exact in-memory dispatch before waiting for durable cleanup.
+    // A failed cleanup never resumes it or permits another send.
+    const running = this.running.get(taskId);
+    if (running?.digest === digest) running.controller.abort();
     await this.change(accountId, row => {
       const r = row.reservations.find(r => r.taskId === taskId && r.digest === digest);
       if (!r) throw new Error("task-reservation-missing"); r.active = false;
     });
-    this.running.get(taskId)?.abort();
   }
 
   async alarm(): Promise<void> {
