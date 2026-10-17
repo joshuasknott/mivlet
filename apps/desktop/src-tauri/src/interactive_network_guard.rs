@@ -35,7 +35,19 @@ struct Fence {
 }
 thread_local! {
     // COM receivers remain on the main WebView UI thread for its lifetime.
-    static RECEIVERS: RefCell<Vec<ICoreWebView2DevToolsProtocolEventReceiver>> = const { RefCell::new(Vec::new()) };
+    static RECEIVERS: RefCell<Vec<(ICoreWebView2DevToolsProtocolEventReceiver, i64)>> = const { RefCell::new(Vec::new()) };
+}
+/// Disposable QA owns the sole WebView in its process. Remove subscriptions
+/// before Close so handler-captured Core interfaces cannot keep its profile
+/// alive after the event loop exits. This is not a renderer command.
+#[cfg(debug_assertions)]
+pub(crate) fn dispose_acceptance() {
+    READY.store(false, Ordering::Release);
+    RECEIVERS.with(|receivers| {
+        for (receiver, token) in receivers.borrow_mut().drain(..) {
+            let _ = unsafe { receiver.remove_DevToolsProtocolEventReceived(token) };
+        }
+    });
 }
 fn allow(frames: &mut Frames, frame: &str, uri: &str, registered: bool) -> bool {
     if let Some(expected) = frames.get(frame) {
@@ -216,7 +228,7 @@ fn subscribe(
     unsafe {
         receiver.add_DevToolsProtocolEventReceived(handler, &mut token)?;
     }
-    RECEIVERS.with(|receivers| receivers.borrow_mut().push(receiver));
+    RECEIVERS.with(|receivers| receivers.borrow_mut().push((receiver, token)));
     Ok(())
 }
 pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
