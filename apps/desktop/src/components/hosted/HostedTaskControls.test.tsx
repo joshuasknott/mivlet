@@ -186,7 +186,7 @@ it("shows retained conflict results as escaped text without resubmitting", async
   render(<HostedTaskControls item={hostedItem} api={actions} onChanged={vi.fn().mockResolvedValue(undefined)} />);
   fireEvent.click(screen.getByRole("button", { name: "Refresh cloud status" }));
   await screen.findByText("<script>retained result</script>");
-  expect(document.querySelector(".hosted-task-outcome script")).toBeNull();
+  expect(document.querySelector(".cloud-panel-task-outcome script")).toBeNull();
   expect(actions.admit).not.toHaveBeenCalled();
   expect(screen.getByText(/needs review before the conversation/)).toBeVisible();
 });

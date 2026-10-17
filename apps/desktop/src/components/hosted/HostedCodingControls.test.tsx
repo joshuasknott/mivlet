@@ -50,7 +50,7 @@ it("binds exact selected paths and argument arrays and refuses hidden, stale, sh
 it("shows literal diffs and applies only after exact separate approval", async () => {
   const p = props(); render(<HostedCodingImport {...p} />); await openImport();
   expect(screen.getByText("+<script>literal</script>")).toBeVisible();
-  expect(document.querySelector(".hosted-coding-diff script")).toBeNull();
+  expect(document.querySelector(".cloud-panel-coding-diff script")).toBeNull();
   expect(p.api.applyImport).not.toHaveBeenCalled();
   fireEvent.click(screen.getByRole("button", { name: "Import changes once" }));
   await waitFor(() => expect(p.onChanged).toHaveBeenCalledTimes(1));

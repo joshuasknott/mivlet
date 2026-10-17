@@ -21,7 +21,7 @@ export interface HostedProviderSettingsProps {
 export function HostedProviderSettings(props: HostedProviderSettingsProps) {
   const [selected, setSelected] = useState("");
   const agentId = props.agents.some(agent => agent.id === selected) ? selected : props.agents[0]?.id;
-  return <div className="hosted-provider-settings">
+  return <div className="cloud-panel-provider-settings">
     <label>Cloud connection for agent<select aria-label="Cloud connection agent" value={agentId ?? ""} onChange={event => setSelected(event.target.value)}>{props.agents.map(agent => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
     {agentId ? <ProviderSettings key={`${hostedScopeKey()}:${props.workspaceId}:${agentId}`} workspaceId={props.workspaceId} agentId={agentId} api={props.api} /> : <p>Add an agent before connecting a cloud provider.</p>}
   </div>;
@@ -51,17 +51,17 @@ function ProviderSettings({ workspaceId, agentId, api = defaultApi }: HostedProv
     void run("refresh", load);
     return () => { live.current = false; };
   }, []);
-  return <section className="settings-group hosted-provider-settings" aria-label="Cloud task connections">
-    <header className="hosted-card__heading"><h2>Cloud tasks</h2><span>Text and public web research</span></header>
+  return <section className="settings-group cloud-panel-provider-settings" aria-label="Cloud task connections">
+    <header className="cloud-panel-card__heading"><h2>Cloud tasks</h2><span>Text and public web research</span></header>
     <p>Let a reviewed text or public web research task finish while your computer is asleep.</p>
-    <p className="hosted-muted">Connect a separate API key for cloud use. Your local provider connections are never transferred. Cloud keys expire after 30 days; task and page text are retained for 24 hours. This uses Mivlet’s development service.</p>
-    <div className="hosted-provider-list">{(Object.keys(hostedProviderLabels) as HostedTextProviderId[]).flatMap(providerId => {
+    <p className="cloud-panel-muted">Connect a separate API key for cloud use. Your local provider connections are never transferred. Cloud keys expire after 30 days; task and page text are retained for 24 hours. This uses Mivlet’s development service.</p>
+    <div className="cloud-panel-provider-list">{(Object.keys(hostedProviderLabels) as HostedTextProviderId[]).flatMap(providerId => {
       const matching = current() ? connections.filter(value => value.providerId === providerId && value.enabled).sort((left, right) => right.updatedAt - left.updatedAt) : [];
       const rows: (HostedProviderConnection | undefined)[] = matching.length ? matching : [undefined];
-      return rows.map((connection, index) => <div className="hosted-provider-row" key={`${providerId}:${connection?.credentialId ?? "new"}`}>
+      return rows.map((connection, index) => <div className="cloud-panel-provider-row" key={`${providerId}:${connection?.credentialId ?? "new"}`}>
         <ProviderIcon provider={providerId} size={26} />
         <div><strong>{hostedProviderLabels[providerId]}{matching.length > 1 ? ` · connection ${index + 1}` : ""}</strong><small>{!loaded ? pending ? "Checking connection…" : "Connection unavailable" : connection ? `${connection.expiresAt > Date.now() ? "Connected" : "Expired"} · expires ${new Date(connection.expiresAt).toLocaleDateString()}` : "Not connected"}</small></div>
-        <div className="hosted-actions">
+        <div className="cloud-panel-actions">
           <button type="button" className={connection ? "button button--secondary" : "button button--primary"} disabled={Boolean(pending) || !loaded || !current()} onClick={() => void run(providerId, async () => {
             await api.enroll({ workspaceId, agentId, providerId, ...(connection ? { credentialId: connection.credentialId, expectedRevision: connection.revision } : {}) });
             if (current()) await load();
@@ -73,7 +73,7 @@ function ProviderSettings({ workspaceId, agentId, api = defaultApi }: HostedProv
         </div>
       </div>);
     })}</div>
-    <p className="hosted-muted">Enter the key in the secure native window. It is stored in your cloud connection, separately from this device’s credentials. Provider usage is billed by your provider.</p>
+    <p className="cloud-panel-muted">Enter the key in the secure native window. It is stored in your cloud connection, separately from this device’s credentials. Provider usage is billed by your provider.</p>
     <button type="button" className="button button--secondary" disabled={Boolean(pending)} onClick={() => void run("refresh", load)}>Refresh connections</button>
     {pending === "refresh" && <p role="status">Checking cloud connections…</p>}
     {error && <p role="alert">{error}</p>}

@@ -1,9 +1,16 @@
-import type { HostedTextProviderId } from "@mivlet/protocol";
+import type { ApprovalRequest, ApprovalResolutionResponse, HostedTextProviderId } from "@mivlet/protocol";
 import { getActiveRuntimeDataScope } from "../../runtime-scope";
 
 export const hostedProviderLabels: Record<HostedTextProviderId, string> = {
   openai: "OpenAI", anthropic: "Anthropic", gemini: "Gemini", xai: "xAI", deepseek: "DeepSeek",
 };
+
+/** Both cloud admission and local import require this exact one-time record. */
+export function matchesHostedApproval(request: ApprovalRequest, recorded: ApprovalResolutionResponse | null): boolean {
+  return Boolean(recorded?.persisted && recorded.auditEntry.requestId === request.id && recorded.auditEntry.decision === "once"
+    && (!recorded.grant || recorded.grant.requestId === request.id)
+    && Object.entries(request).every(([key, value]) => JSON.stringify(recorded.effectiveRequest[key as keyof typeof recorded.effectiveRequest]) === JSON.stringify(value)));
+}
 
 const scopeKeys = new WeakMap<object, number>();
 let nextScopeKey = 0;

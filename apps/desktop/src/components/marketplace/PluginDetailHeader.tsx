@@ -9,11 +9,11 @@ export function PluginDetailHeader({ name, description, icon, status, statusClas
   titleId?: string;
 }) {
   return <>
-    <p className="connector-detail__eyebrow">Plugins</p>
-    <div className="connector-detail__header">
+    <p className="integration-panel-detail__eyebrow">Plugins</p>
+    <div className="integration-panel-detail__header">
       {icon}
       <div><h2 id={titleId}>{name}</h2>{description ? <p>{description}</p> : null}</div>
-      <span className={`connector-detail__status${statusClass ? ` connector-detail__status--${statusClass}` : ""}`}>{status}</span>
+      <span className={`integration-panel-detail__status${statusClass ? ` integration-panel-detail__status--${statusClass}` : ""}`}>{status}</span>
     </div>
   </>;
 }

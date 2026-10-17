@@ -64,10 +64,10 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
 
   const connected = Boolean(discovery && remoteConnectionReady(discovery));
   const disabled = busy || !available;
-  return <article className="connector-detail" aria-label={`${entry.name} connection`} aria-busy={busy}>
+  return <article className="integration-panel-detail" aria-label={`${entry.name} connection`} aria-busy={busy}>
     <PluginDetailHeader name={entry.name} description={entry.description} icon={<span className={`plugin-catalogue-connector-icon plugin-catalogue-connector-icon--${entry.icon}`}><MarketplaceIcon id={entry.id} icon={entry.icon} /></span>} titleId={titleId} status={busy ? "Connecting…" : connected ? "Connected" : failed || saved ? "Needs attention" : "Available"} />
-    <p className="connector-detail__intro">{connected ? "Ready to use with any of your agents." : `Sign in to use ${entry.name} in your conversations.`}</p>
-    <div className="connector-detail__actions">
+    <p className="integration-panel-detail__intro">{connected ? "Ready to use with any of your agents." : `Sign in to use ${entry.name} in your conversations.`}</p>
+    <div className="integration-panel-detail__actions">
       {connected && onUseConnector ? <button type="button" disabled={disabled} onClick={() => onUseConnector({ id: entry.id, name: entry.name, status: "connected", connectionRoute: "remote", permissions: [], healthSummary: "Connected", lastCheckedAt: discovery?.discoveredAt ?? "" })}>Use in chat</button> : null}
       {!connected ? <button type="button" disabled={disabled} onClick={() => void run(async (isCurrent) => {
         if (!workspaceId) return;
@@ -81,11 +81,11 @@ export function RemoteConnectorDetails({ entry, preset, workspaceId, titleId, on
         if (isCurrent()) { setDiscovery(null); setNotice("Disconnected."); }
       })}>Disconnect</button> : null}
     </div>
-    {notice ? <p className="connector-detail__notice" role={failed ? "alert" : "status"}>{notice}</p> : null}
-    {!connected && preset.prerequisite ? <p className="connector-detail__notice">{preset.prerequisite}</p> : null}
+    {notice ? <p className="integration-panel-detail__notice" role={failed ? "alert" : "status"}>{notice}</p> : null}
+    {!connected && preset.prerequisite ? <p className="integration-panel-detail__notice">{preset.prerequisite}</p> : null}
     <PluginOverview id={entry.id} access={connected ? "Uses your connected account permissions" : "Chosen when you connect"} onExample={connected && !disabled && onUseConnector ? (prompt) => onUseConnector({ id: entry.id, name: entry.name, status: "connected", connectionRoute: "remote", permissions: [], healthSummary: "Connected", lastCheckedAt: discovery?.discoveredAt ?? "" }, prompt) : undefined} />
-    <p className="connector-detail__hint">The tools this connection provides become available to your agents; consequential actions still follow your workspace approval preference.</p>
-    <details className="connector-guide"><summary>About this connection</summary>
+    <p className="integration-panel-detail__hint">The tools this connection provides become available to your agents; consequential actions still follow your workspace approval preference.</p>
+    <details className="integration-panel-guide"><summary>About this connection</summary>
       <p>Account access is managed by {entry.name}. You can disconnect at any time.</p>
       {preset.prerequisite ? <p>{preset.prerequisite}</p> : null}
       <a href={preset.documentation} target="_blank" rel="noreferrer">Connection help</a>
