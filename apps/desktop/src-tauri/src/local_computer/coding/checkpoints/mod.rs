@@ -1,6 +1,7 @@
 //! Immutable file checkpoints in a selected private repository. Conversation
 //! state, provider sessions and Git HEAD are deliberately outside restoration.
 pub(crate) mod conversation;
+pub(crate) mod hosted;
 mod preview;
 // Native service projection for the separately stacked copy inventory consumer.
 // It grants no action and must never be exposed as a cleanup authorization.

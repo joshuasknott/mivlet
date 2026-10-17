@@ -435,9 +435,29 @@ pub(super) fn current(
     generation: u32,
     run: Option<&str>,
 ) -> Result<Work> {
+    current_in(ctx, key, generation, run, false)
+}
+
+/// An explicit native file-import review can inspect its parked coding owner.
+/// This never authorizes provider dispatch or continuation of that assignment.
+pub(super) fn current_for_user_review(
+    ctx: &Context<'_>,
+    key: &str,
+    generation: u32,
+    run: Option<&str>,
+) -> Result<Work> {
+    current_in(ctx, key, generation, run, true)
+}
+fn current_in(
+    ctx: &Context<'_>,
+    key: &str,
+    generation: u32,
+    run: Option<&str>,
+    user_review: bool,
+) -> Result<Work> {
     let item = ctx.item(key)?;
     if item.generation != generation
-        || !item.status.active()
+        || !(item.status.active() || user_review && item.status == WorkStatus::AwaitingUser)
         || run.is_some_and(|run| item.current_run_id.as_deref() != Some(run))
     {
         return Err(invalid(

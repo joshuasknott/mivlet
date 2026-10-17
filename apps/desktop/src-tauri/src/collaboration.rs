@@ -11,6 +11,7 @@ pub(crate) mod external;
 mod goals;
 mod handover;
 pub(crate) mod hosted;
+pub(crate) mod hosted_repository;
 pub(crate) mod models;
 mod output_revisions;
 pub(crate) mod pr_watches;

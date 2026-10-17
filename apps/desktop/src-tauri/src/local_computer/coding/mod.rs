@@ -2,6 +2,7 @@
 pub(crate) mod checkpoints;
 pub(crate) mod copy_manager;
 mod git;
+pub(crate) mod hosted_repository;
 pub(crate) mod job_review;
 mod jobs;
 pub(crate) mod task_binding;
@@ -173,14 +174,16 @@ fn reconcile_import(
         |action| ticket.with_current(action),
     )?;
     if let Some(recovery) = &recovery {
-        repo.operation = if recovery.checkpoint_id.is_some() {
+        repo.operation = if recovery.hosted_repository.is_some() {
+            "hosted file import outcome uncertain; inspect and use repository-recover"
+        } else if recovery.checkpoint_id.is_some() {
             "checkpoint restore outcome uncertain; inspect and use repository-recover"
         } else {
             "command import outcome uncertain; inspect and use repository-recover"
         }
         .into();
         repo.command_diff_id = None;
-        if recovery.checkpoint_id.is_none() {
+        if recovery.checkpoint_id.is_none() && recovery.hosted_repository.is_none() {
             repo.last_result = Some(process::CommandResult {
                 interrupted: true,
                 output: format!(

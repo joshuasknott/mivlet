@@ -26,6 +26,15 @@ struct Intent {
     acknowledged: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     checkpoint_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hosted_repository: Option<HostedRepositoryImportSource>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+pub struct HostedRepositoryImportSource {
+    pub snapshot_id: String,
+    pub output_manifest_sha256: String,
+    pub before_import_checkpoint_id: String,
 }
 pub struct Prepared {
     parent: PathBuf,
@@ -45,6 +54,8 @@ pub struct Recovery {
     pub outcome: String,
     pub previous: Option<PathBuf>,
     pub checkpoint_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hosted_repository: Option<HostedRepositoryImportSource>,
 }
 fn hex_id(value: &str, length: usize) -> bool {
     value.len() == length && value.bytes().all(|b| b.is_ascii_hexdigit())
@@ -111,6 +122,11 @@ fn read_intent(destination: &Path, scope: &str) -> Result<Option<Prepared>, Stri
             .checkpoint_id
             .as_ref()
             .is_some_and(|id| !hex_id(id, 48))
+        || intent
+            .hosted_repository
+            .as_ref()
+            .is_some_and(|source| !valid_hosted_source(source))
+        || intent.checkpoint_id.is_some() && intent.hosted_repository.is_some()
         || !intent
             .transaction
             .starts_with(&format!("native-import-{}-", intent.run_id))
@@ -173,6 +189,7 @@ pub(crate) fn prepare(
             .as_deref()
             .ok_or("Import needs a sealed output.")?,
         checkpoint_id: None,
+        hosted_repository: None,
     };
     prepare_source(source, destination, limits, origin, None, current)
 }
@@ -184,6 +201,7 @@ struct ImportSource<'a> {
     input_id: &'a str,
     output_id: &'a str,
     checkpoint_id: Option<&'a str>,
+    hosted_repository: Option<&'a HostedRepositoryImportSource>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -220,6 +238,61 @@ pub(crate) fn prepare_restore(
         input_id: expected_current,
         output_id: expected_output,
         checkpoint_id: Some(checkpoint_id),
+        hosted_repository: None,
+    };
+    prepare_source(
+        source,
+        destination,
+        limits,
+        origin,
+        Some(expected_current),
+        current,
+    )
+}
+
+fn valid_hosted_source(source: &HostedRepositoryImportSource) -> bool {
+    hex_id(&source.snapshot_id, 48)
+        && hex_id(&source.output_manifest_sha256, 64)
+        && hex_id(&source.before_import_checkpoint_id, 48)
+}
+/// Authenticated cloud output uses file-import provenance, never an invented
+/// local execution receipt or a checkpoint masquerading as the source tree.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn prepare_hosted(
+    source: &Path,
+    destination: &Path,
+    limits: Limits,
+    hosted: &HostedRepositoryImportSource,
+    expected_current: &str,
+    expected_output: &str,
+    binding: Binding,
+    current: &dyn Fn() -> bool,
+) -> Result<Prepared, String> {
+    use sha2::{Digest, Sha256};
+    if !valid_hosted_source(hosted)
+        || !hex_id(expected_current, 64)
+        || !hex_id(expected_output, 64)
+        || !hex_id(&binding.scope_id, 64)
+        || binding.generation == 0
+        || binding.operation_id == 0
+    {
+        return Err("Invalid hosted repository import provenance.".into());
+    }
+    let mut random = [0u8; 24];
+    getrandom::fill(&mut random).map_err(|_| "Cannot identify hosted file import.")?;
+    let id = hex::encode(random);
+    let operation_id = hex::encode(Sha256::digest(format!(
+        "hosted-import:{}:{}:{expected_current}:{expected_output}",
+        hosted.snapshot_id, hosted.output_manifest_sha256
+    )));
+    let origin = ImportSource {
+        id: &id,
+        binding: &binding,
+        operation_id: &operation_id,
+        input_id: expected_current,
+        output_id: expected_output,
+        checkpoint_id: None,
+        hosted_repository: Some(hosted),
     };
     prepare_source(
         source,
@@ -289,6 +362,7 @@ fn prepare_source(
         output_id,
         acknowledged: false,
         checkpoint_id: origin.checkpoint_id.map(str::to_owned),
+        hosted_repository: origin.hosted_repository.cloned(),
     };
     // Retain custody before publishing the intent. An early host death can leave
     // a staging directory, but can never move the checkout without this journal.
@@ -437,6 +511,7 @@ pub fn recover(
         output_id: prepared.intent.output_id.clone(),
         outcome: outcome.into(),
         checkpoint_id: prepared.intent.checkpoint_id.clone(),
+        hosted_repository: prepared.intent.hosted_repository.clone(),
         previous: Some(if target == after && old == before && new.is_none() {
             previous.clone()
         } else {
@@ -482,6 +557,9 @@ pub fn recover(
                 || saved["checkpointId"]
                     != serde_json::to_value(&recovery.checkpoint_id)
                         .map_err(|_| "Invalid checkpoint provenance.")?
+                || saved["hostedRepository"]
+                    != serde_json::to_value(&recovery.hosted_repository)
+                        .map_err(|_| "Invalid hosted import provenance.")?
             {
                 return Err("Import recovery receipt identity changed.".into());
             }
@@ -671,6 +749,104 @@ mod tests {
             .acknowledge(Limits::ANALYSIS, &|| true)
             .unwrap();
         assert_eq!(fs::read(destination.join("data")).unwrap(), b"new");
+    }
+    #[test]
+    fn hosted_import_keeps_distinct_provenance_and_never_replays_after_interruption() {
+        let root = tempfile::tempdir().unwrap();
+        let (source, destination, receipt) = fixture(root.path());
+        let before = files::tree_id(&destination, Limits::ANALYSIS).unwrap();
+        let provenance = HostedRepositoryImportSource {
+            snapshot_id: "a".repeat(48),
+            output_manifest_sha256: "b".repeat(64),
+            before_import_checkpoint_id: "f".repeat(48),
+        };
+        assert!(prepare_hosted(
+            &source,
+            &destination,
+            Limits::ANALYSIS,
+            &provenance,
+            &"0".repeat(64),
+            receipt.output_id.as_deref().unwrap(),
+            receipt.binding.clone(),
+            &|| true
+        )
+        .is_err());
+        assert!(!root.path().join(JOURNAL).exists());
+        let prepared = prepare_hosted(
+            &source,
+            &destination,
+            Limits::ANALYSIS,
+            &provenance,
+            &before,
+            receipt.output_id.as_deref().unwrap(),
+            receipt.binding.clone(),
+            &|| true,
+        )
+        .unwrap();
+        assert_eq!(
+            prepared.intent.hosted_repository.as_ref(),
+            Some(&provenance)
+        );
+        assert!(
+            prepared.intent.checkpoint_id.is_none(),
+            "local checkpoint is a safety copy, never the returned source"
+        );
+        assert_ne!(
+            prepared.intent.run_id, receipt.run_id,
+            "no invented local execution receipt"
+        );
+        drop(prepared);
+        let recovery = recover(
+            &destination,
+            Limits::ANALYSIS,
+            &receipt.binding.scope_id,
+            || true,
+            |action| action(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(recovery.hosted_repository.as_ref(), Some(&provenance));
+        assert_eq!(
+            fs::read(destination.join("data")).unwrap(),
+            b"previous",
+            "prepared output is never imported on restart"
+        );
+        acknowledge_recovery(
+            &destination,
+            Limits::ANALYSIS,
+            &receipt.binding.scope_id,
+            || true,
+        )
+        .unwrap();
+        let committed = prepare_hosted(
+            &source,
+            &destination,
+            Limits::ANALYSIS,
+            &provenance,
+            &before,
+            receipt.output_id.as_deref().unwrap(),
+            receipt.binding.clone(),
+            &|| true,
+        )
+        .unwrap()
+        .commit()
+        .unwrap();
+        drop(committed);
+        let recovery = recover(
+            &destination,
+            Limits::ANALYSIS,
+            &receipt.binding.scope_id,
+            || true,
+            |action| action(),
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(recovery.hosted_repository, Some(provenance));
+        assert_eq!(fs::read(destination.join("data")).unwrap(), b"new");
+        assert!(
+            root.path().join(JOURNAL).exists(),
+            "uncertain completed rename remains visible until acknowledgement"
+        );
     }
     #[test]
     #[ignore = "Only invoked in a disposable import crash supervisor"]
