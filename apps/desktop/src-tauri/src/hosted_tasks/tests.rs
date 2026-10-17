@@ -69,4 +69,9 @@ fn receipt_requires_exact_binding_checksum_budget_and_monotonic_native_sequence(
     let mut changed = result.clone();
     changed.snapshot.status = "running".into();
     assert!(validate_result(&b, None, &changed).is_err());
+    let mut changed = result.clone();
+    changed.snapshot.created_at = i64::MAX;
+    changed.snapshot.updated_at = i64::MAX;
+    changed.snapshot.retained_until = i64::MAX;
+    assert!(validate_result(&b, None, &changed).is_err());
 }
