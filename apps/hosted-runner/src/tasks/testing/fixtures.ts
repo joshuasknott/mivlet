@@ -13,6 +13,7 @@ export class MemoryTaskStorage {
   readonly values = new Map<string, unknown>(); alarmAt?: number;
   async get<T>(key: string): Promise<T | undefined> { return structuredClone(this.values.get(key)) as T | undefined; }
   async put(key: string, value: unknown): Promise<void> { this.values.set(key, structuredClone(value)); }
+  async delete(key: string): Promise<void> { this.values.delete(key); }
   async setAlarm(at: number): Promise<void> { this.alarmAt = at; }
   async deleteAlarm(): Promise<void> { this.alarmAt = undefined; }
   async transaction<T>(fn: (tx: MemoryTaskStorage) => Promise<T>): Promise<T> {

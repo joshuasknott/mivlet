@@ -113,7 +113,8 @@ export interface CollaborationWorkItem {
   queue?: WorkQueue;
   outcomeGoal?: OutcomeGoal;
   liveSteering?: LiveWorkSteering[];
-  executionOwner?: "native-background";
+  executionOwner?: "native-background" | "hosted";
+  hostedTask?: import("./hosted-tasks").HostedWorkExecution;
   continuation?: import("./provider-continuation").ProviderContinuation;
   /** Frozen occurrence metadata; carries no claim token or execution authority. */
   schedule?: {

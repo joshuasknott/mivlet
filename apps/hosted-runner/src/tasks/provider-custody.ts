@@ -1,6 +1,6 @@
 import { DurableObject } from "cloudflare:workers";
 import {
-  canonicalHostedTaskJson, HOSTED_TEXT_TASK_LIMITS as L,
+  canonicalHostedTaskJson, hostedTaskSha256, HOSTED_TEXT_TASK_LIMITS as L,
   type HostedCredentialEnrollment, type HostedProviderConnection,
   type HostedTaskBinding, type HostedTaskCapability, type HostedTaskTextInput,
 } from "@mivlet/protocol";
@@ -93,9 +93,10 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
   async run(accountId: string, binding: HostedTaskBinding, input: HostedTaskTextInput, digest: string): Promise<CustodyResult> {
     let encrypted: Credential;
     try {
+      if (await hostedTaskSha256(input) !== binding.inputSha256) throw new Error("task-input-mismatch");
       encrypted = await this.change(accountId, row => {
         const r = row.reservations.find(r => r.taskId === binding.taskId && r.digest === digest);
-        if (!r || !r.active || r.dispatched || canonicalHostedTaskJson(r.binding) !== canonicalHostedTaskJson(binding) || r.retainedUntil <= Date.now()) throw new Error("hosted-dispatch-not-current");
+        if (!r || !r.active || r.dispatched || canonicalHostedTaskJson(r.binding) !== canonicalHostedTaskJson(binding) || r.retainedUntil <= Date.now() || binding.expiresAt <= Date.now()) throw new Error("hosted-dispatch-not-current");
         const c = row.credentials.find(c => c.credentialId === binding.credentialId);
         this.requireCredential(c, binding, Date.now());
         r.dispatched = true;
@@ -113,7 +114,7 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
       await this.change(accountId, row => {
         const r = row.reservations.find(r => r.taskId === binding.taskId && r.digest === digest);
         this.requireCredential(row.credentials.find(c => c.credentialId === binding.credentialId), binding, Date.now());
-        if (!r?.active || controller.signal.aborted) throw new Error("hosted-dispatch-not-current");
+        if (!r?.active || controller.signal.aborted || binding.expiresAt <= Date.now()) throw new Error("hosted-dispatch-not-current");
       });
       const result = await runRealText(binding, input, secret, controller.signal);
       return { ok: true, result };

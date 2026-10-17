@@ -8,7 +8,7 @@ import type { TaskEnv } from "./environment";
 
 interface StoredTask {
   accountId: string; digest: string; admission?: HostedTaskAdmission;
-  snapshot: HostedTaskSnapshot; text?: string; attemptNonce?: string;
+  snapshot: HostedTaskSnapshot; text?: string; attemptNonce?: string; purgeAt?: number;
 }
 const terminal = (status: HostedTaskStatus) => status !== "queued" && status !== "running";
 
@@ -60,6 +60,8 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
     const now = Date.now(); const nonce = crypto.randomUUID();
     const start = await this.ctx.storage.transaction(async tx => {
       const row = await tx.get<StoredTask>("task"); if (!row) return undefined;
+      if (row.purgeAt !== undefined && row.purgeAt <= now) { await tx.delete("task"); await tx.deleteAlarm(); return undefined; }
+      if (row.snapshot.status === "expired" && row.purgeAt !== undefined) { await tx.setAlarm(row.purgeAt); return undefined; }
       if (row.snapshot.retainedUntil <= now) return { expire: true as const, row };
       if (terminal(row.snapshot.status)) { await tx.setAlarm(row.snapshot.retainedUntil); return undefined; }
       if (row.snapshot.status === "running") {
@@ -115,10 +117,12 @@ export class TaskAuthority extends DurableObject<TaskEnv> {
   private async expire(): Promise<void> {
     const expired = await this.ctx.storage.transaction(async tx => {
       const row = await tx.get<StoredTask>("task"); if (!row || row.snapshot.retainedUntil > Date.now()) return undefined;
+      if (row.purgeAt !== undefined) return undefined;
       row.snapshot = { ...row.snapshot, generation: row.snapshot.generation + 1, status: "expired", sequence: row.snapshot.sequence + 1, updatedAt: Date.now(), resultBytes: 0 };
       delete row.snapshot.resultSha256; delete row.snapshot.usage;
       delete row.admission; delete row.text; delete row.attemptNonce;
-      await tx.put("task", row); await tx.deleteAlarm(); return row;
+      row.purgeAt = Date.now() + L.receiptRetentionMs;
+      await tx.put("task", row); await tx.setAlarm(row.purgeAt); return row;
     });
     if (expired) await this.env.PROVIDER_CUSTODY.getByName(expired.accountId).release(expired.accountId, expired.snapshot.binding.taskId, expired.digest).catch(() => undefined);
   }

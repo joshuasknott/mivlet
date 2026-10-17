@@ -7,6 +7,7 @@ export const HOSTED_TEXT_TASK_LIMITS = {
   outputTokens: 4_096,
   elapsedMs: 120_000,
   retentionMs: 24 * 60 * 60_000,
+  receiptRetentionMs: 7 * 24 * 60 * 60_000,
   activePerAccount: 2,
   admissionsPerDay: 20,
   retainedPerAccount: 40,
@@ -86,10 +87,35 @@ export interface HostedTaskResult {
 export interface HostedWorkExecution {
   version: 1;
   binding: HostedTaskBinding;
-  phase: "dispatching" | "accepted" | "stop-pending" | "reconcile-required" | "reconciled";
+  phase: "review" | "dispatching" | "accepted" | "stop-pending" | "reconcile-required" | "reconciled";
+  reviewId?: string;
+  reviewExpiresAt?: number;
+  originallyHeld?: boolean;
   /** Public status only; no token, credential value or provider request. */
   snapshot?: HostedTaskSnapshot;
 }
+export interface HostedTaskTarget { workspaceId: string; agentId: string; workId: string; expectedGeneration: number }
+export interface HostedTaskPrepare extends HostedTaskTarget { credentialId: string; credentialRevision: number }
+export interface HostedTaskReview {
+  reviewId: string;
+  workId: string;
+  workGeneration: number;
+  admission: HostedTaskAdmission;
+  inputBytes: number;
+  expiresAt: number;
+  originallyHeld: boolean;
+  approval: import("./approvals").ApprovalRequest;
+}
+export interface HostedTaskReviewTarget extends HostedTaskTarget { reviewId: string }
+export interface HostedTaskCommit extends HostedTaskReviewTarget { resolution: import("./approvals").ApprovalResolutionRequest }
+export interface HostedTaskControlResult {
+  collaboration: import("./collaboration").CollaborationSnapshot;
+  taskResult?: HostedTaskResult;
+  reconcileRequired: boolean;
+}
+export interface HostedProviderScope { workspaceId: string; agentId: string }
+export interface HostedProviderEnroll extends HostedProviderScope { providerId: HostedTextProviderId; credentialId?: string; expectedRevision?: number }
+export interface HostedProviderRevoke extends HostedProviderScope { credentialId: string; revision: number }
 export interface HostedProviderConnection {
   credentialId: string;
   providerId: HostedTextProviderId;
