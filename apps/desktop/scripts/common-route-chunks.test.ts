@@ -11,7 +11,7 @@ const graph = (edges: Record<string, string[]>, dynamic: Record<string, string[]
   ? { isEntry: false, importers: edges[id], dynamicImporters: dynamic[id] ?? [] } : null;
 
 it("keeps every cohort under the unchanged common budget accounting", () => {
-  for (const name of ["workspace-tools"]) {
+  for (const name of ["workspace-tools", "connected-app-execution"]) {
     expect(conversationUpgradeAssetPattern.test(`${name}-hash.js`)).toBe(false);
     expect(intelligentUiAssetPattern.test(`${name}-hash.js`)).toBe(false);
   }
@@ -65,4 +65,14 @@ it("rejects a new eager or unrelated consumer, including through a shared hook",
 it("does not claim an orphaned or cyclic dependency without an assistant owner", () => {
   expect(assistantInputDependency(input, graph({ [input]: [] }))).toBe(false);
   expect(assistantInputDependency(input, graph({ [input]: [hook], [hook]: [input] }))).toBe(false);
+});
+
+it("groups only the optional connected-app helpers already counted as common", () => {
+  for (const file of ["connector-execution", "connected-app-cancellation", "mcp-semantic-execution", "mcp-transport-core"])
+    expect(commonRouteChunk(`/mivlet/apps/desktop/src/lib/${file}.ts`)).toBe("connected-app-execution");
+  for (const file of ["connected-source-search", "client"])
+    expect(commonRouteChunk(`/mivlet/packages/connectors/src/mcp/${file}.ts`)).toBe("connected-app-execution");
+  expect(commonRouteChunk("/mivlet/packages/protocol/src/spine/connections.ts")).toBe("connected-app-execution");
+  for (const file of ["runtime/domains/tools.ts", "shell/ExecutionWorker.tsx", "components/conversation/ConversationPane.tsx", "lib/mcp-apps.ts"])
+    expect(commonRouteChunk(`/mivlet/apps/desktop/src/${file}`)).toBeUndefined();
 });

@@ -10,6 +10,11 @@ export function commonRouteChunk(id: string): string | undefined {
   const path = id.replace(/\\/g, "/").split("?")[0];
   if (/\/src\/components\/hosted\//.test(path)
     || /\/src\/runtime\/domains\/hosted-tasks\.ts$/.test(path)) return "workspace-tools";
+  // Optional connected-app execution helpers already share the common budget.
+  // Keep their dynamic boundary and leave worker-eager tools/UI outside.
+  if (/\/src\/lib\/(?:connector-execution|connected-app-cancellation|mcp-semantic-execution|mcp-transport-core)\.ts$/.test(path)
+    || /\/packages\/connectors\/src\/mcp\/(?:connected-source-search|client)\.ts$/.test(path)
+    || /\/packages\/protocol\/src\/spine\/connections\.ts$/.test(path)) return "connected-app-execution";
   // The optional workspace panels share one deferred code request on local disk.
   // Opening any one also fetches cloud controls and the other editors/inspectors; React mounts
   // only the selected view. Shared command/checkpoint wrappers
