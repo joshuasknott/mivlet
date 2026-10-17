@@ -1,0 +1,10 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "outDir": "dist/tasks",
+    "rootDir": "src/tasks",
+    "types": []
+  },
+  "include": ["src/tasks", "tasks-configuration.d.ts"],
+  "exclude": ["src/**/*.test.ts", "src/**/testing/**"]
+}

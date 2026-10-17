@@ -1070,5 +1070,5 @@ export interface MivletAgentProfile {
 export type { McpClientAccess, McpServerConfig, McpConsentRequest, McpClientGrant, McpConsentDecision, McpServerStatus } from "./domains/mcp-server";
 export type * from "./domains/provider-usage";
 export type { ProviderContinuationInput, ProviderContinuationMessage, ProviderContinuation } from "./domains/provider-continuation";
-export * from "./domains/hosted-tasks";
-export * from "./domains/hosted-task-capability";
+export * from "./domains/hosted-tasks.js";
+export * from "./domains/hosted-task-capability.js";

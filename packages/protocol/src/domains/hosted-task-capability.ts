@@ -1,4 +1,4 @@
-import { canonicalHostedTaskJson, HOSTED_TEXT_TASK_LIMITS, type HostedTaskCapability } from "./hosted-tasks";
+import { canonicalHostedTaskJson, HOSTED_TEXT_TASK_LIMITS, type HostedTaskCapability } from "./hosted-tasks.js";
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/;
 const SCOPES = new Set(["task:admit", "task:read", "task:cancel", "credential:enroll", "credential:read", "credential:revoke"]);

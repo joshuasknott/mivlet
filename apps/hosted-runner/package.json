@@ -5,15 +5,15 @@
   "type": "module",
   "description": "Mivlet-managed isolated execution computer. Deployable, not deployed.",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && tsc -p tsconfig.tasks.json",
     "pretest": "pnpm --filter @mivlet/protocol build",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.tasks.json --noEmit",
     "test": "vitest run --configLoader runner",
     "worker:types": "wrangler types --config wrangler.jsonc",
     "worker:dev": "wrangler dev --config wrangler.jsonc --port 8789",
     "worker:deploy:dry-run": "wrangler deploy --config wrangler.jsonc --dry-run",
     "worker:deploy": "wrangler deploy --config wrangler.jsonc --containers-rollout=immediate",
-    "tasks:types": "wrangler types --config wrangler.tasks.jsonc tasks-configuration.d.ts",
+    "tasks:types": "wrangler types --config wrangler.tasks.jsonc --env-interface HostedTaskBindings tasks-configuration.d.ts",
     "tasks:dev": "wrangler dev --config wrangler.tasks.jsonc --port 8790",
     "tasks:deploy:dry-run": "wrangler deploy --config wrangler.tasks.jsonc --dry-run",
     "tasks:deploy": "wrangler deploy --config wrangler.tasks.jsonc"

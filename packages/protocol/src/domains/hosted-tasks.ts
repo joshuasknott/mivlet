@@ -1,4 +1,4 @@
-import { redactSecretText, secretMarkerSurvives } from "../secret-redaction";
+import { redactSecretText, secretMarkerSurvives } from "../secret-redaction.js";
 
 /** Explicitly delegated hosted text Work. These records grant no native tools. */
 export const HOSTED_TEXT_TASK_LIMITS = {
