@@ -85,7 +85,7 @@ describe("Work details", () => {
     const editor = screen.getByLabelText(/Conclusion to keep/) as HTMLTextAreaElement;
     expect(editor.value).toContain("A saved report.");
     await act(async () => { fireEvent.change(editor, { target: { value: "Keep the summary short." } }); });
-    const form = document.querySelector("form.work-promote-form");
+    const form = document.querySelector("form.task-panel-promote-form");
     if (!form) throw new Error("Expected the memory promotion form.");
     await act(async () => { fireEvent.click(within(form as HTMLElement).getByRole("button", { name: "Save to memory" })); });
     await Promise.resolve();
@@ -103,7 +103,7 @@ describe("Work details", () => {
     await act(async () => { fireEvent.change(screen.getByLabelText(/Conclusion to keep/), {
       target: { value: "Keep the summary short." },
     }); });
-    const form = document.querySelector("form.work-promote-form");
+    const form = document.querySelector("form.task-panel-promote-form");
     if (!form) throw new Error("Expected the memory promotion form.");
     await act(async () => { fireEvent.click(within(form as HTMLElement).getByRole("button", { name: "Save to memory" })); });
     expect(await screen.findByRole("alert")).toHaveTextContent("Memory changed; refresh first");

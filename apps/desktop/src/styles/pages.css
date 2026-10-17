@@ -766,15 +766,15 @@
 
 .settings-input-note { margin: 0; color: var(--ink-muted); font-size: 12px; line-height: 1.6; }
 .settings-page .toggle-row.settings-preference-row { width: 100%; padding: 20px 0; text-align: left; background: transparent; border: 0; border-bottom: 1px solid var(--line); }
-.local-schedules { gap: 18px; }
-.local-schedules .profile-section { display: grid; gap: 12px; min-width: 0; }
+.schedule-list { gap: 18px; }
+.schedule-list .profile-section { display: grid; gap: 12px; min-width: 0; }
 .local-schedules__prompt { white-space: pre-wrap; overflow-wrap: anywhere; }
 .local-schedules__editor label { display: grid; gap: 6px; }
-.local-schedules .local-schedules__editor .input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-1); background: var(--surface-raised); color: var(--ink); font: inherit; }
-.local-schedules .local-schedules__editor textarea { min-height: 110px; resize: vertical; }
-.local-schedules .local-schedules__editor .input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
-.local-schedules .input, .local-schedules .button, .local-schedules summary { min-height: 44px; }
-.local-schedules small { overflow-wrap: anywhere; }
+.schedule-list .local-schedules__editor .input { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-1); background: var(--surface-raised); color: var(--ink); font: inherit; }
+.schedule-list .local-schedules__editor textarea { min-height: 110px; resize: vertical; }
+.schedule-list .local-schedules__editor .input:focus-visible { outline: 2px solid var(--accent-line); outline-offset: 2px; }
+.schedule-list .input, .schedule-list .button, .schedule-list summary { min-height: 44px; }
+.schedule-list small { overflow-wrap: anywhere; }
 
 .settings-modal__tab { display: flex; align-items: center; gap: 10px; font-size: 13px; border-radius: 8px; }
 .settings-modal__label { font-size: 13px; color: var(--ink-muted); padding-bottom: 20px; }
@@ -787,7 +787,7 @@
 .schedules-dialog { position: relative; width: min(680px, 100%); max-height: calc(100dvh - 48px); overflow: auto; padding: 32px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface-overlay); box-shadow: var(--shadow-3); }
 .schedules-dialog > header { margin-bottom: 24px; }
 .schedules-dialog h1 { margin: 0; padding-right: 32px; font-size: 25px; letter-spacing: -.03em; }
-.schedules-dialog .local-schedules { margin: 0; }
+.schedules-dialog .schedule-list { margin: 0; }
 .schedules-dialog .profile-section { border-top: 1px solid var(--line); padding: 20px 0; }
 @media (max-width: 650px) { .schedules-dialog { padding: 24px 20px; } }
 

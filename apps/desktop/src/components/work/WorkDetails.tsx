@@ -113,29 +113,29 @@ export function WorkDetails({
     }
   };
   return (
-    <article className="work-details" data-status={item.status}>
-      <header className="work-details-header">
+    <article className="task-panel-details" data-status={item.status}>
+      <header className="task-panel-details-header">
         <strong>{item.agentName}</strong>
         <WorkStatusBadge item={item} />
       </header>
-      <section className="work-details-section">
+      <section className="task-panel-details-section">
         <h3>Original request</h3>
-        <p className="work-details-request">{item.userRequest}</p>
+        <p className="task-panel-details-request">{item.userRequest}</p>
         {item.prompt && item.prompt !== item.userRequest ? (
           <>
             <h3>Assignment</h3>
-            <p className="work-details-request">{item.prompt}</p>
+            <p className="task-panel-details-request">{item.prompt}</p>
           </>
         ) : null}
         {item.reason ? (
-          <p className="work-details-reason">{item.reason}</p>
+          <p className="task-panel-details-reason">{item.reason}</p>
         ) : null}
         <ProviderResetControl key={`${item.id}:${item.generation}`} item={item} onCommand={onProviderReset} />
         {item.hostedTask && onChanged && <Suspense fallback={<p role="status">Loading cloud task…</p>}>
           <HostedTaskControls item={item} onChanged={onChanged} />
         </Suspense>}
         {uncertain ? (
-          <p className="work-details-notice">
+          <p className="task-panel-details-notice">
             This request was interrupted or steered after provider activity
             started. Its external effects are uncertain; review saved results
             before continuing. Nothing is replayed automatically.
@@ -143,7 +143,7 @@ export function WorkDetails({
         ) : null}
       </section>
       {item.capturedContext ? (
-        <section className="work-details-section">
+        <section className="task-panel-details-section">
           <h3>Captured context</h3>
           <small>
             Snapshot from{" "}
@@ -153,28 +153,28 @@ export function WorkDetails({
           </small>
           <details>
             <summary>Inspect captured context</summary>
-            <pre className="work-details-context">
+            <pre className="task-panel-details-context">
               {item.capturedContext.text}
             </pre>
           </details>
         </section>
       ) : null}
-      {item.outcomeGoal ? <section className="work-details-section">
+      {item.outcomeGoal ? <section className="task-panel-details-section">
         <h3>Outcome goal</h3><p>{item.outcomeGoal.objective}</p><p>{item.outcomeGoal.successCriteria}</p>
         <small>{item.outcomeGoal.status === "completed" ? "Agent reports achieved" : item.outcomeGoal.status} · {item.turnCount}/{item.maxTurns} turns · {item.tokenUsage.toLocaleString()}/{item.maxTokens.toLocaleString()} reported tokens</small>
         {item.outcomeGoal.report ? <p>{item.outcomeGoal.report.text}</p> : null}
         <small>Agent reports are evidence of the report, not independent verification of an external outcome.</small>
       </section> : null}
-      {item.liveSteering?.length ? <section className="work-details-section">
-        <h3>Live guidance receipts</h3><ol className="work-steering-list">{item.liveSteering.map(event => <li key={event.id}>
+      {item.liveSteering?.length ? <section className="task-panel-details-section">
+        <h3>Live guidance receipts</h3><ol className="task-panel-steering-list">{item.liveSteering.map(event => <li key={event.id}>
           <small>{new Date(event.createdAt).toLocaleString()} · {event.delivery}</small><p>{event.text}</p>
           <small>{event.delivery === "accepted" ? "Codex accepted this guidance for the exact active turn. Earlier actions remain unchanged." : event.delivery === "rejected" ? "The provider did not accept this guidance. It was not automatically sent as another turn." : "Delivery is unconfirmed. Review the saved result before continuing; do not resend automatically."}</small>
         </li>)}</ol>
       </section> : null}
       {item.steering?.length ? (
-        <section className="work-details-section">
+        <section className="task-panel-details-section">
           <h3>Steering</h3>
-          <ol className="work-steering-list">
+          <ol className="task-panel-steering-list">
             {item.steering.map((steer) => (
               <li key={steer.id}>
                 <small>{new Date(steer.createdAt).toLocaleString()}</small>
@@ -185,9 +185,9 @@ export function WorkDetails({
         </section>
       ) : null}
       {item.attachments?.length ? (
-        <section className="work-details-section">
+        <section className="task-panel-details-section">
           <h3>Attachments</h3>
-          <ul className="work-attachment-list">
+          <ul className="task-panel-attachment-list">
             {item.attachments.map((ref) => (
               <li key={ref.id}>
                 <span>{ref.name}</span>
@@ -197,7 +197,7 @@ export function WorkDetails({
                 </small>
                 {ref.availability === "image-input" ||
                 ref.availability === "transient" ? (
-                  <small className="work-attachment-recovery">
+                  <small className="task-panel-attachment-recovery">
                     {item.parentId && ref.availability === "transient"
                       ? "Shared originals are verified against the original request and copied into this agent’s workspace. Reattach if the saved source is unavailable."
                       : "Held in memory only; reattach it after a restart before continuing."}
@@ -209,7 +209,7 @@ export function WorkDetails({
         </section>
       ) : null}
       {item.runIds.length ? (
-        <section className="work-details-section">
+        <section className="task-panel-details-section">
           <h3>Progress</h3>
           <small>
             {item.runIds.length} provider run
@@ -232,10 +232,10 @@ export function WorkDetails({
         </section>
       ) : null}
       {item.outputs.length ? (
-        <section className="work-details-section">
+        <section className="task-panel-details-section">
           <h3>Saved results</h3>
           {item.outputs.map((output) => (
-            <div className="work-details-output" key={output.runId}>
+            <div className="task-panel-details-output" key={output.runId}>
               <p>{output.text}</p>
               <small>
                 Agent report · {new Date(output.createdAt).toLocaleString()}.
@@ -244,7 +244,7 @@ export function WorkDetails({
                   ? " Exact conversation source saved."
                   : " Legacy result without exact source provenance."}
               </small>
-              <div className="work-details-actions">
+              <div className="task-panel-details-actions">
                 <button
                   type="button"
                   onClick={() =>
@@ -277,7 +277,7 @@ export function WorkDetails({
               </div>
               {promoting === output.runId && onPromote ? (
                 <form
-                  className="work-promote-form"
+                  className="task-panel-promote-form"
                   onSubmit={(event) => {
                     event.preventDefault();
                     void save(output);
@@ -299,7 +299,7 @@ export function WorkDetails({
                     {promoteText.length} / {MAX_PROMOTED_MEMORY_VALUE}{" "}
                     characters · saved with this run's provenance
                   </small>
-                  <div className="work-details-actions">
+                  <div className="task-panel-details-actions">
                     <button
                       type="submit"
                       disabled={promotePending || !promoteText.trim()}
@@ -324,11 +324,11 @@ export function WorkDetails({
         </section>
       ) : null}
       {error ? (
-        <p className="work-details-reason" role="alert">
+        <p className="task-panel-details-reason" role="alert">
           {error}
         </p>
       ) : null}
-      <div className="work-details-actions">
+      <div className="task-panel-details-actions">
         {activeWork(item) ? (
           <button
             type="button"
@@ -366,7 +366,7 @@ export function WorkDetails({
         ) : null}
       </div>
       {canContinue && !unstarted ? (
-        <label className="work-reconcile-check">
+        <label className="task-panel-reconcile-check">
           <input
             type="checkbox"
             checked={checked}
@@ -378,7 +378,7 @@ export function WorkDetails({
       ) : null}
       {steering ? (
         <form
-          className="work-steer-form"
+          className="task-panel-steer-form"
           onSubmit={(event) => {
             event.preventDefault();
             const instruction = text.trim();
