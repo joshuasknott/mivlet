@@ -9,7 +9,7 @@ const CodingPreview = lazy(() => import("./CodingPreview").then(module => ({ def
 const CodingResultTabs = lazy(() => import("./CodingResultTabs").then(module => ({ default: module.CodingResultTabs })));
 const CodingRepositoryReview = lazy(() => import("./CodingRepositoryReview").then(module => ({ default: module.CodingRepositoryReview })));
 interface Props {
-  workspaceId: string; agentId: string; jobId: string; jobGeneration: number; onDraft?: (text: string) => void;
+  workspaceId: string; agentId: string; jobId: string; jobGeneration: number; onDraft?: (text: string, repositoryId: string) => void;
 }
 export function NativeCodingResult(props: Props) {
   return <CodingSession key={JSON.stringify([props.workspaceId, props.agentId, props.jobId, props.jobGeneration])} {...props} />;
@@ -61,7 +61,7 @@ function CodingSession({ workspaceId, agentId, jobId, jobGeneration, onDraft }: 
             if (!result || result.job.id !== state.target.jobId || result.job.generation !== state.target.jobGeneration)
               throw new Error("The Stop receipt did not match this session. Reconnect to inspect its outcome.");
             if (mounted.current) setState(previous => previous && { ...previous, job: result.job });
-          }} onDraft={onDraft} /> : undefined} />
+          }} onDraft={text => onDraft(text, state.job.repositoryId!)} /> : undefined} />
     </Suspense> : null}
   </section>;
 }

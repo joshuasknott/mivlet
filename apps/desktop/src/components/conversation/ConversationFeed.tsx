@@ -12,6 +12,7 @@ import type { ConversationMessageView } from "../../lib/conversation-runtime";
 import { toolActivity } from "../../lib/conversation-presentation";
 import { conversationTurns } from "../../lib/conversation-history";
 import type { ConversationTurn } from "../../lib/conversation-presentation-types";
+import type { PreviewFeedbackSource } from "../../lib/preview-feedback";
 import type { McpAppApprovalPreview } from "../../lib/mcp-app-host";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
@@ -79,6 +80,7 @@ interface Props {
   onOpenConnector?: (connectorId: string) => void;
   /** Places an interactive response revision or selected passage in the composer. */
   onDraftResponse?: (text: string) => void;
+  onDraftPreview?: (text: string, source: PreviewFeedbackSource) => void;
   /** Saves a deliberately selected response passage through the native memory boundary. */
   onSaveMemory?: (title: string, value: string) => Promise<void>;
   /** Opens a confirmed decision at its durable conversation source. */
@@ -177,6 +179,7 @@ export function ConversationFeed(props: Props) {
   const onOpenConnector = useTurnCallback(props.onOpenConnector, callbackScope);
   const onPreviewArtifact = useTurnCallback(props.onPreviewArtifact, callbackScope);
   const onDraftResponse = useTurnCallback(props.onDraftResponse, callbackScope);
+  const onDraftPreview = useTurnCallback(props.onDraftPreview, callbackScope);
   const onSaveMemory = useTurnCallback(props.onSaveMemory, callbackScope);
   const onPinResponse = useTurnCallback(props.onPinResponse, callbackScope);
   const onMcpAppApproval = useTurnCallback(props.onMcpAppApproval, callbackScope);
@@ -370,6 +373,7 @@ export function ConversationFeed(props: Props) {
             isMcpRunCurrent={isMcpRunCurrent}
             onOpenConnector={onOpenConnector}
             onDraftResponse={onDraftResponse}
+            onDraftPreview={onDraftPreview}
             onSaveMemory={onSaveMemory}
             onPinResponse={onPinResponse}
             onMcpAppApproval={onMcpAppApproval}
@@ -489,6 +493,7 @@ type TurnProps = Pick<Props,
   | "showAuthor" | "requireAuthor" | "presence" | "approval" | "interruption"
   | "generation" | "appGeneration" | "isMcpRunCurrent" | "onOpenConnector"
   | "onPreviewArtifact" | "onDraftResponse" | "onSaveMemory" | "onPinResponse"
+  | "onDraftPreview"
   | "onMcpAppApproval" | "onMcpAppResourceRegister" | "onMcpAppResourceRelease"
   | "onOpenWorkspaceFiles"
 > & {
@@ -729,6 +734,8 @@ const Turn = memo(function Turn({
                     generation={props.appGeneration}
                     isCurrent={() => props.isMcpRunCurrent?.(turn.id) !== false}
                     onDraft={props.onDraftResponse}
+                    sourceRunId={turn.id}
+                    onDraftPreview={props.onDraftPreview}
                     onMcpAppApproval={props.onMcpAppApproval}
                     onMcpAppResourceRegister={props.onMcpAppResourceRegister}
                     onMcpAppResourceRelease={props.onMcpAppResourceRelease}

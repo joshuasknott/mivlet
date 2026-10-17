@@ -46,6 +46,18 @@ describe("native running-app preview", () => {
     expect(screen.queryByTitle("Running project preview")).toBeNull();
     expect(screen.queryByRole("button", { name: "Pick an element" })).toBeNull();
   });
+  it("retains selected evidence and feedback when the original task conflicts with the current draft", async () => {
+    const { props } = setup();
+    props.onDraft.mockImplementation(() => { throw new Error("This draft follows another task. Your draft was kept."); });
+    await screen.findByTitle("Running project preview"); fireEvent.load(frame()); ready();
+    fireEvent.click(screen.getByRole("button", { name: "Pick an element" })); guest(pick);
+    const note = await screen.findByRole("textbox", { name: "Change selected H1" });
+    fireEvent.change(note, { target: { value: "Keep this feedback" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add to message" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("another task");
+    expect(note).toHaveValue("Keep this feedback");
+    expect(screen.getByText("Selected work")).toBeTruthy();
+  });
   it("discards late element evidence after a native session change", async () => {
     const { props, view } = setup();
     let finish!: (value: NativePreviewFeedback) => void;

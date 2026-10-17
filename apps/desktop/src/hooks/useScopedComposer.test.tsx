@@ -87,11 +87,55 @@ describe("useScopedComposer", () => {
     const pane = renderHook(({ value }) => useScopedComposer(value), { initialProps: { value: original } });
     await act(async () => {});
     const appendFeedback = pane.result.current.appendText;
+    const stageFeedback = pane.result.current.stageWorkFeedback;
     pane.rerender({ value: { ...original, accountId: "other-account" } });
     await act(async () => {});
     act(() => appendFeedback("Old private feedback"));
+    expect(() => stageFeedback("preview-work", "lead", "Old private feedback")).toThrow("original conversation or account changed");
     expect(pane.result.current.text).toBe("");
     expect(mocks.saves).toEqual([]);
+  });
+
+  it("stages preview feedback as an explicit same-task follow-up without losing unsent text", async () => {
+    const draft = renderHook(() => useScopedComposer(scope("lead", "task-feedback")));
+    await act(async () => {});
+    act(() => {
+      draft.result.current.setText("Keep the sidebar compact.");
+      draft.result.current.stageWorkFeedback("original-work", "lead", "Make the heading smaller.");
+    });
+    expect(draft.result.current.replyWorkId).toBe("original-work");
+    expect(draft.result.current.recipientId).toBe("lead");
+    expect(draft.result.current.text).toBe("Keep the sidebar compact.\n\nMake the heading smaller.");
+  });
+
+  it("keeps conflicting reply, recipient, attachments and goal intact when feedback cannot share that draft", async () => {
+    const draft = renderHook(() => useScopedComposer(scope("lead", "feedback-conflict")));
+    await act(async () => {});
+    act(() => { draft.result.current.setText("My original request"); draft.result.current.setReplyWork("other-work"); });
+    expect(() => draft.result.current.stageWorkFeedback("preview-work", "lead", "Feedback")).toThrow("another task");
+    expect(draft.result.current.replyWorkId).toBe("other-work");
+    act(() => { draft.result.current.setReplyWork(undefined); draft.result.current.setRecipient("other-agent"); });
+    expect(() => draft.result.current.stageWorkFeedback("preview-work", "lead", "Feedback")).toThrow("another recipient");
+    act(() => { draft.result.current.setRecipient("lead"); draft.result.current.setAttachments(() => [{ id: "file", name: "keep.txt", type: "text/plain", sizeBytes: 5 }]); });
+    expect(() => draft.result.current.stageWorkFeedback("preview-work", "lead", "Feedback")).toThrow("attachments or a new goal");
+    expect(draft.result.current.attachments[0].name).toBe("keep.txt");
+    const goal = { objective: "Keep my goal", successCriteria: "Existing criteria", maxTurns: 6, maxTokens: 32000 };
+    act(() => { draft.result.current.setAttachments(() => []); draft.result.current.setOutcomeGoal(goal); });
+    expect(() => draft.result.current.stageWorkFeedback("preview-work", "lead", "Feedback")).toThrow("attachments or a new goal");
+    expect(draft.result.current.outcomeGoal).toEqual(goal);
+    expect(draft.result.current.text).toBe("My original request");
+    expect(draft.result.current.replyWorkId).toBeUndefined();
+  });
+
+  it("rejects delayed task feedback after changing conversations in the same account", async () => {
+    const original = scope("lead", "feedback-origin");
+    const draft = renderHook(({ value }) => useScopedComposer(value), { initialProps: { value: original } });
+    await act(async () => {});
+    const stageFeedback = draft.result.current.stageWorkFeedback;
+    draft.rerender({ value: { ...original, threadId: "different-chat" } });
+    await act(async () => {});
+    expect(() => stageFeedback("preview-work", "lead", "Private feedback")).toThrow("original conversation or account changed");
+    expect(draft.result.current.text).toBe("");
   });
 
   it("notifies matching panes without rerendering unrelated or inactive composers on each edit", async () => {

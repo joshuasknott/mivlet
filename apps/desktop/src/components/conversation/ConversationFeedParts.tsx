@@ -6,6 +6,7 @@ import {
   toolFailureSummary,
 } from "../../lib/conversation-presentation";
 import type { ResponsePart } from "../../lib/conversation-presentation-types";
+import type { PreviewFeedbackSource } from "../../lib/preview-feedback";
 import { MessageMarkdown } from "./MessageMarkdown";
 import { McpAppResult } from "./McpAppResult";
 import { nativeCommandResult } from "../../lib/native-command-result";
@@ -34,6 +35,8 @@ export function ConversationFeedPart({
   generation,
   isCurrent,
   onDraft,
+  sourceRunId,
+  onDraftPreview,
   onMcpAppApproval,
   onMcpAppResourceRegister,
   onMcpAppResourceRelease,
@@ -48,6 +51,8 @@ export function ConversationFeedPart({
   generation?: number;
   isCurrent?: () => boolean;
   onDraft?: (text: string) => void;
+  sourceRunId?: string;
+  onDraftPreview?: (text: string, source: PreviewFeedbackSource) => void;
   onMcpAppApproval?: (
     preview: McpAppApprovalPreview,
   ) => Promise<ApprovalResolutionRequest | null>;
@@ -106,7 +111,8 @@ export function ConversationFeedPart({
         </p>
       ) : null}
       {commandJob && agentId ? <Suspense fallback={null}><NativeCodingResult key={`${workspaceId}:${agentId}:${commandJob.id}:${commandJob.generation}`}
-        workspaceId={workspaceId} agentId={agentId} jobId={commandJob.id} jobGeneration={commandJob.generation} onDraft={onDraft} /></Suspense> : null}
+        workspaceId={workspaceId} agentId={agentId} jobId={commandJob.id} jobGeneration={commandJob.generation}
+        onDraft={sourceRunId && onDraftPreview ? (text, repositoryId) => onDraftPreview(text, { runId: sourceRunId, agentId, repositoryId, jobId: commandJob.id, jobGeneration: commandJob.generation }) : undefined} /></Suspense> : null}
       {part.state === "succeeded" && part.mcpApp && part.connectorId && part.resultRevisionId ? (
         <McpAppResult
           descriptor={part.mcpApp}

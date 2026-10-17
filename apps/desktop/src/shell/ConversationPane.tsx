@@ -63,6 +63,7 @@ import { useConversationOrigin } from "./useConversationOrigin";
 import type { ConversationOriginNavigation } from "./useWorkspaceNavigation";
 import { prepareExecutionAttachments } from "../lib/execution-attachments";
 import { ConversationWorkControls } from "../components/work/ConversationWorkControls";
+import { previewFeedbackWork } from "../lib/preview-feedback";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -913,6 +914,11 @@ export function ConversationPane({
               onOpenConnector={onPlugins}
               onDraftResponse={(text) => {
                 composer.appendText(text);
+                focus();
+              }}
+              onDraftPreview={(text, source) => {
+                const original = previewFeedbackWork(service.getSnapshot().data.work, room.id, source);
+                composer.stageWorkFeedback(original.id, original.agentId, text);
                 focus();
               }}
               onSaveMemory={(title, value) =>

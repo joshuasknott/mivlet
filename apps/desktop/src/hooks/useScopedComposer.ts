@@ -79,6 +79,8 @@ export function useScopedComposer(scope?: ComposerScope) {
   const currentIdentity = useRef(identity);
   currentIdentity.current = identity;
   const key = scope ? composerScopeKey(scope) : "";
+  const currentKey = useRef(key);
+  currentKey.current = key;
   const [, render] = useState(0);
   const mounted = useRef(true);
   const allowed = (entry: Entry) => currentIdentity.current === JSON.stringify([entry.scope.workspaceId, entry.scope.accountId]);
@@ -192,6 +194,20 @@ export function useScopedComposer(scope?: ComposerScope) {
       ...content,
       text: `${content.text}${content.text && !/\s$/.test(content.text) ? "\n\n" : ""}${text}`,
     })),
+    stageWorkFeedback: (workId: string, agentId: string, text: string) => {
+      if (!entry?.ready || !allowed(entry) || currentKey.current !== key)
+        throw new Error("The original conversation or account changed. Reopen its preview before adding feedback.");
+      mutate(content => {
+        if (content.replyWorkId && content.replyWorkId !== workId)
+          throw new Error("This draft follows another task. Send it or choose New request before adding preview feedback. Your draft was kept.");
+        if (content.attachments.length || content.outcomeGoal)
+          throw new Error("This draft contains attachments or a new goal. Keep or send that request first, then add feedback to the preview’s original task.");
+        if (content.recipientId && content.recipientId !== agentId)
+          throw new Error("This draft has another recipient. Choose the preview’s original agent before adding its feedback. Your draft was kept.");
+        return { ...content, replyWorkId: workId, recipientId: agentId,
+          text: `${content.text}${content.text && !/\s$/.test(content.text) ? "\n\n" : ""}${text}` };
+      });
+    },
     setAttachments: (update: (attachments: ComposerAttachment[]) => ComposerAttachment[]) => mutate((content) => ({ ...content, attachments: update(content.attachments) })),
     flush: () => entry ? persist(entry) : Promise.resolve(),
     saveNewThreadDraft: async (threadId: string, text: string) => {
