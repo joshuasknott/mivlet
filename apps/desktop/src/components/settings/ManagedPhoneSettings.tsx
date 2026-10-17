@@ -103,6 +103,7 @@ export function ManagedPhoneSettings({ workspaceId, api = nativeApi }: { workspa
         <p className="mcp-description">Follow shared work and send permitted tasks from your phone.</p></div>
     </header>
     <p>Keep this computer awake with Mivlet open and signed in. Approve each phone here; tool approvals stay on this computer.</p>
+    <p className="mcp-description">Cloudflare carries the requests, status and results you choose to share over an encrypted connection. The relay keeps temporary connection records, not task content. Provider keys stay on this computer.</p>
     <p className="mcp-description">This connection uses the selected workspace on this computer. Manual MCP access must be stopped before connecting.</p>
     {phoneUrl && <label>Phone link<input readOnly value={phoneUrl} onFocus={event => event.target.select()} /></label>}
     <div className="profile-action-row">
