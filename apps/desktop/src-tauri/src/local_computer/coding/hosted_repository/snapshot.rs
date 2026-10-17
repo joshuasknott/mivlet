@@ -147,20 +147,3 @@ pub(crate) fn read_snapshot_chunk(
     let start = offset as usize;
     Ok(bytes[start..bytes.len().min(start + CHUNK_BYTES)].to_vec())
 }
-
-pub(crate) fn retained_snapshot(
-    app: &tauri::AppHandle,
-    state: &crate::local_computer::LocalComputerState,
-    ticket: &OperationTicket,
-    task: &TaskIdentity,
-    snapshot_id: &str,
-) -> Result<Snapshot, String> {
-    let current = crate::collaboration::hosted_repository::current_for_import(app, ticket, task)?;
-    let (directory, repo) = storage::repository(state, task, &current.repository)?;
-    let (_, record) = storage::load(&directory, &repo, ticket, snapshot_id)?;
-    bound_context(&current, &record.snapshot)?;
-    if record.task != *task {
-        return Err("The retained source manifest belongs to another exact task.".into());
-    }
-    Ok(record.snapshot)
-}

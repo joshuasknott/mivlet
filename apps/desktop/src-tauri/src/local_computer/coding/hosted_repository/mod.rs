@@ -15,7 +15,7 @@ use mivlet_windows_executor::{repository_files as files, Limits};
 pub(crate) use models::{Entry, ImportReceipt, OutputManifest, Snapshot, Target, TaskIdentity};
 pub(crate) use output::{retained_output, AuthenticatedHostedRepositoryOutput, OutputStager};
 use sha2::{Digest, Sha256};
-pub(crate) use snapshot::{capture_snapshot, read_snapshot_chunk, retained_snapshot};
+pub(crate) use snapshot::{capture_snapshot, read_snapshot_chunk};
 use std::{
     collections::BTreeSet,
     fs,
