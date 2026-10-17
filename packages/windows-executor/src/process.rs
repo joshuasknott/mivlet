@@ -211,7 +211,12 @@ fn environment(root: &Path, system: &Path, preview: Option<&crate::PreviewSpec>)
             "NODE_OPTIONS",
             format!(
                 "--require=\"{}\"",
-                launch_path(&root.join("preview-bridge.cjs")).display()
+                // Node's NODE_OPTIONS parser treats backslashes as escapes,
+                // including inside quotes. Windows Node accepts drive paths
+                // with forward slashes; preserve the exact native-held path.
+                launch_path(&root.join("preview-bridge.cjs"))
+                    .to_string_lossy()
+                    .replace('\\', "/")
             ),
         );
     }
