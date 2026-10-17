@@ -23,4 +23,6 @@ export const readNativeCommandOutput = (
 export const stopNativeCommandJob = (target: NativeCommandTarget) =>
   invokeNative<{ job: NativeCommandJob }>("native_command_stop", { ...target });
 export const writeNativeCommandInput = (request: NativeCommandInput) =>
-  invokeNative<NativeCommandInputReceipt>("native_command_input", { ...request });
+  invokeNative<NativeCommandInputReceipt>("native_command_input", {
+    ...request,
+  });
