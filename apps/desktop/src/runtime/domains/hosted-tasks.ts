@@ -7,6 +7,7 @@ import type {
   HostedTaskControlResult,
   HostedTaskPrepare,
   HostedPublicWebTaskPrepare,
+  HostedCodingTaskPrepare,
   HostedTaskReview,
   HostedTaskReviewTarget,
   HostedTaskTarget,
@@ -30,6 +31,8 @@ export const prepareHostedTextTask = (request: HostedTaskPrepare) =>
   invoke<HostedTaskReview>("hosted_text_prepare", request);
 export const prepareHostedPublicWebTask = (request: HostedPublicWebTaskPrepare) =>
   invoke<HostedTaskReview>("hosted_task_prepare_public_web", request);
+export const prepareHostedCodingTask = (request: HostedCodingTaskPrepare) =>
+  invoke<HostedTaskReview>("hosted_task_prepare_coding", request);
 export const cancelHostedTextReview = (request: HostedTaskReviewTarget) =>
   invoke<HostedTaskControlResult>("hosted_text_review_cancel", request);
 export const admitHostedTextTask = (request: HostedTaskCommit) =>
