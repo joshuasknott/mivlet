@@ -190,7 +190,8 @@ setup. Production tenancy and full signed-in service acceptance remain unverifie
   the Codex, Claude SDK and native API routes that bridge Mivlet tools; provider-owned routes
   without that bridge cannot coordinate agents and show that prerequisite.
 - A persistent right-hand strip opens Activity, Files and Memory. Each section
-  opens or collapses its content inspector while the strip stays available. Agent\n  and project settings replace only its content. Activity
+  opens or collapses its content inspector while the strip stays available. Agent
+  and project settings replace only its content. Activity
   keeps current work, shared references and recent published files bounded;
   completed work remains in searchable, paged history. The scope selector
   browses this chat or its owning agent/project without changing model context
