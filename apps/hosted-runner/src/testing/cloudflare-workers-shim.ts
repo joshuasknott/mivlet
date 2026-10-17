@@ -11,3 +11,4 @@ export abstract class DurableObject<Env = unknown> {
     this.env = env;
   }
 }
+export abstract class WorkerEntrypoint<Env = unknown> extends DurableObject<Env> {}

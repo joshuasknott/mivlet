@@ -12,7 +12,7 @@ export const ENDPOINTS = {
   xai: "https://api.x.ai/v1/chat/completions",
   deepseek: "https://api.deepseek.com/chat/completions",
 } as const;
-export interface ProviderResult { text: string; usage?: HostedTaskUsage; research?: import("@mivlet/protocol").HostedPublicWebProgress }
+export interface ProviderResult { text: string; usage?: HostedTaskUsage; research?: import("@mivlet/protocol").HostedPublicWebProgress; coding?: import("@mivlet/protocol").HostedCodingProgress }
 /** Safe fixed code only. Never forward a provider error body or secret. */
 export class ProviderFailure extends Error {
   constructor(readonly code: string, readonly uncertain: boolean) { super(code); }

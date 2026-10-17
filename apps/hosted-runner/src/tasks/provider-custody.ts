@@ -1,11 +1,12 @@
 import { DurableObject } from "cloudflare:workers";
 import {
-  canonicalHostedTaskJson, hostedTaskSha256, HOSTED_TEXT_TASK_LIMITS as L,
+  canonicalHostedTaskJson, hostedTaskSha256, HOSTED_TEXT_TASK_LIMITS as L, HOSTED_CODING_LIMITS as C,
   type HostedCredentialEnrollment, type HostedProviderConnection,
   type HostedTaskBinding, type HostedTaskCapability, type HostedTaskTextInput,
 } from "@mivlet/protocol";
 import { ProviderFailure, runRealText, type ProviderResult } from "./provider";
 import { runRealResearch } from "./research-provider";
+import { runRealCoding } from "./coding-provider";
 import { researchJournal, researchState, type ResearchState } from "./research-journal";
 import type { TaskEnv } from "./environment";
 
@@ -87,6 +88,7 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
       const credential = row.credentials.find(c => c.credentialId === binding.credentialId);
       this.requireCredential(credential, binding, now);
       const day = Math.floor(now / 86_400_000); const count = row.days.find(d => d.day === day);
+      if (binding.version === 3 && row.reservations.filter(r => r.binding.version === 3).length >= C.retainedTasksPerAccount) throw new Error("hosted-task-quota");
       if ((count?.count ?? 0) >= L.admissionsPerDay || row.reservations.filter(r => r.active).length >= L.activePerAccount || row.reservations.length >= L.retainedPerAccount) throw new Error("hosted-task-quota");
       if (count) count.count++; else row.days.push({ day, count: 1 });
       row.reservations.push({ taskId: binding.taskId, admissionId: binding.admissionId, digest, binding, active: true, dispatched: false, createdAt: now, retainedUntil: now + L.retentionMs });
@@ -128,9 +130,30 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
           || canonicalHostedTaskJson(r.binding) !== canonicalHostedTaskJson(binding)) throw new Error("hosted-dispatch-not-current");
         return operation(r.research);
       }), controller.signal) : undefined;
-      const result = binding.version === 2
-        ? await runRealResearch(binding, input, secret, controller.signal, journal!)
-        : await runRealText(binding, input, secret, controller.signal);
+      const task = this.env.TASK_AUTHORITY.getByName(`${accountId}:${binding.taskId}`);
+      const codingGuard = async <T>(operation: () => Promise<T>): Promise<T> => {
+        controller.signal.throwIfAborted();
+        await this.change(accountId, row => {
+          const r = row.reservations.find(r => r.taskId === binding.taskId && r.digest === digest);
+          this.requireCredential(row.credentials.find(c => c.credentialId === binding.credentialId), binding, Date.now());
+          if (!r?.active || !r.dispatched || canonicalHostedTaskJson(r.binding) !== canonicalHostedTaskJson(binding)) throw new Error("hosted-dispatch-not-current");
+        });
+        controller.signal.throwIfAborted(); const result = await operation(); controller.signal.throwIfAborted(); return result;
+      };
+      const result = binding.version === 3
+        ? await runRealCoding(binding, input, secret, controller.signal, {
+          start: (kind, hash, tokens) => codingGuard(() => task.codingStartStep(accountId, digest, kind, hash, tokens)),
+          finish: (id, hash, check) => codingGuard(() => task.codingFinishStep(accountId, digest, id, hash, check)),
+          progress: () => codingGuard(() => task.codingProgress(accountId, digest)),
+        }, {
+          manifest: () => codingGuard(() => task.codingManifest(accountId, digest)),
+          bytes: file => codingGuard(() => task.codingBytes(accountId, digest, file)),
+          read: (path, offset, length) => codingGuard(() => task.codingRead(accountId, digest, path, offset, length)),
+          write: (path, expected, content) => codingGuard(() => task.codingWrite(accountId, digest, path, expected, content)),
+          sealOutput: () => codingGuard(() => task.codingSealOutput(accountId, digest)),
+        }, this.env.CODING_RUNTIME)
+        : binding.version === 2 ? await runRealResearch(binding, input, secret, controller.signal, journal!)
+          : await runRealText(binding, input, secret, controller.signal);
       return { ok: true, result };
     } catch (error) {
       return { ok: false, code: error instanceof ProviderFailure ? error.code : "hosted-dispatch-outcome-uncertain", uncertain: !(error instanceof ProviderFailure) || error.uncertain };

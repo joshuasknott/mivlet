@@ -10,6 +10,7 @@ import type { TaskEnv } from "./environment";
 export { ProviderCustody, TaskAuthority };
 const ROUTES = {
   "tasks/admit": "task:admit", "tasks/read": "task:read", "tasks/cancel": "task:cancel",
+  "tasks/chunk": "task:input", "tasks/seal": "task:input", "tasks/output": "task:output",
   "credentials/enroll": "credential:enroll", "credentials/read": "credential:read", "credentials/revoke": "credential:revoke",
 } satisfies Record<string, HostedTaskCapabilityScope>;
 const SAFE_FAILURES = new Set([
@@ -20,6 +21,7 @@ const SAFE_FAILURES = new Set([
   "task-admission-conflict", "task-admission-expired", "task-generation-mismatch", "task-not-found", "hosted-task-quota",
   "task-capability-expired", "task-capability-replayed", "task-capability-rate-limited", "task-custody-configuration-required",
   "invalid-research-domain", "invalid-research-url", "invalid-research-scope", "research-url-outside-scope", "research-secret-url", "research-policy-review-required",
+  "invalid-coding-path", "invalid-coding-scope", "invalid-coding-check", "invalid-coding-manifest", "invalid-coding-chunk", "coding-chunk-conflict", "coding-task-not-current", "coding-output-mismatch", "coding-file-incomplete", "coding-file-hash-mismatch", "coding-source-content-refused", "coding-policy-review-required", "hosted-coding-runtime-required",
 ]);
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 
@@ -39,15 +41,17 @@ export default {
       if (cap.scope !== scope || cap.resourceId !== identifier(path[3])) throw new Error("unauthorized");
     } catch { return json({ error: "task-authorization-required" }, 401); }
     try {
-      const body = boundedObject(await readJson(request));
+      const body = boundedObject(await readJson(request, 1024 * 1024));
       // Key bytes intentionally never traverse Convex. Its capability signs
       // exact enrollment metadata; only native supplies the separately entered
       // secret directly to this HTTPS route. Other routes bind the whole body.
-      const hashed = scope === "credential:enroll" ? body.metadata : body;
+      const transfer = scope === "task:input" || scope === "task:output";
+      const hashed = scope === "credential:enroll" ? body.metadata : transfer ? body.authorization : body;
       if (await hostedTaskSha256(hashed) !== cap.requestSha256) throw new Error("task-input-mismatch");
       const custody = env.PROVIDER_CUSTODY.getByName(cap.accountId);
       if (scope === "task:admit") {
         const value = await admission(body, cap);
+        if (value.binding.version === 3 && !env.CODING_RUNTIME) throw new Error("hosted-coding-runtime-required");
         await custody.consume(cap);
         await custody.reserve(cap, value.binding, cap.requestSha256);
         const task = env.TASK_AUTHORITY.getByName(`${cap.accountId}:${value.binding.taskId}`);
@@ -70,6 +74,29 @@ export default {
         const revision = integer(body.revision, 1, 0xffff_ffff);
         await custody.consume(cap); return json(await custody.revoke(cap, revision));
       }
+      if (scope === "task:input" || scope === "task:output") {
+        const task = env.TASK_AUTHORITY.getByName(`${cap.accountId}:${cap.resourceId}`);
+        const authorization = boundedObject(body.authorization);
+        exactKeys(authorization, scope === "task:input" ? ["taskId", "snapshotId", "manifestSha256"] : ["taskId", "outputManifestSha256"]);
+        if (authorization.taskId !== cap.resourceId) throw new Error("task-scope-mismatch");
+        // This new scope is one bounded transfer lease, not a fresh task/tool
+        // approval for each chunk. Existing scopes remain consume-once.
+        if (!await task.transfer(cap, false)) { await custody.consume(cap); await task.transfer(cap, true); }
+        if (route === "tasks/chunk") {
+          exactKeys(body, ["authorization", "chunk"]); const chunk = boundedObject(body.chunk); exactKeys(chunk, ["path", "offset", "dataBase64"]);
+          if (typeof authorization.snapshotId !== "string" || typeof chunk.path !== "string" || typeof chunk.dataBase64 !== "string") throw new Error("invalid-coding-chunk");
+          const value = { taskId: cap.resourceId, snapshotId: authorization.snapshotId, path: chunk.path, offset: integer(chunk.offset, 0, 256 * 1024), dataBase64: chunk.dataBase64 };
+          await task.inputChunk(cap, value, authorization.manifestSha256); return json({ accepted: true });
+        }
+        if (route === "tasks/seal") {
+          exactKeys(body, ["authorization", "seal"]); if (body.seal !== true) throw new Error("invalid-coding-chunk");
+          return json(await task.sealInput(cap, authorization.snapshotId, authorization.manifestSha256));
+        }
+        exactKeys(body, ["authorization", "path", "offset"]);
+        if (typeof body.path !== "string" || typeof authorization.outputManifestSha256 !== "string") throw new Error("coding-output-mismatch");
+        const value = { taskId: cap.resourceId, path: body.path, offset: integer(body.offset, 0, 256 * 1024), outputManifestSha256: authorization.outputManifestSha256 };
+        return json(await task.outputChunk(cap, value));
+      }
       exactKeys(body, scope === "task:cancel" ? ["taskId", "generation"] : ["taskId"]);
       if (body.taskId !== cap.resourceId) throw new Error("task-scope-mismatch");
       const generation = scope === "task:cancel" ? integer(body.generation, 1, 0xffff_ffff) : undefined;
@@ -78,7 +105,7 @@ export default {
       return json(generation !== undefined ? await task.cancel(cap, generation) : await task.read(cap));
     } catch (error) {
       const code = error instanceof Error && SAFE_FAILURES.has(error.message) ? error.message : "hosted-task-unavailable";
-      const status = code === "task-not-found" ? 404 : code.endsWith("quota") || code.endsWith("limited") || code.endsWith("limit") ? 429 : code.endsWith("configuration-required") ? 503 : 409;
+      const status = code === "task-not-found" ? 404 : code.endsWith("quota") || code.endsWith("limited") || code.endsWith("limit") ? 429 : code.endsWith("configuration-required") || code === "hosted-coding-runtime-required" ? 503 : 409;
       // No request/provider bodies, tokens or credentials enter logs/errors.
       return json({ error: code }, status);
     }
