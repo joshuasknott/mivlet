@@ -1,6 +1,6 @@
 import type { NativeToolSpec } from "./agent-runtime.js";
 import type { HostedRepositoryOutputManifest, HostedRepositorySnapshot } from "./hosted-repositories.js";
-import { canonicalHostedTaskJson, type HostedTaskPrepare } from "./hosted-tasks.js";
+import { canonicalHostedTaskJson } from "./hosted-task-json.js";
 
 /** One separately reviewed scratch operation. These are not local tool grants. */
 export const HOSTED_CODING_LIMITS = {
@@ -23,12 +23,6 @@ export interface HostedCodingScope {
 export interface HostedCodingBudget {
   maxModelCalls: number; maxToolCalls: number; maxOutputTokens: number;
   maxElapsedMs: number; maxResultBytes: number;
-}
-export interface HostedCodingTaskPrepare extends HostedTaskPrepare {
-  mode: "offline-coding";
-  selectedPaths: string[];
-  writablePaths: string[];
-  checks: HostedCodingCheck[];
 }
 export interface HostedCodingProposal {
   tool: string;

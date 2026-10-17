@@ -1,5 +1,7 @@
 import { canonicalHostedTaskJson, hostedTaskSha256, hostedTextContentFailure, HOSTED_TEXT_TASK_LIMITS as L, HOSTED_PUBLIC_WEB_LIMITS as W, HOSTED_CODING_LIMITS as C, validatePublicWebScope, publicWebTaskPolicy, hostedCodingTaskPolicy, type HostedTaskAdmission, type HostedTaskCapability, type HostedTextProviderId } from "@mivlet/protocol";
 import { codingRepository } from "./coding-contracts";
+import { boundedObject, exactKeys, integer } from "./request-guards";
+export { boundedObject, exactKeys, integer } from "./request-guards";
 const PROVIDERS = ["openai", "anthropic", "gemini", "xai", "deepseek"] as const;
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/;
 export function identifier(value: unknown): string {
@@ -9,17 +11,6 @@ export function identifier(value: unknown): string {
 export function provider(value: unknown): HostedTextProviderId {
   if (!PROVIDERS.includes(value as HostedTextProviderId)) throw new Error("hosted-api-provider-required");
   return value as HostedTextProviderId;
-}
-export function boundedObject(value: unknown): Record<string, unknown> {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("invalid-task-request");
-  return value as Record<string, unknown>;
-}
-export function exactKeys(value: object, required: string[], optional: string[] = []): void {
-  if (required.some(key => !Object.hasOwn(value, key)) || Object.keys(value).some(key => !required.includes(key) && !optional.includes(key))) throw new Error("invalid-task-request");
-}
-export function integer(value: unknown, minimum: number, maximum: number): number {
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum || value > maximum) throw new Error("invalid-task-budget");
-  return value;
 }
 export async function admission(value: unknown, capability: HostedTaskCapability, now = Date.now()): Promise<HostedTaskAdmission> {
   const input = boundedObject(value); exactKeys(input, ["binding", "input"]);

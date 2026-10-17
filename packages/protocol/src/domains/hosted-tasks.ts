@@ -1,6 +1,7 @@
 import { redactSecretText, secretMarkerSurvives } from "../secret-redaction.js";
 import type { HostedPublicWebBudget, HostedPublicWebProgress, HostedPublicWebScope } from "./hosted-public-web.js";
-import type { HostedCodingBudget, HostedCodingProgress, HostedCodingRepository } from "./hosted-coding.js";
+import type { HostedCodingBudget, HostedCodingCheck, HostedCodingProgress, HostedCodingRepository } from "./hosted-coding.js";
+export { canonicalHostedTaskJson, hostedTaskSha256 } from "./hosted-task-json.js";
 
 /** Explicitly delegated hosted text Work. These records grant no native tools. */
 export const HOSTED_TEXT_TASK_LIMITS = {
@@ -117,6 +118,12 @@ export interface HostedPublicWebTaskPrepare extends HostedTaskPrepare {
   mode: "public-web-research";
   webScope: HostedPublicWebScope;
 }
+export interface HostedCodingTaskPrepare extends HostedTaskPrepare {
+  mode: "offline-coding";
+  selectedPaths: string[];
+  writablePaths: string[];
+  checks: HostedCodingCheck[];
+}
 export interface HostedTaskReviewTarget extends HostedTaskTarget { reviewId: string }
 export interface HostedTaskCommit extends HostedTaskReviewTarget { resolution: import("./approvals").ApprovalResolutionRequest }
 export interface HostedProviderScope { workspaceId: string; agentId: string }
@@ -166,18 +173,3 @@ export interface HostedTaskCapabilityReceipt {
   expiresAt: number;
 }
 
-/** Stable cross-runtime digest; all native producers must use this key order. */
-export function canonicalHostedTaskJson(value: unknown): string {
-  const canonical = (entry: unknown): unknown => {
-    if (Array.isArray(entry)) return entry.map(canonical);
-    if (entry && typeof entry === "object") return Object.fromEntries(Object.entries(entry)
-      .filter(([, child]) => child !== undefined)
-      .sort(([left], [right]) => left < right ? -1 : left > right ? 1 : 0)
-      .map(([key, child]) => [key, canonical(child)]));
-    return entry;
-  };
-  return JSON.stringify(canonical(value));
-}
-export async function hostedTaskSha256(value: unknown): Promise<string> {
-  return Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalHostedTaskJson(value)))), byte => byte.toString(16).padStart(2, "0")).join("");
-}

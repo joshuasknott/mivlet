@@ -138,7 +138,7 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
           || !sameBinding(r.binding, binding)) throw new Error("hosted-dispatch-not-current");
         return operation(r.research);
       }), controller.signal) : undefined;
-      const task = this.env.TASK_AUTHORITY.getByName(`${accountId}:${binding.taskId}`);
+      const codingTask = () => this.env.TASK_AUTHORITY.getByName(`${accountId}:${binding.taskId}`);
       const codingGuard = async <T>(operation: () => Promise<T>): Promise<T> => {
         controller.signal.throwIfAborted();
         await this.change(accountId, row => {
@@ -150,15 +150,15 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
       };
       const result = binding.version === 3
         ? await runRealCoding(binding, input, secret, controller.signal, {
-          start: (kind, hash, tokens) => codingGuard(() => task.codingStartStep(accountId, digest, kind, hash, tokens)),
-          finish: (id, hash, check) => codingGuard(() => task.codingFinishStep(accountId, digest, id, hash, check)),
-          progress: () => codingGuard(() => task.codingProgress(accountId, digest)),
+          start: (kind, hash, tokens) => codingGuard(() => codingTask().codingStartStep(accountId, digest, kind, hash, tokens)),
+          finish: (id, hash, check) => codingGuard(() => codingTask().codingFinishStep(accountId, digest, id, hash, check)),
+          progress: () => codingGuard(() => codingTask().codingProgress(accountId, digest)),
         }, {
-          manifest: () => codingGuard(() => task.codingManifest(accountId, digest)),
-          bytes: file => codingGuard(() => task.codingBytes(accountId, digest, file)),
-          read: (path, offset, length) => codingGuard(() => task.codingRead(accountId, digest, path, offset, length)),
-          write: (path, expected, content) => codingGuard(() => task.codingWrite(accountId, digest, path, expected, content)),
-          sealOutput: () => codingGuard(() => task.codingSealOutput(accountId, digest)),
+          manifest: () => codingGuard(() => codingTask().codingManifest(accountId, digest)),
+          bytes: file => codingGuard(() => codingTask().codingBytes(accountId, digest, file)),
+          read: (path, offset, length) => codingGuard(() => codingTask().codingRead(accountId, digest, path, offset, length)),
+          write: (path, expected, content) => codingGuard(() => codingTask().codingWrite(accountId, digest, path, expected, content)),
+          sealOutput: () => codingGuard(() => codingTask().codingSealOutput(accountId, digest)),
         }, this.env.CODING_RUNTIME)
         : binding.version === 2 ? await runRealResearch(binding, input, secret, controller.signal, journal!)
           : await runRealText(binding, input, secret, controller.signal);

@@ -3,7 +3,7 @@ import {
   validateHostedCodingScope, HOSTED_CODING_LIMITS as L,
   type HostedCodingRepository, type HostedRepositoryFile, type HostedRepositorySnapshot,
 } from "@mivlet/protocol";
-import { boundedObject, exactKeys, integer } from "./contracts";
+import { boundedObject, exactKeys, integer } from "./request-guards";
 
 export const utf8 = new TextEncoder();
 export async function byteSha256(bytes: Uint8Array): Promise<string> {
