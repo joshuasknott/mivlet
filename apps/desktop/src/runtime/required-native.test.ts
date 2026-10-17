@@ -38,10 +38,7 @@ it("preserves request nesting, no-argument commands, and native result identity"
     request: { workspaceId: "workspace-a", includeArchived: true },
   });
   await expect(getPhoneRelayStatus()).resolves.toBe(result);
-  expect(mocks.invoke).toHaveBeenLastCalledWith(
-    "phone_relay_status",
-    undefined,
-  );
+  expect(mocks.invoke).toHaveBeenLastCalledWith("phone_relay_status");
 });
 
 it("retains structured error metadata and original Error instances", async () => {
