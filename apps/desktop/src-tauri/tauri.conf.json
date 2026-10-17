@@ -19,7 +19,7 @@
         "height": 1024,
         "minWidth": 640,
         "minHeight": 600,
-        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --site-per-process"
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --site-per-process --enable-features=ConnectionAllowlists,OverrideConnectionAllowlistOriginTrial"
       }
     ],
     "security": {

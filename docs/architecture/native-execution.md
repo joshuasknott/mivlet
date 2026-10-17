@@ -42,6 +42,10 @@ HTTP pipelining are rejected.
 
 Before the first descriptor, native WebView2 environment metadata must report
 Chromium 152 or newer and a controlled hidden frame must prove enforcement. The
+desktop explicitly enables the native Chromium `ConnectionAllowlists` and
+`OverrideConnectionAllowlistOriginTrial` features, because embedded-runtime
+feature/origin-trial gating can differ from the Chrome release announcement.
+Neither the feature flags nor the reported version replace the actual proof. The
 native fixture observes a successful loopback fetch and real STUN binding packet,
 then verifies that the restricted document reaches its own control routes while
 neither its forbidden fetch nor its separate STUN socket receives traffic during
