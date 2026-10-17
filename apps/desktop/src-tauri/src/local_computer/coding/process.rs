@@ -311,7 +311,11 @@ pub(in crate::local_computer) fn native_run(
     let output = session
         .as_ref()
         .map_or_else(super::super::command_jobs::safe_output, |s| s.output());
-    let result = mivlet_windows_executor::run_with_output(
+    let control = session
+        .as_ref()
+        .map(|session| session.control())
+        .transpose()?;
+    let result = mivlet_windows_executor::run_with_session(
         &execution_resources()?,
         root,
         script,
@@ -329,6 +333,7 @@ pub(in crate::local_computer) fn native_run(
             mivlet_windows_executor::ExecutionMode::Command
         },
         output.clone(),
+        control,
         || ticket.check().is_ok(),
         |launch| {
             ticket.with_current(launch)?;

@@ -9,6 +9,9 @@ struct Start {
     command: String,
     network: bool,
     timeout_seconds: u64,
+    #[serde(default)]
+    interactive: bool,
+    preview_port: Option<u16>,
 }
 
 pub(super) fn start(
@@ -45,13 +48,17 @@ pub(super) fn start(
                     );
                 }
                 let root = checkout(&directory, &repo)?;
-                let mut session = jobs.start(
+                let mut session = jobs.start_with_options(
                     &ticket,
                     Some(&repo.id),
                     &input.command,
                     input.network,
                     input.timeout_seconds,
                     true,
+                    mivlet_windows_executor::SessionOptions {
+                        interactive: input.interactive,
+                        preview_port: input.preview_port,
+                    },
                 )?;
                 let snapshot = session.snapshot()?;
                 if ready.send(Ok(snapshot)).is_err() {

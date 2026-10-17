@@ -93,6 +93,7 @@
     "command-jobs": "local-read",
     "command-output": "local-read",
     "command-stop": "app-state-mutation",
+    "command-input": "app-state-mutation",
     "repository-commit": "local-write",
     "repository-publish": "connector-write",
     "repository-pr-read": "connector-read",

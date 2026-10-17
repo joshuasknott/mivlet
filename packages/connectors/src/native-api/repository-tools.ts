@@ -31,8 +31,10 @@ function tool(
 export const REPOSITORY_TOOLS: Record<string, BackendTool> = {
   "repository-start": tool(
     "start",
-    PERSISTENT_EXECUTION_POLICY + "Use a fixed isolated repository snapshot; hold its lock until all descendants end.",
-    { ...id, command: text, network: { type: "boolean" }, timeoutSeconds: { type: "integer", minimum: 1, maximum: 86400 } },
+    PERSISTENT_EXECUTION_POLICY + "Use a fixed isolated repository snapshot; hold its lock until descendants end. Optional previewPort exposes one approved Node HTTP server only through native private IPC; no host TCP or live edit mirroring.",
+    { ...id, command: text, network: { type: "boolean" }, timeoutSeconds: { type: "integer", minimum: 1, maximum: 86400 },
+      interactive: { type: "boolean", description: "Explicitly retain private stdin; no terminal/TTY." },
+      previewPort: { type: "integer", minimum: 1, maximum: 65535, description: "One exact Node HTTP listen port redirected to a private native preview pipe." } },
     ["repositoryId", "command", "network", "timeoutSeconds"],
     "critical",
   ),
