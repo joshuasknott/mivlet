@@ -19,8 +19,8 @@ vi.mock("@cloudflare/sandbox", () => ({
 import handler, { CodingAuthority, OfflineCodingSandbox } from "./index";
 
 const leaseId = "a".repeat(48);
-async function value(): Promise<CodingCheckStart> {
-  const source = "export const value = 1;\n"; const files = [{ path: "main.js", sizeBytes: utf8.encode(source).length, sha256: await byteSha256(utf8.encode(source)) }];
+async function value(source = "export const value = 1;\n"): Promise<CodingCheckStart> {
+  const files = [{ path: "main.js", sizeBytes: utf8.encode(source).length, sha256: await byteSha256(utf8.encode(source)) }];
   return { leaseId, taskSha256: "b".repeat(64), stepId: "step-unit", deadline: Date.now() + 120000, files, candidateSha256: await hostedTaskSha256(files), scope: { writablePaths: ["main.js"], checks: [{ id: "syntax", argv: ["/usr/bin/node", "--check", "main.js"] }], image: HOSTED_CODING_IMAGE, network: "disabled" } };
 }
 function environment() { return { OFFLINE_CODING: {}, CODING_NETWORK_BASELINE: {} }; }
@@ -68,6 +68,15 @@ describe("private offline runtime authority", () => {
   it("retains cancellation before a delayed begin without creating any sandbox", async () => {
     const storage = new MemoryTaskStorage(); const authority = new CodingAuthority(storage.context(), environment() as never);
     await authority.cancel(); await expect(authority.begin(await value())).rejects.toThrow("coding-lease-already-used"); expect(calls.get).not.toHaveBeenCalled();
+  });
+  it("stages BOM source through runtime authority with the exact manifest hash and SDK bytes", async () => {
+    const source = "\uFEFFexport const value = 1;\n"; const write = vi.fn(async (_path: string, _content: string) => {});
+    calls.get.mockReturnValue({ mkdir: async () => {}, writeFile: write, retire: async () => {} });
+    const storage = new MemoryTaskStorage(); const authority = new CodingAuthority(storage.context(), environment() as never);
+    const start = await value(source); await authority.begin(start); await authority.file("main.js", source);
+    expect(write).toHaveBeenCalledWith("/workspace/task/main.js", source);
+    expect(await byteSha256(utf8.encode(vi.mocked(write).mock.calls[0][1]))).toBe(start.files[0].sha256);
+    await authority.cancel();
   });
   it("launches exact fixed wrapper once and rejects a repeated possibly executed check", async () => {
     const storage = new MemoryTaskStorage(); const exec = vi.fn(async () => ({ output: async () => ({ exitCode: 0, timedOut: false, truncated: false, stdout: JSON.stringify({ exitCode: 0, stdout: "checked", stderr: "", truncated: false, timedOut: false }) }) }));

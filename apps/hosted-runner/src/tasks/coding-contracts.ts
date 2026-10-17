@@ -68,7 +68,7 @@ export function decodeCodingChunk(value: unknown): Uint8Array {
 }
 export function encodeCodingChunk(bytes: Uint8Array): string { return btoa(String.fromCharCode(...bytes)); }
 export function codingSource(bytes: Uint8Array): string {
-  const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  const text = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(bytes);
   if (text.includes("\0") || hostedTextContentFailure(text)) throw new Error("coding-source-content-refused");
   return text;
 }
