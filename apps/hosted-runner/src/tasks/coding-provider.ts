@@ -55,7 +55,7 @@ export async function runRealCoding(binding: HostedCodingTaskBinding, input: Hos
     signal.throwIfAborted();
     const prerequisite = await runtime.prerequisites(binding.repository.scope.image);
     signal.throwIfAborted();
-    if (prerequisite.image !== binding.repository.scope.image || prerequisite.network !== "disabled" || prerequisite.proof !== "positive-and-negative-v1") throw new ProviderFailure("coding-network-proof-required", false);
+    if (prerequisite.image !== binding.repository.scope.image || prerequisite.network !== "disabled" || prerequisite.proof !== "positive-and-negative-v1" || prerequisite.processIsolation !== "uid-seccomp-v1") throw new ProviderFailure("coding-network-proof-required", false);
     for (let turn = 0; turn < binding.budget.maxModelCalls; turn++) {
       signal.throwIfAborted(); const state = await journal.progress();
       const tokens = Math.min(L.tokensPerCall, binding.budget.maxOutputTokens - state.allocatedOutputTokens);
@@ -104,8 +104,13 @@ export async function runRealCoding(binding: HostedCodingTaskBinding, input: Hos
       if (finish !== "tool-calls" || !calls.length || turn + 1 >= binding.budget.maxModelCalls) throw new ProviderFailure("coding-incomplete", false);
       messages.push({ role: "assistant", content: text, toolCalls: calls });
       for (const call of calls) {
-        signal.throwIfAborted(); const args = boundedObject(JSON.parse(call.arguments)); let output: unknown; let toolStep: string;
-        if (call.tool === "scratch_read") {
+        signal.throwIfAborted(); const args = boundedObject(JSON.parse(call.arguments)); safe(args, 64000); let output: unknown; let toolStep: string;
+        if (call.tool === "scratch_list") {
+          exactKeys(args, ["offset", "length"]); const offset = integer(args.offset, 0, L.files); const length = integer(args.length, 1, 64);
+          toolStep = await journal.start("list", await hostedTaskSha256(args));
+          const manifest = await files.manifest(); const names = [...new Set([...manifest.map(file => file.path), ...binding.repository.scope.writablePaths])].sort();
+          output = { files: names.slice(offset, offset + length).map(path => { const file = manifest.find(file => file.path === path); return { path, writable: binding.repository.scope.writablePaths.includes(path), sizeBytes: file?.sizeBytes ?? null, sha256: file?.sha256 ?? null }; }), total: names.length, nextOffset: offset + length < names.length ? offset + length : null };
+        } else if (call.tool === "scratch_read") {
           exactKeys(args, ["path", "offset", "length"]);
           const manifest = await files.manifest(); if (typeof args.path !== "string" || !manifest.some(file => file.path === args.path)) return await propose(call, "path-outside-scope");
           toolStep = await journal.start("read", await hostedTaskSha256(args));
@@ -125,8 +130,9 @@ export async function runRealCoding(binding: HostedCodingTaskBinding, input: Hos
           const cancel = () => { void runtime.cancel(leaseId).catch(() => undefined); }; signal.addEventListener("abort", cancel, { once: true });
           let result: CodingCheckResult;
           try {
-            signal.throwIfAborted(); await runtime.begin({ leaseId, taskSha256: await hostedTaskSha256(binding), stepId: toolStep, deadline: state.deadline, scope: binding.repository.scope, files: manifest, candidateSha256 });
-            for (const file of manifest) { signal.throwIfAborted(); await runtime.file(leaseId, file.path, new TextDecoder("utf-8", { fatal: true }).decode(await files.bytes(file))); }
+            const taskSha256 = await hostedTaskSha256(binding); signal.throwIfAborted();
+            await runtime.begin({ leaseId, taskSha256, stepId: toolStep, deadline: state.deadline, scope: binding.repository.scope, files: manifest, candidateSha256 });
+            for (const file of manifest) { signal.throwIfAborted(); const bytes = await files.bytes(file); signal.throwIfAborted(); await runtime.file(leaseId, file.path, new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
             signal.throwIfAborted(); result = await runtime.run(leaseId, args.id); signal.throwIfAborted();
             if (result.leaseId !== leaseId || result.stepId !== toolStep || result.candidateSha256 !== candidateSha256 || result.id !== args.id) throw new Error("coding-check-outcome-uncertain");
           } finally { signal.removeEventListener("abort", cancel); await runtime.cancel(leaseId); }

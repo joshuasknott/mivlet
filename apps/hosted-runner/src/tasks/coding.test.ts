@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { hostedTaskSha256, hostedCodingTaskPolicy, validateHostedCodingScope, HOSTED_CODING_IMAGE, type HostedCodingTaskBinding, type HostedRepositorySnapshot } from "@mivlet/protocol";
 import { admission } from "./contracts";
-import { byteSha256, codingRepository, encodeCodingChunk, utf8 } from "./coding-contracts";
+import { byteSha256, codingEntries, codingRepository, encodeCodingChunk, utf8 } from "./coding-contracts";
 import { CodingFiles } from "./coding-custody";
 import { codingJournal, codingState, type CodingState } from "./coding-journal";
 import { runRealCoding } from "./coding-provider";
@@ -34,7 +34,7 @@ const sse = (payload: unknown) => new Response(`data: ${JSON.stringify(payload)}
 const tool = (name: string, args: unknown, id: string) => ({ choices: [{ delta: { tool_calls: [{ index: 0, id, function: { name, arguments: JSON.stringify(args) } }] }, finish_reason: "tool_calls" }] });
 function runtime(): CodingRuntimeBinding {
   let current: Parameters<CodingRuntimeBinding["begin"]>[0];
-  return { prerequisites: vi.fn(async () => ({ image: HOSTED_CODING_IMAGE, network: "disabled", proof: "positive-and-negative-v1" })), begin: vi.fn(async value => { current = value; }), file: vi.fn(async () => {}), cancel: vi.fn(async () => {}), run: vi.fn(async (_lease, id) => ({ leaseId: current.leaseId, stepId: current.stepId, candidateSha256: current.candidateSha256, id, exitCode: 0, stdout: "", stderr: "", truncated: false, timedOut: false })) };
+  return { prerequisites: vi.fn(async () => ({ image: HOSTED_CODING_IMAGE, network: "disabled", proof: "positive-and-negative-v1", processIsolation: "uid-seccomp-v1" })), begin: vi.fn(async value => { current = value; }), file: vi.fn(async () => {}), cancel: vi.fn(async () => {}), run: vi.fn(async (_lease, id) => ({ leaseId: current.leaseId, stepId: current.stepId, candidateSha256: current.candidateSha256, id, exitCode: 0, stdout: "", stderr: "", truncated: false, timedOut: false })) };
 }
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
@@ -47,6 +47,7 @@ describe("reviewed isolated scratch admission", () => {
     await expect(admission({ binding: value.binding, input: { messages: [value.input.messages[1]] } }, cap)).rejects.toThrow("coding-policy-review-required");
     for (const argv of [["/bin/sh", "-c", "anything"], ["node", "--check", "main.js"], ["/usr/bin/curl", "https://example.com"]]) expect(() => validateHostedCodingScope({ ...value.binding.repository.scope, checks: [{ id: "bad", argv }] })).toThrow();
     for (const path of ["../private", ".git/config", ".env", "C:\\private", "a/CON", "a/../b", "main.js/child"]) await expect(codingRepository({ ...value.binding.repository, scope: { ...value.binding.repository.scope, writablePaths: [path] } })).rejects.toThrow();
+    expect(() => codingEntries([{ path: "Src/a.js", sizeBytes: 0, sha256: "0".repeat(64) }, { path: "src/b.js", sizeBytes: 0, sha256: "0".repeat(64) }], 0)).toThrow("invalid-coding-manifest");
   });
   it("keeps input custody immutable and refuses wrong chunks, hashes, scope and Stop", async () => {
     const value = await fixture(); const { files, stop } = await custody(value);
@@ -77,7 +78,7 @@ describe("real provider adapters over closed scratch tools", () => {
     const value = await fixture(); const c = await custody(value); const service = runtime(); let calls = 0;
     const send = vi.fn(async (_url: string, request: RequestInit) => {
       expect((await c.journal.progress()).steps.at(-1)?.status).toBe("dispatching"); expect(request.redirect).toBe("manual");
-      const body = JSON.parse(String(request.body)); expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(["scratch_read", "scratch_write", "scratch_check"]);
+      const body = JSON.parse(String(request.body)); expect(body.tools.map((tool: { function: { name: string } }) => tool.function.name)).toEqual(["scratch_list", "scratch_read", "scratch_write", "scratch_check"]);
       return ++calls === 1 ? sse(tool("scratch_write", { path: "main.js", expectedSha256: value.binding.repository.snapshot.files[0].sha256, content: "export const value = 2;\n" }, "write_1"))
         : calls === 2 ? sse(tool("scratch_check", { id: "syntax" }, "check_1")) : sse({ choices: [{ delta: { content: "Changed the value and the syntax check passed." }, finish_reason: "stop" }] });
     }); vi.stubGlobal("fetch", send);
@@ -103,8 +104,22 @@ describe("real provider adapters over closed scratch tools", () => {
   });
   it("checks Stop after the runtime prerequisite before any model send", async () => {
     const value = await fixture(); const c = await custody(value); const service = runtime(); const controller = new AbortController(); const send = vi.fn(); vi.stubGlobal("fetch", send);
-    vi.mocked(service.prerequisites).mockImplementationOnce(async () => { controller.abort(); return { image: HOSTED_CODING_IMAGE, network: "disabled", proof: "positive-and-negative-v1" }; });
+    vi.mocked(service.prerequisites).mockImplementationOnce(async () => { controller.abort(); return { image: HOSTED_CODING_IMAGE, network: "disabled", proof: "positive-and-negative-v1", processIsolation: "uid-seccomp-v1" }; });
     await expect(runRealCoding(value.binding, value.input, key, controller.signal, c.journal, c.access, service)).rejects.toMatchObject({ uncertain: false }); expect(send).not.toHaveBeenCalled();
+  });
+  it("rejects a decoded Unicode-escaped provider key before any candidate write", async () => {
+    const value = await fixture(); const c = await custody(value); const service = runtime();
+    const args = JSON.stringify({ path: "main.js", expectedSha256: value.binding.repository.snapshot.files[0].sha256, content: key }).replace(key, [...key].map(char => `\\u${char.charCodeAt(0).toString(16).padStart(4, "0")}`).join(""));
+    vi.stubGlobal("fetch", vi.fn(async () => sse({ choices: [{ delta: { tool_calls: [{ index: 0, id: "escaped_key", function: { name: "scratch_write", arguments: args } }] }, finish_reason: "tool_calls" }] })));
+    await expect(runRealCoding(value.binding, value.input, key, new AbortController().signal, c.journal, c.access, service)).rejects.toMatchObject({ code: "coding-content-refused" });
+    expect(await c.files.manifest()).toEqual(value.binding.repository.snapshot.files); expect(service.begin).not.toHaveBeenCalled();
+  });
+  it("does not send a file-stage RPC after Stop wins an awaited native custody read", async () => {
+    const value = await fixture(); const c = await custody(value); const service = runtime(); const controller = new AbortController();
+    vi.stubGlobal("fetch", vi.fn(async () => sse(tool("scratch_check", { id: "syntax" }, "check_stop"))));
+    const access = { ...c.access, bytes: async () => { controller.abort(); return value.source; } };
+    await expect(runRealCoding(value.binding, value.input, key, controller.signal, c.journal, access, service)).rejects.toMatchObject({ uncertain: true });
+    expect(service.file).not.toHaveBeenCalled(); expect(service.run).not.toHaveBeenCalled(); expect(service.cancel).toHaveBeenCalled();
   });
 });
 

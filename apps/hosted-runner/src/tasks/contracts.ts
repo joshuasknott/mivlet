@@ -56,6 +56,7 @@ export async function admission(value: unknown, capability: HostedTaskCapability
     return message.role === "system" && message.content === publicWebTaskPolicy(validatePublicWebScope(b.webScope));
   })) throw new Error("research-policy-review-required");
   if (repository && !text.messages.some(raw => { const message = boundedObject(raw); return message.role === "system" && message.content === hostedCodingTaskPolicy(repository); })) throw new Error("coding-policy-review-required");
+  if (coding && new TextEncoder().encode(canonicalHostedTaskJson(input)).length > C.admissionBytes) throw new Error("coding-metadata-limit");
   if (new TextEncoder().encode(canonicalHostedTaskJson(text)).length > L.inputBytes || await hostedTaskSha256(text) !== b.inputSha256 || await hostedTaskSha256(input) !== capability.requestSha256) throw new Error("task-input-mismatch");
   return value as HostedTaskAdmission;
 }

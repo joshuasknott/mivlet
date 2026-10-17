@@ -10,8 +10,8 @@
   // Requires Workers Paid. This private service is not part of the existing
   // Free task deployment and has no provider/account secrets or public route.
   "containers": [
-    { "class_name": "OfflineCodingSandbox", "image": "docker.io/cloudflare/sandbox:0.13.0-next.738.2@sha256:f4b2137219568aa44539ab93c0e774db6bcab323c134c5088447916e58f15e75", "instance_type": "lite", "max_instances": 2 },
-    { "class_name": "CodingNetworkBaseline", "image": "docker.io/cloudflare/sandbox:0.13.0-next.738.2@sha256:f4b2137219568aa44539ab93c0e774db6bcab323c134c5088447916e58f15e75", "instance_type": "lite", "max_instances": 1 }
+    { "class_name": "OfflineCodingSandbox", "image": "docker.io/cloudflare/sandbox:0.13.0-next.738.2-python@sha256:545b3df29a246f83e6fdb907180ea3169a91ee567d5478823a2248604c6bc353", "instance_type": "lite", "max_instances": 2 },
+    { "class_name": "CodingNetworkBaseline", "image": "docker.io/cloudflare/sandbox:0.13.0-next.738.2-python@sha256:545b3df29a246f83e6fdb907180ea3169a91ee567d5478823a2248604c6bc353", "instance_type": "lite", "max_instances": 1 }
   ],
   "durable_objects": { "bindings": [
     { "name": "OFFLINE_CODING", "class_name": "OfflineCodingSandbox" },

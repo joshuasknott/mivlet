@@ -3,7 +3,7 @@ import { getSandbox, Sandbox, type ExecOptions, type SandboxCommand } from "@clo
 import { hostedTaskSha256, validateHostedCodingScope, HOSTED_CODING_IMAGE, HOSTED_CODING_LIMITS as L } from "@mivlet/protocol";
 import { byteSha256, codingEntries, codingSource, hex, utf8 } from "../tasks/coding-contracts";
 import type { CodingCheckResult, CodingCheckStart, CodingRuntimeBinding } from "../tasks/coding-runtime-contract";
-import { NETWORK_PROBE, RUN_CHECK } from "./scripts";
+import { NETWORK_PROBE, CHILD_ISOLATION_PROBE, RUN_CHECK } from "./scripts";
 
 interface CodingEnv extends HostedCodingBindings {}
 // This is fixed before any start. There are deliberately no allowed hosts,
@@ -53,7 +53,7 @@ async function bounded<T>(promise: Promise<T>, milliseconds: number): Promise<T>
 export class CodingRuntime extends WorkerEntrypoint<CodingEnv> implements CodingRuntimeBinding {
   async prerequisites(image: string) {
     if (image !== HOSTED_CODING_IMAGE) throw new Error("coding-image-mismatch");
-    return await this.env.CODING_AUTHORITY.getByName("fixed-network-proof-v1").prove();
+    return await this.env.CODING_AUTHORITY.getByName("fixed-network-proof-v2").prove();
   }
   async begin(value: CodingCheckStart) { await this.env.CODING_AUTHORITY.getByName(leaseId(value.leaseId)).begin(value); }
   async file(id: string, path: string, content: string) { await this.env.CODING_AUTHORITY.getByName(leaseId(id)).file(path, content); }
@@ -63,13 +63,13 @@ export class CodingRuntime extends WorkerEntrypoint<CodingEnv> implements Coding
 
 export class CodingAuthority extends DurableObject<CodingEnv> {
   private sandbox(id: string) { return getSandbox(this.env.OFFLINE_CODING, `scratch-${id}`, { keepAlive: false, containerTimeouts: { instanceGetTimeoutMS: 10_000, portReadyTimeoutMS: 10_000 } }); }
-  async prove(): Promise<{ image: string; network: "disabled"; proof: "positive-and-negative-v1" }> {
-    const receipt = { image: HOSTED_CODING_IMAGE, network: "disabled" as const, proof: "positive-and-negative-v1" as const };
+  async prove() {
+    const receipt = { image: HOSTED_CODING_IMAGE, network: "disabled" as const, proof: "positive-and-negative-v1" as const, processIsolation: "uid-seccomp-v1" as const };
     const nonce = crypto.randomUUID();
     const cached = await this.ctx.storage.transaction(async tx => {
-      const prior = await tx.get<{ image: string; until: number }>("proof");
+      const prior = await tx.get<{ image: string; until: number; processIsolation?: string }>("proof");
       if (await tx.get("probe")) throw new Error("coding-network-proof-in-progress");
-      if (prior?.image === HOSTED_CODING_IMAGE && prior.until > Date.now()) return true;
+      if (prior?.image === HOSTED_CODING_IMAGE && prior.processIsolation === receipt.processIsolation && prior.until > Date.now()) return true;
       await tx.put("probe", { nonce, deadline: Date.now() + L.elapsedMs } satisfies Probe);
       await tx.setAlarm(Date.now() + L.elapsedMs); return false;
     });
@@ -92,6 +92,11 @@ export class CodingAuthority extends DurableObject<CodingEnv> {
         if (!positive.http || !positive.https || !positive.udpDns || !positive.resolverDns) throw new Error("coding-network-positive-control-unavailable");
         const negative = await observe(offline);
         if (Object.values(negative).some(value => value !== false)) throw new Error("coding-network-proof-required");
+        const child = await bounded(offline.exec(["/usr/bin/python3", "-I", "-c", CHILD_ISOLATION_PROBE], { timeout: 12_000 }), 15_000);
+        const childOutput = await child.output({ encoding: "utf8", maxBytes: 2048, timeout: 13_000 });
+        if (childOutput.exitCode !== 0 || childOutput.timedOut || childOutput.truncated) throw new Error("coding-process-isolation-required");
+        const isolation = JSON.parse(childOutput.stdout);
+        if (isolation.loopbackControlBaseline !== true || isolation.unixControlBaseline !== true || isolation.uidSeccomp !== receipt.processIsolation) throw new Error("coding-process-isolation-required");
       } finally {
         // Cleanup is part of the prerequisite. Failed teardown cannot issue a
         // successful proof or silently leave internet-enabled resources live.
@@ -101,7 +106,7 @@ export class CodingAuthority extends DurableObject<CodingEnv> {
       await this.ctx.storage.transaction(async tx => {
         const current = await tx.get<Probe>("probe");
         if (current?.nonce !== nonce || current.deadline <= Date.now()) throw new Error("coding-network-proof-required");
-        await tx.put("proof", { image: HOSTED_CODING_IMAGE, until: Date.now() + 8 * 60 * 60_000 });
+        await tx.put("proof", { image: HOSTED_CODING_IMAGE, processIsolation: receipt.processIsolation, until: Date.now() + 8 * 60 * 60_000 });
         await tx.delete("probe"); await tx.deleteAlarm();
       });
       return receipt;
@@ -115,7 +120,7 @@ export class CodingAuthority extends DurableObject<CodingEnv> {
       || value.deadline <= Date.now() || value.deadline > Date.now() + L.elapsedMs) throw new Error("invalid-coding-lease");
     await this.ctx.storage.transaction(async tx => {
       // An uncertain begin/run is never replayed, even with identical input.
-      if (await tx.get("lease")) throw new Error("coding-lease-already-used");
+      if (await tx.get("lease") || await tx.get("retired")) throw new Error("coding-lease-already-used");
       await tx.put("lease", { value, phase: "staging", received: [] } satisfies Lease);
       await tx.setAlarm(value.deadline);
     });
@@ -170,7 +175,11 @@ export class CodingAuthority extends DurableObject<CodingEnv> {
     } finally { await bounded(sandbox.retire(), 15_000); }
   }
   async cancel(): Promise<void> {
-    const row = await this.ctx.storage.transaction(async tx => { const row = await tx.get<Lease>("lease"); if (!row) return undefined; row.phase = "cancelled"; await tx.put("lease", row); await tx.setAlarm(Date.now() + 1000); return row; });
+    const row = await this.ctx.storage.transaction(async tx => {
+      if (!await tx.get("retired")) await tx.put("retired", Date.now() + 24 * 60 * 60_000);
+      const row = await tx.get<Lease>("lease"); if (row) { row.phase = "cancelled"; await tx.put("lease", row); }
+      await tx.setAlarm(Date.now() + 1000); return row;
+    });
     if (row) await bounded(this.sandbox(row.value.leaseId).retire(), 15_000);
   }
   async alarm(): Promise<void> {
@@ -183,9 +192,12 @@ export class CodingAuthority extends DurableObject<CodingEnv> {
       await this.ctx.storage.transaction(async tx => { if ((await tx.get<Probe>("probe"))?.nonce === probe.nonce) await tx.delete("probe"); });
     }
     const row = await this.ctx.storage.get<Lease>("lease");
-    if (!row) return;
-    await this.cancel();
-    await this.ctx.blockConcurrencyWhile(async () => { await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll(); });
+    if (row) { await this.cancel(); await this.ctx.storage.delete("lease"); }
+    const retired = await this.ctx.storage.get<number>("retired");
+    if (retired !== undefined) {
+      if (retired <= Date.now()) await this.ctx.blockConcurrencyWhile(async () => { await this.ctx.storage.deleteAlarm(); await this.ctx.storage.deleteAll(); });
+      else await this.ctx.storage.setAlarm(retired);
+    }
   }
   private async current(phase: Lease["phase"]): Promise<Lease> {
     const row = await this.ctx.storage.get<Lease>("lease");

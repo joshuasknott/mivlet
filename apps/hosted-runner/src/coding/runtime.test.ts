@@ -3,6 +3,7 @@ import { hostedTaskSha256, HOSTED_CODING_IMAGE } from "@mivlet/protocol";
 import { MemoryTaskStorage } from "../tasks/testing/fixtures";
 import { byteSha256, utf8 } from "../tasks/coding-contracts";
 import type { CodingCheckStart } from "../tasks/coding-runtime-contract";
+import { CHILD_ISOLATION_PROBE } from "./scripts";
 
 const calls = vi.hoisted(() => ({ get: vi.fn(), exec: vi.fn(), destroy: vi.fn() }));
 vi.mock("@cloudflare/sandbox", () => ({
@@ -30,7 +31,8 @@ describe("private offline runtime authority", () => {
   it("has no public HTTP runtime surface", () => { expect(handler.fetch().status).toBe(404); });
   it("requires real positive HTTP/HTTPS/DNS controls before accepting all-negative isolation", async () => {
     const storage = new MemoryTaskStorage(); const observations: string[] = [];
-    const sandbox = (name: string) => ({ exec: async () => ({ output: async () => {
+    const sandbox = (name: string) => ({ exec: async (argv: string[]) => ({ output: async () => {
+      if (argv[3] === CHILD_ISOLATION_PROBE) return { exitCode: 0, timedOut: false, truncated: false, stdout: JSON.stringify({ loopbackControlBaseline: true, unixControlBaseline: true, uidSeccomp: "uid-seccomp-v1" }) };
       observations.push(name); return { exitCode: 0, timedOut: false, truncated: false, stdout: JSON.stringify({ http: name.startsWith("fixed-baseline"), https: name.startsWith("fixed-baseline"), resolverDns: name.startsWith("fixed-baseline"), udpDns: name.startsWith("fixed-baseline"), privateTcp: false }) };
     } }), retire: vi.fn(async () => {}) });
     calls.get.mockImplementation((_ns, name: string) => sandbox(name));
@@ -62,6 +64,10 @@ describe("private offline runtime authority", () => {
     while (!mkdir.mock.calls.length) await Promise.resolve();
     await authority.cancel(); release(); await expect(stage).rejects.toThrow("coding-check-not-current");
     expect(write).not.toHaveBeenCalled(); expect(retire).toHaveBeenCalledOnce(); await expect(authority.run("syntax")).rejects.toThrow();
+  });
+  it("retains cancellation before a delayed begin without creating any sandbox", async () => {
+    const storage = new MemoryTaskStorage(); const authority = new CodingAuthority(storage.context(), environment() as never);
+    await authority.cancel(); await expect(authority.begin(await value())).rejects.toThrow("coding-lease-already-used"); expect(calls.get).not.toHaveBeenCalled();
   });
   it("launches exact fixed wrapper once and rejects a repeated possibly executed check", async () => {
     const storage = new MemoryTaskStorage(); const exec = vi.fn(async () => ({ output: async () => ({ exitCode: 0, timedOut: false, truncated: false, stdout: JSON.stringify({ exitCode: 0, stdout: "checked", stderr: "", truncated: false, timedOut: false }) }) }));

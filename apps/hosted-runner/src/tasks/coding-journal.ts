@@ -1,6 +1,6 @@
 import { HOSTED_CODING_LIMITS as L, type HostedCodingTaskBinding, type HostedCodingProgress } from "@mivlet/protocol";
 
-export interface CodingStep { id: string; kind: "model" | "read" | "write" | "check"; inputSha256: string; status: "dispatching" | "completed"; outputSha256?: string }
+export interface CodingStep { id: string; kind: "model" | "list" | "read" | "write" | "check"; inputSha256: string; status: "dispatching" | "completed"; outputSha256?: string }
 export interface CodingState {
   deadline: number; modelCalls: number; toolCalls: number; allocatedOutputTokens: number;
   steps: CodingStep[]; completedChecks: HostedCodingProgress["completedChecks"];

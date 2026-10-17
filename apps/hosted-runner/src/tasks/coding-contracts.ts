@@ -12,7 +12,7 @@ export async function byteSha256(bytes: Uint8Array): Promise<string> {
 export function hex(value: unknown, length = 64): value is string { return typeof value === "string" && new RegExp(`^[a-f0-9]{${length}}$`).test(value); }
 export function codingEntries(raw: unknown, total: unknown): HostedRepositoryFile[] {
   if (!Array.isArray(raw) || raw.length > L.files) throw new Error("invalid-coding-manifest");
-  const aliases = new Set<string>(); let previous = ""; let bytes = 0;
+  const aliases = new Set<string>(); const directories = new Map<string, string>(); let previous = ""; let bytes = 0;
   const files = raw.map(item => {
     const entry = boundedObject(item); exactKeys(entry, ["path", "sizeBytes", "sha256"]);
     const path = hostedCodingPath(entry.path);
@@ -22,8 +22,12 @@ export function codingEntries(raw: unknown, total: unknown): HostedRepositoryFil
     return { path, sizeBytes, sha256: entry.sha256 };
   });
   for (const file of files) {
-    const parts = file.path.toLowerCase().split("/");
-    for (let i = 1; i < parts.length; i++) if (aliases.has(parts.slice(0, i).join("/"))) throw new Error("invalid-coding-manifest");
+    const parts = file.path.split("/");
+    for (let i = 1; i < parts.length; i++) {
+      const prefix = parts.slice(0, i).join("/"); const lower = prefix.toLowerCase();
+      if (aliases.has(lower) || directories.has(lower) && directories.get(lower) !== prefix) throw new Error("invalid-coding-manifest");
+      directories.set(lower, prefix);
+    }
   }
   if (bytes !== integer(total, 0, L.treeBytes)) throw new Error("invalid-coding-manifest");
   return files;
@@ -45,7 +49,7 @@ export async function codingRepository(value: unknown): Promise<HostedCodingRepo
   if (s.version !== 1 || !hex(s.snapshotId, 48) || !hex(s.repositoryId, 48) || (!hex(s.baseCommit, 40) && !hex(s.baseCommit))
     || typeof s.branch !== "string" || !s.branch || utf8.encode(s.branch).length > 256 || /[\x00-\x1f\x7f]/.test(s.branch) || hostedTextContentFailure(s.branch)
     || !hex(s.inputTreeId) || !hex(s.manifestSha256) || s.inputTreeId !== await treeId(files)
-    || !scope.writablePaths.length || canonicalHostedTaskJson(s.writablePaths) !== canonicalHostedTaskJson(scope.writablePaths)
+    || canonicalHostedTaskJson(s.writablePaths) !== canonicalHostedTaskJson(scope.writablePaths)
     || scope.writablePaths.some((path, i) => i > 0 && path <= scope.writablePaths[i - 1])) throw new Error("invalid-coding-manifest");
   // A new writable file may not alias a selected file/directory.
   const all = [...new Set([...files.map(file => file.path), ...scope.writablePaths])].sort();

@@ -13,8 +13,14 @@ import type { TaskEnv } from "./environment";
 interface Credential extends HostedProviderConnection {
   workspaceId: string; agentId: string; iv: number[]; encrypted: number[];
 }
+type ReservationBinding = Pick<HostedTaskBinding, "version" | "taskId" | "workspaceId" | "agentId" | "credentialId" | "credentialRevision" | "providerId">;
+function bindingIdentity(binding: ReservationBinding): ReservationBinding {
+  const { version, taskId, workspaceId, agentId, credentialId, credentialRevision, providerId } = binding;
+  return { version, taskId, workspaceId, agentId, credentialId, credentialRevision, providerId };
+}
+function sameBinding(saved: ReservationBinding, binding: HostedTaskBinding): boolean { return canonicalHostedTaskJson(bindingIdentity(saved)) === canonicalHostedTaskJson(bindingIdentity(binding)); }
 interface Reservation {
-  taskId: string; admissionId: string; digest: string; binding: HostedTaskBinding;
+  taskId: string; admissionId: string; digest: string; binding: ReservationBinding;
   createdAt: number; retainedUntil: number; active: boolean;
   /** Persisted BEFORE provider egress; recovery never repeats this request. */
   dispatched: boolean;
@@ -91,7 +97,9 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
       if (binding.version === 3 && row.reservations.filter(r => r.binding.version === 3).length >= C.retainedTasksPerAccount) throw new Error("hosted-task-quota");
       if ((count?.count ?? 0) >= L.admissionsPerDay || row.reservations.filter(r => r.active).length >= L.activePerAccount || row.reservations.length >= L.retainedPerAccount) throw new Error("hosted-task-quota");
       if (count) count.count++; else row.days.push({ day, count: 1 });
-      row.reservations.push({ taskId: binding.taskId, admissionId: binding.admissionId, digest, binding, active: true, dispatched: false, createdAt: now, retainedUntil: now + L.retentionMs });
+      // The exact admission digest binds the full manifest. Account quota/key
+      // custody needs only this small identity, never forty full input trees.
+      row.reservations.push({ taskId: binding.taskId, admissionId: binding.admissionId, digest, binding: bindingIdentity(binding), active: true, dispatched: false, createdAt: now, retainedUntil: now + L.retentionMs });
     });
   }
 
@@ -99,10 +107,10 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
     let encrypted: Credential;
     const attempt = crypto.randomUUID();
     try {
-      if (await hostedTaskSha256(input) !== binding.inputSha256) throw new Error("task-input-mismatch");
+      if (await hostedTaskSha256(input) !== binding.inputSha256 || await hostedTaskSha256({ binding, input }) !== digest) throw new Error("task-input-mismatch");
       encrypted = await this.change(accountId, row => {
         const r = row.reservations.find(r => r.taskId === binding.taskId && r.digest === digest);
-        if (!r || !r.active || r.dispatched || canonicalHostedTaskJson(r.binding) !== canonicalHostedTaskJson(binding) || r.retainedUntil <= Date.now() || binding.expiresAt <= Date.now()) throw new Error("hosted-dispatch-not-current");
+        if (!r || !r.active || r.dispatched || !sameBinding(r.binding, binding) || r.retainedUntil <= Date.now() || binding.expiresAt <= Date.now()) throw new Error("hosted-dispatch-not-current");
         const c = row.credentials.find(c => c.credentialId === binding.credentialId);
         this.requireCredential(c, binding, Date.now());
         r.dispatched = true;
@@ -127,7 +135,7 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
         const r = row.reservations.find(r => r.taskId === binding.taskId && r.digest === digest);
         this.requireCredential(row.credentials.find(c => c.credentialId === binding.credentialId), binding, Date.now());
         if (!r?.active || !r.dispatched || r.research?.attempt !== attempt
-          || canonicalHostedTaskJson(r.binding) !== canonicalHostedTaskJson(binding)) throw new Error("hosted-dispatch-not-current");
+          || !sameBinding(r.binding, binding)) throw new Error("hosted-dispatch-not-current");
         return operation(r.research);
       }), controller.signal) : undefined;
       const task = this.env.TASK_AUTHORITY.getByName(`${accountId}:${binding.taskId}`);
@@ -136,7 +144,7 @@ export class ProviderCustody extends DurableObject<TaskEnv> {
         await this.change(accountId, row => {
           const r = row.reservations.find(r => r.taskId === binding.taskId && r.digest === digest);
           this.requireCredential(row.credentials.find(c => c.credentialId === binding.credentialId), binding, Date.now());
-          if (!r?.active || !r.dispatched || canonicalHostedTaskJson(r.binding) !== canonicalHostedTaskJson(binding)) throw new Error("hosted-dispatch-not-current");
+          if (!r?.active || !r.dispatched || !sameBinding(r.binding, binding)) throw new Error("hosted-dispatch-not-current");
         });
         controller.signal.throwIfAborted(); const result = await operation(); controller.signal.throwIfAborted(); return result;
       };
