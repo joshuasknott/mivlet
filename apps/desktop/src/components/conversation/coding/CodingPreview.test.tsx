@@ -5,7 +5,9 @@ import { CodingPreview, isPreviewPick, validPreviewDescriptor } from "./CodingPr
 const target = { workspaceId: "space", agentId: "atlas", expectedGeneration: 4, jobId: "job", jobGeneration: 4 };
 const origin = `http://${"a".repeat(48)}.localhost:43210`;
 const preview: NativePreviewDescriptor = { id: "preview", jobId: "job", jobGeneration: 4, repositoryId: "copy", generation: 4, revision: "revision", url: `${origin}/`, origin, expiresAt: new Date(Date.now() + 60_000).toISOString(), pickerSupported: true };
-const pick: NativePreviewPick = { kind: "mivlet-preview-pick", previewId: "preview", jobId: "job", jobGeneration: 4, revision: "revision", path: "main > h1", tag: "h1", label: "Selected work", bounds: { x: 20, y: 40, width: 200, height: 50 } };
+// Match the actual native picker: pathname and uppercase DOM tagName, never a
+// renderer-invented CSS selector or field value.
+const pick: NativePreviewPick = { kind: "mivlet-preview-pick", previewId: "preview", jobId: "job", jobGeneration: 4, revision: "revision", path: "/work", tag: "H1", label: "Selected work", bounds: { x: 20, y: 40, width: 200, height: 50 } };
 const feedback: NativePreviewFeedback = { ...pick, trust: "external-untrusted" };
 function setup(descriptor = preview) {
   const props = { target, readPreview: vi.fn().mockResolvedValue({ status: "ready", preview: descriptor }), closePreview: vi.fn().mockResolvedValue({ status: "closed", message: "Closed by native." }), validatePreviewPick: vi.fn().mockResolvedValue(feedback), onDraft: vi.fn() };
@@ -29,7 +31,7 @@ describe("native running-app preview", () => {
     fireEvent.click(picker);
     guest(pick, "https://other.example"); guest(pick, origin, window); guest({ ...pick, revision: "stale" });
     expect(props.validatePreviewPick).not.toHaveBeenCalled();
-    guest(pick); await screen.findByRole("textbox", { name: "Change selected h1" });
+    guest(pick); await screen.findByRole("textbox", { name: "Change selected H1" });
     expect(props.validatePreviewPick).toHaveBeenCalledWith({ ...target, previewId: "preview" }, pick);
     expect(props.onDraft).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Make the heading smaller and give it more space." } });
@@ -53,7 +55,7 @@ describe("native running-app preview", () => {
     await screen.findByText("Checking the selected element…");
     view.rerender(<CodingPreview {...props} target={{ ...target, agentId: "mira" }} />);
     finish(feedback);
-    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Change selected h1" })).toBeNull());
+    await waitFor(() => expect(screen.queryByRole("textbox", { name: "Change selected H1" })).toBeNull());
     expect(props.onDraft).not.toHaveBeenCalled();
   });
   it("closes only the exact native preview without claiming the command stopped", async () => {
