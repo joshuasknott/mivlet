@@ -140,10 +140,16 @@ impl Endpoint {
             .ok_or("The private preview namespace is invalid.")?;
         let object_path = String::from_utf16(&object_path[..end])
             .map_err(|_| "The private preview namespace is invalid.")?;
-        if !object_path.starts_with('\\') || !object_path.ends_with(&self.profile) {
+        if object_path != format!(r"AppContainerNamedObjects\{}", self.profile) {
             return Err("The private preview namespace changed identity.".into());
         }
-        let name = wide(format!(r"\\.\pipe{object_path}\{leaf}"));
+        let mut session_id = 0;
+        if unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session_id) } == 0 {
+            return Err(security::error("Resolve private preview Windows session"));
+        }
+        let name = wide(format!(
+            r"\\.\pipe\Sessions\{session_id}\{object_path}\{leaf}"
+        ));
         unsafe {
             WaitNamedPipeW(name.as_ptr(), 200);
         }
@@ -162,6 +168,12 @@ impl Endpoint {
         let mut pid = 0;
         if unsafe { GetNamedPipeServerProcessId(handle.0, &mut pid) } == 0 || pid == 0 {
             return Err("The private preview server identity is unavailable.".into());
+        }
+        let mut peer_session_id = 0;
+        if unsafe { ProcessIdToSessionId(pid, &mut peer_session_id) } == 0
+            || peer_session_id != session_id
+        {
+            return Err("The preview server Windows session changed.".into());
         }
         // Hold the process identity through both pipe PID observations. No PID
         // lookup or renderer URL can establish command-session membership.
