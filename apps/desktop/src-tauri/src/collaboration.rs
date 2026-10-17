@@ -10,6 +10,7 @@ mod exchanges;
 pub(crate) mod external;
 mod goals;
 mod handover;
+pub(crate) mod hosted;
 pub(crate) mod models;
 mod output_revisions;
 pub(crate) mod pr_watches;
@@ -470,7 +471,7 @@ pub async fn collaboration_command(
     let computers = app
         .try_state::<std::sync::Arc<crate::local_computer::LocalComputerState>>()
         .map(|state| state.inner().clone());
-    store
+    let outcome = store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(
                 conn,
@@ -527,7 +528,11 @@ pub async fn collaboration_command(
             }
             ctx.snapshot()
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    if outcome.is_ok() {
+        crate::hosted_tasks::wake_pending(app);
+    }
+    outcome
 }
 
 /// Native adoption is idempotent and never rewrites a historical message or file.
@@ -714,7 +719,7 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
             if provider_resets::require_restart_review(&mut item) { ctx.work(&item)?; }
             // Unstarted user requests have no provider or external outcome to
             // replay. Keep their exact frozen inputs and queue position.
-            if queue::recoverable_unstarted(&ctx, &item)? { continue; }
+            if queue::recoverable_unstarted(&ctx, &item)? || item.execution_owner.as_deref() == Some("hosted") { continue; }
             if item.status.active()
                 && !(crate::background_worker::owns_work(&item) && crate::background_worker::owner_alive())
             {
@@ -746,6 +751,7 @@ pub(crate) fn fence_orphaned_executing_work(
     };
     for mut item in ctx.all_work()? {
         if item.status.executing()
+            && item.execution_owner.as_deref() != Some("hosted")
             && !(crate::background_worker::owns_work(&item)
                 && crate::background_worker::owner_alive())
         {
@@ -791,6 +797,7 @@ pub(crate) fn suspend_account(
     };
     for mut item in ctx.all_work()? {
         if item.status.active() {
+            hosted::mark_stop(&mut item);
             item.status = WorkStatus::AwaitingUser;
             item.generation += 1;
             item.current_run_id = None;
@@ -868,6 +875,11 @@ pub(crate) fn ensure_run_current(
     };
     let item: Work = repo::get(conn, store, &scope.private, Kind::Work, key)?
         .ok_or_else(|| invalid("This assignment is no longer available."))?;
+    if item.execution_owner.as_deref() == Some("hosted") {
+        return Err(invalid(
+            "Cloud-owned attempt results require an authenticated native task receipt.",
+        ));
+    }
     if item.generation != author.generation
         || !item.status.executing()
         || item.current_run_id.as_deref() != Some(run)

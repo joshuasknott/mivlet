@@ -15,6 +15,14 @@ pub(super) fn reply_user(
     id(event_id)?;
     let text = bounded(text, 32_000, "Follow-up")?;
     let mut item = ctx.item(key)?;
+    if item.execution_owner.as_deref() == Some("hosted")
+        || item
+            .hosted_task
+            .as_ref()
+            .is_some_and(|h| h.phase == "review")
+    {
+        return Err(invalid("Cloud text task input is frozen. Review its saved answer, then start a new request with a fresh cloud review; this task cannot accept replies or live steering."));
+    }
     if let Some(existing) = item.steering.iter().find(|event| event.id == event_id) {
         return if existing.text == text {
             Ok(())

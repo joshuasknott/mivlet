@@ -445,7 +445,7 @@ export class WorkspaceExecution {
     const sessions = [...this.state.sessions];
     let changed = false;
     for (const work of this.state.data.work.filter(
-      (work) => work.status === "queued" && work.executionOwner !== "native-background",
+      (work) => work.status === "queued" && !work.executionOwner,
     )) {
       if (!workCanDispatch(work, this.state.data.work)) continue;
       if (work.schedule && !this.scheduled.has(work.id)) continue;
@@ -782,7 +782,7 @@ export class WorkspaceExecution {
     return this.closing;
   }
   private async closeOwnedExecution() {
-    const targets = this.executingWork().filter((work) => work.executionOwner !== "native-background").map((work) => ({
+    const targets = this.executingWork().filter((work) => !work.executionOwner).map((work) => ({
       id: work.id,
       expectedGeneration: work.generation,
     }));

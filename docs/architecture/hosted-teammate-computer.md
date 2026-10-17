@@ -19,8 +19,10 @@ The runner exposes only these capability families:
 - bounded browser observation and exact control actions; and
 - trusted snapshot/live-view metadata for the human UI.
 
-There is no hosted recurring-work or background-conversation contract in the
-current protocol.
+The separate [hosted text task path](hosted-text-tasks.md) explicitly delegates
+one frozen text request to an API provider. It uses a task-only Worker without
+these computer/browser bindings. It grants no tools, files, browser, recurring
+work, or automatic continuation of ordinary conversations.
 
 ## Approval and authorization
 

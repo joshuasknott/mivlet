@@ -174,6 +174,14 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             id(&event_id)?;
             let text = bounded(&text, 2_000, "Steering")?;
             let mut item = ctx.item(&key)?;
+            if item.execution_owner.as_deref() == Some("hosted")
+                || item
+                    .hosted_task
+                    .as_ref()
+                    .is_some_and(|h| h.phase == "review")
+            {
+                return Err(invalid("This cloud text request has frozen input. Stop or finish it, then start a new request and review its complete cloud text; live steering is unavailable."));
+            }
             if let Some(event) = item.steering.iter().find(|event| event.id == event_id) {
                 return if event.text == text {
                     Ok(())
@@ -508,7 +516,14 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             run_id,
             status,
             reason,
-        } => work::finish(ctx, &id, generation, &run_id, status, reason)?,
+        } => {
+            if ctx.item(&id)?.execution_owner.as_deref() == Some("hosted") {
+                return Err(invalid(
+                    "A cloud Work result needs its authenticated native task receipt.",
+                ));
+            }
+            work::finish(ctx, &id, generation, &run_id, status, reason)?;
+        }
         Command::StopWork {
             id,
             expected_generation,
@@ -548,6 +563,15 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             reconcile,
         } => {
             let mut item = ctx.item(&id)?;
+            if item.hosted_task.as_ref().is_some_and(|h| {
+                h.phase != "review"
+                    && h.phase != "reconciled"
+                    && h.snapshot
+                        .as_ref()
+                        .is_none_or(|s| matches!(s.status.as_str(), "queued" | "running"))
+            }) {
+                return Err(invalid("Refresh the cloud task and obtain a terminal receipt or acknowledged cancellation before starting a local continuation."));
+            }
             if !reconcile
                 || expected_generation != item.generation
                 || item.status.active()
@@ -580,6 +604,7 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             // Reconciliation is a new user-authorized foreground attempt; a
             // crashed native attempt is never resurrected automatically.
             item.execution_owner = None;
+            item.hosted_task = None;
             if let Some(goal) = item.outcome_goal.as_mut() {
                 goal.status = "active".into();
                 goal.report = None;

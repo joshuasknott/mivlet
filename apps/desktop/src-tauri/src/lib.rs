@@ -48,6 +48,7 @@ mod execution_control;
 mod generated_html;
 mod google;
 mod hosted_computer;
+mod hosted_tasks;
 #[cfg(windows)]
 mod interactive_network_guard;
 mod knowledge;
@@ -158,6 +159,7 @@ pub fn run() {
                     computers.clone(),
                 );
                 protected_secrets::start_maintenance(computers.clone());
+                hosted_tasks::start_maintenance(handle.clone(), computers.clone());
                 app.manage(computers);
                 app.manage(local_schedules::LocalScheduleDispatchCoordinator::default());
                 app.manage(local_schedules::events::EventIngress::new());
@@ -392,6 +394,14 @@ pub fn run() {
             account_workspace::account_workspace_reconcile,
             account_workspace::account_workspace_clear_session,
             hosted_computer::hosted_computer_status,
+            hosted_tasks::hosted_text_prepare,
+            hosted_tasks::hosted_text_review_cancel,
+            hosted_tasks::hosted_text_admit,
+            hosted_tasks::hosted_text_refresh,
+            hosted_tasks::hosted_text_stop,
+            hosted_tasks::hosted_provider_list,
+            hosted_tasks::hosted_provider_revoke,
+            protected_secrets::hosted_provider_enroll,
             hosted_computer::hosted_computer_provision,
             hosted_computer::hosted_process_prepare,
             hosted_computer::hosted_process_launch,

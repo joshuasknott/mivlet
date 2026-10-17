@@ -2,6 +2,8 @@
 //! metadata crosses IPC; values move from a native dialog to OS custody and a
 //! closed native consumer. Interrupted transfers never replay.
 mod capture;
+mod hosted;
+pub(crate) use hosted::hosted_provider_enroll;
 mod custody;
 mod repository;
 pub(crate) mod runtime;

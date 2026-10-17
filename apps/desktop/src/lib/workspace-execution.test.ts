@@ -151,6 +151,17 @@ describe("native background custody", () => {
     expect(service.getSnapshot().sessions).toEqual([]);
     await service.dispose();
   });
+  it("keeps hosted custody outside renderer dispatch and app-close cancellation while explicit Stop still fences it", async () => {
+    const { service, command, update } = fixture([fixtureWork("cloud", "a", { executionOwner: "hosted" })]);
+    await service.refresh(); service.admit(agents, models, [provider], "full-access");
+    expect(service.getSnapshot().sessions).toEqual([]);
+    update([fixtureWork("cloud", "a", { executionOwner: "hosted", status: "running" })]); await service.refresh();
+    await service.dispose(); expect(command).not.toHaveBeenCalled();
+    const next = fixture([fixtureWork("cloud", "a", { executionOwner: "hosted", status: "running" })]);
+    await next.service.refresh(); await next.service.stop("cloud");
+    expect(next.command).toHaveBeenCalledWith("fixture", { action: "stop-work", id: "cloud" });
+    expect(next.service.getSnapshot().data.work[0].status).toBe("cancelled"); await next.service.dispose();
+  });
   it("window disposal preserves native work while stopping renderer-owned work", async () => {
     const { service, command } = fixture([
       fixtureWork("background", "a", { executionOwner: "native-background", status: "running" }),
