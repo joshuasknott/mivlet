@@ -1,4 +1,5 @@
 import { redactSecretText, secretMarkerSurvives } from "../secret-redaction.js";
+import type { HostedPublicWebBudget, HostedPublicWebProgress, HostedPublicWebScope } from "./hosted-public-web.js";
 
 /** Explicitly delegated hosted text Work. These records grant no native tools. */
 export const HOSTED_TEXT_TASK_LIMITS = {
@@ -25,7 +26,7 @@ export interface HostedTaskBudget {
   maxElapsedMs: number;
   maxResultBytes: number;
 }
-export interface HostedTaskBinding {
+export interface HostedTextTaskBinding {
   version: 1;
   taskId: string;
   admissionId: string;
@@ -48,6 +49,13 @@ export interface HostedTaskBinding {
   /** Latest time at which the admitted request may START, not retention. */
   expiresAt: number;
 }
+export interface HostedPublicWebTaskBinding extends Omit<HostedTextTaskBinding, "version" | "budget"> {
+  version: 2;
+  mode: "public-web-research";
+  webScope: HostedPublicWebScope;
+  budget: HostedPublicWebBudget;
+}
+export type HostedTaskBinding = HostedTextTaskBinding | HostedPublicWebTaskBinding;
 export interface HostedTaskTextInput {
   /** Explicitly disclosed captured text only; no image, tool, path or secret. */
   messages: { role: "system" | "user" | "assistant"; content: string }[];
@@ -78,6 +86,7 @@ export interface HostedTaskSnapshot {
   createdAt: number;
   updatedAt: number;
   retainedUntil: number;
+  research?: HostedPublicWebProgress;
 }
 /** Returned only by authenticated native fetch; renderer cannot attest success. */
 export interface HostedTaskResult {
@@ -96,6 +105,10 @@ export interface HostedWorkExecution {
 }
 export interface HostedTaskTarget { workspaceId: string; agentId: string; workId: string; expectedGeneration: number }
 export interface HostedTaskPrepare extends HostedTaskTarget { credentialId: string; credentialRevision: number }
+export interface HostedPublicWebTaskPrepare extends HostedTaskPrepare {
+  mode: "public-web-research";
+  webScope: HostedPublicWebScope;
+}
 export interface HostedTaskReviewTarget extends HostedTaskTarget { reviewId: string }
 export interface HostedTaskCommit extends HostedTaskReviewTarget { resolution: import("./approvals").ApprovalResolutionRequest }
 export interface HostedProviderScope { workspaceId: string; agentId: string }
