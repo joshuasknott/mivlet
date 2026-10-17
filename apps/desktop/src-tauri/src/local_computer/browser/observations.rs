@@ -170,6 +170,7 @@ pub(super) fn tabs(
     process.navigation.clear();
     process.fields.clear();
     process.downloads.clear();
+    process.upload_choices.clear();
     process.activation.clear();
     process.controls.clear();
     process.scroll = None;
@@ -292,7 +293,7 @@ fn editable(node: &Value) -> bool {
         })
     })
 }
-fn private_attributes(node: &Value) -> Result<bool, String> {
+pub(super) fn private_attributes(node: &Value) -> Result<bool, String> {
     // Editable AX descendants can be DOM text nodes, which have no attributes.
     // Their owning elements are checked separately and their text is never projected.
     if node["nodeType"] == 3 {
@@ -377,7 +378,7 @@ pub(super) fn reachable(
     Ok(output)
 }
 
-fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
+pub(super) fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
     let indexed: HashMap<_, _> = nodes
         .iter()
         .enumerate()
@@ -486,6 +487,7 @@ pub(super) fn observe(
     process.controls.clear();
     process.fields.clear();
     process.downloads.clear();
+    process.upload_choices.clear();
     process.scroll = None;
     let origin = exact_origin(requested_origin)?;
     // Consume before I/O; this choice cannot be replayed by a later observation.

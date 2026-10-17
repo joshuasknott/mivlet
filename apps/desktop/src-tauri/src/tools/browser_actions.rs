@@ -12,6 +12,8 @@ pub(super) fn supported(tool: &str) -> bool {
             | "local-browser-fill"
             | "local-browser-handover"
             | "local-browser-download"
+            | "local-browser-upload-choices"
+            | "local-browser-upload"
     )
 }
 
@@ -19,6 +21,12 @@ pub(super) fn supported(tool: &str) -> bool {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Activation {
     activation_ref: String,
+    origin: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct UploadChoices {
+    tab_ref: String,
     origin: String,
 }
 #[derive(Deserialize)]
@@ -43,6 +51,39 @@ pub(super) async fn execute(
     agent: String,
     generation: u64,
 ) -> Result<ToolResult, String> {
+    if tool == "local-browser-upload-choices" {
+        let input: UploadChoices = serde_json::from_value(arguments)
+            .map_err(|_| "Use one current tabRef and its exact origin.")?;
+        validate_reference(&input.tab_ref, &input.origin)?;
+        let output = tauri::async_runtime::spawn_blocking(move || {
+            crate::local_computer::browser::upload_choices(
+                &computers,
+                &workspace,
+                &agent,
+                generation,
+                &input.tab_ref,
+                &input.origin,
+            )
+        })
+        .await
+        .map_err(|_| "Browser upload choices were interrupted; list tabs again.")??;
+        return Ok(ToolResult { ok: true, output });
+    }
+    if tool == "local-browser-upload" {
+        let input: crate::local_computer::browser::UploadRequest =
+            serde_json::from_value(arguments).map_err(|_| {
+                "Use one current uploadRef, exact origin/name and published artifactId."
+            })?;
+        validate_reference(&input.upload_ref, &input.origin)?;
+        if input.name.trim().is_empty()
+            || input.name.chars().count() > 160
+            || input.name.chars().any(char::is_control)
+        {
+            return Err("Choose the exact observed public upload label.".into());
+        }
+        let output=tauri::async_runtime::spawn_blocking(move||crate::local_computer::browser::upload(&computers,&workspace,&agent,generation,&input)).await.map_err(|_|"Browser file attachment outcome is uncertain. Hand control to the user; never replay it.")??;
+        return Ok(ToolResult { ok: true, output });
+    }
     if tool == "local-browser-download" {
         let input: crate::local_computer::browser::DownloadRequest =
             serde_json::from_value(arguments).map_err(|_| {

@@ -216,6 +216,10 @@ export function buildToolApproval(
     ? "Download this exact observed link into native staging using the browser's existing sign-in. Close this agent's owned browser after transfer, failure or Stop to contain pending writes, then accept one completed passive file up to 8 MiB into private workspace Downloads without overwriting files. Final redirects fail closed. Publication requires a separate action."
     : toolName === "local-browser-handover" && isRegistered
     ? "Save this task as needing your attention, stop agent control and leave the browser open for you. Continuing requires your explicit request and a fresh window selection."
+    : toolName === "local-browser-upload" && isRegistered
+    ? "Attach this exact published passive artifact to the observed empty file field. Its page handlers may immediately transmit the complete file to this website. Native staging remains private until the owned browser closes. No separate submit is clicked; hand control to the user for file confirmation. Never replay an uncertain attachment."
+    : toolName === "local-browser-upload-choices" && isRegistered
+    ? "Read only public labels of empty single-file fields in this exact tab and origin. Omit page text, selected filenames and all field values. No file is attached."
     : isRegistered
     ? `Execute the ${toolName} tool via ${providerId} with the given arguments.`
     : `Refuse unregistered tool ${toolName} — not in Mivlet's tool registry.`;

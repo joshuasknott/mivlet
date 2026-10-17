@@ -226,6 +226,7 @@ pub(super) fn fill(
     let choice = process.fields.remove(reference).ok_or(STALE)?;
     process.fields.clear();
     process.downloads.clear();
+    process.upload_choices.clear();
     process.controls.clear();
     process.navigation.clear();
     process.activation.clear();

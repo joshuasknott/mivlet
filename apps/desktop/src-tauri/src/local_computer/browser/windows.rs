@@ -55,6 +55,11 @@ mod scrolling;
 #[cfg(debug_assertions)]
 #[path = "tab_acceptance.rs"]
 mod tab_acceptance;
+#[path = "uploads.rs"]
+mod uploads;
+#[cfg(debug_assertions)]
+#[path = "uploads_acceptance.rs"]
+mod uploads_acceptance;
 
 pub(super) fn run_helper(arguments: &[std::ffi::OsString]) -> Result<(), String> {
     helper::run(arguments)
@@ -104,6 +109,13 @@ pub(super) fn acceptance() -> Result<(), String> {
     observations::acceptance(
         &mut process,
         window.identity.hwnd,
+        &|| ticket.check(),
+        &|start| ticket.with_current(start),
+    )?;
+    uploads_acceptance::run(
+        &mut process,
+        window.identity.hwnd,
+        root.path(),
         &|| ticket.check(),
         &|start| ticket.with_current(start),
     )?;
@@ -418,10 +430,42 @@ pub(super) struct BrowserProcess {
     controls: std::collections::HashMap<String, controls::Choice>,
     fields: std::collections::HashMap<String, forms::Choice>,
     downloads: std::collections::HashMap<String, downloads::Choice>,
+    upload_choices: std::collections::HashMap<String, uploads::Choice>,
+    upload_custody: Vec<uploads::Custody>,
     scroll: Option<(String, scrolling::Choice)>,
 }
 
 impl BrowserProcess {
+    pub(super) fn upload_choices(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<String, String> {
+        uploads::choices(self, (hwnd, generation), reference, origin, check)
+    }
+    pub(super) fn upload(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        input: &super::UploadRequest,
+        source: &super::super::artifacts::VerifiedUploadArtifact,
+        native_root: &Path,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        uploads::upload(
+            self,
+            (hwnd, generation),
+            input,
+            source,
+            native_root,
+            check,
+            dispatch,
+        )
+    }
     pub(super) fn download(
         &mut self,
         hwnd: u64,
@@ -714,6 +758,8 @@ impl BrowserProcess {
                 controls: std::collections::HashMap::new(),
                 fields: std::collections::HashMap::new(),
                 downloads: std::collections::HashMap::new(),
+                upload_choices: std::collections::HashMap::new(),
+                upload_custody: Vec::new(),
                 scroll: None,
             })
         }

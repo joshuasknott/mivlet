@@ -326,6 +326,7 @@ pub(super) fn download(
     validate(input)?;
     let choice = process.downloads.remove(&input.download_ref).ok_or(STALE)?;
     process.downloads.clear();
+    process.upload_choices.clear();
     process.fields.clear();
     process.controls.clear();
     process.navigation.clear();

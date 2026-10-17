@@ -243,6 +243,7 @@ pub(super) fn click(
     process.controls.clear();
     process.fields.clear();
     process.downloads.clear();
+    process.upload_choices.clear();
     process.navigation.clear();
     process.activation.clear();
     process.scroll = None;

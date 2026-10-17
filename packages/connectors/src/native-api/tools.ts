@@ -202,6 +202,18 @@ const TOOL_DEFINITIONS: BackendTool[] = [
     parameters:toolParameters({reason:{type:"string",minLength:1,maxLength:240}},["reason"],true)
   },
   {
+    name:"local-browser-upload-choices",
+    description:"Inspect only labelled empty single-file fields in one fresh tabRef at exact origin. Returns 30s uploadRefs and public labels; no page text, selected filenames or values. Private/occupied/unsupported file fields stop reads. Does not attach a file.",
+    defaultMode:"read-only",defaultRisk:"medium",
+    parameters:toolParameters({tabRef:textParameter,origin:textParameter},["tabRef","origin"],true)
+  },
+  {
+    name:"local-browser-upload",
+    description:"Attach one published passive artifact (<=8 MiB) to a fresh observed empty single-file uploadRef, exact origin/name and artifactId. Native receipt/hash verified; no host path/bytes exposed. Page handlers may upload immediately. No separate submit or replay; hand browser to user for file-valued confirmation afterward.",
+    defaultMode:"full-access",defaultRisk:"critical",
+    parameters:toolParameters({uploadRef:textParameter,origin:textParameter,name:textParameter,artifactId:textParameter},["uploadRef","origin","name","artifactId"],true)
+  },
+  {
     name: "local-browser-navigate",
     description: "Navigate once: 30s navigationRef, exact source origin, HTTP(S) URL. Selected foreground only. Observe; no replay/file import.",
     defaultMode: "full-access", defaultRisk: "high",
