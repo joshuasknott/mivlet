@@ -1,6 +1,47 @@
 use super::*;
 
 #[test]
+fn native_download_events_omit_browser_filename_and_bound_the_download_identity() {
+    use serde_json::json;
+    let event = json!({"method":"Browser.downloadWillBegin","params":{"guid":"baadf00d-1234-5678-9abc-0123456789ab","frameId":"frame","url":"https://example.test/report.csv","suggestedFilename":"private-user-name.csv"}});
+    let safe = download_event(&event).unwrap().unwrap();
+    assert_eq!(safe["kind"], "begin");
+    assert!(!safe.to_string().contains("private-user-name"));
+    for guid in [
+        "../private",
+        "------------------------------------",
+        "baadf00d123456789abc0123456789abcdef00",
+    ] {
+        let mut changed = event.clone();
+        changed["params"]["guid"] = guid.into();
+        assert!(download_event(&changed).is_err());
+    }
+    let mut changed = event.clone();
+    changed["sessionId"] = "other-session".into();
+    assert!(download_event(&changed).is_err());
+    assert!(download_event(
+        &json!({"method":"Network.requestWillBeSent","params":{"headers":{"Cookie":"private"}}})
+    )
+    .unwrap()
+    .is_none());
+}
+
+#[test]
+fn browser_download_policy_cannot_use_the_read_channel() {
+    let input = Pair::new(false).unwrap();
+    let output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    assert!(control
+        .read_command(
+            Command::DownloadPolicy,
+            serde_json::json!({"behavior":"allow","downloadPath":"untrusted"}),
+            None,
+            &|| Ok(())
+        )
+        .is_err());
+}
+
+#[test]
 fn public_form_wire_uses_only_fixed_source_and_passes_text_as_data() {
     use serde_json::{json, Value};
     let input = Pair::new(false).unwrap();

@@ -106,7 +106,20 @@ fn serve(mut stream: TcpStream, stop: &AtomicBool) {
         .and_then(|r| r.split("\r\n").next())
         .and_then(|line| line.strip_prefix("GET "))
         .and_then(|line| line.strip_suffix(" HTTP/1.1"));
+    if path == Some("/download.csv")
+        && !std::str::from_utf8(&request[..count]).is_ok_and(|headers| {
+            headers
+                .lines()
+                .any(|line| line.eq_ignore_ascii_case("Cookie: MivletFixture=fixture-bounded"))
+        })
+    {
+        let _ = stream
+            .write_all(b"HTTP/1.1 403 Forbidden\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+        return;
+    }
     let body = match path {
+        Some("/download-page") => "<!doctype html><title>Download fixture</title><h1>Public download</h1><a href='/download.csv' download>Download report</a>",
+        Some("/download.csv") => "quarter,revenue\nQ1,42\n",
         Some("/form") => "<!doctype html><title>Public form fixture</title><h1>Public form</h1><label>Public topic<input id=topic type=text aria-label='Public topic' oninput=\"document.getElementById('result').textContent='Field edited once'\"></label><p id=result>Not edited</p><label>Existing content<input aria-label='Existing content' value='Human text preserved'></label>",
         Some("/scroll") => "<!doctype html><title>Scroll fixture</title><script>Object.defineProperty(Document.prototype,'visibilityState',{get:()=> 'visible'});</script><style>body{margin:0}main{position:relative;min-height:5000px;background:#eee}button{position:absolute;top:1250px;left:40px;height:40px}#result{position:absolute;top:1300px}</style><main><h1>Public scrolling report</h1><button onclick=\"document.getElementById('result').textContent='Scrolled action verified'\">Finish scroll</button><button style=\"top:50px\" onclick=\"window.open('/second','_blank')\">Open scroll companion</button><p id=result>Not finished</p></main>",
         Some("/private") => "<!doctype html><title>Private step</title><label>Password<input type=password value='Hidden password delta'></label>",
@@ -118,7 +131,17 @@ fn serve(mut stream: TcpStream, stop: &AtomicBool) {
     } else {
         body.into()
     };
-    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
+    let content_type = if path == Some("/download.csv") {
+        "text/csv\r\nContent-Disposition: attachment; filename=browser-report.csv"
+    } else {
+        "text/html; charset=utf-8"
+    };
+    let cookie = if path == Some("/download-page") {
+        "Set-Cookie: MivletFixture=fixture-bounded; HttpOnly; SameSite=Strict; Path=/\r\n"
+    } else {
+        ""
+    };
+    let response = format!("HTTP/1.1 200 OK\r\nContent-Type: {content_type}\r\n{cookie}Content-Length: {}\r\nConnection: close\r\n\r\n{}", body.len(), body);
     let _ = stream.write_all(response.as_bytes());
 }
 

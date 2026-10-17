@@ -210,6 +210,8 @@ export function buildToolApproval(
     ? "Switch the selected foreground browser to this exact observed tab once. Inspect the current page before further input."
     : toolName === "local-browser-fill" && isRegistered
     ? "Enter this exact public text into the observed empty field. Page handlers may send it to the website. Preserve existing values and private fields; inspect the page afterward."
+    : toolName === "local-browser-download" && isRegistered
+    ? "Download this exact observed link into native staging using the browser's existing sign-in. Close this agent's owned browser after transfer, failure or Stop to contain pending writes, then accept one completed passive file up to 8 MiB into private workspace Downloads without overwriting files. Final redirects fail closed. Publication requires a separate action."
     : toolName === "local-browser-handover" && isRegistered
     ? "Save this task as needing your attention, stop agent control and leave the browser open for you. Continuing requires your explicit request and a fresh window selection."
     : isRegistered

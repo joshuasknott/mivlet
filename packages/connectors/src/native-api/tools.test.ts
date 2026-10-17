@@ -16,6 +16,15 @@ const request: NativeCompletionRequest = {
 };
 
 describe("native application action schemas", () => {
+  it("binds managed browser download custody to one observed link and passive filename", () => {
+    const tool=registeredToolSpecs().find(tool=>tool.name==="local-browser-download")!;
+    const schema=JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["downloadRef","origin","name","url","fileName","timeoutSeconds"]);
+    expect(Object.keys(schema.properties)).toEqual(schema.required);
+    expect(schema.properties.timeoutSeconds).toEqual({type:"integer",minimum:1,maximum:10});
+    expect(schema.additionalProperties).toBe(false);
+    expect(lookupTool(tool.name)?.defaultRisk).toBe("critical");
+  });
   it("binds public empty-field entry to observed identity and literal text", () => {
     const tool=registeredToolSpecs().find(tool=>tool.name==="local-browser-fill")!;
     const schema=JSON.parse(tool.parameters);

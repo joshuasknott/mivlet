@@ -242,6 +242,7 @@ pub(super) fn click(
     let choice = process.controls.remove(reference).ok_or(STALE)?;
     process.controls.clear();
     process.fields.clear();
+    process.downloads.clear();
     process.navigation.clear();
     process.activation.clear();
     process.scroll = None;

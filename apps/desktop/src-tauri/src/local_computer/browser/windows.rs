@@ -26,6 +26,11 @@ use windows_sys::Win32::{
 
 #[path = "controls.rs"]
 mod controls;
+#[path = "downloads.rs"]
+mod downloads;
+#[cfg(debug_assertions)]
+#[path = "downloads_acceptance.rs"]
+mod downloads_acceptance;
 #[cfg(debug_assertions)]
 #[path = "fixture_server.rs"]
 mod fixture_server;
@@ -119,6 +124,13 @@ pub(super) fn acceptance() -> Result<(), String> {
         return Err("The owned browser disappeared before cleanup.".into());
     }
     let held = unsafe { std::os::windows::io::OwnedHandle::from_raw_handle(handle) };
+    downloads_acceptance::run(
+        &mut process,
+        window.identity.hwnd,
+        root.path(),
+        &|| ticket.check(),
+        &|start| ticket.with_current(start),
+    )?;
     let product = process.product;
     drop(process);
     if unsafe { WaitForSingleObject(held.as_raw_handle(), 5000) }
@@ -405,10 +417,29 @@ pub(super) struct BrowserProcess {
     activation: std::collections::HashMap<String, navigation::Choice>,
     controls: std::collections::HashMap<String, controls::Choice>,
     fields: std::collections::HashMap<String, forms::Choice>,
+    downloads: std::collections::HashMap<String, downloads::Choice>,
     scroll: Option<(String, scrolling::Choice)>,
 }
 
 impl BrowserProcess {
+    pub(super) fn download(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        input: &super::DownloadRequest,
+        native_root: &Path,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<downloads::Transfer, String> {
+        downloads::download(
+            self,
+            (hwnd, generation),
+            input,
+            native_root,
+            check,
+            dispatch,
+        )
+    }
     pub(super) fn fill(
         &mut self,
         hwnd: u64,
@@ -682,6 +713,7 @@ impl BrowserProcess {
                 activation: std::collections::HashMap::new(),
                 controls: std::collections::HashMap::new(),
                 fields: std::collections::HashMap::new(),
+                downloads: std::collections::HashMap::new(),
                 scroll: None,
             })
         }
@@ -748,6 +780,38 @@ impl Drop for BrowserProcess {
 }
 
 struct BrowserJob(std::os::windows::io::OwnedHandle);
+impl BrowserJob {
+    fn stop_and_wait(&self) -> Result<(), String> {
+        use super::LaunchStop;
+        self.stop();
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            let mut information = JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
+            if unsafe {
+                QueryInformationJobObject(
+                    self.0.as_raw_handle(),
+                    JobObjectBasicAccountingInformation,
+                    std::ptr::addr_of_mut!(information).cast(),
+                    std::mem::size_of_val(&information) as u32,
+                    std::ptr::null_mut(),
+                )
+            } == 0
+            {
+                return Err(
+                    "The owned browser could not confirm transfer shutdown; no file was imported."
+                        .into(),
+                );
+            }
+            if information.ActiveProcesses == 0 {
+                return Ok(());
+            }
+            if std::time::Instant::now() >= deadline {
+                return Err("The owned browser is still closing; no file was imported.".into());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+    }
+}
 impl super::LaunchStop for BrowserJob {
     fn stop(&self) {
         unsafe {
