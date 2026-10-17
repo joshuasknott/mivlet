@@ -1,3 +1,4 @@
+import { ALLOW_PREVIEW_FALLBACKS } from "../preview-policy";
 import {
   appendOutputRevision,
   createOutputDocument,
@@ -44,7 +45,7 @@ export async function listRuntimeOutputs(
   } = {},
 ): Promise<RuntimeOutput[]> {
   const workspaceId = scopeWorkspace(input.expectedWorkspaceId);
-  if (hasTauriRuntime()) {
+  if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
     return nativeOutput<RuntimeOutput[]>("output_list", {
       workspaceId,
       input: {
@@ -69,7 +70,7 @@ export async function getRuntimeOutput(
   expectedWorkspaceId?: string,
 ): Promise<RuntimeOutput | null> {
   const workspaceId = scopeWorkspace(expectedWorkspaceId);
-  if (hasTauriRuntime()) {
+  if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
     return nativeOutput<RuntimeOutput | null>("output_get", {
       workspaceId,
       outputId,
@@ -83,7 +84,7 @@ export async function ensureRuntimeOutput(
   expectedWorkspaceId?: string,
 ): Promise<RuntimeOutput> {
   const workspaceId = scopeWorkspace(expectedWorkspaceId);
-  if (hasTauriRuntime()) {
+  if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
     return nativeOutput<RuntimeOutput>("output_ensure", { workspaceId, input });
   }
   const key = outputKey(workspaceId, input.id);
@@ -126,7 +127,7 @@ export async function appendRuntimeOutputRevision(
   expectedWorkspaceId?: string,
 ): Promise<RuntimeOutput> {
   const workspaceId = scopeWorkspace(expectedWorkspaceId);
-  if (hasTauriRuntime()) {
+  if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
     return nativeOutput<RuntimeOutput>("output_append_revision", {
       workspaceId,
       input,
@@ -149,7 +150,7 @@ export async function restoreRuntimeOutputRevision(
   expectedWorkspaceId?: string,
 ): Promise<RuntimeOutput> {
   const workspaceId = scopeWorkspace(expectedWorkspaceId);
-  if (hasTauriRuntime()) {
+  if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
     return nativeOutput<RuntimeOutput>("output_restore_revision", {
       workspaceId,
       input: {
@@ -183,7 +184,7 @@ export async function setRuntimeOutputPinned(
   revisionId?: string,
 ): Promise<RuntimeOutput> {
   const workspaceId = scopeWorkspace(expectedWorkspaceId);
-  if (hasTauriRuntime()) {
+  if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
     const next = await nativeOutput<RuntimeOutput>("output_set_pin", {
       workspaceId,
       input: { outputId, pinned, location, revisionId },
@@ -212,7 +213,7 @@ export async function exportRuntimeOutput(
   expectedWorkspaceId?: string,
 ): Promise<string> {
   const workspaceId = scopeWorkspace(expectedWorkspaceId);
-  if (hasTauriRuntime()) {
+  if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
     return nativeOutput<string>("output_export", {
       workspaceId,
       input: { outputId, destination },

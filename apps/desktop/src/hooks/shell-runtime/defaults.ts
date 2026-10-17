@@ -1,3 +1,4 @@
+import { ALLOW_PREVIEW_FALLBACKS } from "../../runtime/preview-policy";
 import type { AccountWorkspaceStatus, IdentityStatus } from "@mivlet/protocol";
 import { DEFAULT_CUSTOM_APPROVAL_SETTINGS } from "@mivlet/connectors";
 import { knowledgeSources, memoryRecords } from "../../data/workspace";
@@ -44,8 +45,7 @@ export const defaultShellState: PersistedShellState = {
   customApprovalSettings: DEFAULT_CUSTOM_APPROVAL_SETTINGS
 };
 
-export const ALLOW_PREVIEW_FALLBACKS =
-  import.meta.env.DEV || import.meta.env.MODE === "test";
+export { ALLOW_PREVIEW_FALLBACKS } from "../../runtime/preview-policy";
 
 export const DEFAULT_IDENTITY_STATUS: IdentityStatus = {
   enabled: false,

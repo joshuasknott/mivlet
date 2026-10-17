@@ -1,3 +1,4 @@
+import { ALLOW_PREVIEW_FALLBACKS } from "../preview-policy";
 import type { Spine } from "@mivlet/protocol";
 import type { ConversationMessagePageRequest } from "../../lib/conversation-runtime";
 import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
@@ -283,7 +284,7 @@ export async function createRuntimeConversationThread(
       "The selected workspace changed before the conversation was created.",
     );
   }
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     const thread = previewThread(input, scope.workspaceId);
     previewConversationStore(scope.workspaceId).threads.push(thread);
     return thread;
@@ -308,7 +309,7 @@ export async function createRuntimeConversationThread(
 
 export async function listRuntimeConversationThreads() {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     return [...previewConversationStore(scope.workspaceId).threads];
   }
   const result = await invoke<unknown>("conversation_list_threads");
@@ -320,7 +321,7 @@ export async function listRuntimeConversationThreads() {
 
 export async function deleteRuntimeConversationThread(threadId: string) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
     store.threads = store.threads.filter((thread) => thread.id !== threadId);
     store.messages = store.messages.filter(
@@ -334,7 +335,7 @@ export async function deleteRuntimeConversationThread(threadId: string) {
 
 export async function getRuntimeConversationThread(threadId: string) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     return (
       previewConversationStore(scope.workspaceId).threads.find(
         (thread) => thread.id === threadId,
@@ -351,7 +352,7 @@ export async function updateRuntimeConversationThread(
   input: RuntimeConversationThreadUpdate,
 ) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
     const index = store.threads.findIndex(
       (thread) => thread.id === input.threadId,
@@ -379,7 +380,7 @@ export async function selectRuntimeConversationBranch(
   expected?: { headId?: string; lastSequence: number },
 ) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
     const index = store.threads.findIndex((thread) => thread.id === threadId);
     if (index < 0)
@@ -429,7 +430,7 @@ export async function selectRuntimeConversationBranch(
 
 export async function listRuntimeConversationMessages(threadId: string) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     return previewConversationStore(scope.workspaceId).messages.filter(
       (view) => view.message.threadId === threadId,
     );
@@ -451,7 +452,7 @@ export async function listRuntimeConversationMessagesPage(
   const scope = conversationScopeOrThrow();
   const limit = Math.max(1, Math.min(200, Math.floor(request.limit ?? 80)));
   const beforeSequence = request.beforeSequence;
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     const all = previewConversationStore(scope.workspaceId)
       .messages.filter((view) => view.message.threadId === threadId)
       .filter(
@@ -499,7 +500,7 @@ export async function appendRuntimeConversationMessage(
   input: RuntimeConversationMessageAppend,
 ) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
     const thread = store.threads.find(
       (candidate) => candidate.id === input.threadId,
@@ -566,7 +567,7 @@ export async function reviseRuntimeConversationMessage(
   input: RuntimeConversationMessageRevision,
 ) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     const store = previewConversationStore(scope.workspaceId);
     const index = store.messages.findIndex(
       (view) =>
@@ -621,7 +622,7 @@ export async function loadRuntimeConversationDraft(
     throw new Error(
       "The selected workspace changed before the draft was loaded.",
     );
-  if (!hasTauriRuntime())
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime())
     return (
       previewConversationStore(scope.workspaceId).drafts.get(draftKey) ?? null
     );
@@ -651,7 +652,7 @@ export async function saveRuntimeConversationDraft(
     throw new Error(
       "The selected workspace changed before the draft was saved.",
     );
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     previewConversationStore(scope.workspaceId).drafts.set(draft.draftKey, {
       ...draft,
     });
@@ -666,7 +667,7 @@ export async function saveRuntimeConversationDraft(
 
 export async function deleteRuntimeConversationDraft(draftKey: string) {
   const scope = conversationScopeOrThrow();
-  if (!hasTauriRuntime()) {
+  if (ALLOW_PREVIEW_FALLBACKS && !hasTauriRuntime()) {
     previewConversationStore(scope.workspaceId).drafts.delete(draftKey);
     return;
   }
