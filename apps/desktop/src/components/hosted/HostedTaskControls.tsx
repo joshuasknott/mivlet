@@ -107,13 +107,13 @@ function TaskControls({ item, onChanged, disabled = false, api = defaultApi }: H
   return <div className="hosted-task-controls">
     {canStart && <div className="hosted-task-controls__start">
       {connections ? <>
-        <label>Cloud API connection<select value={credential} disabled={Boolean(pending) || disabled || uncertain} onChange={event => setCredential(event.target.value)}>
+        <label>Cloud API connection<select value={credential} disabled={Boolean(pending) || disabled || uncertain && attempted} onChange={event => setCredential(event.target.value)}>
           <option value="">Choose a connected provider</option>
           {connections.map(connection => <option key={connection.credentialId} value={connection.credentialId}>{hostedProviderLabels[connection.providerId]} · {connection.credentialId.slice(-6)}</option>)}
         </select></label>
         {!connections.length && <p className="hosted-muted">Connect a separate hosted API key in Settings first. Cloud tasks use this request’s saved API provider and model.</p>}
         <button type="button" className="button button--secondary" disabled={Boolean(pending) || !current()} onClick={() => void loadConnections()}>Refresh connections</button>
-        <button type="button" className="button button--secondary" disabled={!credential || Boolean(pending) || disabled || uncertain} onClick={() => void run("prepare", async () => {
+        <button type="button" className="button button--secondary" disabled={!credential || Boolean(pending) || disabled || uncertain && attempted} onClick={() => void run("prepare", async () => {
           const selected = connections.find(connection => connection.credentialId === credential);
           if (!selected) return;
           const result = await boundedHostedRead(api.prepare({ ...target(), credentialId: selected.credentialId, credentialRevision: selected.revision }));
@@ -121,7 +121,7 @@ function TaskControls({ item, onChanged, disabled = false, api = defaultApi }: H
           if (result.workId !== item.id || result.admission.binding.workspaceId !== item.workspaceId || result.admission.binding.agentId !== item.agentId
             || result.admission.binding.workId !== item.id || result.admission.binding.workGeneration !== result.workGeneration)
             throw new Error("The cloud review does not match this task. Refresh its recorded status.");
-          setReview(result); setAttempted(false); await boundedHostedRead(onChanged());
+          setReview(result); setAttempted(false); setUncertain(false); await boundedHostedRead(onChanged());
         })}>Review cloud task</button>
       </> : <button type="button" className="button button--secondary" disabled={Boolean(pending) || disabled || !current()} onClick={() => void loadConnections()}><Cloud size={17} aria-hidden="true" /> Continue in cloud…</button>}
     </div>}

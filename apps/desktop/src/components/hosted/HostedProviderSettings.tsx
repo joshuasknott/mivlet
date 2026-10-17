@@ -60,7 +60,7 @@ function ProviderSettings({ workspaceId, agentId, api = defaultApi }: HostedProv
       const rows: (HostedProviderConnection | undefined)[] = matching.length ? matching : [undefined];
       return rows.map((connection, index) => <div className="hosted-provider-row" key={`${providerId}:${connection?.credentialId ?? "new"}`}>
         <ProviderIcon provider={providerId} size={26} />
-        <div><strong>{hostedProviderLabels[providerId]}{matching.length > 1 ? ` · connection ${index + 1}` : ""}</strong><small>{!loaded ? "Checking connection…" : connection ? `${connection.expiresAt > Date.now() ? "Connected" : "Expired"} · expires ${new Date(connection.expiresAt).toLocaleDateString()}` : "Not connected"}</small></div>
+        <div><strong>{hostedProviderLabels[providerId]}{matching.length > 1 ? ` · connection ${index + 1}` : ""}</strong><small>{!loaded ? pending ? "Checking connection…" : "Connection unavailable" : connection ? `${connection.expiresAt > Date.now() ? "Connected" : "Expired"} · expires ${new Date(connection.expiresAt).toLocaleDateString()}` : "Not connected"}</small></div>
         <div className="hosted-actions">
           <button type="button" className={connection ? "button button--secondary" : "button button--primary"} disabled={Boolean(pending) || !loaded || !current()} onClick={() => void run(providerId, async () => {
             await api.enroll({ workspaceId, agentId, providerId, ...(connection ? { credentialId: connection.credentialId, expectedRevision: connection.revision } : {}) });

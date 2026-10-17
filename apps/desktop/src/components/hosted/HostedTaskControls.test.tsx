@@ -55,6 +55,24 @@ it("cancel restores the prior hold through the exact native review", async () =>
   expect(actions.admit).not.toHaveBeenCalled();
 });
 
+it("allows a fresh review after a pre-admission prerequisite failure without sending or replaying", async () => {
+  const prepare = vi.fn().mockRejectedValueOnce(new Error("Choose the task’s saved API provider")).mockImplementation(async () => review());
+  const actions = api({ prepare });
+  render(<HostedTaskControls item={item} api={actions} onChanged={vi.fn().mockResolvedValue(undefined)} />);
+  fireEvent.click(screen.getByRole("button", { name: "Continue in cloud…" }));
+  const select = await screen.findByRole("combobox");
+  await waitFor(() => expect(select).toBeEnabled());
+  fireEvent.change(select, { target: { value: "cloud-key" } });
+  fireEvent.click(screen.getByRole("button", { name: "Review cloud task" }));
+  await screen.findByText("Choose the task’s saved API provider");
+  await waitFor(() => expect(screen.getByRole("button", { name: "Review cloud task" })).toBeEnabled());
+  fireEvent.click(screen.getByRole("button", { name: "Review cloud task" }));
+  await screen.findByRole("dialog");
+  expect(actions.prepare).toHaveBeenCalledTimes(2);
+  expect(actions.admit).not.toHaveBeenCalled();
+  expect(actions.approve).not.toHaveBeenCalled();
+});
+
 it("retains evidence after an uncertain admission and never offers the old request again", async () => {
   const actions = api({ admit: vi.fn().mockRejectedValue(new Error("Reply lost")) });
   render(<HostedTaskControls item={item} api={actions} onChanged={vi.fn().mockResolvedValue(undefined)} />);
