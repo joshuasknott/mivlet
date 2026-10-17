@@ -18,6 +18,9 @@
 .mcp-settings p {
   line-height: 1.55;
 }
+.mcp-manual-setup > .mcp-server-panel {
+  margin-top: 12px;
+}
 .mcp-server-panel,
 .mcp-access-panel,
 .mcp-settings .mcp-consent {

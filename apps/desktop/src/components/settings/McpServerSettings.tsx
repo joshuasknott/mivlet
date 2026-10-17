@@ -17,6 +17,7 @@ import {
   stopMcpServer,
 } from "../../runtime/domains/mcp-server";
 import "./mcp-server-settings.css";
+import { ManagedPhoneSettings } from "./ManagedPhoneSettings";
 
 type Agent = { id: string; name: string };
 export function McpServerSettings({
@@ -89,6 +90,9 @@ export function McpServerSettings({
   };
   return (
     <div className="mcp-settings" aria-busy={busy}>
+      <ManagedPhoneSettings workspaceId={workspaceId} />
+      <details className="mcp-manual-setup">
+        <summary>Advanced: manual MCP and external assistants</summary>
       <section className="mcp-server-panel" aria-label="MCP server">
         <header className="mcp-panel-heading">
           <span className="mcp-panel-icon">
@@ -114,6 +118,7 @@ export function McpServerSettings({
               clients start with read-only access. Keep Mivlet open and signed
               in for requests to run.
             </p>
+            <p className="mcp-description">Disconnect the managed phone connection before starting this server.</p>
           </div>
         </header>
         {status?.endpoint ? (
@@ -235,6 +240,7 @@ export function McpServerSettings({
           </form>
         )}
       </section>
+      </details>
       {!status && !statusError && <p role="status">Loading client access…</p>}
       {statusError && (
         <p className="mcp-notice mcp-notice--error" role="alert">
