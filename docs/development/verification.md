@@ -104,6 +104,21 @@ mode does not produce the required `check` result or replace full validation.
 Locally, the matching command is `pnpm --filter @mivlet/desktop exec vite build
 --config ../../scripts/perf/profile.vite.config.mjs --configLoader runner`.
 
+An optional `baseline_commit` must be a full ancestor SHA with the same lockfile.
+Both profiles run sequentially on the same runner and frozen install. The graph
+comparison rejects module loss, budget-category moves and changed startup
+closures; byte savings still have to pass the unchanged performance ceilings.
+This remote path avoids overlapping local builds when desktop memory is limited.
+
+With `native_preview` enabled, a successful renderer profile also builds an
+unsigned debug executable from that exact commit. Its artifact includes the
+commit, executable SHA-256, Cargo lockfile SHA-256 and toolchain versions. Verify
+those against the intended checkout before running native acceptance locally.
+The artifact is accessible to repository readers and is for acceptance only;
+it is neither an installer nor a signed release. The debug-only
+`--check-preview-network` probe additionally requires
+`MIVLET_PREVIEW_NETWORK_ACCEPTANCE=1`; record its actual exit status and output.
+
 The October 16 integration keeps `assistant-stream` with the deferred
 assistant-ui graph and separates the generated-interface schema engine from
 eager vendor code. The schema chunk still counts against the common budget.
