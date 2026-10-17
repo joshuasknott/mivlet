@@ -245,6 +245,7 @@ fn response(bytes: &[u8], origin: &str, websocket: bool) -> Result<Vec<u8>, &'st
             return Err("Invalid app header.");
         }
         match lower.as_str() {
+            "connection" if !websocket => continue,
             "content-length" => {
                 if length
                     || value
@@ -300,6 +301,7 @@ fn response(bytes: &[u8], origin: &str, websocket: bool) -> Result<Vec<u8>, &'st
         return Err("Ambiguous app response.");
     }
     output.push(format!("Content-Security-Policy: {}", policy(origin)));
+    if !websocket {output.push("Connection: close".into());}
     output.push("Referrer-Policy: no-referrer".into());
     output.push("Cache-Control: no-store".into());
     output.push("X-Content-Type-Options: nosniff".into());
