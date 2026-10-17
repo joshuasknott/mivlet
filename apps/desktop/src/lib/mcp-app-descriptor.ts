@@ -32,4 +32,3 @@ export function resultMcpApp(content: string): McpAppDescriptor | undefined {
     return undefined;
   }
 }
-
