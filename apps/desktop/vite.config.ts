@@ -4,6 +4,7 @@ import react from "@vitejs/plugin-react";
 import { pruneUnusedIconWeights } from "./scripts/icon-weights";
 import { compactStyleNames } from "./scripts/compact-style-names";
 import { treeShakeAssistantPrimitives } from "./scripts/assistant-primitives";
+import { assistantInputDependency, commonRouteChunk } from "./scripts/common-route-chunks";
 
 export default defineConfig({
   plugins: [
@@ -69,7 +70,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         onlyExplicitManualChunks: true,
-        manualChunks(id) {
+        manualChunks(id, { getModuleInfo }) {
+          const route = commonRouteChunk(id);
+          if (route) return route;
           // These small session controls share one deferred conversation island.
           // Opening a session no longer fetches four mutually importing chunks.
           if (/[/\\]components[/\\]conversation[/\\]coding[/\\]/.test(id))
@@ -83,7 +86,8 @@ export default defineConfig({
           // dedicated chunks prevents the shell's generic vendor chunk from
           // eagerly pulling OpenUI, assistant-ui, or MCP App code at startup.
           if (id.includes("vite/preload-helper")) return "feature-preload";
-          if (id.includes("@assistant-ui") || /[/\\]assistant-stream[/\\]/.test(id)) return "assistant-ui";
+          if (id.includes("@assistant-ui") || /[/\\]assistant-stream[/\\]/.test(id)
+            || assistantInputDependency(id, getModuleInfo)) return "assistant-ui";
           // Zod is used only by the generated-interface catalogues and their
           // OpenUI runtime. Do not pull its schema engine into eager vendor.
           if (/[/\\]zod[/\\]/.test(id)) return "interface-schema";
