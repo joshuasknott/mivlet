@@ -53,6 +53,22 @@ fn prepare_holds_the_canonical_queue_before_disclosing_exact_captured_text() {
             None,
         )?;
         let item = ctx.item(&request.work_id)?;
+        assert!(repo::get::<Offer>(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            Kind::Receipt,
+            &format!("hosted-task:{}", item.id),
+        )?
+        .is_some());
+        assert!(repo::get::<Offer>(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.private,
+            Kind::Receipt,
+            &item.id,
+        )?
+        .is_none());
         assert!(item.queue.as_ref().unwrap().held);
         assert_eq!(item.generation, request.expected_generation + 1);
         assert!(!queue::dispatchable(&item, &ctx.all_work()?));
