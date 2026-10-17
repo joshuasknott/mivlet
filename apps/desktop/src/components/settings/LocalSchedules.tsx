@@ -37,9 +37,9 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
     finally { setPending(false); }
   };
   return <div className="settings-page__body schedule-list">
-    <div className="settings-section-heading"><p>Run a task with a named agent at a set time. Keep Mivlet open, online, and this computer awake. Missed recurring times coalesce to one run after reopening; interrupted runs require review.</p></div>
+    <div className="settings-section-heading"><p>Schedule a named agent. Keep Mivlet open, online and this PC awake. Missed recurring times merge into one run on reopening; review interrupted runs.</p></div>
     {project ? <p>Tasks for <strong>{project.name}</strong>. Each result becomes a shared project conversation and a recorded work item.</p> : null}
-    <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Agent workflows use the same tools and approval controls as chat. The saved permission level is a ceiling; reducing the agent's access also limits future runs. Approvals appear in Activity, and Stop ends the current task. Research-only schedules use Codex web search.</p></details>
+    <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Scheduled agents use chat's tools and approvals. Saved permissions cap access; reducing agent access also limits future runs. Approvals appear in Activity. Stop ends the task. Research-only runs use Codex web search.</p></details>
     <div className="schedules-toolbar"><label className="settings-field"><span>Show schedules for</span><select aria-label="Filter schedules by agent" value={filterAgentId} onChange={(event) => { setFilterAgentId(event.target.value); setCreating(false); setEditing(null); }}><option value="">All agents</option>{runtime.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
     <button type="button" className="button button-primary" disabled={pending || schedules.isPending || !!schedules.error} onClick={() => { setEditing(null); setCreating(true); }}>New schedule</button></div>
     {schedules.isPending ? <p role="status">Loading schedules…</p> : null}

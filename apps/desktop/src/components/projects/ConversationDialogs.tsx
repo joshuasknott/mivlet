@@ -243,11 +243,7 @@ export function ConversationDialog({
                 ))}
               </fieldset>
               <p className="team-dialog-note">
-                Each participant replies with their own saved model and
-                instructions through an existing supported route. Without a
-                coordinator, the sender explicitly chooses the exact responder
-                or addresses one with an @mention. Mivlet never fans out to
-                every member automatically.
+                Each participant uses their saved model, instructions and supported connection. Without a coordinator, choose one responder or @mention them. Mivlet never sends to every member automatically.
               </p>
               <TeamReadiness
                 participantIds={ids}
@@ -266,9 +262,7 @@ export function ConversationDialog({
             </p>
           ) : kind === "project" ? (
             <p className="team-dialog-note">
-              Participants use their own selected models. They receive this
-              Project&apos;s shared history, references, decisions and work
-              records. Their private conversations remain separate.
+              Participants use their selected models and receive this Project&apos;s shared history, references, decisions and work records. Private conversations stay separate.
             </p>
           ) : null}
           {edit ? (
