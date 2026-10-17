@@ -142,10 +142,25 @@ impl Endpoint {
         }
         drop(job);
         let mut token = ptr::null_mut();
-        if unsafe { OpenProcessToken(process.0, TOKEN_QUERY, &mut token) } == 0 {
+        if unsafe { OpenProcessToken(process.0, TOKEN_QUERY | TOKEN_DUPLICATE, &mut token) } == 0 {
             return Err(security::error("Verify preview AppContainer"));
         }
         let token = Handle::checked(token, "Read preview AppContainer")?;
+        let mut is_container = 0u32;
+        let mut token_size = 0;
+        if unsafe {
+            GetTokenInformation(
+                token.0,
+                TokenIsAppContainer,
+                ptr::addr_of_mut!(is_container).cast(),
+                size_of::<u32>() as u32,
+                &mut token_size,
+            )
+        } == 0
+            || is_container != 1
+        {
+            return Err("The preview server is not an AppContainer process.".into());
+        }
         let mut bytes = 0;
         unsafe {
             GetTokenInformation(
