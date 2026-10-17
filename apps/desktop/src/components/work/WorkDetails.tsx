@@ -191,8 +191,9 @@ export function WorkDetails({
                 {ref.availability === "image-input" ||
                 ref.availability === "transient" ? (
                   <small className="work-attachment-recovery">
-                    Held in memory only; reattach it after a restart before
-                    continuing.
+                    {item.parentId && ref.availability === "transient"
+                      ? "Shared originals are verified against the original request and copied into this agent’s workspace. Reattach if the saved source is unavailable."
+                      : "Held in memory only; reattach it after a restart before continuing."}
                   </small>
                 ) : null}
               </li>

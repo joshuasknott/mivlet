@@ -11,8 +11,6 @@ use sha2::{Digest, Sha256};
 mod branch_tests;
 #[path = "exchange_regressions.rs"]
 mod exchange_regressions;
-#[path = "queue_goal_tests.rs"]
-mod queue_goal_tests;
 #[path = "output_revision_tests.rs"]
 mod output_revision_tests;
 #[path = "pr_watch_tests.rs"]
@@ -21,6 +19,8 @@ mod pr_watch_tests;
 mod provider_continuation_tests;
 #[path = "provider_reset_regressions.rs"]
 mod provider_reset_regressions;
+#[path = "queue_goal_tests.rs"]
+mod queue_goal_tests;
 #[path = "scheduling_regressions.rs"]
 mod scheduling_regressions;
 #[path = "ui_tests.rs"]
@@ -1831,7 +1831,7 @@ fn roadmap_additive_payloads_preserve_old_work_without_guessing_context() {
 fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
     fixture(&store(), |ctx| {
         let room = chats::open_main(ctx, "lead")?;
-        let preview = vec![
+        let mut preview = vec![
             WorkAttachment {
                 id: "upload".into(),
                 name: "brief.txt".into(),
@@ -1853,6 +1853,10 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
                 sha256: None,
             },
         ];
+        let unstaged: Command = serde_json::from_value(json!({"action":"start-work", "id":"before-durable", "conversationId":room.id, "agentId":"lead", "prompt":"Read the brief", "discussion":false, "attachments":preview})).unwrap();
+        assert!(commands::apply(ctx, unstaged).is_err());
+        assert!(ctx.item("before-durable").is_err());
+        preview[0] = staged_attachment("upload", "Attachments/admission/brief.txt");
         commands::apply(
             ctx,
             Command::StartWork {
@@ -1921,6 +1925,7 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
         bad_hash.sha256 = Some("not-a-hash".into());
         assert!(work::validate_attachments(&[bad_hash]).is_err());
         let mut in_memory_with_ref = preview[0].clone();
+        in_memory_with_ref.availability = "transient".into();
         in_memory_with_ref.relative_path = Some("Attachments/batch-1/brief.txt".into());
         assert!(work::validate_attachments(&[in_memory_with_ref]).is_err());
         let mut unknown_kind = preview[1].clone();
