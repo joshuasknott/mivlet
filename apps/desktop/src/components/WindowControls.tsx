@@ -14,7 +14,11 @@ export function WindowControls({ preview = false }: { preview?: boolean }) {
   };
   return <div className="window-controls">
     <div className="window-controls__drag" aria-hidden="true" onMouseDown={(event) => { if (event.button === 0 && event.detail === 1) act("drag"); }} onDoubleClick={() => act("maximize")} />
-    {([{ action: "minimize", label: "Minimize window", Icon: Minus }, { action: "maximize", label: "Maximize or restore window", Icon: Square }, { action: "close", label: "Close window", Icon: X }]).map(({ action, label, Icon }) => <button key={action} type="button" className={`window-controls__${action}`} aria-label={label} title={label} onClick={() => act(action)}><Icon size={13} aria-hidden="true" /></button>)}
+    {[
+      { action: "minimize", label: "Minimize window", icon: <Minus size={13} aria-hidden="true" /> },
+      { action: "maximize", label: "Maximize or restore window", icon: <Square size={13} aria-hidden="true" /> },
+      { action: "close", label: "Close window", icon: <X size={13} aria-hidden="true" /> },
+    ].map(({ action, label, icon }) => <button key={action} type="button" className={`window-controls__${action}`} aria-label={label} title={label} onClick={() => act(action)}>{icon}</button>)}
     {error ? <span role="alert">{error}</span> : null}
   </div>;
 }
