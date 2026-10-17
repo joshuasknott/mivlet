@@ -97,7 +97,10 @@ fn extract_archive(bytes: &[u8], destination: &Path) -> Result<(usize, usize, u6
         {
             return Err("Repository archives cannot contain links or special files.".into());
         }
-        let path = entry_path(entry.name())?;
+        let name = entry
+            .name()
+            .map_err(|_| "The repository archive contains an invalid file name.")?;
+        let path = entry_path(&name)?;
         total = total
             .checked_add(entry.size())
             .ok_or("The repository archive is too large.")?;
@@ -262,6 +265,68 @@ mod tests {
             let temp = tempfile::tempdir().unwrap();
             assert!(extract_archive(&archive(&entries), temp.path()).is_err());
         }
+    }
+    #[test]
+    fn extraction_refuses_external_symlinks_without_touching_the_target() {
+        let temp = tempfile::tempdir().unwrap();
+        let outside = temp.path().join("outside.txt");
+        fs::write(&outside, b"kept").unwrap();
+        for target in [
+            "../../outside.txt".into(),
+            outside.to_string_lossy().into_owned(),
+        ] {
+            let mut writer = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+            writer
+                .add_symlink(
+                    "repo/link",
+                    target,
+                    zip::write::SimpleFileOptions::default(),
+                )
+                .unwrap();
+            let bytes = writer.finish().unwrap().into_inner();
+            let destination = temp.path().join("destination");
+            fs::create_dir_all(&destination).unwrap();
+            assert!(extract_archive(&bytes, &destination).is_err());
+            assert_eq!(fs::read(&outside).unwrap(), b"kept");
+            assert!(!destination.join("repo/link").exists());
+        }
+    }
+    #[test]
+    fn extraction_does_not_apply_privileged_archive_modes() {
+        let mut bytes = archive(&[("repo/main.ts", b"source")]);
+        let central = bytes
+            .windows(4)
+            .position(|part| part == b"PK\x01\x02")
+            .unwrap();
+        bytes[central + 5] = 3; // Unix metadata, including attacker-controlled SUID/SGID.
+        bytes[central + 38..central + 42].copy_from_slice(&(0o106755u32 << 16).to_le_bytes());
+        let temp = tempfile::tempdir().unwrap();
+        assert_eq!(extract_archive(&bytes, temp.path()).unwrap().0, 1);
+        let output = temp.path().join("repo/main.ts");
+        assert_eq!(fs::read(&output).unwrap(), b"source");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&output).unwrap().permissions().mode() & 0o7000,
+                0
+            );
+        }
+    }
+    #[test]
+    fn extraction_refuses_invalid_utf8_names_instead_of_replacing_bytes() {
+        let mut bytes = archive(&[("repo/main.ts", b"source")]);
+        let central = bytes
+            .windows(4)
+            .position(|part| part == b"PK\x01\x02")
+            .unwrap();
+        bytes[7] |= 8;
+        bytes[central + 9] |= 8; // Both headers declare UTF-8.
+        bytes[30] = 0xff;
+        bytes[central + 46] = 0xff;
+        let temp = tempfile::tempdir().unwrap();
+        assert!(extract_archive(&bytes, temp.path()).is_err());
+        assert_eq!(fs::read_dir(temp.path()).unwrap().count(), 0);
     }
     #[test]
     fn paths_exclude_credentials_and_dependencies() {
