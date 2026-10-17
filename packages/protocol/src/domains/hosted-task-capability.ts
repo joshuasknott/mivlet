@@ -1,7 +1,7 @@
 import { canonicalHostedTaskJson, HOSTED_TEXT_TASK_LIMITS, type HostedTaskCapability } from "./hosted-tasks.js";
 
 const ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{2,159}$/;
-const SCOPES = new Set(["task:admit", "task:read", "task:cancel", "credential:enroll", "credential:read", "credential:revoke"]);
+const SCOPES = new Set(["task:admit", "task:read", "task:cancel", "task:input", "task:output", "credential:enroll", "credential:read", "credential:revoke"]);
 const DOMAIN = "mivlet-hosted-text-task-capability:v1:";
 function bytes(value: Uint8Array): ArrayBuffer { return Uint8Array.from(value).buffer; }
 function encode(value: Uint8Array): string { return btoa(String.fromCharCode(...value)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }

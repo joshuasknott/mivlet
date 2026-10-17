@@ -1,5 +1,6 @@
 import { redactSecretText, secretMarkerSurvives } from "../secret-redaction.js";
 import type { HostedPublicWebBudget, HostedPublicWebProgress, HostedPublicWebScope } from "./hosted-public-web.js";
+import type { HostedCodingBudget, HostedCodingProgress, HostedCodingRepository } from "./hosted-coding.js";
 
 /** Explicitly delegated hosted text Work. These records grant no native tools. */
 export const HOSTED_TEXT_TASK_LIMITS = {
@@ -19,7 +20,7 @@ export const HOSTED_TEXT_TASK_LIMITS = {
 } as const;
 
 export type HostedTextProviderId = "openai" | "anthropic" | "gemini" | "xai" | "deepseek";
-export type HostedTaskStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "uncertain" | "expired";
+export type HostedTaskStatus = "queued" | "running" | "completed" | "needs-review" | "failed" | "cancelled" | "uncertain" | "expired";
 export interface HostedTaskBudget {
   maxModelCalls: 1;
   maxOutputTokens: number;
@@ -55,7 +56,13 @@ export interface HostedPublicWebTaskBinding extends Omit<HostedTextTaskBinding, 
   webScope: HostedPublicWebScope;
   budget: HostedPublicWebBudget;
 }
-export type HostedTaskBinding = HostedTextTaskBinding | HostedPublicWebTaskBinding;
+export interface HostedCodingTaskBinding extends Omit<HostedTextTaskBinding, "version" | "budget"> {
+  version: 3;
+  mode: "offline-coding";
+  repository: HostedCodingRepository;
+  budget: HostedCodingBudget;
+}
+export type HostedTaskBinding = HostedTextTaskBinding | HostedPublicWebTaskBinding | HostedCodingTaskBinding;
 export interface HostedTaskTextInput {
   /** Explicitly disclosed captured text only; no image, tool, path or secret. */
   messages: { role: "system" | "user" | "assistant"; content: string }[];
@@ -87,6 +94,7 @@ export interface HostedTaskSnapshot {
   updatedAt: number;
   retainedUntil: number;
   research?: HostedPublicWebProgress;
+  coding?: HostedCodingProgress;
 }
 /** Returned only by authenticated native fetch; renderer cannot attest success. */
 export interface HostedTaskResult {
@@ -96,7 +104,7 @@ export interface HostedTaskResult {
 export interface HostedWorkExecution {
   version: 1;
   binding: HostedTaskBinding;
-  phase: "review" | "dispatching" | "accepted" | "stop-pending" | "reconcile-required" | "reconciled";
+  phase: "review" | "dispatching" | "accepted" | "stop-pending" | "awaiting-import" | "scope-change-required" | "reconcile-required" | "reconciled";
   reviewId?: string;
   reviewExpiresAt?: number;
   originallyHeld?: boolean;
@@ -136,7 +144,7 @@ export function hostedTextContentFailure(content: string): string | undefined {
   if (/(?:^|[\s"'`(])(?:[A-Za-z]:[\\/]|\\\\|file:\/\/|\/(?:Users|home|tmp|var|etc|root|mnt|media|private)\/)/im.test(content)) return "hosted-local-path-content";
   return undefined;
 }
-export type HostedTaskCapabilityScope = "task:admit" | "task:read" | "task:cancel" | "credential:enroll" | "credential:read" | "credential:revoke";
+export type HostedTaskCapabilityScope = "task:admit" | "task:read" | "task:cancel" | "task:input" | "task:output" | "credential:enroll" | "credential:read" | "credential:revoke";
 /** Native/Convex/Worker wire only. Never display, persist, or send to a model. */
 export interface HostedTaskCapability {
   version: 1;
