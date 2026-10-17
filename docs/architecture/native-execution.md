@@ -6,6 +6,45 @@ does not invoke a provider shell or alter Computer Use window grants, leases or
 foreground/background delivery. WSL/Ubuntu/Bubblewrap are not prerequisites for
 these tools. The separate experimental Grok bridge is unchanged.
 
+## Restricted running-app preview
+
+A command session may reserve one explicit Node HTTP preview port. The fixed,
+native-staged read-only preload redirects only that HTTP listener to a generated
+`LOCAL` named pipe; it does not grant sandbox loopback, private-network access or
+a host listener. HTTPS and non-Node server adapters need separate support. The
+executor authenticates each pipe peer against its retained process handle, exact
+Windows Job, AppContainer SID and restricted token before exposing a stream.
+
+The desktop issues a short-lived native descriptor only for the exact scoped
+job/generation, repository copy and frozen input-tree revision. A bounded native
+proxy accepts its own opaque `48hex.localhost` Host and Origin and forwards only
+through that executor stream. It never probes a host application port. Closing
+the view leaves the command running; Stop, account change, expiry and job closure
+invalidate transport. Foreground/background ownership must be returned to the
+desktop before this initial preview can be opened.
+
+The separate HTTP origin receives no Tauri IPC. Existing native child-frame
+navigation and pre-transmission Document guards, including paused out-of-process
+frames, pin live preview navigation to its registered origin. Static MCP and
+generated-HTML guests keep their exact URL pins. Every proxied app response adds
+a policy limited to the preview's HTTP/WebSocket origin, data/blob media and local
+scripts/styles; external resources, nested frames, native protocols and reporting
+endpoints are excluded. Application CSP remains enforced. HTTP and upgrade headers,
+request size, concurrency, lifetime and total transferred bytes are bounded.
+
+Public point feedback is optional: a fixed bootstrap is added only to a normal,
+uncompressed bounded first HTML head chunk. CSP may block it, in which case the UI
+never enables picking. A trusted click omits file/form/editable subtrees and emits
+only bounded path, tag, label and geometry. The host validates the exact frame
+source/origin plus native preview/job/generation/revision before staging an
+explicitly untrusted chat draft. Nothing is sent automatically. This preview
+shows the session's frozen input snapshot; repository-to-session live edit sync
+requires its own confined-tree protocol and is not implied by HMR support.
+
+Native pipeline, installed WebView navigation/network fences, HMR and user picker
+acceptance are distinct checks. Source/unit or mocked HTTP checks do not establish
+that an installed restricted dev server and WebView worked end to end.
+
 ## Security identity and launch
 
 Each execution has a random, ephemeral Less Privileged AppContainer package SID.

@@ -12,6 +12,7 @@ mod cua;
 pub(crate) mod desktop_tools;
 pub(crate) mod execution_setup;
 pub(crate) mod leases;
+pub(crate) mod live_preview;
 pub(crate) mod office_authoring;
 pub(crate) mod office_drafts;
 pub(crate) mod office_editing;
