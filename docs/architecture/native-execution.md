@@ -49,6 +49,12 @@ a bounded native observation window. Renderer result messages cannot declare
 success. The probe owns unpredictable fixture routes, exact document registrations,
 a ten-second deadline, and cleanup on account, task-generation or exact job Stop.
 An unsupported runtime or inconclusive probe exposes no app preview.
+The debug-only `--check-preview-network` entry, explicitly enabled with
+`MIVLET_PREVIEW_NETWORK_ACCEPTANCE=1`, exercises this proof in a hidden disposable
+WebView with the same installed native guards. It starts no account, workspace,
+provider or command executor, registers no renderer command handler, and removes
+its temporary profile. This installed-runtime check is separate from restricted
+Node pipe transport, running-app/HMR display and user point-feedback acceptance.
 
 Public point feedback is optional: a fixed bootstrap is added only to a normal,
 uncompressed bounded first HTML head chunk. CSP may block it, in which case the UI

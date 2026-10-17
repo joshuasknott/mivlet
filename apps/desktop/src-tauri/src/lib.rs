@@ -106,6 +106,11 @@ pub fn check_owned_browser() -> Result<(), String> {
     local_computer::browser::check_owned_browser()
 }
 
+#[cfg(all(windows, debug_assertions))]
+pub fn check_preview_network() -> Result<(), String> {
+    connection_allowlist_probe::acceptance()
+}
+
 /// Developer-only live check; prints status/counts, never credentials or source content.
 #[cfg(debug_assertions)]
 pub fn check_connectors() {
