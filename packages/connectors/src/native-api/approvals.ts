@@ -189,7 +189,7 @@ export function buildToolApproval(
     : toolName === "command-stop" && isRegistered
     ? "Stop this exact native job and all descendants. Wait for its terminal status; discard its snapshot."
     : toolName === "command-input" && isRegistered
-    ? "Write this exact text once to the selected restricted interactive job. The sequence is consumed before delivery; an uncertain receipt stops the job and is never replayed. Native code does not echo or save the input."
+    ? "Write this exact text once to the selected restricted interactive job. The sequence is consumed before delivery; an uncertain receipt stops the job and is never replayed. Native job history saves no input text."
     : (toolName === "repository-run" || toolName === "workspace-run") && isRegistered
     ? `Run exact Windows command in ${toolName === "workspace-run" ? "selected copies" : "a repository snapshot"}. Restricted identity; host files/credentials unavailable. Network: ${parsed.network === true ? "internetClient capability; no private-network or loopback exemption" : "disabled"}. Originals preserved; import validated success; discard failure/Stop.`
     : toolName === "repository-pr-action" && isRegistered
