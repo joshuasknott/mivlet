@@ -1,10 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   MOCK_CLERK_AUDIENCE,
   MOCK_CLERK_ISSUER,
   createConvexAuthConfig,
   isNonLocalClerkMockEnvironment
-} from "./auth.config";
+} from "./clerkAuthPolicy";
+
+afterEach(() => { vi.unstubAllEnvs(); vi.resetModules(); });
 
 const mockLocal = {
   MIVLET_CLERK_ISSUER: MOCK_CLERK_ISSUER,
@@ -13,6 +15,14 @@ const mockLocal = {
 } as const;
 
 describe("Convex auth configuration", () => {
+  it("exports serializable credentials without reading the environment during serialization", async () => {
+    vi.stubEnv("MIVLET_CLERK_ISSUER", "https://example.clerk.accounts.dev");
+    vi.stubEnv("MIVLET_CLERK_AUDIENCE", "convex");
+    const config = (await import("./auth.config")).default;
+    vi.unstubAllEnvs();
+    expect(Object.getOwnPropertyDescriptor(config, "providers")?.get).toBeUndefined();
+    expect(JSON.parse(JSON.stringify(config))).toEqual({ providers: [{ domain: "https://example.clerk.accounts.dev", applicationID: "convex" }] });
+  });
   it("fails closed when Clerk issuer or audience is missing", () => {
     expect(() => createConvexAuthConfig({})).toThrow(/MIVLET_CLERK_ISSUER and MIVLET_CLERK_AUDIENCE/);
     expect(() => createConvexAuthConfig({ MIVLET_CLERK_ISSUER: "https://example.clerk.accounts.dev" }))
