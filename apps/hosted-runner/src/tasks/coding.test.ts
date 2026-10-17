@@ -142,6 +142,17 @@ describe("real provider adapters over closed scratch tools", () => {
     await expect(runRealCoding(value.binding, value.input, key, new AbortController().signal, c.journal, c.access, service)).rejects.toMatchObject({ code: "coding-content-refused" });
     expect(service.file).not.toHaveBeenCalled(); expect(service.run).not.toHaveBeenCalled(); expect(service.cancel).toHaveBeenCalled();
   });
+  it.each(["path", "argv"] as const)("refuses the enrolled key in scratch %s metadata before runtime admission", async location => {
+    const value = await fixture(); const c = await custody(value); const service = runtime();
+    if (location === "argv") {
+      value.binding.repository.scope.checks[0].argv.push(key);
+      value.input.messages[0].content = hostedCodingTaskPolicy(value.binding.repository);
+    }
+    const access = { ...c.access, manifest: async () => (await c.access.manifest()).map(file => location === "path" ? { ...file, path: `${key}.js` } : file) };
+    vi.stubGlobal("fetch", vi.fn(async () => sse(tool("scratch_check", { id: "syntax" }, "metadata_key"))));
+    await expect(runRealCoding(value.binding, value.input, key, new AbortController().signal, c.journal, access, service)).rejects.toMatchObject({ code: "coding-content-refused" });
+    expect(service.begin).not.toHaveBeenCalled(); expect(service.file).not.toHaveBeenCalled(); expect(service.run).not.toHaveBeenCalled();
+  });
 });
 
 describe("immutable-manifest transfer leases", () => {
