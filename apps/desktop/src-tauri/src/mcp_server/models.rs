@@ -8,6 +8,8 @@ pub struct Config {
     pub public_origin: Option<String>,
     #[serde(default)]
     pub browser_origins: Vec<String>,
+    #[serde(default)]
+    pub remote_access: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Default)]
@@ -107,6 +109,7 @@ pub struct Decision {
 #[serde(rename_all = "camelCase")]
 pub struct Status {
     pub endpoint: Option<String>,
+    pub remote_url: Option<String>,
     pub pending: Vec<ConsentRequest>,
     pub grants: Vec<Grant>,
     pub history: Vec<History>,

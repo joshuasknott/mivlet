@@ -2,7 +2,7 @@ import type { ToolExecutor } from "@mivlet/connectors";
 import { isLocalComputerTool } from "./computer-tools";
 
 const OBSERVATIONS = new Set(["local-app-observe", "local-desktop-observe", "local-browser-observe"]);
-const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "local-browser-click", "local-browser-scroll", "local-browser-navigate", "write-file"]);
+const MUTATIONS = new Set(["local-app-action", "local-desktop-action", "local-browser-click", "local-browser-scroll", "local-browser-navigate", "local-browser-activate", "local-browser-fill", "local-browser-download", "local-browser-upload", "write-file"]);
 type RecoveryClass = "stale-observation" | "loading" | "human-control" | "uncertain-effect" | "foreground-required";
 type PendingRecovery = { kind: RecoveryClass; tools: ReadonlySet<string>; target?: string };
 
@@ -30,6 +30,8 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
   let mutationSinceObservation = false;
   let observation = "";
   let blocked = "";
+  let handedOver = false;
+  let fileConfirmation = false;
   let pendingRecovery: PendingRecovery | null = null;
   const recoveryFailures = new Map<RecoveryClass, number>();
   const preflightFailures = new Map<string, number>();
@@ -37,6 +39,8 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
   return async (approval, argumentsJson) => {
     const name = approval.action.split(/\s+/)[0];
     if (!isLocalComputerTool(name, argumentsJson)) return execute(approval, argumentsJson);
+    if (handedOver) throw new Error("The browser is under human control. Wait for a fresh explicit user continuation before selecting, reading, or acting again.");
+    if (fileConfirmation && name!=="local-browser-handover") throw new Error("The browser file step needs human confirmation. Hand browser control to the user before any further computer work; never replay the attachment.");
     const mutation = MUTATIONS.has(name);
     const fingerprint = `${name}:${stableArguments(argumentsJson)}`;
     if (++calls > 80) blocked = "This computer turn reached its action limit. Explain the current state and ask the user to continue.";
@@ -56,6 +60,16 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
     if (calls > 84) throw new Error("Computer work stopped at its turn limit. Report the current state to the user.");
     try {
       const result = await execute(approval, argumentsJson);
+      if (name === "local-browser-handover" && stringArgument(result,"status") === "human-control-required") {
+        handedOver = true;
+        activity("Waiting for your browser step");
+        return result;
+      }
+      if (name==="local-browser-upload" && stringArgument(result,"status")==="file-attached") {
+        fileConfirmation=true;
+        activity("Waiting for your file confirmation");
+        return result;
+      }
       if (mutation && stringArgument(result, "status") === "foreground-required") {
         mutationSinceObservation = false;
         preflightFailures.set(fingerprint, (preflightFailures.get(fingerprint) ?? 0) + 1);
@@ -85,6 +99,7 @@ export function createComputerTaskExecutor(execute: ToolExecutor, activity: (mes
       }
       return result;
     } catch (error) {
+      if (name==="local-browser-upload" && String(error).includes("uncertain")) fileConfirmation=true;
       if (mutation) {
         if (++failedActions >= 4) blocked = "Several computer actions failed. Stop making changes and explain the current obstacle.";
       }
@@ -198,7 +213,7 @@ function stableArguments(value: string): string {
     const visit = (item: unknown): unknown => {
       if (Array.isArray(item)) return item.map(visit);
       if (!item || typeof item !== "object") return item;
-      return Object.fromEntries(Object.entries(item).filter(([key]) => !["observationId", "elementRef", "controlRef", "scrollRef", "navigationRef", "tabRef", "ref", "activeTabRef", "updatedAt", "observedAt", "expiresAt"].includes(key))
+      return Object.fromEntries(Object.entries(item).filter(([key]) => !["observationId", "elementRef", "controlRef", "fieldRef", "downloadRef", "uploadRef", "scrollRef", "navigationRef", "activationRef", "tabRef", "ref", "activeTabRef", "updatedAt", "observedAt", "expiresAt"].includes(key))
         .sort(([a], [b]) => a.localeCompare(b)).map(([key, nested]) => [key, visit(nested)]));
     };
     return JSON.stringify(visit(JSON.parse(value)));

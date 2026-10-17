@@ -15,6 +15,14 @@ pub(super) fn reply_user(
     id(event_id)?;
     let text = bounded(text, 32_000, "Follow-up")?;
     let mut item = ctx.item(key)?;
+    if item.execution_owner.as_deref() == Some("hosted")
+        || item
+            .hosted_task
+            .as_ref()
+            .is_some_and(|h| h.phase == "review")
+    {
+        return Err(invalid("Cloud text task input is frozen. Review its saved answer, then start a new request with a fresh cloud review; this task cannot accept replies or live steering."));
+    }
     if let Some(existing) = item.steering.iter().find(|event| event.id == event_id) {
         return if existing.text == text {
             Ok(())
@@ -24,6 +32,9 @@ pub(super) fn reply_user(
     }
     if item.generation != expected_generation {
         return Err(invalid("This assignment changed. Reload before replying."));
+    }
+    if item.steering.len() >= 16 {
+        return Err(invalid("This assignment reached its follow-up limit. Start a fresh request with the saved results."));
     }
     if item.status == WorkStatus::Cancelled || item.status == WorkStatus::Failed {
         return Err(invalid("This assignment has already ended."));
@@ -71,6 +82,13 @@ pub(super) fn reply_user(
         item.status = WorkStatus::Queued;
         item.reason = Some("A user follow-up is queued after delegated results.".into());
     }
+    if let Some(goal) = item.outcome_goal.as_mut() {
+        if matches!(goal.status.as_str(), "completed" | "blocked") {
+            goal.status = "active".into();
+            goal.report = None;
+        }
+    }
+    super::goals::enforce_budget(&mut item);
     item.updated_at = ctx.time.into();
     ctx.work(&item)
 }

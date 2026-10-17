@@ -1,5 +1,4 @@
 import { mergeConnectorConnections } from "../../lib/connector-connections";
-import { toRuntimeError } from "../errors";
 import type {
   ApprovalResolutionRequest,
   ConnectorActionRequest,
@@ -78,14 +77,10 @@ export async function beginRuntimeConnectorOAuth(
   }
   const scope = activeDataScope();
   if (!scope) return null;
-  try {
-    return await invoke<ConnectorAuthResult>("begin_connector_oauth", {
-      request,
-      workspaceId: scope.workspaceId,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ConnectorAuthResult>("begin_connector_oauth", {
+    request,
+    workspaceId: scope.workspaceId,
+  });
 }
 
 export async function clearRuntimeConnectorAuth(connectorId: string) {
@@ -94,14 +89,10 @@ export async function clearRuntimeConnectorAuth(connectorId: string) {
   }
   const scope = activeDataScope();
   if (!scope) return null;
-  try {
-    return await invoke<ConnectorManifest>("clear_connector_auth", {
-      connectorId,
-      workspaceId: scope.workspaceId,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ConnectorManifest>("clear_connector_auth", {
+    connectorId,
+    workspaceId: scope.workspaceId,
+  });
 }
 
 export async function listRuntimeConnectorAccounts(connectorId: string) {
@@ -110,14 +101,10 @@ export async function listRuntimeConnectorAccounts(connectorId: string) {
   }
   const scope = activeDataScope();
   if (!scope) return null;
-  try {
-    return await invoke<ConnectorAccountOption[]>("list_connector_accounts", {
-      connectorId,
-      workspaceId: scope.workspaceId,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ConnectorAccountOption[]>("list_connector_accounts", {
+    connectorId,
+    workspaceId: scope.workspaceId,
+  });
 }
 
 export async function switchRuntimeConnectorAccount(
@@ -129,15 +116,11 @@ export async function switchRuntimeConnectorAccount(
   }
   const scope = activeDataScope();
   if (!scope) return null;
-  try {
-    return await invoke<ConnectorManifest>("switch_connector_account", {
-      connectorId,
-      connectionId,
-      workspaceId: scope.workspaceId,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ConnectorManifest>("switch_connector_account", {
+    connectorId,
+    connectionId,
+    workspaceId: scope.workspaceId,
+  });
 }
 
 export async function refreshRuntimeConnectorHealth(connectorId: string) {
@@ -146,14 +129,10 @@ export async function refreshRuntimeConnectorHealth(connectorId: string) {
   }
   const scope = activeDataScope();
   if (!scope) return null;
-  try {
-    return await invoke<ConnectorManifest>("refresh_connector_health", {
-      connectorId,
-      workspaceId: scope.workspaceId,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ConnectorManifest>("refresh_connector_health", {
+    connectorId,
+    workspaceId: scope.workspaceId,
+  });
 }
 
 export async function listRuntimeConnectorSyncStates(
@@ -163,13 +142,9 @@ export async function listRuntimeConnectorSyncStates(
     return null;
   }
   if (!workspaceId) return null;
-  try {
-    return await invoke<ConnectorSyncState[]>("list_connector_sync_states", {
-      workspaceId,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ConnectorSyncState[]>("list_connector_sync_states", {
+    workspaceId,
+  });
 }
 
 export async function syncRuntimeConnector(request: ConnectorSyncRequest) {
@@ -178,11 +153,7 @@ export async function syncRuntimeConnector(request: ConnectorSyncRequest) {
   }
   const scope = activeDataScope();
   if (!scope || request.workspaceId !== scope.workspaceId) return null;
-  try {
-    return await invoke<ConnectorSyncState>("sync_connector", { request });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ConnectorSyncState>("sync_connector", { request });
 }
 
 async function invokeConnectorKnowledge<T>(
@@ -192,14 +163,10 @@ async function invokeConnectorKnowledge<T>(
   if (!hasTauriRuntime()) return null;
   const scope = activeDataScope();
   if (!scope) return null;
-  try {
-    return await invoke<T>(command, {
-      ...args,
-      ...scope,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<T>(command, {
+    ...args,
+    ...scope,
+  });
 }
 
 export function listRuntimeConnectorKnowledgeSources() {
@@ -237,15 +204,11 @@ export async function executeRuntimeConnectorAction(request: {
   }
   const scope = activeDataScope();
   if (!scope) return null;
-  try {
-    return await invoke<ConnectorActionResult>(
-      "execute_approved_connector_action",
-      {
-        request,
-        workspaceId: scope.workspaceId,
-      },
-    );
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ConnectorActionResult>(
+    "execute_approved_connector_action",
+    {
+      request,
+      workspaceId: scope.workspaceId,
+    },
+  );
 }

@@ -149,7 +149,7 @@ export function AgentEditor({
 
   return (
     <div className={presentation === "panel" ? "workspace-context agent-settings-panel" : "agent-editor-backdrop"} role="presentation">
-      <div ref={modalRef} className="agent-editor" role="dialog" aria-modal={modal || undefined} aria-labelledby="agent-editor-title"
+      <div ref={modalRef} className="agent-profile-dialog" role="dialog" aria-modal={modal || undefined} aria-labelledby="agent-editor-title"
         onKeyDown={(event) => { if (!modal && event.key === "Escape" && !skillsOpen) { event.stopPropagation(); onClose(); } }}>
         <header className="agent-editor__header">
           <div><h2 id="agent-editor-title">{presentation === "panel" ? "Agent settings" : agent ? `Edit ${agent.name}` : "Create agent"}</h2></div>

@@ -2,6 +2,8 @@ import { httpRouter } from "convex/server";
 import { httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
 import { requireHttpClerkIdentity, type ConvexAuthReader } from "./convexAuth";
+import { parseHostedTaskCapabilityArgs } from "./hostedTasks";
+import { parsePhoneRelayCapabilityArgs } from "./phoneRelay";
 import {
   EXECUTION_CAPABILITY_MINT_WINDOW_MS,
   RATE_LIMITED_CODE,
@@ -177,6 +179,85 @@ export async function handleNativeExecutionCapability(
 }
 
 const http = httpRouter();
+
+/** Text and phone capabilities share the account mint budget with computer operations. */
+async function handleNativeCapability<Args extends { deviceId: string }>(
+  ctx: ExecutionCapabilityHttpCtx,
+  request: Request,
+  parse: (value: unknown) => Args,
+  mint: (args: Args) => Promise<unknown>,
+): Promise<Response> {
+  const reply = (status: number, body: unknown, headers: Record<string, string> = {}) =>
+    Response.json(body, { status, headers: { "Cache-Control": "no-store", ...headers } });
+  // Native requests have neither browser header. No CORS route is registered.
+  if (request.headers.has("origin") || request.headers.has("sec-fetch-mode")) {
+    return reply(403, { status: "error", errorMessage: "native-request-required" });
+  }
+  try {
+    await requireHttpClerkIdentity(ctx);
+  } catch (error) {
+    const failure = classifyCapabilityHttpFailure(error);
+    return reply(failure.status, { status: "error", errorMessage: failure.errorMessage });
+  }
+  try {
+    if (request.method !== "POST" || request.headers.get("content-type")?.split(";")[0].trim().toLowerCase() !== "application/json") {
+      throw new Error("invalid-request");
+    }
+    const reader = request.body?.getReader();
+    if (!reader) throw new Error("invalid-request");
+    const chunks: Uint8Array[] = [];
+    let size = 0;
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) break;
+        size += chunk.value.byteLength;
+        if (size > 2_048) throw new Error("invalid-request");
+        chunks.push(chunk.value);
+      }
+    } finally {
+      await reader.cancel().catch(() => undefined);
+      reader.releaseLock();
+    }
+    const bytes = new Uint8Array(size);
+    let offset = 0;
+    for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+    let body: unknown;
+    try { body = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)); }
+    catch { throw new Error("invalid-request"); }
+    const args = parse(body);
+    await ctx.runMutation(internal.hostedExecution.consumeExecutionCapabilityMint, { deviceId: args.deviceId });
+    const receipt = await mint(args);
+    return reply(200, { status: "success", value: receipt });
+  } catch (error) {
+    const failure = classifyCapabilityHttpFailure(error);
+    return reply(failure.status, { status: "error", errorMessage: failure.errorMessage },
+      failure.errorMessage === RATE_LIMITED_CODE
+        ? { "Retry-After": String(Math.ceil(EXECUTION_CAPABILITY_MINT_WINDOW_MS / 1000)) } : {});
+  }
+}
+
+export async function handleNativeHostedTaskCapability(ctx: ExecutionCapabilityHttpCtx, request: Request): Promise<Response> {
+  return handleNativeCapability(ctx, request, parseHostedTaskCapabilityArgs,
+    args => ctx.runAction(internal.hostedTasks.requestHostedTaskCapability, args));
+}
+
+export async function handleNativePhoneRelayCapability(ctx: ExecutionCapabilityHttpCtx, request: Request): Promise<Response> {
+  return handleNativeCapability(ctx, request, parsePhoneRelayCapabilityArgs,
+    args => ctx.runAction(internal.phoneRelay.requestPhoneRelayCapability, args));
+}
+
+http.route({
+  path: "/native/phone-relay-capability",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => handleNativePhoneRelayCapability(ctx, request)),
+});
+
+http.route({
+  path: "/native/task-capability",
+  method: "POST",
+  handler: httpAction(async (ctx, request) => handleNativeHostedTaskCapability(ctx, request)),
+});
 
 http.route({
   path: "/native/execution-capability",

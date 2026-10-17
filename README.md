@@ -26,9 +26,9 @@ supported production service or a signed installer release. See [LICENSE](LICENS
 Public source access does not provide a hosted Mivlet account service, provider
 subscriptions, or connector credentials; configure your own services as described below.
 
-Mivlet is pre-release Windows desktop software. This repository contains a
-substantial local product and an optional hosted-computer foundation; it is not
-a deployed or production-validated service.
+Mivlet is pre-release Windows desktop software. The local workspace has optional
+cloud task and phone services, deployed against the existing development account
+setup. Production tenancy and full signed-in service acceptance remain unverified.
 
 ### Implemented locally
 
@@ -51,8 +51,11 @@ a deployed or production-validated service.
   [coding workflow and its limits](docs/architecture/coding-workflow.md).
   File checkpoints save named code states in the private copy, preview real file
   changes, and restore an explicitly approved tree with a recoverable before-restore
-  checkpoint. Original checkouts, Git HEAD and conversation history stay intact;
-  restored files need fresh verification. See [checkpoint limits and recovery](docs/architecture/coding-workflow.md#file-checkpoints).
+  checkpoint. Connected undo can restore the associated conversation branch and
+  private-copy files together, with explicit Finish/Revert recovery after an
+  uncertain result. Original checkouts and Git HEAD stay intact; restored files
+  need fresh verification. Work keeps its exact repository copy across continuations.
+  See [checkpoint limits and recovery](docs/architecture/coding-workflow.md#file-checkpoints).
 - Bounded live command logs and native persistent jobs for repository snapshots
   or selected workspace files. Library's Commands section shows status and Stop.
   Persistent jobs require an explicit lifetime, retain isolation and repository
@@ -60,6 +63,17 @@ a deployed or production-validated service.
   the opt-in [background owner](docs/architecture/work-execution.md#opt-in-native-background-text-execution-on-windows)
   retains approved commands after the window closes. Restart never replays jobs.
   See the [native lifecycle](docs/architecture/native-execution.md#live-output-and-controlled-jobs).
+- Approved interactive jobs accept bounded line input with reconnectable output
+  and independent Stop. Native Node HTTP previews can open beside a command
+  result; selecting an element stages a revision request with validated evidence.
+  Preview transport remains isolated, and installed WebView network enforcement
+  must pass its native probe. Sessions use a fixed snapshot: stop, edit and restart
+  to see repository changes. Full-screen terminal/resize support is not offered.
+- Conversation queues can be held, edited and reordered before admission. Explicit
+  goals record success criteria and turn/token limits; continuation checks fresh
+  reports before scheduling another turn. Codex supports live turn guidance;
+  other routes retain guidance for the next supported boundary. These controls
+  operate on the same encrypted Work records as foreground/background execution.
 - GitHub PR review for attached repositories: paginated changes, checks and
   comments, revision-aware viewed files, local review drafts, explicitly approved
   managed-branch updates and review actions, and bounded optional PR watches
@@ -127,7 +141,9 @@ a deployed or production-validated service.
   intact. Shared tools create passive DOCX, formula-bearing XLSX, editable
   16:9 PPTX and PDF reports with tables and vector bar charts. Uploaded images and text can be previewed
   during the current session (bounded to 32 MB of preview memory). Upload pixels
-  are not added to saved conversations; unavailable originals ask for reattachment.
+  are not embedded in saved conversation text. Work retains verified private image
+  copies and hash-bound references for continuation and explicit recipient sharing;
+  unavailable or changed originals ask for reattachment.
   Saved workspace text files remain previewable through their scoped file path.
 - Provider and plugin-style Connections, including connector and MCP
   boundaries. App connections use browser sign-in through native OAuth or official remote services.
@@ -142,8 +158,18 @@ a deployed or production-validated service.
 - An authenticated local MCP server lets external assistants inspect explicitly
   shared Work and request tasks from selected agents. Native desktop consent,
   read-only defaults, expiry, revocation and scoped access history preserve
-  Mivlet authority. Remote access requires an operator-provided HTTPS proxy;
-  the app does not publish an endpoint. See [external assistants](docs/architecture/mcp-server.md).
+  Mivlet authority. Manual remote MCP access requires an operator-provided HTTPS
+  proxy. See [external assistants](docs/architecture/mcp-server.md).
+- An opt-in phone/web view shares those granted agents and Work, with task
+  requests, bounded results and Stop for tasks the browser started. Native OAuth
+  custody and HttpOnly cookies keep bearer credentials out of browser JavaScript.
+  Managed phone access uses a separate Free Cloudflare relay with fixed client
+  assets and closed native operations; it requires no user-operated tunnel.
+  Cloudflare carries the selected shared requests/results over TLS without
+  retaining their text in relay storage. Opt-in push contains no task content.
+  Deployment configuration, browser permission and an awake, signed-in desktop
+  are required. Account credential refresh or relink ends the link and requires
+  reconnecting; this is not hosted task execution or proof of real-phone delivery.
 - Agent instructions travel as model context rather than appearing in user
   messages. Skills belong to their agent profile. ChatGPT turns use ephemeral
   Codex sessions while Mivlet keeps the durable conversation locally.
@@ -231,8 +257,11 @@ a deployed or production-validated service.
   delivery and a protected system installation with a verified publisher.
   The agent then lists and selects the window through normal computer tools.
   Stop leaves this browser open for human takeover; account changes and app
-  closure close it. This currently uses Windows controls; DOM browser tools and
-  managed uploads/downloads remain incomplete.
+  closure close it. Fresh DOM references support tab activation, observation,
+  clicks and empty public text fields. Private fields require human handover.
+  Managed downloads close the owned browser before sealing passive files into
+  workspace custody; uploads attach an exact verified published passive artifact
+  to a fresh empty file field. Both are bounded to 8 MiB and require exact approval.
 - Runtime-detected operating-system dictation. It fails closed when speech
   recognition is unavailable and does not retain raw audio.
 
@@ -242,9 +271,20 @@ a deployed or production-validated service.
   with short-lived generation-fenced capabilities. Local tests and packaging
   checks do not prove that Containers, Browser Rendering, Durable Objects,
   Convex, Clerk, or production secrets have been deployed.
+- The [cloud task service](docs/architecture/hosted-text-tasks.md) accepts an
+  explicitly reviewed Work item and separately connected cloud API key. Text tasks
+  make one model call; public-page research uses a bounded model/read loop within
+  exact reviewed HTTPS domains. Both can finish while the desktop is closed and
+  retain their result for reconciliation. The deployed Worker and development
+  Convex capability endpoint passed live authorization checks; a real provider
+  completion and signed-in native admission still need acceptance.
+- Cloud file work requires exact selected input files, writable paths and optional
+  check commands, followed by a separate approval to import returned changes.
+  Its isolated offline runtime requires Workers Paid and successful runtime
+  isolation checks. That runtime has not been activated or live-validated.
 - A separate OpenCode Workerd and Cloudflare Agents fixture verifies a scheduled
   task, exact approval, cancellation and durable receipt across restart. It accepts
-  fixed synthetic data only; real hosted task/provider delegation is unavailable.
+  fixed synthetic data only and provides no additional production task authority.
   See the [SDK architecture](docs/architecture/hosted-opencode-prototype.md).
 - Account sign-in gates first-run setup. Convex sync and remote workspace code
   remain optional foundation for future shared or multi-device work and are not
@@ -262,10 +302,10 @@ a deployed or production-validated service.
 - Automatic continuation of ordinary conversations after the desktop app
   closes.
 - Secure sign-in or secret handoff inside a hosted agent computer.
-- Deployed hosted operation, live third-party validation, production tenancy,
-  metering, quotas, monitoring, disaster recovery, or multi-device sync.
+- Live hosted computer/browser operation, real-provider cloud task acceptance,
+  production tenancy, metering, monitoring, disaster recovery, or multi-device sync.
 - Signed public installers, updater channels, supported macOS/Linux releases,
-  and mobile control.
+  and physical-phone/push-delivery acceptance.
 
 The [local computer](docs/architecture/local-teammate-computer.md) and
 [hosted computer](docs/architecture/hosted-teammate-computer.md) documents define

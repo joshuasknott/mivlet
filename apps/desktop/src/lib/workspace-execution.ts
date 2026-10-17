@@ -6,6 +6,7 @@ import type {
   MivletAgentProfile,
   PermissionMode,
   WorkAttachment,
+  OutcomeGoalInput,
 } from "@mivlet/protocol";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
 import type { ComposerAttachment } from "./types";
@@ -24,9 +25,15 @@ import {
 } from "./provider-models";
 import { ExecutionApprovalRouter } from "./execution-approvals";
 import { permissionModeFor } from "./agent-run";
+import { compareQueuedWork, workCanDispatch } from "./work-queue";
 
 export const activeWork = (work: CollaborationWorkItem) =>
   ["queued", "running", "waiting", "awaiting-approval"].includes(work.status);
+/** Shared originals may be staged deliberately for a recipient; a different
+ * agent's receipt and saved path never become that recipient's authority. */
+export function assignmentAttachments(work: CollaborationWorkItem, attachments: readonly ComposerAttachment[]): ComposerAttachment[] {
+  return work.parentId ? attachments.map(attachment => ({ ...attachment, workspaceFile: undefined, durableRef: undefined })) : [...attachments];
+}
 const workKey = (work: CollaborationWorkItem) =>
   `${work.id}:${work.generation}:${work.runIds.length}`;
 export const restrictedPermission = (
@@ -43,6 +50,7 @@ export function composerAttachmentRefs(
   attachments: readonly ComposerAttachment[],
 ): WorkAttachment[] {
   return attachments.map((attachment) => {
+    if (attachment.durableRef) return attachment.durableRef;
     if (attachment.workspaceFile)
       return {
         id: attachment.id,
@@ -353,9 +361,7 @@ export class WorkspaceExecution {
         conversations: [...data.conversations].sort((a, b) =>
           a.updatedAt.localeCompare(b.updatedAt),
         ),
-        work: [...data.work].sort((a, b) =>
-          a.createdAt.localeCompare(b.createdAt),
-        ),
+        work: [...data.work].sort(compareQueuedWork),
         facts: [...data.facts].sort((a, b) =>
           a.createdAt.localeCompare(b.createdAt),
         ),
@@ -391,6 +397,9 @@ export class WorkspaceExecution {
       text,
     });
   }
+  liveSteer(id: string, expectedGeneration: number, text: string) {
+    return this.command({ action: "live-steer-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
+  }
   async submit(
     conversationId: string,
     agentId: string,
@@ -400,6 +409,7 @@ export class WorkspaceExecution {
     recipientIds?: string[],
     parentMessageId?: string,
     requestId?: string,
+    outcomeGoal?: OutcomeGoalInput,
   ) {
     const id = requestId ?? `work-${crypto.randomUUID()}`;
     this.attachments.set(id, [...attachments]);
@@ -407,6 +417,7 @@ export class WorkspaceExecution {
     try {
       await this.command({
         action: "start-work",
+        outcomeGoal,
         id,
         conversationId,
         agentId,
@@ -434,8 +445,9 @@ export class WorkspaceExecution {
     const sessions = [...this.state.sessions];
     let changed = false;
     for (const work of this.state.data.work.filter(
-      (work) => work.status === "queued" && work.executionOwner !== "native-background",
+      (work) => work.status === "queued" && !work.executionOwner,
     )) {
+      if (!workCanDispatch(work, this.state.data.work)) continue;
       if (work.schedule && !this.scheduled.has(work.id)) continue;
       const external = this.state.data.work.filter(
         (work) =>
@@ -534,12 +546,12 @@ export class WorkspaceExecution {
           work.permissionMode,
           permissionModeFor(profile.permissionLabel),
         ),
-        attachments:
+        attachments: assignmentAttachments(work,
           this.attachments.get(work.id) ??
           (work.parentId
             ? this.effortAttachments.get(work.rootId)
             : undefined) ??
-          [],
+          []),
         cancelled: false,
         started: false,
         approvalIds: new Set(),
@@ -770,7 +782,7 @@ export class WorkspaceExecution {
     return this.closing;
   }
   private async closeOwnedExecution() {
-    const targets = this.executingWork().filter((work) => work.executionOwner !== "native-background").map((work) => ({
+    const targets = this.executingWork().filter((work) => !work.executionOwner).map((work) => ({
       id: work.id,
       expectedGeneration: work.generation,
     }));

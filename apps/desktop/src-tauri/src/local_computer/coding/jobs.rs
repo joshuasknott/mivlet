@@ -2,6 +2,19 @@ use super::*;
 use crate::local_computer::command_jobs::ScopeJobs;
 use std::sync::atomic::Ordering;
 
+pub(super) fn bind_repository(
+    session: &mut super::super::command_jobs::JobSession,
+    repo: &Repository,
+    task: Option<&task_binding::TaskRepository>,
+) -> Result<(), String> {
+    let binding = match task {
+        Some(task) => task.binding.clone(),
+        None => RepositoryWorkBinding::from_repository(repo, &super::super::command_jobs::now())?,
+    };
+    binding.check(repo)?;
+    session.bind_repository(binding)
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct Start {
@@ -9,6 +22,9 @@ struct Start {
     command: String,
     network: bool,
     timeout_seconds: u64,
+    #[serde(default)]
+    interactive: bool,
+    preview_port: Option<u16>,
 }
 
 pub(super) fn start(
@@ -16,6 +32,7 @@ pub(super) fn start(
     ticket: OperationTicket,
     jobs: Arc<ScopeJobs>,
     arguments: Value,
+    task: Option<task_binding::TaskRepository>,
 ) -> Result<String, String> {
     let input: Start =
         serde_json::from_value(arguments).map_err(|_| "Invalid persistent repository command.")?;
@@ -31,7 +48,8 @@ pub(super) fn start(
                 let _guard = mutex.try_lock().map_err(|_| {
                     "A repository operation is running. Wait or Stop it before starting a job."
                 })?;
-                let mut repo = load(&directory)?.ok_or("Attach a repository in Library first.")?;
+                let mut repo = task_repository(&directory, task.as_ref())?
+                    .ok_or("Attach a repository in Library first.")?;
                 if repo.id != input.repository_id {
                     return Err("Repository selection changed. Request a fresh approval.".into());
                 }
@@ -43,14 +61,19 @@ pub(super) fn start(
                     );
                 }
                 let root = checkout(&directory, &repo)?;
-                let mut session = jobs.start(
+                let mut session = jobs.start_with_options(
                     &ticket,
                     Some(&repo.id),
                     &input.command,
                     input.network,
                     input.timeout_seconds,
                     true,
+                    mivlet_windows_executor::SessionOptions {
+                        interactive: input.interactive,
+                        preview_port: input.preview_port,
+                    },
                 )?;
+                bind_repository(&mut session, &repo, task.as_ref())?;
                 let snapshot = session.snapshot()?;
                 if ready.send(Ok(snapshot)).is_err() {
                     return Err("Command start observer disconnected before admission.".into());

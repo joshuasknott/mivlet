@@ -19,6 +19,8 @@ mod pr_watch_tests;
 mod provider_continuation_tests;
 #[path = "provider_reset_regressions.rs"]
 mod provider_reset_regressions;
+#[path = "queue_goal_tests.rs"]
+mod queue_goal_tests;
 #[path = "scheduling_regressions.rs"]
 mod scheduling_regressions;
 #[path = "ui_tests.rs"]
@@ -28,13 +30,13 @@ mod workspace_tests;
 
 const TIME: &str = "2026-09-12T10:00:00.000Z";
 
-fn store() -> Store {
+pub(super) fn store() -> Store {
     Store::open_in_memory(Vault::new(&MasterKey::generate().unwrap()).unwrap()).unwrap()
 }
 fn profiles() -> Vec<MivletAgentProfile> {
     ["lead", "researcher", "reviewer"].iter().map(|id| serde_json::from_value(json!({"id":id,"name":id,"instructions":"Fixture teammate","modelId":"openai::fixture-model","icon":"sparkle","permissionLabel":"Ask Me"})).unwrap()).collect()
 }
-fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
+pub(super) fn fixture<T>(store: &Store, f: impl FnOnce(&Context<'_>) -> Result<T>) -> T {
     fixture_with_profiles(store, profiles(), f)
 }
 fn fixture_with_profiles<T>(
@@ -1829,7 +1831,7 @@ fn roadmap_additive_payloads_preserve_old_work_without_guessing_context() {
 fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
     fixture(&store(), |ctx| {
         let room = chats::open_main(ctx, "lead")?;
-        let preview = vec![
+        let mut preview = vec![
             WorkAttachment {
                 id: "upload".into(),
                 name: "brief.txt".into(),
@@ -1851,9 +1853,14 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
                 sha256: None,
             },
         ];
+        let unstaged: Command = serde_json::from_value(json!({"action":"start-work", "id":"before-durable", "conversationId":room.id, "agentId":"lead", "prompt":"Read the brief", "discussion":false, "attachments":preview})).unwrap();
+        assert!(commands::apply(ctx, unstaged).is_err());
+        assert!(ctx.item("before-durable").is_err());
+        preview[0] = staged_attachment("upload", "Attachments/admission/brief.txt");
         commands::apply(
             ctx,
             Command::StartWork {
+                outcome_goal: None,
                 id: "attach".into(),
                 conversation_id: room.id.clone(),
                 agent_id: "lead".into(),
@@ -1918,6 +1925,7 @@ fn roadmap_work_attachment_refs_are_bounded_and_refreshed_at_bind() {
         bad_hash.sha256 = Some("not-a-hash".into());
         assert!(work::validate_attachments(&[bad_hash]).is_err());
         let mut in_memory_with_ref = preview[0].clone();
+        in_memory_with_ref.availability = "transient".into();
         in_memory_with_ref.relative_path = Some("Attachments/batch-1/brief.txt".into());
         assert!(work::validate_attachments(&[in_memory_with_ref]).is_err());
         let mut unknown_kind = preview[1].clone();
@@ -2054,6 +2062,7 @@ fn roadmap_attachment_refs_survive_restart_review_without_replay() {
         commands::apply(
             ctx,
             Command::StartWork {
+                outcome_goal: None,
                 id: "recover".into(),
                 conversation_id: room.id.clone(),
                 agent_id: "lead".into(),

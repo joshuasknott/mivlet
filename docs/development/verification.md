@@ -113,10 +113,45 @@ mode does not produce the required `check` result or replace full validation.
 Locally, the matching command is `pnpm --filter @mivlet/desktop exec vite build
 --config ../../scripts/perf/profile.vite.config.mjs --configLoader runner`.
 
+An optional `baseline_commit` must be a full ancestor SHA with the same lockfile.
+Both profiles run sequentially on the same runner and frozen install. The graph
+comparison rejects module loss, budget-category moves and changed startup
+closures; byte savings still have to pass the unchanged performance ceilings.
+This remote path avoids overlapping local builds when desktop memory is limited.
+
+With `native_preview` enabled, a successful renderer profile also builds an
+unsigned debug executable from that exact commit. Its artifact includes the
+commit, executable SHA-256, Cargo lockfile SHA-256 and toolchain versions. Verify
+those against the intended checkout before running native acceptance locally.
+The artifact is accessible to repository readers and is for acceptance only;
+it is neither an installer nor a signed release. The debug-only
+`--check-preview-network` probe additionally requires
+`MIVLET_PREVIEW_NETWORK_ACCEPTANCE=1`; record its actual exit status and output.
+
 The October 16 integration keeps `assistant-stream` with the deferred
 assistant-ui graph and separates the generated-interface schema engine from
 eager vendor code. The schema chunk still counts against the common budget.
 Budget ceilings and asset accounting remain unchanged.
+
+The assistant-ui build transform converts the pinned package's generated
+primitive getter barrels into native ESM namespace imports. This removes unused
+controls while preserving the used implementations and live bindings; package
+entry changes fail the build for review. Its bundle regression checks both retained
+controls and omitted rendering/viewport/dictation modules. Session controls share
+one deferred conversation chunk. Provider instruction loading and live tool
+updates remain independent of saved-history and generated-response parsing.
+
+Generated-response regressions exercise the shipped provider-prompt example
+through extraction, the production AST guard, rendering, saved state and a
+deliberate follow-up. `ui:check` regenerates actual component signatures while
+applying Mivlet's supported language profile; generic upstream capabilities must
+not leak into provider instructions. HTML and saved-state limits use native
+UTF-8 byte bounds. Preview registration and guest loading have bounded recovery,
+and stale native registrations are released. Artifact preview tests cover saved
+output restoration and late editor results after the source changes. These
+mocked-native checks do not establish live provider or native guest rendering;
+capture and inspect the actual result at desktop and narrow widths when doing
+browser/native acceptance, and record console failures alongside screenshots.
 
 While editing a renderer, run desktop typecheck and focused tests; for a package,
 run its build and tests. Run native checks for native changes. Use `pnpm check`

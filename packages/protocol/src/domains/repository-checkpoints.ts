@@ -10,7 +10,7 @@ export interface RepositoryCheckpoint {
   fileCount: number;
   requestId: string;
   generation: number;
-  reason: "manual" | "before-restore";
+  reason: "manual" | "before-restore" | "before-task";
 }
 export interface RepositoryCheckpointList {
   checkpoints: RepositoryCheckpoint[];

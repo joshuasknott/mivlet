@@ -185,8 +185,9 @@ export function setPublicAddressLookupForTests(lookup?: PublicAddressLookup): vo
  * Resolve the hostname and refuse the URL when any answer is a private,
  * loopback, link-local, multicast, unspecified, or cloud-metadata address.
  * Returns the validated public address set. Callers that open a socket must
- * pin that set with `createPinnedDnsLookup` (desktop web-fetch uses
- * `resolve_to_addrs`). Playwright `route.continue()` re-resolves and is not a pin.
+ * use a runtime-supported pin (desktop web-fetch uses `resolve_to_addrs`).
+ * `createPinnedDnsLookup` only pins a Node implementation honoring lookup;
+ * Workers node:https ignores it. Playwright route.continue also is not a pin.
  */
 export async function assertPublicHttpsUrl(value: unknown): Promise<PublicHttpsTarget> {
   const href = validatePublicHttpsUrl(value);

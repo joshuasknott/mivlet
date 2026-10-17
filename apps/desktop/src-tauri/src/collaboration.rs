@@ -1,5 +1,6 @@
 //! Account-private teammates and durable coordination. Membership and
 //! contributions never grant provider, connector, file or computer authority.
+pub(crate) mod attachment_sources;
 pub(crate) mod background;
 mod capture_summary;
 mod chats;
@@ -7,13 +8,20 @@ mod commands;
 mod context;
 mod exchanges;
 pub(crate) mod external;
+mod goals;
+mod handover;
+pub(crate) mod hosted;
+pub(crate) mod hosted_repository;
 pub(crate) mod models;
 mod output_revisions;
 pub(crate) mod pr_watches;
 pub(crate) mod provider_continuation;
 pub(crate) mod provider_continuation_read;
 mod provider_resets;
+mod queue;
+pub(crate) mod restore;
 mod schedules;
+mod steering;
 pub(crate) mod ui;
 mod work;
 pub(crate) use schedules::{
@@ -436,18 +444,35 @@ pub fn collaboration_load(
 }
 
 #[tauri::command]
-pub fn collaboration_command(
+pub async fn collaboration_command(
     app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     request: Request,
 ) -> std::result::Result<Snapshot, String> {
     main_window(&window)?;
+    if let Command::LiveSteerWork {
+        id,
+        expected_generation,
+        event_id,
+        text,
+    } = &request.command
+    {
+        let (workspace, id, generation, event, text) = (
+            request.workspace_id.clone(),
+            id.clone(),
+            *expected_generation,
+            event_id.clone(),
+            text.clone(),
+        );
+        return tauri::async_runtime::spawn_blocking(move || steering::live(&app, &workspace, &id, generation, &event, &text)).await
+            .map_err(|_| "Live steering could not finish. Inspect the saved delivery state; do not resend it automatically.".to_string())?;
+    }
     let profiles = native_profiles(app.clone(), &request.workspace_id)?;
     let store = crate::store::try_global().ok_or("Mivlet's encrypted store is unavailable.")?;
     let computers = app
         .try_state::<std::sync::Arc<crate::local_computer::LocalComputerState>>()
         .map(|state| state.inner().clone());
-    store
+    let outcome = store
         .transaction(|conn| {
             let scope = authorized_scope::resolve(
                 conn,
@@ -481,6 +506,20 @@ pub fn collaboration_command(
                 )?;
             }
             let new_work = match &request.command {
+                Command::StartWork {
+                    id,
+                    agent_id,
+                    attachments: Some(refs),
+                    ..
+                } => {
+                    work::verify_attachment_files(
+                        computers.as_deref(),
+                        scope.data.workspace_id(),
+                        agent_id,
+                        refs,
+                    )?;
+                    Some(id.clone())
+                }
                 Command::StartWork { id, .. } => Some(id.clone()),
                 _ => None,
             };
@@ -490,7 +529,11 @@ pub fn collaboration_command(
             }
             ctx.snapshot()
         })
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string());
+    if outcome.is_ok() {
+        crate::hosted_tasks::wake_pending(app);
+    }
+    outcome
 }
 
 /// Native adoption is idempotent and never rewrites a historical message or file.
@@ -675,6 +718,9 @@ pub(crate) fn recover(store: &Store) -> Result<()> {
         let ctx = Context { conn, store, scope: &scope, profiles: &[], time: &time };
         for mut item in ctx.all_work()? {
             if provider_resets::require_restart_review(&mut item) { ctx.work(&item)?; }
+            // Unstarted user requests have no provider or external outcome to
+            // replay. Keep their exact frozen inputs and queue position.
+            if queue::recoverable_unstarted(&ctx, &item)? || item.execution_owner.as_deref() == Some("hosted") { continue; }
             if item.status.active()
                 && !(crate::background_worker::owns_work(&item) && crate::background_worker::owner_alive())
             {
@@ -706,6 +752,7 @@ pub(crate) fn fence_orphaned_executing_work(
     };
     for mut item in ctx.all_work()? {
         if item.status.executing()
+            && item.execution_owner.as_deref() != Some("hosted")
             && !(crate::background_worker::owns_work(&item)
                 && crate::background_worker::owner_alive())
         {
@@ -751,6 +798,7 @@ pub(crate) fn suspend_account(
     };
     for mut item in ctx.all_work()? {
         if item.status.active() {
+            hosted::mark_stop(&mut item);
             item.status = WorkStatus::AwaitingUser;
             item.generation += 1;
             item.current_run_id = None;
@@ -760,6 +808,33 @@ pub(crate) fn suspend_account(
         }
     }
     Ok(())
+}
+
+/// Persist the source agent's unique live Work before native computer Stop.
+/// The browser remains open for human input; fresh continuation is deliberate.
+pub(crate) fn browser_handover(
+    workspace: &str,
+    agent: &str,
+    reason: &str,
+) -> std::result::Result<(), String> {
+    let store = crate::store::try_global().ok_or("The native Work store is unavailable.")?;
+    store
+        .transaction(|conn| {
+            let scope = authorized_scope::resolve(conn, Some(workspace), None, ScopeAccess::Write)?;
+            let time = now();
+            handover::pause(
+                &Context {
+                    conn,
+                    store,
+                    scope: &scope,
+                    profiles: &[],
+                    time: &time,
+                },
+                agent,
+                reason,
+            )
+        })
+        .map_err(|error| error.to_string())
 }
 
 /// Canonical messages and journal writes must still belong to a live assignment.
@@ -801,6 +876,11 @@ pub(crate) fn ensure_run_current(
     };
     let item: Work = repo::get(conn, store, &scope.private, Kind::Work, key)?
         .ok_or_else(|| invalid("This assignment is no longer available."))?;
+    if item.execution_owner.as_deref() == Some("hosted") {
+        return Err(invalid(
+            "Cloud-owned attempt results require an authenticated native task receipt.",
+        ));
+    }
     if item.generation != author.generation
         || !item.status.executing()
         || item.current_run_id.as_deref() != Some(run)

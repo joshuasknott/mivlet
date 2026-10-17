@@ -20,7 +20,7 @@ pub(super) struct TabSnapshot {
     choices: HashMap<String, String>,
 }
 impl TabSnapshot {
-    fn consume(
+    pub(super) fn consume(
         &mut self,
         hwnd: u64,
         generation: u64,
@@ -168,11 +168,16 @@ pub(super) fn tabs(
 ) -> Result<String, String> {
     process.tabs = None;
     process.navigation.clear();
+    process.fields.clear();
+    process.downloads.clear();
+    process.upload_choices.clear();
+    process.activation.clear();
     process.controls.clear();
     process.scroll = None;
     let (window, pages) = targets(process, hwnd, check)?;
     let mut choices = HashMap::new();
     let mut navigation = HashMap::new();
+    let mut activation = HashMap::new();
     let mut tabs = Vec::new();
     let live: HashSet<_> = pages
         .iter()
@@ -192,6 +197,7 @@ pub(super) fn tabs(
         let raw_url = page["url"].as_str().unwrap_or_default();
         let mut origin = url_origin(raw_url);
         let mut navigation_ref = None;
+        let mut activation_ref = None;
         if origin.is_some() || raw_url == "about:blank" {
             let session = session(process, &target, check)?;
             let value = call(process, Command::Frames, json!({}), Some(&session), check)?;
@@ -201,9 +207,12 @@ pub(super) fn tabs(
             let reference = super::super::super::desktop_tools::opaque_id()?;
             origin = Some(choice.origin.clone());
             navigation_ref = Some(reference.clone());
+            let activate_reference = super::super::super::desktop_tools::opaque_id()?;
+            activation_ref = Some(activate_reference.clone());
+            activation.insert(activate_reference, choice.clone());
             navigation.insert(reference, choice);
         }
-        tabs.push(json!({"tabRef":reference,"navigationRef":navigation_ref,"title":title,"origin":origin}));
+        tabs.push(json!({"tabRef":reference,"navigationRef":navigation_ref,"activationRef":activation_ref,"title":title,"origin":origin}));
     }
     check()?;
     process.tabs = Some(TabSnapshot {
@@ -214,6 +223,7 @@ pub(super) fn tabs(
         choices,
     });
     process.navigation = navigation;
+    process.activation = activation;
     Ok(json!({"tabs":tabs,"trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
@@ -283,7 +293,7 @@ fn editable(node: &Value) -> bool {
         })
     })
 }
-fn private_attributes(node: &Value) -> Result<bool, String> {
+pub(super) fn private_attributes(node: &Value) -> Result<bool, String> {
     // Editable AX descendants can be DOM text nodes, which have no attributes.
     // Their owning elements are checked separately and their text is never projected.
     if node["nodeType"] == 3 {
@@ -368,7 +378,7 @@ pub(super) fn reachable(
     Ok(output)
 }
 
-fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
+pub(super) fn privacy_fields(nodes: &[Value], frame: &str) -> Result<Vec<usize>, String> {
     let indexed: HashMap<_, _> = nodes
         .iter()
         .enumerate()
@@ -475,6 +485,9 @@ pub(super) fn observe(
     check: &dyn Fn() -> Result<(), String>,
 ) -> Result<String, String> {
     process.controls.clear();
+    process.fields.clear();
+    process.downloads.clear();
+    process.upload_choices.clear();
     process.scroll = None;
     let origin = exact_origin(requested_origin)?;
     // Consume before I/O; this choice cannot be replayed by a later observation.
@@ -536,6 +549,34 @@ pub(super) fn observe(
     } else {
         (Value::Null, None)
     };
+    let (fields, field_choices) = if visible {
+        super::forms::capture(
+            process,
+            (hwnd, generation, window),
+            &target,
+            &session,
+            &before,
+            &origin,
+            &nodes,
+            check,
+        )?
+    } else {
+        (Vec::new(), HashMap::new())
+    };
+    let (downloads, download_choices) = if visible {
+        super::downloads::capture(
+            process,
+            (hwnd, generation, window),
+            &target,
+            &session,
+            &before,
+            &origin,
+            &nodes,
+            check,
+        )?
+    } else {
+        (Vec::new(), HashMap::new())
+    };
     let after = frame(
         &call(process, Command::Frames, json!({}), Some(&session), check)?,
         &origin,
@@ -545,9 +586,11 @@ pub(super) fn observe(
     }
     check()?;
     process.controls = choices;
+    process.fields = field_choices;
+    process.downloads = download_choices;
     let scroll_ref = scroll.as_ref().map(|(reference, _)| reference.clone());
     process.scroll = scroll;
-    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"viewport":viewport,"scrollRef":scroll_ref,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"fields":fields,"fieldsPartial":true,"downloads":downloads,"downloadsPartial":true,"fieldScope":"empty-public-text-only","controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"viewport":viewport,"scrollRef":scroll_ref,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
 pub(super) fn checked_tree(
@@ -749,6 +792,7 @@ pub(super) fn acceptance(
     }
     super::tab_acceptance::run(process, hwnd, &origin, check, dispatch)?;
     super::scroll_acceptance::run(process, hwnd, &origin, check, dispatch)?;
+    super::forms_acceptance::run(process, hwnd, &origin, check, dispatch)?;
     eprintln!("Owned browser DOM fixture: document-bound navigation and visible-tab public button click each dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed refs, password field and file chooser refused.");
     Ok(())
 }

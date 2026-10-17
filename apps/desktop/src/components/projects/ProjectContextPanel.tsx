@@ -193,9 +193,9 @@ export function ProjectContextPanel({
       : runtime.agents.find((agent) => agent.id === share.recipient.id)?.name ??
         "Removed agent";
   return (
-    <section className="project-context" aria-label={project.name}>
-      <div className="project-context__body">
-        <div className="project-context__intro">
+    <section className="collection-panel-context" aria-label={project.name}>
+      <div className="collection-panel-context__body">
+        <div className="collection-panel-context__intro">
           <p>
             {project.instructions ||
               "Add instructions to give this project a clear purpose."}
@@ -272,7 +272,7 @@ export function ProjectContextPanel({
           <summary>
             Shared context <small>{project.shares.length}</small>
           </summary>
-          <div className="project-shares">
+          <div className="collection-panel-shares">
             {project.shares.map((share) => (
               <article key={share.id} data-mode={share.mode}>
                 <header>
@@ -304,12 +304,12 @@ export function ProjectContextPanel({
               </article>
             ))}
             {project.shares.length === 0 ? (
-              <p className="project-files__empty">
+              <p className="collection-panel-files__empty">
                 Nothing has been explicitly shared into this project yet.
               </p>
             ) : null}
             <form
-              className="project-share__new"
+              className="collection-panel-share__new"
               onSubmit={(event) => {
                 event.preventDefault();
                 void perform(submitShare);
@@ -407,7 +407,7 @@ export function ProjectContextPanel({
               {facts.filter((fact) => fact.status === "current").length}
             </small>
           </summary>
-          <div className="project-facts">
+          <div className="collection-panel-facts">
             {facts.map((fact) => (
               <article key={fact.id} data-status={fact.status}>
                 <header>
@@ -525,7 +525,7 @@ export function ProjectContextPanel({
               </article>
             ))}
             <form
-              className="project-facts__new"
+              className="collection-panel-facts__new"
               onSubmit={(event) => {
                 event.preventDefault();
                 const fields = new FormData(event.currentTarget);
@@ -570,7 +570,7 @@ export function ProjectContextPanel({
           <summary>
             Participants <small>{team?.participantIds.length ?? 0}</small>
           </summary>
-          <div className="project-context__participants">
+          <div className="collection-panel-context__participants">
             {team?.participantIds.map((id) => {
               const agent = runtime.agents.find((agent) => agent.id === id);
               return (

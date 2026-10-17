@@ -36,12 +36,12 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
     catch (error) { setStatus(errorText(error)); }
     finally { setPending(false); }
   };
-  return <div className="settings-page__body local-schedules">
-    <div className="settings-section-heading"><p>Run a task with a named agent at a set time. Keep Mivlet open, online, and this computer awake. Missed recurring times coalesce to one run after reopening; interrupted runs require review.</p></div>
+  return <div className="settings-page__body schedule-list">
+    <div className="settings-section-heading"><p>Schedule a named agent. Keep Mivlet open, online and this PC awake. Missed recurring times merge into one run on reopening; review interrupted runs.</p></div>
     {project ? <p>Tasks for <strong>{project.name}</strong>. Each result becomes a shared project conversation and a recorded work item.</p> : null}
-    <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Agent workflows use the same tools and approval controls as chat. The saved permission level is a ceiling; reducing the agent's access also limits future runs. Approvals appear in Activity, and Stop ends the current task. Research-only schedules use Codex web search.</p></details>
+    <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Scheduled agents use chat's tools and approvals. Saved permissions cap access; reducing agent access also limits future runs. Approvals appear in Activity. Stop ends the task. Research-only runs use Codex web search.</p></details>
     <div className="schedules-toolbar"><label className="settings-field"><span>Show schedules for</span><select aria-label="Filter schedules by agent" value={filterAgentId} onChange={(event) => { setFilterAgentId(event.target.value); setCreating(false); setEditing(null); }}><option value="">All agents</option>{runtime.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
-    <button type="button" className="button button--primary" disabled={pending || schedules.isPending || !!schedules.error} onClick={() => { setEditing(null); setCreating(true); }}>New schedule</button></div>
+    <button type="button" className="button button-primary" disabled={pending || schedules.isPending || !!schedules.error} onClick={() => { setEditing(null); setCreating(true); }}>New schedule</button></div>
     {schedules.isPending ? <p role="status">Loading schedules…</p> : null}
     {schedules.error ? <p role="alert">{errorText(schedules.error)}</p> : null}
     {creating || editing ? <ScheduleEditor key={editing?.id ?? "new"} runtime={project ? { ...runtime, agents: runtime.agents.filter(agent => project.participantIds.includes(agent.id)) } : runtime} initialAgentId={filterAgentId} schedule={editing} pending={pending}
@@ -58,9 +58,9 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
       <small>{schedule.providerId} · {schedule.model} · Reasoning: {schedule.reasoningEffort ?? "provider default"}</small>
       <small>{schedule.executionKind === "agent" ? "Agent workflow" : "Research only"}</small>
       <div className="profile-action-row">
-        <button type="button" className="button button--secondary" disabled={pending} onClick={() => { setCreating(false); setEditing(schedule); }}>Edit</button>
-        <button type="button" className="button button--secondary" disabled={pending} onClick={() => void act(() => setLocalScheduleStatus({ workspaceId, id: schedule.id, expectedRevision: schedule.revision, status: schedule.status === "paused" ? "enabled" : "paused" }), schedule.status === "paused" ? "Schedule resumed." : "Schedule paused.")}>{schedule.status === "paused" ? "Resume" : "Pause"}</button>
-        <button type="button" className="button button--secondary" disabled={pending} onClick={() => void act(() => setLocalScheduleStatus({ workspaceId, id: schedule.id, expectedRevision: schedule.revision, status: "cancelled" }), "Schedule cancelled.")}>Cancel schedule</button>
+        <button type="button" className="button button-secondary" disabled={pending} onClick={() => { setCreating(false); setEditing(schedule); }}>Edit</button>
+        <button type="button" className="button button-secondary" disabled={pending} onClick={() => void act(() => setLocalScheduleStatus({ workspaceId, id: schedule.id, expectedRevision: schedule.revision, status: schedule.status === "paused" ? "enabled" : "paused" }), schedule.status === "paused" ? "Schedule resumed." : "Schedule paused.")}>{schedule.status === "paused" ? "Resume" : "Pause"}</button>
+        <button type="button" className="button button-secondary" disabled={pending} onClick={() => void act(() => setLocalScheduleStatus({ workspaceId, id: schedule.id, expectedRevision: schedule.revision, status: "cancelled" }), "Schedule cancelled.")}>Cancel schedule</button>
       </div>
       <ScheduleResults workspaceId={workspaceId} scheduleId={schedule.id} onOpenResult={onOpenResult ? (threadId) => onOpenResult(schedule.agentId, threadId) : undefined} />
     </article>)}
@@ -78,7 +78,7 @@ function ScheduleResults({ workspaceId, scheduleId, onOpenResult }: { workspaceI
     {results.isFetching && !results.data ? <p>Loading results…</p> : null}
     {results.error ? <p role="alert">{errorText(results.error)}</p> : null}
     {results.data?.length === 0 ? <p>No runs yet.</p> : null}
-    {results.data?.map((run) => <div key={run.id}><p>{new Date(run.scheduledFor).toLocaleString()} · {run.state}{run.detail ? ` — ${run.detail}` : ""}</p>{run.threadId && onOpenResult ? <button type="button" className="button button--secondary" onClick={() => void onOpenResult(run.threadId!).catch((failure) => setError(errorText(failure)))}>Open conversation</button> : null}</div>)}
+    {results.data?.map((run) => <div key={run.id}><p>{new Date(run.scheduledFor).toLocaleString()} · {run.state}{run.detail ? ` — ${run.detail}` : ""}</p>{run.threadId && onOpenResult ? <button type="button" className="button button-secondary" onClick={() => void onOpenResult(run.threadId!).catch((failure) => setError(errorText(failure)))}>Open conversation</button> : null}</div>)}
     {error ? <p role="alert">{error}</p> : null}
   </details>;
 }
@@ -127,7 +127,7 @@ function ScheduleEditor({ runtime, schedule, pending, onSave, onCancel, initialA
     <label>Time zone<input className="input" required list={timezoneListId} value={timezone} placeholder="Search by city, such as London" onChange={(event) => { setTimezone(event.target.value); setInvalid(""); }} /></label><datalist id={timezoneListId}>{timezones.map(zone => <option key={zone} value={zone}>{zone.replaceAll("_", " ")}</option>)}</datalist>
     {preview.error ? <p role="alert">{errorText(preview.error)}</p> : preview.data ? <p role="status">Next run: <time dateTime={preview.data}>{new Date(preview.data).toLocaleString([], { timeZone: timezone, dateStyle: "full", timeStyle: "short" })}</time> · {timezone}</p> : <p role="status">{preview.isFetching ? "Calculating next run…" : "Choose a date and time to preview the next run."}</p>}
     {invalid ? <p role="alert">{invalid}</p> : null}
-    <div className="profile-action-row"><button type="submit" className="button button--primary" disabled={pending || !supported || !effortValid || !prompt.trim() || !preview.data || !!preview.error}>{pending ? "Saving…" : "Save schedule"}</button><button type="button" className="button button--secondary" disabled={pending} onClick={onCancel}>Close</button></div>
+    <div className="profile-action-row"><button type="submit" className="button button-primary" disabled={pending || !supported || !effortValid || !prompt.trim() || !preview.data || !!preview.error}>{pending ? "Saving…" : "Save schedule"}</button><button type="button" className="button button-secondary" disabled={pending} onClick={onCancel}>Close</button></div>
   </form>;
 }
 

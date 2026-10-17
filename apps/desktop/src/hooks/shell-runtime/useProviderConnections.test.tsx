@@ -8,6 +8,11 @@ import * as persistence from "../../lib/persistence";
 import { defaultShellState } from "./defaults";
 import { useProviderConnections } from "./useProviderConnections";
 
+const previewPolicy = vi.hoisted(() => ({ allowed: true }));
+vi.mock("../../runtime/preview-policy", () => ({
+  get ALLOW_PREVIEW_FALLBACKS() { return previewPolicy.allowed; },
+}));
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((done) => {
@@ -26,7 +31,7 @@ function connected(id: string): BackendProvider {
   };
 }
 
-function mount(selectedModelId = "", strict = false) {
+function mount(selectedModelId = "", strict = false, connectedBackendIds: string[] = []) {
   const identity = { current: "account-a" as string | null };
   const setLastAction = vi.fn();
   const wrapper = strict
@@ -35,7 +40,7 @@ function mount(selectedModelId = "", strict = false) {
   const hook = renderHook(
     ({ generation }) =>
       useProviderConnections({
-        initialState: defaultShellState,
+        initialState: { ...defaultShellState, connectedBackendIds },
         workspaceScopeGeneration: generation,
         workspaceIdentityRef: identity,
         selectedModelId,
@@ -49,6 +54,7 @@ function mount(selectedModelId = "", strict = false) {
 
 describe("provider startup and recovery", () => {
   beforeEach(() => {
+    previewPolicy.allowed = true;
     vi.spyOn(persistence, "hasTauriRuntime").mockReturnValue(true);
     vi.spyOn(providersRuntime, "listRuntimeBackends").mockResolvedValue([
       connected("openai"),
@@ -70,6 +76,54 @@ describe("provider startup and recovery", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.restoreAllMocks();
+  });
+
+  it("production browser cannot restore or create a synthetic provider connection", async () => {
+    previewPolicy.allowed = false;
+    vi.mocked(persistence.hasTauriRuntime).mockReturnValue(false);
+    vi.mocked(providersRuntime.listRuntimeBackends).mockResolvedValue(null);
+    vi.mocked(providersRuntime.connectRuntimeBackend).mockResolvedValue(null);
+    const { result, rerender } = mount("", false, ["openai"]);
+    await act(async () => {});
+    expect(result.current.connectedAgentBackends).toEqual([]);
+    expect(result.current.connectedBackendIds).toEqual([]);
+    await act(async () => {
+      expect(await result.current.connectBackendWithVerify("openai", "preview-placeholder"))
+        .toMatchObject({ outcome: "unsupported", message: expect.stringContaining("installed Mivlet desktop app") });
+    });
+    expect(result.current.connectedAgentBackends).toEqual([]);
+    expect(result.current.connectedBackendIds).toEqual([]);
+    rerender({ generation: 2 });
+    await act(async () => {});
+    expect(result.current.connectedAgentBackends).toEqual([]);
+    expect(result.current.connectedBackendIds).toEqual([]);
+  });
+
+  it("a claimed native runtime cannot substitute a preview result for a usable provider", async () => {
+    vi.mocked(providersRuntime.listRuntimeBackends).mockResolvedValue(null);
+    vi.mocked(providersRuntime.connectRuntimeBackend).mockResolvedValue(null);
+    const { result } = mount();
+    await act(async () => {});
+    await act(async () => {
+      expect(await result.current.connectBackendWithVerify("openai", "preview-placeholder"))
+        .toMatchObject({ outcome: "unsupported" });
+    });
+    expect(result.current.connectedAgentBackends).toEqual([]);
+    expect(result.current.connectedBackendIds).toEqual([]);
+  });
+
+  it("development preview can still restore and create synthetic connections", async () => {
+    vi.mocked(persistence.hasTauriRuntime).mockReturnValue(false);
+    vi.mocked(providersRuntime.listRuntimeBackends).mockResolvedValue(null);
+    vi.mocked(providersRuntime.connectRuntimeBackend).mockResolvedValue(null);
+    const { result } = mount("", false, ["openai"]);
+    await act(async () => {});
+    expect(result.current.connectedAgentBackends.map(provider => provider.id)).toContain("openai");
+    await act(async () => {
+      expect(await result.current.connectBackendWithVerify("xai", "preview-placeholder"))
+        .toMatchObject({ outcome: "ready" });
+    });
+    expect(result.current.connectedAgentBackends.map(provider => provider.id)).toContain("xai");
   });
 
   it("publishes the selected provider at 80ms while a secondary check takes 5000ms", async () => {

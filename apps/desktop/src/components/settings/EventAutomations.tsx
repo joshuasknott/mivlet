@@ -84,15 +84,15 @@ export function EventAutomations({
   };
   return (
     <details
-      className="event-automations local-schedules__editor"
+      className="automation-panel-automations local-schedules__editor"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary ref={summary}>
         Event triggers <span>{events.length || ""}</span>
       </summary>
       {open ? (
-        <div className="event-automations__body">
-          <div className="event-automations__header">
+        <div className="automation-panel-automations__body">
+          <div className="automation-panel-automations__header">
             <p>
               Start a saved task when an authenticated event arrives. Runs use
               the agent’s current tools, saved permission ceiling, ordinary
@@ -100,7 +100,7 @@ export function EventAutomations({
             </p>
             <button
               type="button"
-              className="button button--secondary"
+              className="button button-secondary"
               disabled={pending || editing !== undefined}
               onClick={(event) => {
                 editorOpener.current = event.currentTarget;
@@ -110,7 +110,7 @@ export function EventAutomations({
               New event trigger
             </button>
           </div>
-          <div className="event-automations__ingress">
+          <div className="automation-panel-automations__ingress">
             <strong>
               {ingress.data?.listening
                 ? "Local ingress is listening"
@@ -128,7 +128,7 @@ export function EventAutomations({
             {ingress.error ? (
               <p role="alert">{message(ingress.error)}</p>
             ) : null}
-            <div className="event-automations__pair event-automations__ingress-controls">
+            <div className="automation-panel-automations__pair automation-panel-automations__ingress-controls">
               <label>
                 Local port
                 <input
@@ -142,7 +142,7 @@ export function EventAutomations({
               </label>
               <button
                 type="button"
-                className="button button--secondary"
+                className="button button-secondary"
                 disabled={
                   pending ||
                   ingress.isPending ||
@@ -194,7 +194,7 @@ export function EventAutomations({
           ) : null}
           {events.map((schedule) =>
             schedule.trigger.kind === "event" ? (
-              <article className="event-automations__trigger" key={schedule.id}>
+              <article className="automation-panel-automations__trigger" key={schedule.id}>
                 <strong>
                   {runtime.agents.find((agent) => agent.id === schedule.agentId)
                     ?.name ?? "Unavailable agent"}{" "}
@@ -224,7 +224,7 @@ export function EventAutomations({
                 <div className="profile-action-row">
                   <button
                     type="button"
-                    className="button button--secondary"
+                    className="button button-secondary"
                     disabled={pending || editing !== undefined}
                     onClick={(event) => {
                       editorOpener.current = event.currentTarget;
@@ -235,7 +235,7 @@ export function EventAutomations({
                   </button>
                   <button
                     type="button"
-                    className="button button--secondary"
+                    className="button button-secondary"
                     disabled={pending}
                     onClick={() =>
                       void act(
@@ -261,7 +261,7 @@ export function EventAutomations({
                   </button>
                   <button
                     type="button"
-                    className="button button--secondary"
+                    className="button button-secondary"
                     disabled={pending}
                     onClick={() =>
                       void act(
@@ -322,7 +322,7 @@ function EventDeliveryHistory({
       {history.error ? <p role="alert">{message(history.error)}</p> : null}
       {history.data?.length === 0 ? <p>No deliveries received.</p> : null}
       {history.data?.map((delivery) => (
-        <article className="event-automations__delivery" key={delivery.id}>
+        <article className="automation-panel-automations__delivery" key={delivery.id}>
           <strong>{delivery.state}</strong>
           <small>
             <time dateTime={delivery.receivedAt}>
@@ -340,7 +340,7 @@ function EventDeliveryHistory({
           {delivery.threadId && onOpenResult ? (
             <button
               type="button"
-              className="button button--secondary"
+              className="button button-secondary"
               onClick={() =>
                 void onOpenResult(schedule.agentId, delivery.threadId!).catch(
                   (failure) => setError(message(failure)),

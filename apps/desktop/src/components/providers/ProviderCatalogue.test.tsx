@@ -421,7 +421,7 @@ describe("ProviderCatalogue", () => {
 
     expect(
       within(dialog).getByText(
-        "This connection is configured. A live model request is the final check.",
+        "Configured. A live model request is the final check.",
       ),
     ).toBeInTheDocument();
     expect(within(dialog).queryByText("This connection is ready.")).toBeNull();

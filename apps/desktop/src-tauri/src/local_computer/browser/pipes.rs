@@ -13,6 +13,10 @@ use windows_sys::Win32::{
 
 const FAILURE: &str = "The private browser pipe failed. No browser input was retried.";
 const MAX_FRAME: usize = 1024 * 1024;
+#[path = "forms_script.rs"]
+mod forms_script;
+#[path = "uploads_script.rs"]
+mod uploads_script;
 
 #[cfg(test)]
 #[path = "pipes_tests.rs"]
@@ -262,7 +266,17 @@ fn write_once(
     check: &dyn Fn() -> Result<(), String>,
     dispatch: &super::super::super::control::NativeDispatch<'_>,
 ) -> Result<(), String> {
-    if message.len() > 4096 || message.contains(&0) {
+    write_once_bounded(file, message, deadline, check, dispatch, 4096)
+}
+fn write_once_bounded(
+    file: &File,
+    message: &[u8],
+    deadline: Instant,
+    check: &dyn Fn() -> Result<(), String>,
+    dispatch: &super::super::super::control::NativeDispatch<'_>,
+    limit: usize,
+) -> Result<(), String> {
+    if message.len() > limit || message.contains(&0) {
         return Err("The private browser request exceeded its limit.".into());
     }
     let mut frame = message.to_vec();
@@ -303,6 +317,8 @@ pub(super) struct ControlPipe {
     pub output: Framed,
     sequence: u32,
     interrupted: bool,
+    download_tracking: bool,
+    download_events: std::collections::VecDeque<serde_json::Value>,
 }
 
 /// Closed native protocol surface. Navigation additionally requires the native
@@ -317,6 +333,14 @@ pub(super) enum Command {
     Accessibility,
     DescribeNode,
     Navigate,
+    Activate,
+    ResolveField,
+    FillEmpty,
+    ReleaseObject,
+    DownloadPolicy,
+    ProbeFile,
+    ProbeText,
+    AttachFile,
     Quads,
     Layout,
     Hit,
@@ -336,6 +360,14 @@ impl Command {
             Self::Accessibility => "Accessibility.getFullAXTree",
             Self::DescribeNode => "DOM.describeNode",
             Self::Navigate => "Page.navigate",
+            Self::Activate => "Target.activateTarget",
+            Self::ResolveField => "DOM.resolveNode",
+            Self::FillEmpty => "Runtime.callFunctionOn",
+            Self::ReleaseObject => "Runtime.releaseObject",
+            Self::DownloadPolicy => "Browser.setDownloadBehavior",
+            Self::ProbeFile => "Runtime.callFunctionOn",
+            Self::ProbeText => "Runtime.callFunctionOn",
+            Self::AttachFile => "DOM.setFileInputFiles",
             Self::Quads => "DOM.getContentQuads",
             Self::Layout => "Page.getLayoutMetrics",
             Self::Hit => "DOM.getNodeForLocation",
@@ -347,12 +379,210 @@ impl Command {
     }
 }
 impl ControlPipe {
+    pub(super) fn empty_text(
+        &mut self,
+        frame: &str,
+        session: &str,
+        backend: u64,
+        origin: &str,
+        metadata: &serde_json::Value,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let world = self.exchange(Command::IsolatedWorld, serde_json::json!({"frameId":frame,"worldName":"mivlet-native-empty-text-v1","grantUniveralAccess":false}),Some(session),check,None)?;
+        let context = world["executionContextId"]
+            .as_u64()
+            .filter(|id| *id > 0 && *id <= i32::MAX as u64)
+            .ok_or("The native field context is unavailable.")?;
+        let object = self.exchange(
+            Command::ResolveField,
+            serde_json::json!({"backendNodeId":backend,"executionContextId":context}),
+            Some(session),
+            check,
+            None,
+        )?;
+        let object = object["object"]["objectId"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 512)
+            .ok_or("The native field identity is unavailable.")?;
+        let result = self.exchange(Command::ProbeText,serde_json::json!({"objectId":object,"functionDeclaration":forms_script::EMPTY_TEXT,"arguments":[{"value":origin},{"value":metadata}],"returnByValue":true,"generatePreview":false,"silent":true,"userGesture":false,"awaitPromise":false,"throwOnSideEffect":true}),Some(session),check,None)?;
+        if result.get("exceptionDetails").is_some() || result["result"]["type"] != "string" {
+            return Err("The browser could not confirm an empty public text field.".into());
+        }
+        let empty = match result["result"]["value"].as_str() {
+            Some("empty") => true,
+            Some("occupied" | "stale" | "unsupported") => false,
+            _ => return Err("The browser returned an unsupported field state.".into()),
+        };
+        self.exchange(
+            Command::ReleaseObject,
+            serde_json::json!({"objectId":object}),
+            Some(session),
+            check,
+            None,
+        )?;
+        Ok(empty)
+    }
+    pub(super) fn empty_file(
+        &mut self,
+        frame: &str,
+        session: &str,
+        backend: u64,
+        origin: &str,
+        metadata: &serde_json::Value,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let world=self.exchange(Command::IsolatedWorld,serde_json::json!({"frameId":frame,"worldName":"mivlet-native-upload-read-v1","grantUniveralAccess":false}),Some(session),check,None)?;
+        let context = world["executionContextId"]
+            .as_u64()
+            .filter(|id| *id > 0 && *id <= i32::MAX as u64)
+            .ok_or("The native file-field context is unavailable.")?;
+        let object = self.exchange(
+            Command::ResolveField,
+            serde_json::json!({"backendNodeId":backend,"executionContextId":context}),
+            Some(session),
+            check,
+            None,
+        )?;
+        let object = object["object"]["objectId"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 512)
+            .ok_or("The native file-field identity is unavailable.")?;
+        let result=self.exchange(Command::ProbeFile,serde_json::json!({"objectId":object,"functionDeclaration":uploads_script::EMPTY_FILE,"arguments":[{"value":origin},{"value":metadata}],"returnByValue":true,"generatePreview":false,"silent":true,"userGesture":false,"awaitPromise":false,"throwOnSideEffect":true}),Some(session),check,None)?;
+        if result.get("exceptionDetails").is_some() || result["result"]["type"] != "string" {
+            return Err("The browser could not confirm an empty public file field.".into());
+        }
+        let empty = match result["result"]["value"].as_str() {
+            Some("empty") => true,
+            Some("occupied" | "stale" | "unsupported") => false,
+            _ => return Err("The browser returned an unsupported file-field state.".into()),
+        };
+        self.exchange(
+            Command::ReleaseObject,
+            serde_json::json!({"objectId":object}),
+            Some(session),
+            check,
+            None,
+        )?;
+        Ok(empty)
+    }
+    pub(super) fn attach_file(
+        &mut self,
+        session: &str,
+        backend: u64,
+        path: &std::path::Path,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<(), String> {
+        self.exchange(
+            Command::AttachFile,
+            serde_json::json!({"backendNodeId":backend,"files":[path]}),
+            Some(session),
+            check,
+            Some(dispatch),
+        )
+        .map(|_| ())
+    }
+    pub(super) fn download_policy(
+        &mut self,
+        path: Option<&std::path::Path>,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<(), String> {
+        if path.is_some() {
+            self.download_tracking = true;
+            self.download_events.clear();
+        }
+        let params = if let Some(path) = path {
+            serde_json::json!({"behavior":"allowAndName","downloadPath":path.to_str().ok_or("The private download folder is unsupported.")?,"eventsEnabled":true})
+        } else {
+            serde_json::json!({"behavior":"default","eventsEnabled":false})
+        };
+        self.exchange(Command::DownloadPolicy, params, None, check, Some(dispatch))?;
+        if path.is_none() {
+            self.download_tracking = false;
+            self.download_events.clear();
+        }
+        Ok(())
+    }
+    pub(super) fn poll_downloads(
+        &mut self,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        self.read_command(Command::Version, serde_json::json!({}), None, check)?;
+        Ok(self.download_events.drain(..).collect())
+    }
+    pub(super) fn fill_empty(
+        &mut self,
+        frame: &str,
+        session: &str,
+        backend: u64,
+        origin: &str,
+        metadata: &serde_json::Value,
+        text: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        let world = self.exchange(
+            Command::IsolatedWorld,
+            serde_json::json!({"frameId":frame,
+            "worldName":"mivlet-native-public-field-v1","grantUniveralAccess":false,
+            "contentSecurityPolicy":"default-src 'none'; script-src 'none'"}),
+            Some(session),
+            check,
+            None,
+        )?;
+        let context = world["executionContextId"]
+            .as_u64()
+            .filter(|id| *id > 0 && *id <= i32::MAX as u64)
+            .ok_or("The private native field context is unavailable.")?;
+        let object = self.exchange(
+            Command::ResolveField,
+            serde_json::json!({"backendNodeId":backend,"executionContextId":context}),
+            Some(session),
+            check,
+            None,
+        )?;
+        let object = object["object"]["objectId"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 512)
+            .ok_or("The native field identity is unavailable.")?;
+        let result = self.exchange(
+            Command::FillEmpty,
+            serde_json::json!({"objectId":object,
+            "functionDeclaration":forms_script::FILL_EMPTY,
+            "arguments":[{"value":text},{"value":origin},{"value":metadata}],
+            "returnByValue":true,"generatePreview":false,"silent":true,"userGesture":false,
+            "awaitPromise":false,"throwOnSideEffect":false}),
+            Some(session),
+            check,
+            Some(dispatch),
+        )?;
+        if result.get("exceptionDetails").is_some() || result["result"]["type"] != "string" {
+            return Err("The browser form operation did not confirm its exact outcome.".into());
+        }
+        let status = result["result"]["value"]
+            .as_str()
+            .filter(|value| matches!(*value, "filled" | "stale" | "unsupported" | "not-empty"))
+            .ok_or("The browser form operation returned an unsupported outcome.")?
+            .to_owned();
+        // No object identity or field value crosses this private native method.
+        self.exchange(
+            Command::ReleaseObject,
+            serde_json::json!({"objectId":object}),
+            Some(session),
+            check,
+            None,
+        )?;
+        Ok(status)
+    }
     pub(super) fn new(input: File, output: File) -> Self {
         Self {
             input,
             output: Framed::new(output),
             sequence: 0,
             interrupted: false,
+            download_tracking: false,
+            download_events: std::collections::VecDeque::new(),
         }
     }
     pub(super) fn read_command(
@@ -364,11 +594,25 @@ impl ControlPipe {
     ) -> Result<serde_json::Value, String> {
         if matches!(
             command,
-            Command::Navigate | Command::Click | Command::Scroll
+            Command::Navigate
+                | Command::Activate
+                | Command::FillEmpty
+                | Command::DownloadPolicy
+                | Command::AttachFile
+                | Command::Click
+                | Command::Scroll
         ) {
             return Err("Browser input requires the native dispatch fence.".into());
         }
-        if matches!(command, Command::IsolatedWorld | Command::Visibility) {
+        if matches!(
+            command,
+            Command::IsolatedWorld
+                | Command::Visibility
+                | Command::ResolveField
+                | Command::ReleaseObject
+                | Command::ProbeFile
+                | Command::ProbeText
+        ) {
             return Err("Only the fixed native visibility probe may create or evaluate its private context.".into());
         }
         self.exchange(command, params, session, check, None)
@@ -414,6 +658,21 @@ impl ControlPipe {
             Command::Navigate,
             params,
             Some(session),
+            check,
+            Some(dispatch),
+        )
+    }
+
+    pub(super) fn activate(
+        &mut self,
+        target: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<serde_json::Value, String> {
+        self.exchange(
+            Command::Activate,
+            serde_json::json!({"targetId":target}),
+            None,
             check,
             Some(dispatch),
         )
@@ -466,7 +725,18 @@ impl ControlPipe {
             let deadline = Instant::now() + Duration::from_secs(5);
             let message = message.to_string();
             if let Some(dispatch) = dispatch {
-                write_once(&self.input, message.as_bytes(), deadline, check, dispatch)?;
+                if matches!(command, Command::FillEmpty) {
+                    write_once_bounded(
+                        &self.input,
+                        message.as_bytes(),
+                        deadline,
+                        check,
+                        dispatch,
+                        32768,
+                    )?;
+                } else {
+                    write_once(&self.input, message.as_bytes(), deadline, check, dispatch)?;
+                }
             } else {
                 write(&self.input, message.as_bytes(), deadline, check)?;
             }
@@ -476,6 +746,14 @@ impl ControlPipe {
                     serde_json::from_slice(&self.output.read(deadline, check)?)
                         .map_err(|_| FAILURE)?;
                 if response.get("id").is_none() && response["method"].is_string() {
+                    if self.download_tracking {
+                        if let Some(event) = download_event(&response)? {
+                            if self.download_events.len() >= 16 {
+                                return Err("The private download event bound was exceeded.".into());
+                            }
+                            self.download_events.push_back(event);
+                        }
+                    }
                     continue;
                 }
                 if response["id"]
@@ -517,6 +795,58 @@ impl ControlPipe {
         }
         check()
     }
+}
+
+fn download_event(message: &serde_json::Value) -> Result<Option<serde_json::Value>, String> {
+    use serde_json::json;
+    let method = message["method"].as_str().unwrap_or_default();
+    if !matches!(
+        method,
+        "Browser.downloadWillBegin" | "Browser.downloadProgress"
+    ) {
+        return Ok(None);
+    }
+    if message.get("sessionId").is_some() {
+        return Err("A download event came from an unsupported browser session.".into());
+    }
+    let params = &message["params"];
+    let guid = params["guid"]
+        .as_str()
+        .filter(|guid| {
+            guid.len() == 36
+                && guid.bytes().enumerate().all(|(index, byte)| {
+                    if matches!(index, 8 | 13 | 18 | 23) {
+                        byte == b'-'
+                    } else {
+                        byte.is_ascii_hexdigit()
+                    }
+                })
+        })
+        .ok_or("The native download identity is invalid.")?;
+    if method == "Browser.downloadWillBegin" {
+        let frame = params["frameId"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 100)
+            .ok_or("The native download frame is invalid.")?;
+        let url = params["url"]
+            .as_str()
+            .filter(|url| url.len() <= 2048)
+            .ok_or("The native download URL is invalid.")?;
+        return Ok(Some(
+            json!({"kind":"begin","guid":guid,"frameId":frame,"url":url}),
+        ));
+    }
+    let state = params["state"]
+        .as_str()
+        .filter(|state| matches!(*state, "inProgress" | "completed" | "canceled"))
+        .ok_or("The native download state is invalid.")?;
+    let bytes = params["receivedBytes"]
+        .as_f64()
+        .filter(|bytes| bytes.is_finite() && *bytes >= 0.0 && *bytes <= 9_007_199_254_740_991.0)
+        .ok_or("The native download byte count is invalid.")?;
+    Ok(Some(
+        json!({"kind":"progress","guid":guid,"state":state,"receivedBytes":bytes}),
+    ))
 }
 
 fn visibility(value: &serde_json::Value) -> Result<bool, String> {

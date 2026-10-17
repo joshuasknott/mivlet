@@ -54,14 +54,12 @@ export async function resolveRuntimeMcpCapabilityRoute(
   capabilityId: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeResolvedMcpCapabilityRoute | null>(
+  return invokeNative<RuntimeResolvedMcpCapabilityRoute | null>(
     "resolve_mcp_capability_route",
     {
       request: { workspaceId, capabilityId },
     },
-  ).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  );
 }
 
 export interface RuntimeMcpToolProposal {
@@ -192,11 +190,12 @@ export async function prepareRuntimeCapabilityGrant(
   proposal: RuntimeCapabilityGrantProposal,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimePreparedCapabilityGrant>("prepare_capability_grant", {
-    proposal,
-  }).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  return invokeNative<RuntimePreparedCapabilityGrant>(
+    "prepare_capability_grant",
+    {
+      proposal,
+    },
+  );
 }
 
 export async function commitRuntimeCapabilityGrant(
@@ -204,10 +203,8 @@ export async function commitRuntimeCapabilityGrant(
   resolution: ApprovalResolutionRequest,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeCapabilityGrant>("commit_capability_grant", {
+  return invokeNative<RuntimeCapabilityGrant>("commit_capability_grant", {
     request: { proposal, resolution },
-  }).catch((error) => {
-    throw toRuntimeError(error);
   });
 }
 
@@ -215,14 +212,12 @@ export async function prepareRuntimeMcpServerConfiguration(
   configuration: RuntimeMcpServerConfiguration,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimePreparedMcpServerConfiguration>(
+  return invokeNative<RuntimePreparedMcpServerConfiguration>(
     "prepare_mcp_server_configuration",
     {
       configuration,
     },
-  ).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  );
 }
 
 export async function commitRuntimeMcpServerConfiguration(
@@ -230,20 +225,22 @@ export async function commitRuntimeMcpServerConfiguration(
   resolution: ApprovalResolutionRequest,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeMcpServerSummary>("commit_mcp_server_configuration", {
-    request: { configuration, resolution },
-  }).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  return invokeNative<RuntimeMcpServerSummary>(
+    "commit_mcp_server_configuration",
+    {
+      request: { configuration, resolution },
+    },
+  );
 }
 
 export async function listRuntimeMcpServerConfigurations(workspaceId: string) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeMcpServerSummary[]>("list_mcp_server_configurations", {
-    workspaceId,
-  }).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  return invokeNative<RuntimeMcpServerSummary[]>(
+    "list_mcp_server_configurations",
+    {
+      workspaceId,
+    },
+  );
 }
 
 export async function spawnRuntimeMcpProcess(
@@ -290,14 +287,12 @@ export async function inspectRuntimeRemoteMcpAuthorization(
   configurationReference: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeRemoteMcpAuthorizationSummary>(
+  return invokeNative<RuntimeRemoteMcpAuthorizationSummary>(
     "inspect_remote_mcp_authorization",
     {
       request: { workspaceId, configurationReference },
     },
-  ).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  );
 }
 
 export async function beginRuntimeRemoteMcpAuthorization(
@@ -305,14 +300,12 @@ export async function beginRuntimeRemoteMcpAuthorization(
   configurationReference: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeRemoteMcpAuthorizationResult>(
+  return invokeNative<RuntimeRemoteMcpAuthorizationResult>(
     "begin_remote_mcp_authorization",
     {
       request: { workspaceId, configurationReference },
     },
-  ).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  );
 }
 
 export async function disconnectRuntimeRemoteMcpAuthorization(
@@ -320,12 +313,10 @@ export async function disconnectRuntimeRemoteMcpAuthorization(
   configurationReference: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<{ status: "disconnected"; message: string }>(
+  return invokeNative<{ status: "disconnected"; message: string }>(
     "disconnect_remote_mcp_authorization",
     { request: { workspaceId, configurationReference } },
-  ).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  );
 }
 
 export async function openRuntimeRemoteMcpSession(
@@ -333,11 +324,12 @@ export async function openRuntimeRemoteMcpSession(
   configurationReference: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeOpenedRemoteMcpSession>("open_remote_mcp_session", {
-    request: { workspaceId, configurationReference },
-  }).catch((error) => {
-    throw toRuntimeError(error);
-  });
+  return invokeNative<RuntimeOpenedRemoteMcpSession>(
+    "open_remote_mcp_session",
+    {
+      request: { workspaceId, configurationReference },
+    },
+  );
 }
 
 export async function sendRuntimeRemoteMcpFrame(
@@ -346,10 +338,8 @@ export async function sendRuntimeRemoteMcpFrame(
   frame: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<string[]>("send_remote_mcp_frame", {
+  return invokeNative<string[]>("send_remote_mcp_frame", {
     request: { workspaceId, sessionId, frame },
-  }).catch((error) => {
-    throw toRuntimeError(error);
   });
 }
 
@@ -364,10 +354,8 @@ export async function pollRuntimeRemoteMcpMessages(
   sessionId: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<RuntimeRemoteMcpPollResult>("poll_remote_mcp_messages", {
+  return invokeNative<RuntimeRemoteMcpPollResult>("poll_remote_mcp_messages", {
     request: { workspaceId, sessionId },
-  }).catch((error) => {
-    throw toRuntimeError(error);
   });
 }
 
@@ -376,10 +364,8 @@ export async function closeRuntimeRemoteMcpSession(
   sessionId: string,
 ) {
   if (!hasTauriRuntime()) return null;
-  return invoke<null>("close_remote_mcp_session", {
+  return invokeNative<null>("close_remote_mcp_session", {
     request: { workspaceId, sessionId },
-  }).catch((error) => {
-    throw toRuntimeError(error);
   });
 }
 

@@ -51,7 +51,7 @@ export function NativeCommandJobs({
   const agent = agents.find((item) => item.id === selected) ?? agents[0];
   return (
     <details
-      className="native-command-jobs"
+      className="command-job-list"
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
       <summary>Commands</summary>

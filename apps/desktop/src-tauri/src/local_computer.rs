@@ -1,6 +1,8 @@
 //! Native Windows app control and bounded per-agent workspace files.
 pub(crate) mod activity;
 pub(crate) mod artifacts;
+pub(crate) mod attachment_images;
+pub(crate) mod attachment_shares;
 pub(crate) mod authority;
 pub(crate) mod browser;
 pub(crate) mod coding;
@@ -10,6 +12,7 @@ mod cua;
 pub(crate) mod desktop_tools;
 pub(crate) mod execution_setup;
 pub(crate) mod leases;
+pub(crate) mod live_preview;
 pub(crate) mod office_authoring;
 pub(crate) mod office_drafts;
 pub(crate) mod office_editing;
@@ -266,23 +269,7 @@ impl LocalComputerState {
         agent_id: &str,
     ) -> Result<ComputerScope, String> {
         self.ensure_open()?;
-        validate_scope_id(workspace_id)?;
-        validate_scope_id(agent_id)?;
-        let mut digest = Sha256::new();
-        digest.update(b"fable-local-computer-v1\0");
-        digest.update(workspace_id.as_bytes());
-        digest.update(b"\0");
-        digest.update(agent_id.as_bytes());
-        let key = hex::encode(digest.finalize());
-        let directory = self.root.join(&key[..32]);
-        if !directory.starts_with(&self.root) {
-            return Err("The local computer scope is invalid.".into());
-        }
-        Ok(ComputerScope {
-            key: key[..32].to_string(),
-            computer_id: format!("local-{}", &key[..24]),
-            directory,
-        })
+        computer_scope(&self.root, workspace_id, agent_id)
     }
 
     pub(crate) fn validate_target(&self, workspace_id: &str, agent_id: &str) -> Result<(), String> {
@@ -445,6 +432,32 @@ impl LocalComputerState {
         Ok(workspace)
     }
 }
+/// Derive the existing native scope without loading authority or creating files.
+/// Admission and execution use this same identity; callers supply an account root.
+pub(crate) fn computer_scope(
+    root: &std::path::Path,
+    workspace_id: &str,
+    agent_id: &str,
+) -> Result<ComputerScope, String> {
+    validate_scope_id(workspace_id)?;
+    validate_scope_id(agent_id)?;
+    let mut digest = Sha256::new();
+    digest.update(b"fable-local-computer-v1\0");
+    digest.update(workspace_id.as_bytes());
+    digest.update(b"\0");
+    digest.update(agent_id.as_bytes());
+    let key = hex::encode(digest.finalize());
+    let directory = root.join(&key[..32]);
+    if !directory.starts_with(root) {
+        return Err("The local computer scope is invalid.".into());
+    }
+    Ok(ComputerScope {
+        key: key[..32].to_string(),
+        computer_id: format!("local-{}", &key[..24]),
+        directory,
+    })
+}
+
 #[derive(Clone)]
 pub(crate) struct ComputerScope {
     key: String,
@@ -622,8 +635,11 @@ fn attachment_type(name: &str) -> Result<(String, &'static str), String> {
         "xlsx" => "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "pptx" => "application/vnd.openxmlformats-officedocument.presentationml.presentation",
         "pdf" => "application/pdf",
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "webp" => "image/webp",
         _ => return Err(
-            "Mivlet can stage text, Markdown, JSON, CSV, YAML, DOCX, XLSX, PPTX and passive PDF attachments."
+            "Mivlet can stage PNG, JPEG, WebP, text, Markdown, JSON, CSV, YAML, DOCX, XLSX, PPTX and passive PDF attachments."
                 .into(),
         ),
     };
@@ -680,7 +696,17 @@ fn write_staged_attachment(
     if bytes.is_empty() || bytes.len() > MAX_ATTACHMENT_BYTES {
         return Err("Choose a non-empty attachment smaller than 2 MB.".into());
     }
-    if office_inspection::is_office(&extension) {
+    if mime_type.starts_with("image/") {
+        if request.mime_type != mime_type {
+            return Err("The image format does not match its filename.".into());
+        }
+        crate::user_images::from_saved_bytes(
+            &request.attachment_id,
+            &request.name,
+            mime_type,
+            &bytes,
+        )?;
+    } else if office_inspection::is_office(&extension) {
         office_inspection::project(&bytes, &extension)?;
     } else if extension == "pdf" {
         artifacts::checked_pdf(&bytes)?;

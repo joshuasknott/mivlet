@@ -1,5 +1,5 @@
 .agent-settings-panel { grid-column: 3; grid-row: 1; }
-.agent-settings-panel .agent-editor {
+.agent-settings-panel .agent-profile-dialog {
   display: flex; flex-direction: column; width: 100%; height: 100%; max-height: none;
   min-height: 0; overflow: hidden; border: 0; border-radius: 0; box-shadow: none;
   color: var(--ink); background: var(--surface);
@@ -8,14 +8,14 @@
 .agent-settings-panel .agent-editor__header h2 { font-size: 14px; letter-spacing: 0; }
 .agent-settings-panel .agent-editor__header button { min-width: 36px; min-height: 36px; }
 .agent-editor__body { display: contents; }
-.agent-settings-panel .agent-editor form { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; padding: 0; gap: 0; }
+.agent-settings-panel .agent-profile-dialog form { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; padding: 0; gap: 0; }
 .agent-settings-panel .agent-editor__body { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow-y: auto; padding: 24px 20px; gap: 24px; }
 .agent-settings-panel .agent-editor__identity { display: flex; flex-direction: column; align-items: stretch; gap: 28px; }
 .agent-settings-panel .agent-editor__identity > .agent-avatar { align-self: center; }
 .agent-editor__appearance { min-width: 0; }
 .agent-editor__appearance > summary { color: var(--ink-muted); font-size: 12px; cursor: pointer; padding-block: 8px; }
 .agent-editor-backdrop .agent-editor__appearance > summary { display: none; }
-.agent-settings-panel .agent-editor .agent-icon-picker { margin-top: 12px; }
+.agent-settings-panel .agent-profile-dialog .agent-icon-picker { margin-top: 12px; }
 .agent-settings-panel .agent-editor__footer { position: static; flex-shrink: 0; margin: 0; padding: 16px 20px; gap: 8px; }
 .agent-settings-panel .agent-editor__footer > div { gap: 6px; }
 .agent-settings-panel .agent-editor__footer button { padding-inline: 10px; }

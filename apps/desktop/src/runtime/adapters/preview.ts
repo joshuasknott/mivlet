@@ -9,7 +9,7 @@ export const previewRuntimeAdapter: RuntimeAdapter = {
   kind: "preview",
   async invoke(command: string) {
     throw new Error(
-      `Native command "${command}" is unavailable in Mivlet's development preview.`,
+      `Native command "${command}" requires the installed Mivlet desktop app.`,
     );
   },
   async listen() {

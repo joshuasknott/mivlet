@@ -1,0 +1,15 @@
+.conversation-restore { border: 1px solid var(--line); border-radius: 10px; margin-block: 12px; color: var(--ink); font-size: 12px; }
+.conversation-restore > summary { padding: 12px; min-height: 44px; cursor: pointer; color: var(--ink-muted); }
+.conversation-restore__body { display: grid; gap: 12px; padding: 0 12px 12px; }
+.conversation-restore p, .conversation-restore h4 { margin: 0; line-height: 1.6; }
+.conversation-restore ul { display: grid; gap: 8px; list-style: none; margin: 0; padding: 0; }
+.conversation-restore li { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.conversation-restore small { display: block; color: var(--ink-muted); margin-top: 4px; }
+.conversation-restore section, .conversation-restore form { display: grid; gap: 10px; }
+.conversation-restore__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.conversation-restore button { min-height: 44px; padding: 8px 12px; background: var(--surface-raised); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; font: inherit; cursor: pointer; }
+.conversation-restore button:disabled { opacity: .5; cursor: default; }
+.conversation-restore pre { max-height: 320px; max-width: 100%; overflow: auto; padding: 12px; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; }
+.conversation-restore input { display: block; min-height: 44px; width: min(100%, 320px); margin-top: 6px; padding: 8px; color: var(--ink); background: var(--surface-raised); border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.conversation-restore :focus-visible { outline: 2px solid var(--ink); outline-offset: 2px; }
+.conversation-restore code, .conversation-restore strong { overflow-wrap: anywhere; }

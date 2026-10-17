@@ -61,22 +61,19 @@ describe("hosted-runner fetch router", () => {
     expect(harness.computer.launches).toHaveLength(1);
 
     const navigate = await harness.fetch(harness.browserNavigateRequest(browserToken));
-    expect(navigate.status).toBe(200);
-    expect(harness.browser.navigates).toEqual([
-      {
-        request: { requestKey: "browser:request-123", url: "https://example.com/path" },
-        generation: 3
-      }
-    ]);
-    expect(harness.computer.readyChecks).toEqual([3]);
+    expect(navigate.status).toBe(503);
+    expect(await navigate.json()).toMatchObject({ error: "hosted-browser-network-prerequisite" });
+    expect(harness.browser.navigates).toEqual([]);
+    expect(harness.computer.readyChecks).toEqual([]);
 
     const snapshotOnNavigate = await harness.fetch(harness.browserNavigateRequest(snapshotToken));
     expect(snapshotOnNavigate.status).toBe(401);
-    expect(harness.browser.navigates).toHaveLength(1);
+    expect(harness.browser.navigates).toHaveLength(0);
 
     const snapshot = await harness.fetch(harness.browserSnapshotRequest(snapshotToken));
-    expect(snapshot.status).toBe(200);
-    expect(harness.browser.snapshots).toEqual([3]);
+    expect(snapshot.status).toBe(503);
+    expect(await snapshot.json()).toMatchObject({ error: "hosted-browser-network-prerequisite" });
+    expect(harness.browser.snapshots).toEqual([]);
     expect(harness.computer.launches).toHaveLength(1);
   });
 

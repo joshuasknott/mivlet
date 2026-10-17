@@ -212,11 +212,11 @@ mod tests {
             let mut entry = archive.by_index(index).unwrap();
             let mut xml = String::new();
             entry.read_to_string(&mut xml).unwrap();
-            if entry.name() == path {
+            if entry.name().unwrap() == path {
                 assert!(xml.contains(from));
                 xml = xml.replace(from, to);
             }
-            files.push((entry.name().to_string(), xml));
+            files.push((entry.name().unwrap().into_owned(), xml));
         }
         super::super::office_authoring::zip_files(files).unwrap()
     }

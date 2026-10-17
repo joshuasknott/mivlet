@@ -1,0 +1,13 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mivlet-phone-relay",
+  "main": "src/phone/index.ts",
+  "compatibility_date": "2026-08-28",
+  "observability": { "enabled": false },
+  "durable_objects": { "bindings": [{ "name": "PHONE_RELAY_AUTHORITY", "class_name": "PhoneRelayAuthority" }] },
+  "migrations": [{ "tag": "v1-phone-relay", "new_sqlite_classes": ["PhoneRelayAuthority"] }],
+  "rules": [
+    { "type": "Text", "globs": ["**/*.html", "**/*.css", "**/remote/app.js", "**/remote/sw.js"], "fallthrough": true },
+    { "type": "Data", "globs": ["**/*.png"], "fallthrough": true }
+  ]
+}

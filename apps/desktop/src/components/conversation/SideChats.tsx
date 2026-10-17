@@ -1,25 +1,11 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ConversationRoom } from "@mivlet/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
+import { SideChatContextNotice } from "./SideChatContextNotice";
 import {
   partitionSideChats,
   type SideChatOwner,
 } from "../../lib/conversation-service";
-
-/**
- * Side Chats are durable but separate conversations. This notice is reused by
- * the list and by a Side Chat's own header so the boundary is never implied.
- */
-export function SideChatContextNotice({ compact = false }: { compact?: boolean }) {
-  return (
-    <p className="side-chat-notice" role="note">
-      <strong>Side Chats are separate conversations.</strong>{" "}
-      {compact
-        ? "This chat keeps its own transcript."
-        : "Each keeps its own transcript and never inherits another chat's history. Only the Agent's durable instructions and conclusions you explicitly promote to Memory carry over."}
-    </p>
-  );
-}
 
 function SideChatEditor({
   heading,

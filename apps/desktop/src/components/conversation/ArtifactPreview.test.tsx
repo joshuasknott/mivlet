@@ -11,7 +11,7 @@ import {
   parseComputerArtifact,
   previewComputerArtifact,
 } from "../../lib/computer-artifacts";
-import { ensureRuntimeOutput } from "../../runtime/domains/outputs";
+import { ensureRuntimeOutput, getRuntimeOutput } from "../../runtime/domains/outputs";
 import { createOutputDocument } from "../../lib/output-revisions";
 vi.mock("../../lib/computer-artifacts", async (original) => ({
   ...(await original<typeof import("../../lib/computer-artifacts")>()),
@@ -43,6 +43,7 @@ describe("verified artifact previews", () => {
   beforeEach(() => {
     vi.mocked(previewComputerArtifact).mockReset();
     vi.mocked(ensureRuntimeOutput).mockReset();
+    vi.mocked(getRuntimeOutput).mockReset().mockResolvedValue(null);
     vi.stubGlobal(
       "matchMedia",
       vi.fn(() => ({
@@ -293,5 +294,31 @@ describe("verified artifact previews", () => {
       }),
       "workspace",
     );
+  });
+  it("shows a saved revision again after reopening the published artifact", async () => {
+    vi.mocked(previewComputerArtifact).mockResolvedValue({ artifactId: `artifact-${"a".repeat(64)}`, mimeType: "text/markdown", text: "# Original", imageDataUrl: null, truncated: false });
+    vi.mocked(getRuntimeOutput).mockResolvedValue(createOutputDocument({
+      id: `output-artifact-${"a".repeat(64)}`, title: "Notes", format: "markdown", mimeType: "text/markdown",
+      source: { conversationId: "chat", artifactId: `artifact-${"a".repeat(64)}`, agentId: "agent" }, content: "# Saved improvement",
+    }));
+    render(<ArtifactPreview output={output} workspaceId="workspace" agentId="agent" generation={7} conversationId="chat" onClose={() => {}} />);
+    expect(await screen.findByRole("heading", { name: "Saved improvement" })).toBeVisible();
+    expect(screen.queryByRole("heading", { name: "Original" })).toBeNull();
+  });
+  it("rejects a late editor open after the preview changes owner", async () => {
+    vi.mocked(previewComputerArtifact).mockResolvedValue({ artifactId: `artifact-${"a".repeat(64)}`, mimeType: "text/markdown", text: "# Original", imageDataUrl: null, truncated: false });
+    let finish!: (document: ReturnType<typeof createOutputDocument>) => void;
+    vi.mocked(ensureRuntimeOutput).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const props = { output, workspaceId: "workspace", agentId: "agent", generation: 7, conversationId: "chat", onClose: () => {} };
+    const view = render(<ArtifactPreview {...props} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Edit output" }));
+    expect(screen.getByRole("button", { name: "Opening editor…" })).toBeDisabled();
+    view.rerender(<ArtifactPreview {...props} conversationId="other-chat" />);
+    await act(async () => finish(createOutputDocument({
+      id: "old-output", title: "Private old editor", format: "markdown", mimeType: "text/markdown",
+      source: { conversationId: "chat", artifactId: `artifact-${"a".repeat(64)}`, agentId: "agent" }, content: "Old private editing content",
+    })));
+    expect(screen.queryByRole("textbox", { name: "Private old editor content" })).toBeNull();
+    expect(await screen.findByRole("button", { name: "Edit output" })).toBeEnabled();
   });
 });

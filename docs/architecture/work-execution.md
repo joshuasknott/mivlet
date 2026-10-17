@@ -92,8 +92,11 @@ their existing runner. Requests with unsupported capabilities stay with the
 desktop executor. This autonomous provider route exposes no command, file,
 computer or connector tools, and it never approves an action. A provider tool or approval request
 interrupts the attempt for explicit review and Continue in the app.
-Follow-ups and steering also require the foreground Continue path; a native
-turn never marks a new instruction delivered without actually supplying it.
+Read Only text follow-ups use a fresh native turn after the current response.
+The worker supplies the exact saved completed text and chronological user
+guidance, within its existing context bound. Uncertain attempts, missing saved
+text, tools, attachments and goals still require the foreground Continue path.
+No provider input or external effect is replayed.
 
 `Work.executionOwner = "native-background"` selects this owner. Claiming,
 checkpoints and completion check canonical Work identity and generation in the
@@ -205,6 +208,38 @@ steering history all render in Work details. `awaiting-user` after provider
 activity is explained as uncertain rather than presented as a failure.
 
 ## Steering, Stop, approvals
+
+### Editable requests and outcome goals
+
+Conversation controls above the composer expose **Up next** over the canonical
+Work records. Unstarted chat requests can be edited, paused, reordered and
+removed. Edits update the request and explicit recipient contributions together
+before any attempt. Every changed generation fences already-preparing sessions;
+desktop admission, native background selection and native attempt binding all
+enforce held requests and queue order. Closing views keeps the queue intact.
+Restart preserves only intact, never-dispatched queue entries; prior attempts
+retain explicit review and reconciliation. Attachment admission uses verified
+workspace references, including supported images; unavailable bytes fail closed.
+
+An optional outcome goal belongs to the root Work and is saved atomically with
+the request. The user supplies its objective, success criteria and bounded turn
+and token limits. Supported foreground agents report progress through
+`goal-report`; reports are tied to the exact live run and only take effect after
+the public assistant result is durably saved. Completion remains an attributed
+agent report, not independent outcome verification. A fresh turn continues from
+saved evidence while budget remains. Pause takes effect at the current turn
+boundary. Questions, blockers, errors, uncertain delivery and exhausted budgets
+stop automatic continuation. Explicit Continue retains prior usage and adds only
+the existing bounded round; goals grant no additional tool authority.
+
+**Guide active work** offers next-turn guidance on supported routes. Foreground
+Codex additionally supports deliberate live guidance using its documented
+`turn/steer` method. Native code supplies the observed exact thread and expected
+turn identity, persists an event before delivery, and records accepted, rejected
+or uncertain delivery. Acceptance does not undo earlier actions. An unconfirmed
+receipt pauses for review; the app never automatically resends it or silently
+converts it into another turn. Unsupported adapters retain next-turn guidance.
+The official protocol is documented in [Codex App Server](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn).
 
 - **Steering** (`steer-work`) records a deliberate update with an idempotent
   event id under the expected generation and applies it at a safe boundary.

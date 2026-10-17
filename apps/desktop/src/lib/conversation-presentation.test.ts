@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { conversationTurns, appendResponseText, resolveResponseTool, toolActivity } from "./conversation-presentation";
+import { appendResponseText, resolveResponseTool, toolActivity } from "./conversation-presentation";
+import { conversationTurns } from "./conversation-history";
 import type { ConversationMessageView } from "./conversation-runtime";
 
 function view(runId: string, kind: string, sequence: number, content: string, detail?: unknown): ConversationMessageView {
@@ -130,6 +131,16 @@ describe("conversation presentation", () => {
     parts = appendResponseText(parts, "Answer.");
     parts = resolveResponseTool(parts, "call", "Read it", true);
     expect(parts.map((part) => part.content)).toEqual(["First update.", "Read it", "Answer."]);
+  });
+  it("keeps live MCP descriptors validated without reconstructing saved history", () => {
+    const descriptor = { connectorId: "vercel", toolName: "show", resourceUri: "ui://app/view" };
+    const output = JSON.stringify({ mcpApp: descriptor });
+    expect(resolveResponseTool([], "call", output, true)[0]).toMatchObject({ mcpApp: descriptor });
+    expect(resolveResponseTool([], "call", output, false)[0]).not.toHaveProperty("mcpApp");
+    for (const resourceUri of ["https://app.example/view", `ui://${"x".repeat(2048)}`, "ui://app/\nview"]) {
+      const invalid = JSON.stringify({ mcpApp: { ...descriptor, resourceUri } });
+      expect(resolveResponseTool([], "call", invalid, true)[0]).not.toHaveProperty("mcpApp");
+    }
   });
   it("retains only bounded attachment metadata from a user message", () => {
     const valid = view("one", "user", 1, "Inspect this", { attachments: [{

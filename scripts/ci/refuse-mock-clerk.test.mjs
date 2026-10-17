@@ -15,6 +15,7 @@ import {
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '../..');
 const authConfig = readFileSync(join(root, 'apps/desktop/convex/auth.config.ts'), 'utf8');
+const authPolicy = readFileSync(join(root, 'apps/desktop/convex/clerkAuthPolicy.ts'), 'utf8');
 const ci = readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8');
 
 const mockLocal = {
@@ -24,7 +25,9 @@ const mockLocal = {
 };
 
 test('CI and Convex share the mock Clerk issuer', () => {
-  assert.match(authConfig, new RegExp(`MOCK_CLERK_ISSUER = "${MOCK_CLERK_ISSUER}"`));
+  assert.match(authPolicy, new RegExp(`MOCK_CLERK_ISSUER = "${MOCK_CLERK_ISSUER}"`));
+  assert.match(authConfig, /import \{ createConvexAuthConfig \} from "\.\/clerkAuthPolicy"/);
+  assert.match(authConfig, /export default createConvexAuthConfig\(\)/);
 });
 
 test('CI always runs the mock Clerk deploy guard', () => {

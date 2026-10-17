@@ -647,6 +647,38 @@ impl NativeControl {
         })
     }
 
+    /// Transfer custody while the exact foreground lease is still alive. The
+    /// returned native object may be finalized without further browser input;
+    /// every normal pre/post window, privacy and generation check still runs.
+    pub(super) fn transfer_native<T>(
+        &self,
+        workspace: &str,
+        agent: &str,
+        generation: u64,
+        ticket: &OperationTicket,
+        action: impl FnOnce(
+            &WindowBinding,
+            &dyn Fn() -> Result<(), String>,
+            &NativeDispatch<'_>,
+        ) -> Result<T, String>,
+    ) -> Result<T, String> {
+        self.with_native(
+            workspace,
+            agent,
+            generation,
+            ticket,
+            |window, mode, check, dispatch| {
+                if !mode.is_foreground() {
+                    return Err(
+                        "Browser transfers require an explicitly selected foreground window."
+                            .into(),
+                    );
+                }
+                action(window, check, dispatch)
+            },
+        )
+    }
+
     fn with_native<T>(
         &self,
         workspace: &str,

@@ -209,7 +209,7 @@ pub(super) fn read_manifest(
         || manifest.checkpoint.label.chars().any(char::is_control)
         || !matches!(
             manifest.checkpoint.reason.as_str(),
-            "manual" | "before-restore"
+            "manual" | "before-restore" | "before-task"
         )
         || !(id(&manifest.checkpoint.head, 40) || id(&manifest.checkpoint.head, 64))
         || chrono::DateTime::parse_from_rfc3339(&manifest.checkpoint.created_at).is_err()

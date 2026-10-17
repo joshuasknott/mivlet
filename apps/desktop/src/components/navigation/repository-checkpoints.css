@@ -59,12 +59,12 @@
   padding: 8px 12px;
   white-space: normal;
 }
-.checkpoint-panel .button--primary {
+.checkpoint-panel .button-primary {
   background: var(--accent);
   color: var(--surface);
   width: 100%;
 }
-.checkpoint-panel .button--primary:hover:not(:disabled) {
+.checkpoint-panel .button-primary:hover:not(:disabled) {
   background: var(--accent-strong);
 }
 .checkpoint-panel .repository-files__actions {

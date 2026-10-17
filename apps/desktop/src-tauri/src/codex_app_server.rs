@@ -26,6 +26,10 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter, Manager};
 use url::Url;
 
+#[path = "codex_app_server/steering.rs"]
+mod steering;
+pub(crate) use steering::{steer_active_turn, SteeringDelivery};
+
 const CODEX_LOGIN_START_TIMEOUT: Duration = Duration::from_secs(20);
 const CODEX_LOGIN_COMPLETION_TIMEOUT: Duration = Duration::from_secs(5 * 60);
 
@@ -139,6 +143,10 @@ pub struct CodexInterruptRequest {
 }
 
 struct ActiveCodexRun {
+    run_id: Option<String>,
+    thread_id: Option<String>,
+    turn_id: Option<String>,
+    steering: HashMap<String, (String, mpsc::Sender<bool>)>,
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<crate::provider_process::SupervisedChild>>,
     computer: Option<CodexComputerScope>,
@@ -951,6 +959,10 @@ pub fn start_codex_app_server_turn(
         runs.insert(
             request.request_id.clone(),
             ActiveCodexRun {
+                run_id: request.options.run_id.clone(),
+                thread_id: None,
+                turn_id: None,
+                steering: HashMap::new(),
                 stdin: Arc::clone(&stdin),
                 child: Arc::clone(&child),
                 computer: request.options.computer.clone(),
@@ -1018,6 +1030,7 @@ fn read_codex_stdout(
         let Ok(value) = serde_json::from_str::<Value>(&line) else {
             continue;
         };
+        steering::observe_route(&request.request_id, &value);
         if crate::provider_usage::codex_event_is_limit(&value) {
             crate::provider_usage::record_limit_failure("codex", request.options.run_id.as_deref());
         }
@@ -1696,26 +1709,10 @@ fn is_rpc_response(value: &Value, id: i64) -> bool {
 
 #[tauri::command]
 pub fn interrupt_codex_app_server_turn(request: CodexInterruptRequest) -> Result<(), String> {
-    let runs = active_runs()
-        .lock()
-        .map_err(|_| "Mivlet could not access Codex app-server state.".to_string())?;
-    let run = runs
-        .get(&request.request_id)
-        .ok_or_else(|| "Codex app-server run is no longer active.".to_string())?;
-    *run.image_delivery_stopped
-        .lock()
-        .map_err(|_| "Image delivery state is unavailable.")? = true;
-    let Some(turn_id) = request.turn_id else {
-        return Ok(());
-    };
-    write_json_line(
-        &run.stdin,
-        &json!({
-            "id": 9,
-            "method": "turn/interrupt",
-            "params": { "threadId": request.thread_id, "turnId": turn_id }
-        }),
-    )
+    // Sessions are ephemeral; Mivlet owns durable history. Stop must terminate
+    // the exact child independently of a full stdin pipe or stalled RPC.
+    let _ = (&request.thread_id, &request.turn_id);
+    shutdown_codex_app_server_turn(request.request_id)
 }
 
 #[tauri::command]

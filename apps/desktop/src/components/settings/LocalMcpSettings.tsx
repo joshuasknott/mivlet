@@ -302,28 +302,28 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
   };
 
   return (
-    <article className="profile-clean-card settings-open-section mcp-settings">
+    <article className="profile-clean-card settings-open-section plugin-config-settings">
       <div className="profile-clean-card__content">
         <section className="profile-section" aria-label="Saved tool servers">
             {!loaded ? <p role="status">Loading tool servers…</p> : loadError ? (
-              <div className="mcp-settings__empty"><p role="alert">{loadError}</p><button type="button" className="button button--secondary" onClick={() => void refresh()}>Retry</button></div>
+              <div className="plugin-config-settings__empty"><p role="alert">{loadError}</p><button type="button" className="button button-secondary" onClick={() => void refresh()}>Retry</button></div>
             ) : (
               <>
-              {!desktopAvailable ? <p className="mcp-settings__empty">Tool servers are available only in the desktop app.</p> :
+              {!desktopAvailable ? <p className="plugin-config-settings__empty">Tool servers are available only in the desktop app.</p> :
               initialAdding && adding ? null : servers.length > 0 ? (
                 <div className="provider-access-list">
                   {servers.filter(server => !serverId || server.id === serverId).map((server) => {
                     const discovery = discoveries[server.id];
                     const draft = enablementDrafts[server.id];
-                    return <div className="mcp-settings__server" key={server.id}>
-                      <div className="provider-access-row mcp-settings__server-header">
+                    return <div className="plugin-config-settings__server" key={server.id}>
+                      <div className="provider-access-row plugin-config-settings__server-header">
                         <span>
                           <strong>{server.displayName}</strong>
                           <small>{server.disabled ? "Off" : `${server.transport === "stdio" ? "Saved locally" : "Remote HTTPS"} · No tools enabled by default`}</small>
                         </span>
                         <button
                           type="button"
-                          className="button button--secondary"
+                          className="button button-secondary"
                           disabled={checkingId === server.id || server.disabled}
                           onClick={() => void check(server)}
                         >
@@ -333,7 +333,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                           <span className="profile-action-row">
                             <button
                               type="button"
-                              className="button button--secondary"
+                              className="button button-secondary"
                               disabled={authorizingId === server.id || server.disabled}
                               onClick={() => void authorize(server)}
                             >
@@ -341,7 +341,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                             </button>
                             <button
                               type="button"
-                              className="button button--secondary"
+                              className="button button-secondary"
                               disabled={authorizingId === server.id || server.disabled}
                               onClick={() => void disconnectAccount(server)}
                             >
@@ -351,7 +351,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                         ) : null}
                       </div>
                       {discovery && draft ? (
-                        <div className="mcp-settings__access" aria-label={`${server.displayName} access`}>
+                        <div className="plugin-config-settings__access" aria-label={`${server.displayName} access`}>
                           <strong>Available access</strong>
                           <small>Select only what Mivlet may consider using. Every tool call still passes Mivlet permissions and approval.</small>
                           {[...discovery.discoveredTools.map((value) => ({ kind: "tools" as const, value })), ...discovery.discoveredResources.map((value) => ({ kind: "resources" as const, value }))].map((item) => (
@@ -389,18 +389,18 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                             </select>
                             <small>The tool must return Mivlet's cited-search contract. Results stay untrusted.</small>
                           </label>
-                          <button type="button" className="button button--secondary" disabled={busy} onClick={() => void saveEnablement(server)}>Save access</button>
+                          <button type="button" className="button button-secondary" disabled={busy} onClick={() => void saveEnablement(server)}>Save access</button>
                         </div>
                       ) : null}
                     </div>
                   })}
                 </div>
-              ) : <p className="mcp-settings__empty">No tool servers yet.</p>}
+              ) : <p className="plugin-config-settings__empty">No tool servers yet.</p>}
 
-              {!serverId ? <details className="mcp-settings__add" open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}>
+              {!serverId ? <details className="plugin-config-settings__add" open={adding} onToggle={(event) => setAdding(event.currentTarget.open)}>
                 <summary ref={addServerRef}><Plus size={15} aria-hidden="true" /> Add server</summary>
                 <p>Only add software you trust. Credentials in commands, arguments, or web addresses are blocked.</p>
-                <div className="mcp-settings__form">
+                <div className="plugin-config-settings__form">
                   <label className="settings-field">
                     <span>Location</span>
                     <select value={transport} onChange={(event) => setTransport(event.target.value as "stdio" | "streamable-http")}>
@@ -425,7 +425,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
                     <span>HTTPS address</span>
                     <input value={endpoint} onChange={(event) => setEndpoint(event.target.value)} placeholder="https://example.com/mcp" />
                   </label>}
-                  <button type="button" className="button button--secondary" disabled={!desktopAvailable || busy || !name.trim() || !(transport === "stdio" ? command.trim() : endpoint.trim())} onClick={() => void prepare()}>
+                  <button type="button" className="button button-secondary" disabled={!desktopAvailable || busy || !name.trim() || !(transport === "stdio" ? command.trim() : endpoint.trim())} onClick={() => void prepare()}>
                     Review and save
                   </button>
                 </div>
@@ -456,7 +456,7 @@ function WorkspaceMcpSettings({ workspaceId, onNotice, initialAdding, serverId, 
             <input ref={confirmationInputRef} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} />
           </label>
           <div className="profile-action-row">
-            <button type="button" className="button button--secondary" disabled={busy} onClick={() => void decide("deny")}>Cancel</button>
+            <button type="button" className="button button-secondary" disabled={busy} onClick={() => void decide("deny")}>Cancel</button>
             <button type="button" className="button" disabled={busy || confirmation !== pending.approval.confirmationPhrase} onClick={() => void decide("once")}>Save server</button>
           </div>
         </section>

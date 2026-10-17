@@ -30,7 +30,7 @@ const harness = vi.hoisted(() => {
     stopCurrentWork: vi.fn(async () => true),
   };
   return {
-    composerImageInputs: vi.fn(() => ({ ok: true, images: [] as NativeImageInput[] })),
+    composerImageInputs: vi.fn((_attachments?: unknown[]) => ({ ok: true, images: [] as NativeImageInput[] })),
     controller,
     run,
     prepareExecutionAttachments: vi.fn(async (attachments: unknown[]) => ({
@@ -89,7 +89,7 @@ vi.mock("../lib/builtin-plugins", () => ({
 }));
 
 vi.mock("../lib/composer-images", () => ({
-  composerImageInputs: () => harness.composerImageInputs(),
+  composerImageInputs: (attachments: unknown[]) => harness.composerImageInputs(attachments),
 }));
 
 vi.mock("../lib/execution-attachments", () => ({
@@ -122,6 +122,7 @@ const provider: BackendProvider = {
   ],
 };
 const modelOptions = providerModelOptions([{ provider, models: provider.models }]);
+const invalidateHarnessOwners: Array<() => void> = [];
 
 function profile(id: string, name: string, instructions: string, modelId: string): MivletAgentProfile {
   return {
@@ -203,6 +204,7 @@ function makeHarness(options: {
   const agentName = agentId === "reviewer" ? "Reviewer" : "Lead";
   const modelId = agentId === "reviewer" ? "review-model" : "lead-model";
   let current = true;
+  invalidateHarnessOwners.push(() => { current = false; });
   const snapshot = {
     data: {
       conversations: [{
@@ -262,6 +264,7 @@ async function renderWorker(options: {
 } = {}) {
   const setup = makeHarness(options);
   const activeRuntime = runtime(options.activeProvider);
+  const previousRuns = harness.run.mock.calls.length;
   await act(async () => {
     render(
       <ExecutionWorker
@@ -272,7 +275,8 @@ async function renderWorker(options: {
       />,
     );
   });
-  await waitFor(() => expect(harness.run).toHaveBeenCalled());
+  await waitFor(() => expect(harness.run).toHaveBeenCalledTimes(previousRuns + 1));
+  await waitFor(() => expect(setup.service.released).toHaveBeenCalledWith(setup.session));
   return { ...setup, runtime: activeRuntime };
 }
 
@@ -298,8 +302,30 @@ describe("ExecutionWorker coordination reachability", () => {
     harness.resolveWorkAttachments.mockReturnValue({ attachments: [] });
     harness.composerImageInputs.mockReturnValue({ ok: true, images: [] });
   });
-  afterEach(() => {
-    cleanup();
+  afterEach(async () => {
+    // Real WorkspaceExecution.dispose invalidates canonical ownership before
+    // workers unmount. A React view is never independent execution authority.
+    for (const invalidate of invalidateHarnessOwners.splice(0)) invalidate();
+    await act(async () => { cleanup(); });
+  });
+
+  it("does not dispatch a provider after canonical ownership ends while context preparation is pending", async () => {
+    const setup = makeHarness();
+    const selectedRuntime = runtime();
+    type PreparedContext = Awaited<ReturnType<ShellRuntime["assembleConversationContext"]>>;
+    let finish!: (context: PreparedContext) => void;
+    vi.mocked(selectedRuntime.assembleConversationContext).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const view = render(<ExecutionWorker session={setup.session as never} service={setup.service as never} runtime={selectedRuntime} projects={[]} />);
+    await waitFor(() => expect(selectedRuntime.assembleConversationContext).toHaveBeenCalled());
+    setup.setCurrent(false);
+    view.unmount();
+    await act(async () => finish({ systemPrefix: "prepared too late", receipt: {
+      version: 1, attemptId: "attempt-lead", assembledAt: "2026-10-17T00:00:00.000Z",
+      scope: { level: "thread", threadId: "conversation-direct" }, citations: [], contributions: [],
+    } }));
+    await waitFor(() => expect(setup.service.released).toHaveBeenCalled());
+    expect(harness.run).not.toHaveBeenCalled();
+    expect(setup.commands).not.toContainEqual(expect.objectContaining({ action: "bind-work" }));
   });
 
   it.each([true, false])("admits current images only when the executing managed route supports them (%s)", async supported => {
@@ -321,8 +347,29 @@ describe("ExecutionWorker coordination reachability", () => {
       await waitFor(() => expect(setup.service.released).toHaveBeenCalled());
       expect(harness.run).not.toHaveBeenCalled();
       expect(setup.commands).toContainEqual(expect.objectContaining({ action: "work-status", status: "failed",
-        reason: expect.stringContaining("Reattach images") }));
+        reason: expect.stringContaining("supported image-capable model") }));
     }
+  });
+
+  it("hydrates a durable image before selecting the model image inputs", async () => {
+    const selected = { ...provider, id: "claude", backendType: "claude-agent", driverKind: "claude-agent",
+      models: [{ id: "sonnet", label: "Claude", available: true }] } as BackendProvider;
+    const setup = makeHarness();
+    setup.session.model = providerModelOptions([{ provider: selected, models: selected.models }])[0]!;
+    const image: NativeImageInput = { id: "saved-image", name: "saved.png", mediaType: "image/png",
+      sizeBytes: 68, width: 1, height: 1, dataUrl: "data:image/png;base64,saved-pixels" };
+    const restored = { id: image.id, name: image.name, type: image.mediaType, sizeBytes: image.sizeBytes,
+      durableRef: { id: image.id, name: image.name, mimeType: image.mediaType, sizeBytes: image.sizeBytes,
+        availability: "workspace-file", relativePath: "Attachments/batch/saved.png", sha256: "a".repeat(64) } };
+    harness.resolveWorkAttachments.mockReturnValueOnce({ attachments: [restored] });
+    const hydrated = { ...restored, imageInput: image };
+    harness.prepareExecutionAttachments.mockResolvedValueOnce({ attachments: [hydrated], batch: undefined, node: undefined });
+    harness.composerImageInputs.mockReturnValue({ ok: true, images: [image] });
+    await act(async () => render(<ExecutionWorker session={setup.session as never} service={setup.service as never}
+      runtime={runtime(selected)} projects={[]} />));
+    await waitFor(() => expect(harness.run).toHaveBeenCalled());
+    expect(harness.composerImageInputs).toHaveBeenLastCalledWith([hydrated]);
+    expect(harness.run.mock.calls[0]![0]).toMatchObject({ images: [image] });
   });
 
   it("fails closed before Work binding when the automation occurrence claim is rejected", async () => {

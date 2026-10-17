@@ -232,6 +232,9 @@ importers:
       '@cloudflare/sandbox':
         specifier: 0.13.0-next.738.2
         version: 0.13.0-next.738.2
+      '@mivlet/connectors':
+        specifier: workspace:*
+        version: link:../../packages/connectors
       '@mivlet/protocol':
         specifier: workspace:*
         version: link:../../packages/protocol

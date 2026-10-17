@@ -25,7 +25,7 @@ import {
   conversationToolsForModel,
 } from "../lib/computer-tools";
 import { COMPUTER_WORK_INSTRUCTIONS } from "../lib/computer-instructions";
-import { loadGeneratedUiInstructions } from "../lib/generated-interface";
+import { loadGeneratedUiInstructions } from "../lib/generated-ui-instructions";
 import { capturedFileExclusions } from "../lib/context-selection";
 import { builtinPluginInstructions } from "../lib/builtin-plugins";
 import { composerImageInputs } from "../lib/composer-images";
@@ -44,6 +44,7 @@ import { coordinationResource } from "../lib/coordination-resources";
 import { discardRuntimeLocalComputerAttachmentBatch } from "../runtime/domains/local-computer";
 import { applyProviderContinuation, providerContinuationHistory } from "../lib/provider-continuation";
 import { readProviderContinuation } from "../runtime/domains/provider-continuation";
+import { prepareSharedExecutionAttachments, sharedRequestAttachmentIds } from "../lib/shared-execution-attachments";
 
 /** Mounted by the workspace root, never by a tab. Each admission runs once. */
 export function ExecutionWorker({
@@ -117,6 +118,8 @@ export function ExecutionWorker({
               ? "delegate"
               : name === "teammate-message"
                 ? "message"
+                : name === "goal-report"
+                  ? "goal-report"
               : name === "project-record"
                 ? "record-fact"
                 : "await-user",
@@ -221,18 +224,17 @@ export function ExecutionWorker({
         );
         if (!validation.ok)
           throw new Error(validation.error ?? "This model is unavailable.");
-        const resolved = resolveWorkAttachments(session.attachments, session.work);
+        const requestRoot = service.getSnapshot().data.work.find(work => work.id === session.work.rootId);
+        const inherited = sharedRequestAttachmentIds(session.work, requestRoot).length
+          ? await prepareSharedExecutionAttachments({ work: session.work, root: requestRoot, attachments: session.attachments,
+              node: await controller.localComputer.refresh(), isCurrent: () => service.current(session) })
+          : session.attachments;
+        if (sharedRequestAttachmentIds(session.work, requestRoot).length) {
+          const receipt = inherited.find(attachment => attachment.workspaceFile)?.workspaceFile;
+          if (receipt) batch = { computerId: receipt.computerId, batchId: receipt.batchId };
+        }
+        const resolved = resolveWorkAttachments(inherited, session.work);
         if (resolved.error) throw new Error(resolved.error);
-        const images = composerImageInputs(resolved.attachments);
-        if (!images.ok) throw new Error(images.error);
-        if (
-          images.images.length &&
-          !supportsUserImageInput(provider, { id: session.model.modelId,
-            available: true, capabilities: session.model.capabilities })
-        )
-          throw new Error(
-            "Reattach images with a supported Codex/Claude model.",
-          );
         controller.resetCancellation();
         const staged = await prepareExecutionAttachments(
           resolved.attachments,
@@ -241,6 +243,11 @@ export function ExecutionWorker({
           session.work.agentId,
           () => service.current(session),
         );
+        const images = composerImageInputs(staged.attachments);
+        if (!images.ok) throw new Error(images.error);
+        if (images.images.length && !supportsUserImageInput(provider, { id: session.model.modelId,
+          available: true, capabilities: session.model.capabilities }))
+          throw new Error("Choose a supported image-capable model before continuing this request.");
         if (!service.current(session)) return;
         if (!session.attachments.length) {
           // Continued assignments recover durable workspace refs; files that
@@ -263,7 +270,7 @@ export function ExecutionWorker({
                 .join(", ")}. Reattach them before continuing.`,
             );
         }
-        batch = staged.batch;
+        batch = staged.batch ?? batch;
         if (!service.current(session)) return;
         const { ids, tools: connectorTools } =
           await controller.beginConnectorTurn();
@@ -300,7 +307,9 @@ export function ExecutionWorker({
           provider.capabilities.includes("approvals") &&
           session.model.capabilities?.tools !== false;
         if (toolCapable)
-          tools.push(...collaborationToolSpecs(projectMember, Boolean(session.work.continuation)));
+          tools.push(...collaborationToolSpecs(projectMember, Boolean(session.work.continuation), Boolean(session.work.outcomeGoal)));
+        if (session.work.outcomeGoal && !toolCapable)
+          throw new Error("Outcome goals require a provider route with Mivlet coordination tools. Choose a supported model and explicitly continue.");
         if (room.kind === "group" && !toolCapable)
           throw new Error(
             "This model does not support the collaboration tools. Choose a tool-capable model for this participant.",
@@ -331,7 +340,7 @@ export function ExecutionWorker({
           CONVERSATION_STYLE_INSTRUCTIONS,
           generatedUiInstructions,
           tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
-          tools.some(tool => tool.name === "local-browser-observe") ? "Owned browser: select sole window, list/observe exact origin, act once, verify. tabRefs 60s; input refs 30s/single-use. Blank: navigate only. Click fully visible buttons/HTTP links; scroll public center up/down <=600px. May submit/download/run handlers. No tab switching/forms/JS/file import. Unknown input: fresh request, never replay." : "",
+          tools.some(tool => tool.name === "local-browser-observe") ? "Owned browser: select exact window, list/observe exact origin, use only advertised fresh single-use ref tools, act once, verify. Blank: navigate only. Activate only the observed tab; fill only empty public text fields. An approved passive download closes the owned browser before private workspace import. Handover persists attention and requires explicit Continue. No arbitrary JS or private fields. Unknown input: fresh request, never replay." : "",
           builtinPluginInstructions(
             session.work.prompt,
             staged.node?.plugins,
@@ -385,6 +394,9 @@ export function ExecutionWorker({
               )
                 throw new Error("This assignment was stopped before dispatch.");
               if (session.work.schedule) await service.bindScheduledWork(session, attemptId);
+              // A lost IPC reply may still have committed the binding. Retain
+              // its exact passive inputs once admission is attempted.
+              adopted = true;
               await service.command({
                 action: "bind-work",
                 ...scope,

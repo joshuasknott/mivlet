@@ -17,7 +17,6 @@ import {
 } from "../components/navigation/PanelContent";
 import { WorkspaceRightNav } from "../components/navigation/WorkspaceRightNav";
 import { SearchFileDialog } from "../components/search/SearchFileDialog";
-import { SideChatList } from "../components/conversation/SideChats";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import type { useLocalProjects } from "../hooks/useLocalProjects";
 import {
@@ -37,6 +36,11 @@ import type { WorkspaceNavigation } from "./useWorkspaceNavigation";
 const WorkspaceHistory = lazy(() =>
   import("./WorkspaceHistory").then(({ WorkspaceHistory: Component }) => ({
     default: Component,
+  })),
+);
+const SideChatList = lazy(() =>
+  import("../components/conversation/SideChats").then((module) => ({
+    default: module.SideChatList,
   })),
 );
 const WorkspaceMemories = lazy(() =>
@@ -298,48 +302,50 @@ export function WorkspaceContextPanel({
       }
       sideChats={
         navContext && navContext.kind !== "work" ? (
-          <SideChatList
-            compact
-            key={navProject?.id ?? navAgent?.id}
-            owner={
-              navContext.kind === "project"
-                ? { kind: "project", id: navContext.project.id }
-                : { kind: "agent", id: navContext.agent.id }
-            }
-            ownerName={
-              navContext.kind === "project"
-                ? navContext.project.name
-                : navContext.agent.name
-            }
-            chats={state.data.conversations}
-            activeId={nav.activeRoom?.id}
-            onOpen={(room) => nav.openPanelChat(room.id)}
-            onCreate={async (title) => {
-              const project = navContext.kind === "project";
-              const room = await createSideChat(service, {
-                title,
-                owner: project
+          <Suspense fallback={<p role="status">Loading Side Chats…</p>}>
+            <SideChatList
+              compact
+              key={navProject?.id ?? navAgent?.id}
+              owner={
+                navContext.kind === "project"
                   ? { kind: "project", id: navContext.project.id }
-                  : { kind: "agent", id: navContext.agent.id },
-                participantIds: project
-                  ? (navTeam?.participantIds ?? [])
-                  : [navContext.agent.id],
-                facilitatorId: project
-                  ? (navTeam?.leadAgentId ?? "")
-                  : navContext.agent.id,
-              });
-              nav.openPanelChat(room.id);
-            }}
-            onRename={async (room, title) => {
-              await renameSideChat(service, room, title);
-            }}
-            onArchive={async (room, archived) => {
-              await setSideChatArchived(service, room, archived);
-            }}
-            onDelete={async (room) => {
-              await deleteSideChat(service, room);
-            }}
-          />
+                  : { kind: "agent", id: navContext.agent.id }
+              }
+              ownerName={
+                navContext.kind === "project"
+                  ? navContext.project.name
+                  : navContext.agent.name
+              }
+              chats={state.data.conversations}
+              activeId={nav.activeRoom?.id}
+              onOpen={(room) => nav.openPanelChat(room.id)}
+              onCreate={async (title) => {
+                const project = navContext.kind === "project";
+                const room = await createSideChat(service, {
+                  title,
+                  owner: project
+                    ? { kind: "project", id: navContext.project.id }
+                    : { kind: "agent", id: navContext.agent.id },
+                  participantIds: project
+                    ? (navTeam?.participantIds ?? [])
+                    : [navContext.agent.id],
+                  facilitatorId: project
+                    ? (navTeam?.leadAgentId ?? "")
+                    : navContext.agent.id,
+                });
+                nav.openPanelChat(room.id);
+              }}
+              onRename={async (room, title) => {
+                await renameSideChat(service, room, title);
+              }}
+              onArchive={async (room, archived) => {
+                await setSideChatArchived(service, room, archived);
+              }}
+              onDelete={async (room) => {
+                await deleteSideChat(service, room);
+              }}
+            />
+            </Suspense>
         ) : undefined
       }
       schedules={

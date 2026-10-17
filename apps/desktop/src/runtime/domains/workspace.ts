@@ -1,6 +1,11 @@
 import { toRuntimeError } from "../errors";
 import type { ExecutionAttempt, RuntimeSnapshot } from "@mivlet/protocol";
-import { hasTauriRuntime, invoke, activeDataScope } from "../bridge";
+import {
+  hasTauriRuntime,
+  invoke,
+  invokeNative,
+  activeDataScope,
+} from "../bridge";
 import { readWithDeadline } from "../read-deadline";
 
 export async function loadRuntimeSnapshot(
@@ -32,14 +37,10 @@ export async function saveRuntimeSnapshot(
   }
   if (!workspaceId) return null;
 
-  try {
-    return await invoke<RuntimeSnapshot>("save_runtime_snapshot", {
-      snapshot,
-      workspaceId,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<RuntimeSnapshot>("save_runtime_snapshot", {
+    snapshot,
+    workspaceId,
+  });
 }
 
 export async function saveRuntimeExecutionAttempt(
@@ -54,14 +55,10 @@ export async function saveRuntimeExecutionAttempt(
       "The selected workspace changed before the execution attempt was saved.",
     );
   }
-  try {
-    return await invoke<ExecutionAttempt>("save_execution_attempt", {
-      attempt,
-      ...scope,
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeNative<ExecutionAttempt>("save_execution_attempt", {
+    attempt,
+    ...scope,
+  });
 }
 
 export async function listRuntimeExecutionAttempts() {

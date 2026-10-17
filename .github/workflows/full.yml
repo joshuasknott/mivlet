@@ -8,6 +8,14 @@ on:
         description: Profile the production renderer only (not full validation)
         type: boolean
         default: false
+      baseline_commit:
+        description: Optional ancestor commit for an exact same-run renderer graph comparison
+        type: string
+        default: ""
+      native_preview:
+        description: Also build an unsigned debug executable after renderer verification
+        type: boolean
+        default: false
   schedule:
     - cron: "17 3 * * *"
 
@@ -60,10 +68,11 @@ jobs:
   bundle-profile:
     if: ${{ inputs.bundle_profile }}
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
           persist-credentials: false
       - uses: pnpm/action-setup@v4
         with:
@@ -74,13 +83,87 @@ jobs:
           node-version: 24
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: node --test scripts/perf/profile.test.mjs scripts/perf/budget.test.mjs
+      - run: pnpm --filter @mivlet/protocol build
+      - run: pnpm --filter @mivlet/desktop typecheck
+      - run: pnpm quality
+      - run: node --test scripts/perf/profile.test.mjs scripts/perf/budget.test.mjs scripts/perf/compare-graphs.test.mjs
+      - name: Profile the requested ancestor with the same install
+        if: ${{ inputs.baseline_commit != '' }}
+        shell: pwsh
+        env:
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ($env:BASELINE_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full lowercase commit SHA.' }
+          git merge-base --is-ancestor $env:BASELINE_COMMIT $env:GITHUB_SHA
+          if ($LASTEXITCODE -ne 0) { throw 'Baseline must be an ancestor of this exact checkout.' }
+          $finalCommit = $env:GITHUB_SHA
+          $finalLock = (Get-FileHash pnpm-lock.yaml -Algorithm SHA256).Hash
+          try {
+            git checkout --detach $env:BASELINE_COMMIT
+            if ($LASTEXITCODE -ne 0) { throw 'Baseline checkout failed.' }
+            if ((Get-FileHash pnpm-lock.yaml -Algorithm SHA256).Hash -ne $finalLock) { throw 'A same-install comparison requires the same pnpm lockfile.' }
+            $env:GITHUB_SHA = $env:BASELINE_COMMIT
+            pnpm --filter @mivlet/desktop exec vite build --config ../../scripts/perf/profile.vite.config.mjs --configLoader runner
+            if ($LASTEXITCODE -ne 0) { throw 'Baseline profile failed.' }
+            Copy-Item -LiteralPath output/bundle-profile/report.json -Destination "$env:RUNNER_TEMP/baseline-profile.json"
+          } finally {
+            $env:GITHUB_SHA = $finalCommit
+            git checkout --detach $finalCommit
+            if ($LASTEXITCODE -ne 0) { throw 'Final checkout restoration failed.' }
+          }
+          Copy-Item -LiteralPath "$env:RUNNER_TEMP/baseline-profile.json" -Destination output/bundle-profile/baseline.json
       - run: pnpm --filter @mivlet/desktop exec vite build --config ../../scripts/perf/profile.vite.config.mjs --configLoader runner
+      - if: ${{ inputs.baseline_commit != '' }}
+        run: node scripts/perf/compare-graphs.mjs output/bundle-profile/baseline.json output/bundle-profile/report.json output/bundle-profile/graph-comparison.json
       - run: pnpm perf:check
       - uses: actions/upload-artifact@v4
         if: ${{ always() }}
         with:
           name: bundle-profile-${{ github.sha }}
-          path: output/bundle-profile/report.json
+          path: output/bundle-profile/*.json
           if-no-files-found: error
           retention-days: 14
+      - uses: actions/upload-artifact@v4
+        with:
+          name: renderer-${{ github.sha }}
+          path: apps/desktop/dist
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+  native-preview:
+    if: ${{ inputs.bundle_profile && inputs.native_preview }}
+    needs: bundle-profile
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          shared-key: mivlet-windows
+      - uses: actions/download-artifact@v4
+        with:
+          name: renderer-${{ github.sha }}
+          path: apps/desktop/dist
+      - name: Build the exact-source debug acceptance executable
+        shell: pwsh
+        run: |
+          cargo build --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --bin mivlet-desktop `
+            --config profile.dev.package.mivlet-desktop.debug=0 `
+            --config profile.dev.package.mivlet-desktop.incremental=false
+          if ($LASTEXITCODE -ne 0) { throw 'Native preview build failed.' }
+          New-Item -ItemType Directory -Force output/native-preview | Out-Null
+          Copy-Item -LiteralPath apps/desktop/src-tauri/target/debug/mivlet-desktop.exe -Destination output/native-preview/mivlet-desktop.exe
+          @{ commit = $env:GITHUB_SHA; executableSha256 = (Get-FileHash output/native-preview/mivlet-desktop.exe -Algorithm SHA256).Hash.ToLowerInvariant(); cargoLockSha256 = (Get-FileHash apps/desktop/src-tauri/Cargo.lock -Algorithm SHA256).Hash.ToLowerInvariant(); signed = $false; purpose = 'Debug acceptance only; not an installer or release'; rust = (rustc --version); cargo = (cargo --version) } | ConvertTo-Json | Set-Content -Encoding utf8 output/native-preview/receipt.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-preview-${{ github.sha }}
+          path: output/native-preview
+          if-no-files-found: error
+          retention-days: 7

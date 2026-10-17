@@ -55,7 +55,7 @@ export function ProjectFiles({
   });
   return (
     <section
-      className={`project-files${compact ? " project-files--compact" : ""}`}
+      className={`collection-panel-files${compact ? " collection-panel-files--compact" : ""}`}
       aria-labelledby={compact ? undefined : headingId}
     >
       <header>
@@ -79,9 +79,9 @@ export function ProjectFiles({
         </button>
       </header>
       {adding ? (
-        <div className="project-files__picker">
+        <div className="collection-panel-files__picker">
           {eligibleSources.length > 6 ? (
-            <label className="project-picker-search">
+            <label className="collection-panel-picker-search">
               <MagnifyingGlass size={15} aria-hidden="true" />
               <input
                 autoFocus
@@ -93,7 +93,7 @@ export function ProjectFiles({
               />
             </label>
           ) : null}
-          <div className="project-files__choices">
+          <div className="collection-panel-files__choices">
             {choices.map((source) => (
               <button
                 type="button"
@@ -123,7 +123,7 @@ export function ProjectFiles({
           </div>
           {onImport ? (
             <button
-              className="project-files__import"
+              className="collection-panel-files__import"
               type="button"
               disabled={disabled}
               onClick={onImport}
@@ -136,25 +136,25 @@ export function ProjectFiles({
       ) : null}
       {error ? (
         <p
-          className="project-form-message project-form-message--error"
+          className="collection-panel-form-message collection-panel-form-message--error"
           role="alert"
         >
           {error}
         </p>
       ) : status ? (
-        <p className="project-form-message" role="status">
+        <p className="collection-panel-form-message" role="status">
           {status}
         </p>
       ) : null}
-      <div className="project-files__list">
+      <div className="collection-panel-files__list">
         {files.map((file) => {
           const size = formatBytes(file.sizeBytes);
           return (
-            <div className="project-file" key={file.sourceId}>
+            <div className="collection-panel-file" key={file.sourceId}>
               <FileText size={compact ? 20 : 23} aria-hidden="true" />
               {onOpen ? (
                 <button
-                  className="project-file__open"
+                  className="collection-panel-file__open"
                   type="button"
                   disabled={disabled}
                   onClick={() => onOpen(file.sourceId)}
@@ -192,7 +192,7 @@ export function ProjectFiles({
           );
         })}
         {files.length === 0 ? (
-          <p className="project-files__empty">
+          <p className="collection-panel-files__empty">
             No files have been added to this project.
           </p>
         ) : null}
