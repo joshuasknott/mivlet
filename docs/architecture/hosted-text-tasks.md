@@ -33,6 +33,13 @@ and finishing the canonical execution attempt. A changed head or reduced
 authority retains the authenticated result for review instead of overwriting
 the conversation. Account changes reject late responses.
 
+The renderer validates replies against the returned canonical local Work and
+its complete saved cloud binding. The local `hosted-<digest>` workspace ID and
+Convex workspace ID are separate identities. Prepare accepts only its held
+generation; later controls may include several native state transitions and
+must never move backward from the newest observed generation. Stop uses that
+generation even before the parent view has refreshed.
+
 Closing the app leaves admitted cloud work running. Explicit Work or project
 Stop immediately fences local writes, persists `stop-pending` and wakes native
 cancellation. The Worker persists cancellation before aborting an active fetch;
