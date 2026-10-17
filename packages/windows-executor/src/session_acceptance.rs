@@ -185,6 +185,8 @@ setInterval(()=>{},1000);
     control.stop();
     assert!(!control.is_current(&binding));
     assert!(control.open_preview(&binding).is_err());
+    assert!(socket.read(&mut [0u8; 1]).is_err());
+    drop((http, socket, writer));
     let completed = owned.worker.take().unwrap().join().unwrap().unwrap();
     assert!(completed.receipt().interrupted && completed.receipt().persistent);
     assert!(completed.receipt().output_id.is_none());
