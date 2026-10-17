@@ -5,6 +5,22 @@ mod git;
 mod jobs;
 pub(crate) mod task_binding;
 pub(crate) use task_binding::{capture_work_repository, RepositoryWorkBinding};
+
+/// A model may not use a persistent session to write into a repository outside
+/// its immutable current Work selection. User-directed terminal controls have
+/// separate exact-job authority and do not pass through this model-only check.
+pub(crate) fn validate_command_repository(
+    workspace: &str,
+    agent: &str,
+    repository: &str,
+) -> Result<(), String> {
+    let task = task_binding::executing_binding(workspace, agent)?
+        .ok_or("A repository session input needs an exact current Work repository binding.")?;
+    if task.binding.repository_id != repository {
+        return Err("This command session belongs to a different repository than the current task. No input was sent; use the task's own copy or explicit terminal controls.".into());
+    }
+    Ok(())
+}
 pub(super) mod process;
 pub(crate) mod pull_requests;
 #[cfg(test)]
