@@ -5,6 +5,9 @@ import { McpClient } from "@mivlet/connectors/mcp/sdk-client";
 import { createDesktopToolExecutor } from "./desktop-tool-runtime";
 import { buildToolApproval } from "@mivlet/connectors/native-api/approvals";
 import { createApprovalGate } from "@mivlet/connectors/native-api/tool-executor";
+// Collect the real lazy adapter before timing protocol behavior. Its first Vite
+// transform must not consume the MCP test's five-second execution budget.
+import "./mcp-semantic-execution";
 
 vi.mock("./native-mcp-client", () => ({ McpClient }));
 
