@@ -14,6 +14,7 @@ export * from "./domains/coding.js";
 export * from "./domains/pull-requests.js";
 export * from "./domains/command-jobs.js";
 export * from "./domains/repository-checkpoints.js";
+export * from "./domains/conversation-restore.js";
 export * from "./domains/local-projects.js";
 export * from "./domains/collaboration.js";
 export * from "./domains/conversation-ui.js";

@@ -14,6 +14,7 @@ pub(crate) mod pr_watches;
 pub(crate) mod provider_continuation;
 pub(crate) mod provider_continuation_read;
 mod provider_resets;
+pub(crate) mod restore;
 mod queue;
 mod schedules;
 mod steering;

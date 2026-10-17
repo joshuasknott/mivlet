@@ -259,6 +259,7 @@ pub fn run() {
             conversations::conversation_get_thread,
             conversations::conversation_update_thread,
             conversations::conversation_select_branch,
+            collaboration::restore::conversation_restore,
             conversations::conversation_list_messages,
             conversations::conversation_list_messages_page,
             conversations::conversation_append_message,
