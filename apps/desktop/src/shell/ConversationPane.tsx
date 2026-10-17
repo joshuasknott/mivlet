@@ -912,7 +912,7 @@ export function ConversationPane({
               }}
               onOpenConnector={onPlugins}
               onDraftResponse={(text) => {
-                currentComposer.current.appendText(text);
+                composer.appendText(text);
                 focus();
               }}
               onSaveMemory={(title, value) =>
