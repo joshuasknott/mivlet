@@ -167,10 +167,12 @@ mod tests {
         let writer = Arc::new(Mutex::new(()));
         let (release, blocked) = mpsc::channel();
         let (exited, finished) = mpsc::channel();
+        let (entered, started) = mpsc::channel();
         let owned_writer = writer.clone();
         let result = super::bounded_write(
             move || {
                 let _pipe = owned_writer.lock().unwrap();
+                entered.send(()).unwrap();
                 let _ = blocked.recv();
                 let _ = exited.send(());
                 Ok(())
@@ -178,6 +180,7 @@ mod tests {
             Duration::from_millis(20),
             || {
                 // Simulate exact child termination while its stdin is still held.
+                started.recv_timeout(Duration::from_secs(1)).unwrap();
                 assert!(writer.try_lock().is_err());
                 release.send(()).unwrap();
             },
