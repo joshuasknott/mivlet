@@ -150,10 +150,7 @@ export function AppearanceSettingsView({
           <button
             key={option}
             type="button"
-            className={
-              "theme-toggle__button" +
-              (theme === option ? " theme-toggle__button--active" : "")
-            }
+            className={`theme-toggle__button${theme === option ? " theme-toggle__button--active" : ""}`}
             aria-pressed={theme === option}
             onClick={() => {
               onThemeChange(option);
