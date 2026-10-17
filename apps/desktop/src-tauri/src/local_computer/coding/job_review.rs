@@ -177,11 +177,13 @@ fn review_changes(
     // Inspect names only before any content staging. Protected deleted/renamed
     // base content must not reappear under a public path through rename/copy
     // detection or a changed current filename. Uncertainty stays unavailable.
-    let mut base_names = git::repo_git(directory, repo)?;
-    base_names.args(["ls-tree", "-r", "--name-only", "-z", &repo.base, "--"]);
-    let base_names = run(base_names)?;
-    if base_names.truncated || base_names.redacted || !public_base_names(&base_names.output) {
-        return Ok(Value::Null);
+    for revision in [repo.base.as_str(), "HEAD"] {
+        let mut names = git::repo_git(directory, repo)?;
+        names.args(["ls-tree", "-r", "--name-only", "-z", revision, "--"]);
+        let names = run(names)?;
+        if names.truncated || names.redacted || !public_base_names(&names.output) {
+            return Ok(Value::Null);
+        }
     }
     // Same derived scratch tree as Library review, with a shared overall
     // deadline. The real index, worktree, selection and recovery ledger stay put.

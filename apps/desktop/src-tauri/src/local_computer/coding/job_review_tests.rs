@@ -283,3 +283,54 @@ fn protected_base_deleted_case_and_directory_contents_never_enter_public_review(
     assert_eq!(review["truncated"], true);
     assert!(!review.to_string().contains("synthetic-private"));
 }
+
+#[test]
+fn protected_head_committed_after_base_then_renamed_cannot_enter_public_diff() {
+    let (temp, directory, authority, repo) = super::super::tests::fixture();
+    let ticket = authority.begin_agent(1).unwrap();
+    let root = checkout(&directory, &repo).unwrap();
+    fs::write(root.join(".env.private"), "REVIEW_HEAD_PRIVATE_MARKER\n").unwrap();
+    git::run(&directory, &repo, &["add", "-A", "--", ":/"], &ticket).unwrap();
+    git::run(
+        &directory,
+        &repo,
+        &[
+            "-c",
+            "user.name=Fixture",
+            "-c",
+            "user.email=fixture@example.invalid",
+            "commit",
+            "-m",
+            "private head after original base",
+        ],
+        &ticket,
+    )
+    .unwrap();
+    assert_ne!(
+        git::run(&directory, &repo, &["rev-parse", "HEAD"], &ticket).unwrap(),
+        repo.base
+    );
+    fs::rename(root.join(".env.private"), root.join("public-renamed.txt")).unwrap();
+    owner(&directory, &repo);
+    let manager = JobManager::default();
+    let jobs = manager.scope(&temp.path().join("jobs")).unwrap();
+    let mut session = jobs
+        .start(&ticket, Some(&repo.id), "echo fixture", false, 60, true)
+        .unwrap();
+    super::super::jobs::bind_repository(&mut session, &repo, None).unwrap();
+    let review = inspect(
+        &directory,
+        &jobs,
+        &target(&session.snapshot().unwrap().id),
+        &ticket,
+    )
+    .unwrap();
+    assert!(review["changes"].is_null());
+    assert_eq!(review["truncated"], true);
+    assert!(!review.to_string().contains("REVIEW_HEAD_PRIVATE_MARKER"));
+    assert!(review["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|name| name == "public-renamed.txt"));
+}
