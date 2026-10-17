@@ -10,6 +10,9 @@ pub(crate) fn capture_snapshot(
     selected_paths: &[String],
     writable_paths: &[String],
 ) -> Result<Snapshot, String> {
+    if !retention::is_preparing(task)? {
+        return Err("Native source capture requires its live preparation custody through review publication.".into());
+    }
     let current = crate::collaboration::hosted_repository::current(app, ticket, task, false)?;
     let (directory, repo) = storage::repository(state, task, &current.repository)?;
     let mutex = lock(&directory)?;
