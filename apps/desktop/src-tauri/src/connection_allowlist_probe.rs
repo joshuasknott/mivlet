@@ -612,7 +612,7 @@ pub(crate) fn acceptance() -> Result<(), String> {
             .visible(false)
             .skip_taskbar(true)
             .data_directory(directory)
-            .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --site-per-process")
+            .additional_browser_args("--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --site-per-process --enable-features=ConnectionAllowlists,OverrideConnectionAllowlistOriginTrial")
             .build()?;
             crate::mcp_app_host::install_navigation_guard(&window);
             let handle = app.handle().clone();
@@ -736,6 +736,26 @@ mod tests {
         assert!(transition_on(&state, 8, 2));
         assert!(!transition_on(&state, 8, 3));
         assert_eq!(state.load(Ordering::Acquire), 8 | 2);
+    }
+    #[test]
+    fn native_runtime_and_acceptance_explicitly_enable_network_enforcement() {
+        let config: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).unwrap();
+        let arguments = config["app"]["windows"][0]["additionalBrowserArgs"]
+            .as_str()
+            .unwrap();
+        assert!(arguments.contains(
+            "--enable-features=ConnectionAllowlists,OverrideConnectionAllowlistOriginTrial"
+        ));
+        assert!(arguments.contains("--site-per-process"));
+        for forbidden in [
+            "disable-web-security",
+            "disable-site-isolation",
+            "no-sandbox",
+            "allow-insecure-localhost",
+        ] {
+            assert!(!arguments.contains(forbidden));
+        }
     }
     #[test]
     fn no_renderer_cue_can_replace_native_positive_and_negative_network_observations() {
