@@ -17,6 +17,27 @@ use std::{
 
 const TTL: Duration = Duration::from_secs(10 * 60);
 const MAX_PREVIEWS: usize = 8;
+const HOST_SUFFIX: &str = ".mivlet-preview.localhost";
+
+/// Reserved frame namespace, with an exact native capability label and port.
+/// The parent CSP permits this namespace only for frames; it does not establish
+/// registration, account authority, or permission to reach another local host.
+pub(crate) fn preview_origin(uri: &str) -> Option<String> {
+    let parsed = url::Url::parse(uri).ok()?;
+    let token = parsed.host_str()?.strip_suffix(HOST_SUFFIX)?;
+    if parsed.scheme() != "http"
+        || !parsed.username().is_empty()
+        || parsed.password().is_some()
+        || parsed.port().is_none_or(|port| port == 0)
+        || token.len() != 48
+        || !token
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return None;
+    }
+    Some(parsed.origin().ascii_serialization())
+}
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Descriptor {
@@ -79,11 +100,7 @@ fn entries() -> &'static Mutex<HashMap<String, Arc<Entry>>> {
 /// account cannot keep its origin registered through a renderer URL string.
 #[cfg(windows)]
 pub(crate) fn registered_origin(uri: &str) -> Option<String> {
-    let parsed = url::Url::parse(uri).ok()?;
-    if parsed.scheme() != "http" || !parsed.username().is_empty() || parsed.password().is_some() {
-        return None;
-    }
-    let origin = parsed.origin().ascii_serialization();
+    let origin = preview_origin(uri)?;
     let entry = {
         entries()
             .lock()
@@ -109,19 +126,19 @@ pub(crate) fn same_registered_origin(expected: &str, uri: &str) -> bool {
     })
 }
 pub(crate) fn navigation_allowed(expected: &str, uri: &str) -> Option<bool> {
+    let parsed = url::Url::parse(expected).ok()?;
+    let host = parsed.host_str()?;
+    if host != &HOST_SUFFIX[1..] && !host.ends_with(HOST_SUFFIX) {
+        return None;
+    }
+    // A malformed or retired capability cannot become an ordinary frame just
+    // because the namespace appears in frame-src.
+    if preview_origin(expected).is_none() {
+        return Some(false);
+    }
     #[cfg(windows)]
     if let Some(allowed) = crate::connection_allowlist_probe::navigation(expected, uri) {
         return Some(allowed);
-    }
-    let parsed = url::Url::parse(expected).ok()?;
-    let host = parsed.host_str()?;
-    let token = host.strip_suffix(".localhost")?;
-    if token.len() != 48
-        || !token
-            .bytes()
-            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-    {
-        return None;
     }
     Some(same_registered_origin(expected, uri))
 }
@@ -196,7 +213,7 @@ fn open(
         .local_addr()
         .map_err(|_| "The preview address is unavailable.")?
         .port();
-    let origin = format!("http://{id}.localhost:{port}");
+    let origin = format!("http://{id}{HOST_SUFFIX}:{port}");
     let descriptor = Descriptor {
         id: id.clone(),
         job_id: job.into(),
@@ -410,5 +427,38 @@ pub async fn native_preview_feedback(
             entry.descriptor.job_generation,
             &entry.descriptor.revision,
         )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn preview_origin_requires_the_exact_reserved_capability_shape() {
+        let origin = format!("http://{}.mivlet-preview.localhost:41234", "a".repeat(48));
+        assert_eq!(
+            preview_origin(&format!("{origin}/work?version=1")),
+            Some(origin.clone())
+        );
+        for invalid in [
+            origin.replace(".mivlet-preview", ""),
+            origin.replace(".localhost", ".localhost.evil"),
+            origin.replace("http://", "http://extra."),
+            origin.replace(&"a".repeat(48), &"g".repeat(48)),
+            origin.replace(&"a".repeat(48), &"a".repeat(47)),
+            origin.replace("http://", "https://"),
+            origin.replace("http://", "http://user@"),
+            origin.replace(":41234", ""),
+            origin.replace(":41234", ":0"),
+            "http://mivlet-preview.localhost:41234".into(),
+        ] {
+            assert!(preview_origin(&invalid).is_none(), "{invalid}");
+        }
+        assert_eq!(navigation_allowed(&origin, &origin), Some(false));
+        assert_eq!(
+            navigation_allowed("https://example.com", "https://example.com"),
+            None
+        );
     }
 }

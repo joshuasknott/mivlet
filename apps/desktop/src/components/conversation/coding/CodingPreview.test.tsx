@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { NativePreviewDescriptor, NativePreviewFeedback, NativePreviewPick } from "@mivlet/protocol";
 import { CodingPreview, isPreviewPick, validPreviewDescriptor } from "./CodingPreview";
 const target = { workspaceId: "space", agentId: "atlas", expectedGeneration: 4, jobId: "job", jobGeneration: 4 };
-const origin = `http://${"a".repeat(48)}.localhost:43210`;
+const origin = `http://${"a".repeat(48)}.mivlet-preview.localhost:43210`;
 const preview: NativePreviewDescriptor = { id: "preview", jobId: "job", jobGeneration: 4, repositoryId: "copy", generation: 4, revision: "revision", url: `${origin}/`, origin, expiresAt: new Date(Date.now() + 60_000).toISOString(), pickerSupported: true };
 // Match the actual native picker: pathname and uppercase DOM tagName, never a
 // renderer-invented CSS selector or field value.
@@ -22,6 +22,21 @@ describe("native running-app preview", () => {
     expect(validPreviewDescriptor(preview, target)).toBe(true);
     for (const invalid of [{ ...preview, url: "http://127.0.0.1:3000/", origin: "http://127.0.0.1:3000" }, { ...preview, origin: "https://other.example" }, { ...preview, expiresAt: "2000-01-01" }, { ...preview, generation: 3 }]) expect(validPreviewDescriptor(invalid, target)).toBe(false);
     expect(isPreviewPick({ ...pick, bounds: { ...pick.bounds, width: Infinity } }, preview)).toBe(false);
+  });
+  it.each([
+    `http://${"a".repeat(48)}.localhost:43210`,
+    "http://mivlet-preview.localhost:43210",
+    `http://extra.${"a".repeat(48)}.mivlet-preview.localhost:43210`,
+    `http://${"a".repeat(48)}.mivlet-preview.localhost.evil:43210`,
+    `http://${"g".repeat(48)}.mivlet-preview.localhost:43210`,
+    `http://${"a".repeat(47)}.mivlet-preview.localhost:43210`,
+    `http://${"a".repeat(48)}.mivlet-preview.localhost`,
+    `http://${"a".repeat(48)}.mivlet-preview.localhost:0`,
+    `https://${"a".repeat(48)}.mivlet-preview.localhost:43210`,
+    `http://user@${"a".repeat(48)}.mivlet-preview.localhost:43210`,
+  ])("refuses a URL outside the exact native preview shape: %s", candidate => {
+    const url = new URL(candidate);
+    expect(validPreviewDescriptor({ ...preview, url: `${candidate}/`, origin: url.origin }, target)).toBe(false);
   });
   it("requires exact guest readiness and native validation before drafting feedback", async () => {
     const { props } = setup(); await screen.findByTitle("Running project preview");

@@ -17,7 +17,7 @@ export function validPreviewDescriptor(preview: NativePreviewDescriptor, target:
   try {
     const url = new URL(preview.url);
     return url.protocol === "http:"
-      && /^[a-f0-9]{48}\.localhost$/.test(url.hostname) && Boolean(url.port)
+      && /^[a-f0-9]{48}\.mivlet-preview\.localhost$/.test(url.hostname) && Boolean(url.port) && url.port !== "0"
       && !url.username && !url.password && !url.hash
       && url.origin === preview.origin && url.origin !== window.location.origin
       && preview.jobId === target.jobId && preview.jobGeneration === target.jobGeneration

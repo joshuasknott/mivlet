@@ -17,15 +17,18 @@ Windows Job, AppContainer SID and restricted token before exposing a stream.
 
 The desktop issues a short-lived native descriptor only for the exact scoped
 job/generation, repository copy and frozen input-tree revision. A bounded native
-proxy accepts its own opaque `48hex.localhost` Host and Origin and forwards only
-through that executor stream. It never probes a host application port. Closing
+proxy accepts its own opaque `48hex.mivlet-preview.localhost:<port>` Host and
+Origin and forwards only through that executor stream. It never probes a host
+application port. Closing
 the view leaves the command running; Stop, account change, expiry and job closure
 invalidate transport. A background-owned job must be stopped, background execution
 turned off, and a new foreground-owned preview command started; running-job
 ownership cannot be transferred by opening this initial preview.
 
-The separate HTTP origin receives no Tauri IPC. Existing native child-frame
-navigation and pre-transmission Document guards, including paused out-of-process
+The desktop CSP permits only `http://*.mivlet-preview.localhost:*` for these
+dynamic frames; script and connection directives remain limited to app assets
+and Tauri IPC. The separate HTTP origin receives no Tauri IPC. Existing native
+child-frame navigation and pre-transmission Document guards, including paused out-of-process
 frames, pin live preview navigation to its registered origin. Static MCP and
 generated-HTML guests keep their exact URL pins. Every proxied app response adds
 a policy limited to the preview's HTTP/WebSocket origin, data/blob media and local
