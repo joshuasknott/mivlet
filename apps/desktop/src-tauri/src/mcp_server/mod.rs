@@ -36,6 +36,7 @@ struct Engine {
     config: Config,
     oauth: Mutex<oauth::State>,
     remote: Mutex<remote::Sessions>,
+    push: remote::push::PushState,
     app: Option<tauri::AppHandle>,
     inflight: Arc<tokio::sync::Semaphore>,
     rate: Mutex<(std::time::Instant, u32)>,
@@ -145,6 +146,7 @@ pub async fn mcp_server_start(
         config,
         oauth: Mutex::new(oauth::State::default()),
         remote: Mutex::new(remote::Sessions::default()),
+        push: remote::push::PushState::default(),
         app: Some(app.clone()),
         inflight: Arc::new(tokio::sync::Semaphore::new(16)),
         rate: Mutex::new((std::time::Instant::now(), 0)),
@@ -165,7 +167,10 @@ pub async fn mcp_server_start(
         loop {
             tokio::select! {
                 _ = &mut serving => break,
-                _ = tick.tick() => { if lifecycle.expire().is_err() { break; } }
+                _ = tick.tick() => {
+                    if lifecycle.expire().is_err() { break; }
+                    remote::push::schedule(lifecycle.clone());
+                }
             }
         }
         let _ = lifecycle.transaction(|conn, scope, saved| {

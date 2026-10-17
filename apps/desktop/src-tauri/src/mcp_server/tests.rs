@@ -19,6 +19,7 @@ fn engine_with_store(origin: &str, store: &'static Store) -> Arc<Engine> {
         config: Config::default(),
         oauth: Mutex::new(oauth::State::default()),
         remote: Mutex::new(remote::Sessions::default()),
+        push: remote::push::PushState::default(),
         app: None,
         inflight: Arc::new(tokio::sync::Semaphore::new(16)),
         rate: Mutex::new((std::time::Instant::now(), 0)),

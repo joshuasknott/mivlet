@@ -20,6 +20,47 @@ beforeEach(()=>{
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();document.body.replaceChildren();});
 const start=async()=>{await import("../../src-tauri/src/mcp_server/remote/app.js");await vi.waitFor(()=>expect(document.querySelector(".task-request")).not.toBeNull());};
 describe("phone client against shared task contracts",()=>{
+  it("does not let an old notification status read replace an accepted opt-in",async()=>{
+    const key=new Uint8Array(65);key[0]=4;
+    const state={publicKey:btoa(String.fromCharCode(...key)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_"),enabled:false,deliveryFailed:false};
+    replies["/remote/push"]=state;
+    const registration={pushManager:{getSubscription:async()=>null,subscribe:async()=>({endpoint:"https://fcm.googleapis.com/fcm/send/fixture",options:{applicationServerKey:key.buffer}})}};
+    vi.stubGlobal("Notification",{requestPermission:async()=>"granted"});
+    vi.stubGlobal("PushManager",class {});
+    vi.stubGlobal("navigator",{serviceWorker:{register:async()=>registration,ready:Promise.resolve(registration)}});
+    const fetchNormally=fetch.getMockImplementation();
+    let release;
+    fetch.mockImplementation(async(path,options)=>{
+      if(path==="/remote/push" && options.method==="GET" && !release) {
+        return new Promise(resolve=>{release=()=>resolve({ok:true,status:200,json:async()=>state});});
+      }
+      return fetchNormally(path,options);
+    });
+    await start();
+    await vi.waitFor(()=>expect(release).toBeTypeOf("function"));
+    document.getElementById("notifications").click();
+    await vi.waitFor(()=>expect(document.getElementById("notifications").getAttribute("aria-pressed")).toBe("true"));
+    release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(document.getElementById("notifications").getAttribute("aria-pressed")).toBe("true");
+  });
+  it("enables and disables native push with only the browser endpoint",async()=>{
+    const key=new Uint8Array(65);key[0]=4;
+    replies["/remote/push"]={publicKey:btoa(String.fromCharCode(...key)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_"),enabled:false,deliveryFailed:false};
+    const subscribe=vi.fn(async()=>({endpoint:"https://fcm.googleapis.com/fcm/send/fixture",options:{applicationServerKey:key.buffer}}));
+    const registration={pushManager:{getSubscription:vi.fn(async()=>null),subscribe}};
+    vi.stubGlobal("Notification",{requestPermission:vi.fn(async()=>"granted")});
+    vi.stubGlobal("PushManager",class {});
+    vi.stubGlobal("navigator",{serviceWorker:{register:vi.fn(async()=>registration),ready:Promise.resolve(registration)}});
+    await start();
+    document.getElementById("notifications").click();
+    await vi.waitFor(()=>expect(document.getElementById("notifications").getAttribute("aria-pressed")).toBe("true"));
+    expect(subscribe).toHaveBeenCalledWith({userVisibleOnly:true,applicationServerKey:key});
+    expect(calls.find(call=>call.path==="/remote/push" && call.body)?.body).toEqual({endpoint:"https://fcm.googleapis.com/fcm/send/fixture"});
+    document.getElementById("notifications").click();
+    await vi.waitFor(()=>expect(document.getElementById("notifications").getAttribute("aria-pressed")).toBe("false"));
+    expect(calls.filter(call=>call.path==="/remote/push" && call.body).at(-1).body).toEqual({endpoint:null});
+  });
   it("clears only connection-owned notices after reconnecting",async()=>{
     await start();failNextRead=true;
     document.getElementById("refresh").click();

@@ -8,8 +8,8 @@ let timer;
 let busy = false;
 let pendingMutation;
 let notifications = false;
-let notificationWorker;
-const seen = new Map();
+let notificationBusy = false;
+let notificationVersion = 0;
 const labels = {queued:"Queued",running:"Working",waiting:"Waiting",completed:"Complete",failed:"Failed",cancelled:"Stopped",blocked:"Blocked","awaiting-user":"Needs you","awaiting-approval":"Needs approval",interrupted:"Interrupted"};
 const terminal = new Set(["completed","failed","cancelled"]);
 const attention = new Set(["blocked","awaiting-user","awaiting-approval","interrupted"]);
@@ -45,7 +45,9 @@ function reset(message) {
   clearTimeout(timer);
   session = undefined;
   pendingMutation = undefined;
-  seen.clear();
+  notifications = false;
+  ++notificationVersion;
+  notificationLabel();
   ui.work.replaceChildren();
   ui["result-content"].replaceChildren();
   ui.agent.replaceChildren();
@@ -96,12 +98,6 @@ function renderWork(items) {
   const nodes = [];
   const agent = session.agents.find(agent => agent.id === ui.agent.value);
   for (const item of items) {
-    const before = seen.get(item.id);
-    if (notifications && before && before !== item.status && (attention.has(item.status) || ["completed","failed"].includes(item.status))) {
-      const options = {body: attention.has(item.status) ? "An agent needs your attention." : item.status === "completed" ? "An agent finished a task." : "An agent task failed.", tag: item.id};
-      if (notificationWorker) void notificationWorker.showNotification("Mivlet",options).catch(() => { notifications=false; });
-    }
-    seen.set(item.id, item.status);
     const card = element("article", undefined, "card");
     const heading = element("div", undefined, "agent-heading");
     const avatar = element("span", (agent?.name || "A").slice(0,1), "avatar");
@@ -182,17 +178,65 @@ ui.disconnect.addEventListener("click",async () => {
 ui.refresh.addEventListener("click",() => void refresh());
 ui.agent.addEventListener("change",() => { ++epoch; ui.result.hidden=true; void refresh(); });
 ui["close-result"].addEventListener("click",() => { ui.result.hidden=true; ui.refresh.focus(); });
-ui.notifications.hidden = !("Notification" in window) || !("serviceWorker" in navigator);
-ui.notifications.addEventListener("click",async () => {
+ui.notifications.hidden = !("Notification" in window) || !("serviceWorker" in navigator) || !("PushManager" in window);
+byId("notification-help").hidden = ui.notifications.hidden;
+function notificationLabel(failed = false) {
+  ui.notifications.textContent = notifications ? (failed ? "Delivery failed · Turn off notifications" : "Notifications on · Turn off") : "Notify when work changes";
+  ui.notifications.setAttribute("aria-pressed",String(notifications));
+}
+async function notificationStatus(version) {
+  if (ui.notifications.hidden) return;
+  const reading = notificationVersion;
   try {
-    const permission = await Notification.requestPermission();
-    if (permission === "granted") {
-      await navigator.serviceWorker.register("/remote/sw.js",{scope:"/remote"});
-      notificationWorker = await navigator.serviceWorker.ready;
-      notifications = true;
+    const state = await request("/remote/push");
+    if (version !== epoch || reading !== notificationVersion || !session) return;
+    notifications = state.enabled;
+    notificationLabel(state.deliveryFailed);
+  } catch { /* Local HTTP and unsupported services keep the explicit opt-in. */ }
+}
+async function pushWorker() {
+  await navigator.serviceWorker.register("/remote/sw.js",{scope:"/remote"});
+  let timeout;
+  try {
+    return await Promise.race([navigator.serviceWorker.ready,new Promise((_,reject) => { timeout=setTimeout(() => reject(new Error("The notification worker did not become ready. Try again.")),10000); })]);
+  } finally { clearTimeout(timeout); }
+}
+ui.notifications.addEventListener("click",async () => {
+  if (notificationBusy || !session) return;
+  notificationBusy = true;
+  ++notificationVersion;
+  ui.notifications.disabled = true;
+  const version = epoch;
+  try {
+    if (notifications) {
+      await request("/remote/push",{endpoint:null});
+      if (version !== epoch) return;
+      notifications = false;
+      notificationLabel();
+      return;
     }
-  } catch { notifications = false; }
-  ui.notifications.textContent = notifications ? "Notifications on while this view is active" : "Notifications unavailable";
+    const permission = await Notification.requestPermission();
+    if (permission !== "granted") throw new Error("Allow notifications in this browser before enabling them here.");
+    const state = await request("/remote/push");
+    const worker = await pushWorker();
+    if (version !== epoch || !session) return;
+    const key = Uint8Array.from(atob(state.publicKey.replace(/-/g,"+").replace(/_/g,"/")),character => character.charCodeAt(0));
+    if (key.length !== 65 || key[0] !== 4) throw new Error("The notification key is invalid.");
+    let subscription = await worker.pushManager.getSubscription();
+    const oldKey = subscription?.options.applicationServerKey;
+    if (subscription && (!oldKey || new Uint8Array(oldKey).some((value,index) => value !== key[index]) || oldKey.byteLength !== key.length)) {
+      await subscription.unsubscribe();
+      subscription = null;
+    }
+    subscription ??= await worker.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:key});
+    if (version !== epoch || !session) return;
+    await request("/remote/push",{endpoint:subscription.endpoint});
+    if (version !== epoch || !session) return;
+    notifications = true;
+    notificationLabel();
+    notice("Notifications are enabled while your computer stays awake and this browser's access is valid.");
+  } catch (error) { if (version === epoch) notice(error.message || "Notifications could not be enabled. Try again."); }
+  finally { notificationBusy=false; ui.notifications.disabled=false; }
 });
 document.addEventListener("visibilitychange",() => { if (!document.hidden) void refresh(); else clearTimeout(timer); });
 async function initialize() {
@@ -209,6 +253,7 @@ async function initialize() {
     lock(false);
     notice("");
     await refresh();
+    void notificationStatus(version);
   } catch { if (version === epoch) reset("Connect this browser to see the work you choose to share."); }
 }
 if (new URLSearchParams(location.search).has("connection")) { history.replaceState(null,"","/remote"); notice("Sign-in expired or was declined. Connect again when ready."); }
