@@ -103,27 +103,25 @@ pub(crate) fn registered(uri: &str) -> bool {
         )
 }
 pub(crate) fn navigation(expected: &str, uri: &str) -> Option<bool> {
-    let parsed = url::Url::parse(expected).ok()?;
-    let token = parsed
-        .host_str()?
-        .strip_prefix("mivlet-proof-")?
-        .strip_suffix(".localhost")?;
-    if token.len() != 48
-        || !token
-            .bytes()
-            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-    {
+    let probe = active().lock().ok().and_then(|probe| probe.clone())?;
+    probe_navigation(&probe, expected, uri)
+}
+fn probe_navigation(probe: &Probe, expected: &str, uri: &str) -> Option<bool> {
+    if crate::local_computer::live_preview::preview_origin(expected)? != probe.origin {
         return None;
     }
-    let Some(probe) = active().lock().ok().and_then(|probe| probe.clone()) else {
-        return Some(false);
-    };
     let baseline = format!("{}/baseline", probe.origin);
     let restricted = format!("{}/restricted", probe.origin);
     Some(
-        live(&probe)
-            && registered(expected)
-            && registered(uri)
+        live(probe)
+            && matches!(
+                expected.strip_prefix(&probe.origin),
+                Some("/baseline" | "/restricted")
+            )
+            && matches!(
+                uri.strip_prefix(&probe.origin),
+                Some("/baseline" | "/restricted")
+            )
             && ((expected == baseline
                 && uri == baseline
                 && probe.phase.load(Ordering::Acquire) == 0)
@@ -190,7 +188,7 @@ pub(crate) async fn verify(
             let probe = Arc::new(Probe {
                 attempt,
                 origin: format!(
-                    "http://mivlet-proof-{token}.localhost:{}",
+                    "http://{token}.mivlet-preview.localhost:{}",
                     listener
                         .local_addr()
                         .map_err(|_| "Native probe address is unavailable.")?
@@ -702,7 +700,7 @@ mod tests {
     fn probe() -> Probe {
         Probe {
             attempt: 4,
-            origin: format!("http://mivlet-proof-{}.localhost:12345", "a".repeat(48)),
+            origin: format!("http://{}.mivlet-preview.localhost:12345", "a".repeat(48)),
             frame_id: "frame".into(),
             baseline_nonce: "base-native-nonce".into(),
             restricted_nonce: "restricted-native-nonce".into(),
@@ -734,7 +732,23 @@ mod tests {
         assert!(host
             .split('.')
             .all(|label| !label.is_empty() && label.len() <= 63));
-        assert!(host.starts_with("mivlet-proof-"));
+        assert!(crate::local_computer::live_preview::preview_origin(&value.origin).is_some());
+        assert!(host.ends_with(".mivlet-preview.localhost"));
+    }
+    #[test]
+    fn proof_navigation_does_not_capture_another_preview_capability() {
+        let value = probe();
+        let baseline = format!("{}/baseline", value.origin);
+        let restricted = format!("{}/restricted", value.origin);
+        assert_eq!(probe_navigation(&value, &baseline, &restricted), Some(true));
+        let other = format!("http://{}.mivlet-preview.localhost:12345/", "b".repeat(48));
+        assert_eq!(probe_navigation(&value, &other, &other), None);
+        assert_eq!(probe_navigation(&value, &baseline, &other), Some(false));
+        value.cancel.store(true, Ordering::Release);
+        assert_eq!(
+            probe_navigation(&value, &baseline, &restricted),
+            Some(false)
+        );
     }
     #[test]
     fn canceled_callbacks_and_server_tail_cannot_change_a_new_attempt() {

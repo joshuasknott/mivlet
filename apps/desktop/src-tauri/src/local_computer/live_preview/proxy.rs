@@ -487,7 +487,8 @@ fn serve(mut socket: TcpStream, entry: Arc<Entry>) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const ORIGIN: &str = "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.localhost:41234";
+    const ORIGIN: &str =
+        "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234";
     #[test]
     fn host_origin_body_and_upgrade_are_exact_without_host_port_forwarding() {
         let valid=format!("GET /src/main.ts?version=1 HTTP/1.1\r\nHost: {}\r\nOrigin: {ORIGIN}\r\nAccept-Encoding: gzip\r\n\r\n",ORIGIN.trim_start_matches("http://"));

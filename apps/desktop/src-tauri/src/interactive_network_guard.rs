@@ -443,7 +443,7 @@ mod tests {
     }
     #[test]
     fn expired_native_preview_origin_cannot_be_reintroduced_as_an_ordinary_frame() {
-        let issued = "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.localhost:41234/";
+        let issued = "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234/";
         let mut frames = Frames::new();
         assert!(!allow(&mut frames, "new-preview", issued, false));
         frames.insert("retained".into(), issued.into());
@@ -454,5 +454,20 @@ mod tests {
             "http://127.0.0.1:1420/",
             false
         ));
+    }
+    #[test]
+    fn malformed_reserved_preview_hosts_cannot_become_ordinary_frames() {
+        for uri in [
+            "http://mivlet-preview.localhost:41234/",
+            "http://wrong.mivlet-preview.localhost:41234/",
+            "http://extra.aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234/",
+            "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost/",
+            "https://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234/",
+            "http://user@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.mivlet-preview.localhost:41234/",
+        ] {
+            assert!(!allow(&mut Frames::new(), "unregistered", uri, false));
+            let mut frames = Frames::from([("retained".into(), uri.into())]);
+            assert!(!allow(&mut frames, "retained", uri, false));
+        }
     }
 }
