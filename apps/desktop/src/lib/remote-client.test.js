@@ -1,6 +1,5 @@
-import {readFileSync} from "node:fs";
+import page from "../../src-tauri/src/mcp_server/remote/index.html?raw";
 import {afterEach,beforeEach,describe,expect,it,vi} from "vitest";
-const page=readFileSync(new URL("../../src-tauri/src/mcp_server/remote/index.html",import.meta.url),"utf8");
 const work={id:"task-1",agentId:"atlas",request:"<img src=x onerror=alert(1)>",status:"running",generation:1,updatedAt:"now",canControl:true};
 const replies={"/remote/session":{workspaceId:"default",access:"request-tasks",agents:[{id:"atlas",name:"Atlas"}]},"mivlet_work":{work:[work],truncated:false},"mivlet_request_task":work,"mivlet_stop_work":{...work,status:"cancelled"},"mivlet_read_work":{outputs:[{text:"Result text"}]}};
 let calls;
