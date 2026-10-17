@@ -20,8 +20,9 @@ job/generation, repository copy and frozen input-tree revision. A bounded native
 proxy accepts its own opaque `48hex.localhost` Host and Origin and forwards only
 through that executor stream. It never probes a host application port. Closing
 the view leaves the command running; Stop, account change, expiry and job closure
-invalidate transport. Foreground/background ownership must be returned to the
-desktop before this initial preview can be opened.
+invalidate transport. A background-owned job must be stopped, background execution
+turned off, and a new foreground-owned preview command started; running-job
+ownership cannot be transferred by opening this initial preview.
 
 The separate HTTP origin receives no Tauri IPC. Existing native child-frame
 navigation and pre-transmission Document guards, including paused out-of-process

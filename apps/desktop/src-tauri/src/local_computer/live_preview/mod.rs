@@ -306,7 +306,7 @@ pub async fn native_command_preview(
         let _handoff = crate::background_worker::commands::foreground_fence("command-output")?;
         if crate::background_worker::commands::should_route("command-output")? {
             return Err(
-                "Return the command session to the desktop before opening its live preview.".into(),
+                "This command is owned by background execution. Stop that exact job, turn off background execution, then start a new foreground-owned command with its approved preview port.".into(),
             );
         }
         let state = state.inner().clone();
