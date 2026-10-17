@@ -64,6 +64,7 @@ struct Inner {
     preview: Option<PreviewSpec>,
     cancel: Arc<AtomicBool>,
     writing: AtomicBool,
+    ready: AtomicBool,
     state: Mutex<State>,
 }
 #[derive(Clone)]
@@ -77,10 +78,7 @@ impl SessionControl {
         if self.0.binding != *binding || self.0.cancel.load(Ordering::Acquire) {
             return false;
         }
-        self.0
-            .state
-            .try_lock()
-            .is_ok_and(|state| !state.closed && state.input_id.is_some())
+        self.0.ready.load(Ordering::Acquire)
     }
     pub fn new(
         binding: Binding,
@@ -115,6 +113,7 @@ impl SessionControl {
             preview,
             cancel,
             writing: AtomicBool::new(false),
+            ready: AtomicBool::new(false),
             state: Mutex::new(State {
                 input_id: None,
                 closed: false,
@@ -237,6 +236,7 @@ impl SessionControl {
         }
     }
     pub(crate) fn close(&self) {
+        self.0.ready.store(false, Ordering::Release);
         if let Ok(mut state) = self.0.state.lock() {
             state.closed = true;
             #[cfg(windows)]
@@ -265,6 +265,7 @@ impl SessionControl {
         }
         state.input_id = Some(input_id.to_owned());
         state.endpoint = Some(endpoint);
+        self.0.ready.store(true, Ordering::Release);
         Ok(())
     }
 }
