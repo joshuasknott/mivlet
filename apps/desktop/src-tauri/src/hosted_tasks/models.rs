@@ -13,6 +13,8 @@ pub(crate) struct Budget {
     pub max_page_reads: Option<u8>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_source_bytes: Option<usize>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_tool_calls: Option<u8>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -22,6 +24,8 @@ pub(crate) struct Binding {
     pub mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_scope: Option<PublicWebScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repository: Option<CodingRepository>,
     pub task_id: String,
     pub admission_id: String,
     pub run_id: String,
@@ -80,6 +84,8 @@ pub(crate) struct TaskSnapshot {
     pub retained_until: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub research: Option<PublicWebProgress>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub coding: Option<CodingProgress>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
@@ -123,6 +129,60 @@ pub(crate) struct Prepare {
     pub mode: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub web_scope: Option<PublicWebScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub selected_paths: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub writable_paths: Option<Vec<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub checks: Option<Vec<CodingCheck>>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodingCheck {
+    pub id: String,
+    pub argv: Vec<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodingScope {
+    pub writable_paths: Vec<String>,
+    pub checks: Vec<CodingCheck>,
+    pub image: String,
+    pub network: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodingRepository {
+    pub snapshot: crate::local_computer::coding::hosted_repository::Snapshot,
+    pub scope: CodingScope,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodingProposal {
+    pub tool: String,
+    pub arguments: String,
+    pub arguments_sha256: String,
+    pub reason: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodingCheckReceipt {
+    pub id: String,
+    pub candidate_sha256: String,
+    pub exit_code: i32,
+    pub output_sha256: String,
+    pub truncated: bool,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct CodingProgress {
+    pub model_calls: u8,
+    pub tool_calls: u8,
+    pub allocated_output_tokens: u32,
+    pub completed_checks: Vec<CodingCheckReceipt>,
+    pub output: crate::local_computer::coding::hosted_repository::OutputManifest,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub proposal: Option<CodingProposal>,
 }
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
