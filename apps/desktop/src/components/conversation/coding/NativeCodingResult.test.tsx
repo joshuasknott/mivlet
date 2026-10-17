@@ -1,0 +1,42 @@
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { NativeCodingResult } from "./NativeCodingResult";
+import { listNativeCommandJobs } from "../../../runtime/domains/command-jobs";
+import { loadRuntimeLocalComputer } from "../../../runtime/domains/local-computer";
+vi.mock("../../../runtime/domains/command-jobs", () => ({ listNativeCommandJobs: vi.fn(), stopNativeCommandJob: vi.fn() }));
+vi.mock("../../../runtime/domains/local-computer", () => ({ loadRuntimeLocalComputer: vi.fn() }));
+vi.mock("./CodingTerminal", () => ({ CodingTerminal: ({ target }: { target: { jobId: string } }) => <p>Verified terminal {target.jobId}</p> }));
+vi.mock("./CodingPreview", () => ({ CodingPreview: () => <p>Verified preview</p> }));
+vi.mock("./CodingResultTabs", () => ({ CodingResultTabs: ({ terminal, preview }: { terminal: React.ReactNode; preview: React.ReactNode }) => <>{terminal}{preview}</> }));
+const id = "a".repeat(48);
+const props = { workspaceId: "workspace", agentId: "agent", jobId: id, jobGeneration: 4 };
+beforeEach(() => {
+  vi.mocked(loadRuntimeLocalComputer).mockResolvedValue({ workspaceId: "workspace", agentId: "agent", generation: 4 } as never);
+  vi.mocked(listNativeCommandJobs).mockResolvedValue({ jobs: [{ id, generation: 4, status: "running", repositoryId: "repo", previewPort: 4173 }] } as never);
+});
+afterEach(() => { cleanup(); vi.clearAllMocks(); });
+it("opens controls only after deliberate reconnect and exact scoped native verification", async () => {
+  render(<NativeCodingResult {...props} onDraft={vi.fn()} />);
+  expect(loadRuntimeLocalComputer).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Open native session" }));
+  await screen.findByText(`Verified terminal ${id}`);
+  expect(listNativeCommandJobs).toHaveBeenCalledWith({ workspaceId: "workspace", agentId: "agent", expectedGeneration: 4 });
+  expect(screen.getByText("Verified preview")).toBeTruthy();
+});
+it("refuses a receipt whose generation does not match native history", async () => {
+  vi.mocked(listNativeCommandJobs).mockResolvedValue({ jobs: [{ id, generation: 9 }] } as never);
+  render(<NativeCodingResult {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open native session" }));
+  await screen.findByText(/unavailable in this agent's scope/);
+  expect(screen.queryByText(`Verified terminal ${id}`)).toBeNull();
+});
+it("ignores a late scope lookup when the result closes", async () => {
+  let finish!: (value: never) => void;
+  vi.mocked(loadRuntimeLocalComputer).mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  render(<NativeCodingResult {...props} />);
+  fireEvent.click(screen.getByRole("button", { name: "Open native session" }));
+  await waitFor(() => expect(loadRuntimeLocalComputer).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "Hide native session" }));
+  await act(async () => finish({ workspaceId: "workspace", agentId: "agent", generation: 4 } as never));
+  expect(screen.queryByText(`Verified terminal ${id}`)).toBeNull();
+});

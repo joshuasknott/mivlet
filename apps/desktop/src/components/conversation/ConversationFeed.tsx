@@ -726,6 +726,7 @@ const Turn = memo(function Turn({
                     cancelled={cancelled}
                     onOpenConnector={props.onOpenConnector}
                     workspaceId={props.workspaceId}
+                    agentId={props.agent.id}
                     conversationId={props.threadId ?? turn.id}
                     generation={props.appGeneration}
                     isCurrent={() => props.isMcpRunCurrent?.(turn.id) !== false}
@@ -802,6 +803,7 @@ const Turn = memo(function Turn({
             part={part}
             running={false}
             workspaceId={props.workspaceId}
+            agentId={props.agent.id}
             conversationId={props.threadId ?? turn.id}
             generation={props.appGeneration}
             isCurrent={() => props.isMcpRunCurrent?.(turn.id) !== false}
