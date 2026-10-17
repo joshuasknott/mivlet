@@ -676,22 +676,74 @@ pub(crate) fn stop(
     app: &tauri::AppHandle,
     ticket: &OperationTicket,
     request: &Target,
-) -> std::result::Result<Offer, String> {
+) -> std::result::Result<(ControlResult, Option<Target>), String> {
     context(app, &request.workspace_id, Some(ticket), |ctx| {
-        let item = target(ctx, request)?;
-        let offer = offer(ctx, &item)?;
-        if item.execution_owner.as_deref() != Some("hosted") {
-            return Err(invalid("This request has no admitted cloud owner."));
-        }
-        if item
-            .hosted_task
-            .as_ref()
-            .is_none_or(|h| h.phase != "stop-pending")
-        {
-            work::invalidate_descendants(ctx, &item.id, "Cloud Stop requested. Local writes are fenced now; remote cancellation is pending until acknowledged.", WorkStatus::Cancelled)?;
-        }
-        Ok(offer)
+        stop_at(ctx, request)
     })
+}
+fn stop_at(ctx: &Context<'_>, request: &Target) -> Result<(ControlResult, Option<Target>)> {
+    let item = target(ctx, request)?;
+    let saved = offer(ctx, &item)?;
+    let cloud = item
+        .hosted_task
+        .as_ref()
+        .ok_or_else(|| invalid("This request has no cloud review or admitted owner."))?;
+    if item.execution_owner.is_none()
+        && item.status == WorkStatus::Queued
+        && item.current_run_id.is_none()
+        && item.queue.as_ref().is_some_and(|queue| queue.held)
+        && cloud.phase == "review"
+        && cloud.review_id.as_deref() == Some(&saved.review_id)
+        && saved.work_generation == item.generation
+        && cloud.binding == saved.admission.binding
+    {
+        // Serialized with claim_at in the canonical Store. If Stop wins,
+        // the old approved target cannot claim or register an egress gate.
+        work::invalidate_descendants(
+            ctx,
+            &item.id,
+            "Stopped before cloud admission. This saved review cannot send a later task request.",
+            WorkStatus::Cancelled,
+        )?;
+        let mut stopped = ctx.item(&item.id)?;
+        stopped.hosted_task = None;
+        ctx.work(&stopped)?;
+        return Ok((
+            ControlResult {
+                collaboration: ctx.snapshot()?,
+                task_result: None,
+                reconcile_required: false,
+            },
+            None,
+        ));
+    }
+    if item.execution_owner.as_deref() != Some("hosted") {
+        return Err(invalid(
+            "This request has no current cloud review or admitted owner.",
+        ));
+    }
+    if cloud.phase != "stop-pending" && cloud.phase != "reconciled" {
+        work::invalidate_descendants(ctx, &item.id, "Cloud Stop requested. Local writes are fenced now; remote cancellation is pending until acknowledged.", WorkStatus::Cancelled)?;
+    }
+    let stopped = ctx.item(&item.id)?;
+    let pending = stopped
+        .hosted_task
+        .as_ref()
+        .filter(|h| h.phase == "stop-pending")
+        .map(|_| Target {
+            workspace_id: stopped.workspace_id.clone(),
+            agent_id: stopped.agent_id.clone(),
+            work_id: stopped.id.clone(),
+            expected_generation: stopped.generation,
+        });
+    Ok((
+        ControlResult {
+            collaboration: ctx.snapshot()?,
+            task_result: saved.result,
+            reconcile_required: cloud.phase == "reconcile-required",
+        },
+        pending,
+    ))
 }
 pub(crate) fn pending(app: &tauri::AppHandle) -> std::result::Result<Vec<Target>, String> {
     context(

@@ -139,7 +139,9 @@ fn native_claim_owns_one_existing_work_and_stop_rejects_its_late_conversation_wr
             head.last_message_id,
             saved.admission.binding.expected_head_id
         );
-        work::invalidate_descendants(ctx, &item.id, "Stop fixture", WorkStatus::Cancelled)?;
+        let (_, pending) = stop_at(ctx, &target)?;
+        assert_eq!(pending.unwrap().expected_generation, item.generation + 1);
+        assert!(cloud::dispatch::with_current(&saved.admission.binding, || Ok(())).is_err());
         let stopped = ctx.item(&item.id)?;
         assert_eq!(stopped.hosted_task.as_ref().unwrap().phase, "stop-pending");
         assert!(super::super::ensure_run_current(
@@ -148,6 +150,55 @@ fn native_claim_owns_one_existing_work_and_stop_rejects_its_late_conversation_wr
             Some(&saved.admission.binding.run_id)
         )
         .is_err());
+        Ok(())
+    });
+}
+#[test]
+fn stop_before_claim_cancels_review_and_prevents_the_delayed_approved_dispatch() {
+    fixture(&store(), |ctx| {
+        let (request, scope, connections) = start(ctx)?;
+        let review = prepare_at(
+            ctx,
+            &request,
+            &scope,
+            4,
+            "https://tasks.example.test",
+            &connections,
+            None,
+        )?;
+        let target = Target {
+            expected_generation: review.work_generation,
+            ..request.target()
+        };
+        // Pause the approved admission at the same boundary as production:
+        // its sole approval consumer retained cleanup but has not claimed Work.
+        let _dispatch = cloud::dispatch::AdmissionGuard::retain(&review.admission.binding);
+        let (stopped, remote) = stop_at(ctx, &target)?;
+        assert!(remote.is_none());
+        assert!(!stopped.reconcile_required);
+        let saved = ctx.item(&target.work_id)?;
+        assert_eq!(saved.status, WorkStatus::Cancelled);
+        assert_eq!(saved.generation, target.expected_generation + 1);
+        assert!(saved.hosted_task.is_none());
+        assert!(saved.execution_owner.is_none());
+        assert!(!queue::dispatchable(&saved, &ctx.all_work()?));
+        let mut sends = 0;
+        if let Ok(offer) = claim_at(ctx, &target, &review.review_id) {
+            cloud::dispatch::with_current(&offer.admission.binding, || {
+                sends += 1;
+                Ok(())
+            })
+            .unwrap();
+        }
+        assert_eq!(sends, 0);
+        assert!(cloud::dispatch::with_current(&review.admission.binding, || Ok(())).is_err());
+        assert!(execution_attempt::get_scoped(
+            ctx.conn,
+            ctx.store,
+            &ctx.scope.data,
+            &review.admission.binding.run_id
+        )?
+        .is_none());
         Ok(())
     });
 }
