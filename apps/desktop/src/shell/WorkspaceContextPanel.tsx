@@ -47,6 +47,7 @@ const WorkspaceMemories = lazy(() =>
 
 export function WorkspaceContextPanel({
   hidden,
+  onReveal,
   nav,
   runtime,
   service,
@@ -55,6 +56,7 @@ export function WorkspaceContextPanel({
   renderConversation,
 }: {
   hidden: boolean;
+  onReveal?: () => void;
   nav: WorkspaceNavigation;
   runtime: ShellRuntime;
   service: WorkspaceExecution;
@@ -121,6 +123,8 @@ export function WorkspaceContextPanel({
         setBrowsing({ identity, scope: next });
       }}
       open={!hidden && (nav.contextOpen || Boolean(nav.computer))}
+      replaced={hidden}
+      onOpen={() => { onReveal?.(); nav.setContextOpen(true); }}
       onClose={() => {
         nav.setComputer(null);
         nav.setContextOpen(false);
@@ -255,6 +259,16 @@ export function WorkspaceContextPanel({
             room={room}
             runtime={runtime}
             scope={scope}
+            sourceIds={runtime.workspaceKnowledgeSources.map((source) => source.id)}
+            onOpenSource={(sourceId) => {
+              const source = runtime.workspaceKnowledgeSources.find((entry) => entry.id === sourceId);
+              if (source) nav.setPanelRequest({
+                id: "memory-source:" + sourceId,
+                kind: "file",
+                title: source.title,
+                target: { type: "knowledge-file", workspaceId, sourceId },
+              });
+            }}
           />
         </Suspense>
       }

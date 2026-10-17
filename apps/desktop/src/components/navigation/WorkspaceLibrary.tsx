@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, useState, type ReactNode } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
 import { useQuery } from "@tanstack/react-query";
 import type {
   CollaborationWorkItem,
@@ -7,7 +14,6 @@ import type {
   LocalProject,
   MivletAgentProfile,
 } from "@mivlet/protocol";
-import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { MagnifyingGlass } from "@phosphor-icons/react/dist/csr/MagnifyingGlass";
 import { useWorkspaceLocalFiles } from "../../hooks/useWorkspaceLocalFiles";
 import { NativeExecutionSetup } from "./NativeExecutionSetup";
@@ -15,10 +21,15 @@ import { NativeCommandJobs } from "./NativeCommandJobs";
 import { listRuntimeOutputs } from "../../runtime/domains/outputs";
 import { subscribeOutputPinned } from "../../lib/output-revision-events";
 import { PanelFileRow } from "./PanelFileRow";
+import { PanelPagination } from "./PanelPagination";
 import { panelFiles, type PanelFile } from "./workspace-panel-data";
 import type { RightPanelTab } from "./right-panel-state";
 
-const RepositoryFiles = lazy(() => import("./RepositoryFiles").then((module) => ({ default: module.RepositoryFiles })));
+const RepositoryFiles = lazy(() =>
+  import("./RepositoryFiles").then((module) => ({
+    default: module.RepositoryFiles,
+  })),
+);
 
 export function WorkspaceLibrary({
   workspaceId,
@@ -43,17 +54,28 @@ export function WorkspaceLibrary({
 }) {
   const [query, setQuery] = useState("");
   const [origin, setOrigin] = useState("all");
-  const [limit, setLimit] = useState(40);
+  const [page, setPage] = useState(0);
+  const [workingPage, setWorkingPage] = useState(0);
+  const region = useRef<HTMLElement>(null);
+  const pageSize = 24;
   const [technical, setTechnical] = useState(false);
   const pinned = useQuery({
     queryKey: ["workspace-pinned-outputs", workspaceId],
     enabled: Boolean(workspaceId),
     retry: false,
-    queryFn: () => listRuntimeOutputs({ includeUnpinned: false, expectedWorkspaceId: workspaceId }),
+    queryFn: () =>
+      listRuntimeOutputs({
+        includeUnpinned: false,
+        expectedWorkspaceId: workspaceId,
+      }),
   });
-  useEffect(() => subscribeOutputPinned((event) => {
-    if (event.workspaceId === workspaceId) void pinned.refetch();
-  }), [workspaceId, pinned.refetch]);
+  useEffect(
+    () =>
+      subscribeOutputPinned((event) => {
+        if (event.workspaceId === workspaceId) void pinned.refetch();
+      }),
+    [workspaceId, pinned.refetch],
+  );
   const scopedFiles =
     suppliedFiles ??
     panelFiles({
@@ -65,17 +87,33 @@ export function WorkspaceLibrary({
       project,
       sources,
     });
-  const files: PanelFile[] = [...scopedFiles, ...(pinned.data ?? []).map((output) => ({
-    id: "pinned:" + output.id, title: output.title, detail: "Pinned output", origin: "created" as const,
-    updatedAt: output.updatedAt, tab: { id: "output:" + output.id, kind: "output" as const, title: output.title, outputId: output.id },
-  }))];
+  const files: PanelFile[] = [
+    ...scopedFiles,
+    ...(pinned.data ?? []).map((output) => ({
+      id: "pinned:" + output.id,
+      title: output.title,
+      detail: "Pinned output",
+      origin: "created" as const,
+      updatedAt: output.updatedAt,
+      tab: {
+        id: "output:" + output.id,
+        kind: "output" as const,
+        title: output.title,
+        outputId: output.id,
+      },
+    })),
+  ];
   const search = query.trim().toLowerCase();
   const filtered = files.filter(
     (file) =>
       (origin === "all" || file.origin === origin) &&
       (file.title + " " + file.detail).toLowerCase().includes(search),
   );
-  const listing = useWorkspaceLocalFiles(workspaceId, technical ? agents.map(agent => agent.id) : [], work);
+  const listing = useWorkspaceLocalFiles(
+    workspaceId,
+    technical ? agents.map((agent) => agent.id) : [],
+    work,
+  );
   const workingFiles = (listing.data ?? []).flatMap(({ agentId, snapshot }) =>
     (snapshot?.entries ?? [])
       .filter((file) => file.kind === "file")
@@ -84,54 +122,70 @@ export function WorkspaceLibrary({
   const visibleWorkingFiles = workingFiles.filter((file) =>
     (file.name + " " + file.path).toLowerCase().includes(search),
   );
+  const currentPage = Math.min(
+    page,
+    Math.max(0, Math.ceil(filtered.length / pageSize) - 1),
+  );
+  const currentWorkingPage = Math.min(
+    workingPage,
+    Math.max(0, Math.ceil(visibleWorkingFiles.length / pageSize) - 1),
+  );
   return (
-    <section className="workspace-library" aria-label="Files">
-      <header className="workspace-library__heading">
-        <h2>Files</h2>
-        {addFiles}
-      </header>
-      <label className="workspace-library__search">
-        <MagnifyingGlass size={17} aria-hidden="true" />
-        <input
-          type="search"
-          aria-label="Search files"
-          placeholder="Search files"
-          value={query}
-          onChange={(event) => {
-            setQuery(event.target.value);
-            setLimit(40);
-          }}
-        />
-      </label>
-      {files.length > 0 && (
-        <div className="workspace-library__filters">
-          <select
-            aria-label="File collection"
-            value={origin}
-            onChange={(event) => {
-              setOrigin(event.target.value);
-              setLimit(40);
-            }}
-          >
-            <option value="all">All files</option>
-            <option value="created">Created here</option>
-            <option value="attached">Added to chat</option>
-            <option value="shared">Shared with agent</option>
-          </select>
-          <span>
-            {filtered.length} {filtered.length === 1 ? "file" : "files"}
-          </span>
+    <section ref={region} className="workspace-library" aria-label="Files">
+      <div className="panel-collection__controls">
+        <header className="workspace-library__heading">
+          <h2>Files</h2>
+        </header>
+        <div className="workspace-library__toolbar">
+          <label className="workspace-library__search">
+            <MagnifyingGlass size={17} aria-hidden="true" />
+            <input
+              type="search"
+              aria-label="Search files"
+              placeholder="Search files"
+              value={query}
+              onChange={(event) => {
+                setQuery(event.target.value);
+                setPage(0);
+                setWorkingPage(0);
+              }}
+            />
+          </label>
+          {addFiles}
         </div>
-      )}
+        {files.length > 0 && (
+          <div className="workspace-library__filters">
+            <select
+              aria-label="File collection"
+              value={origin}
+              onChange={(event) => {
+                setOrigin(event.target.value);
+                setPage(0);
+                setWorkingPage(0);
+              }}
+            >
+              <option value="all">All files</option>
+              <option value="created">Created here</option>
+              <option value="attached">Added to chat</option>
+              <option value="shared">Shared with agent</option>
+            </select>
+            <span>
+              {filtered.length} {filtered.length === 1 ? "file" : "files"}
+            </span>
+          </div>
+        )}
+      </div>
       <div className="workspace-library__cards">
-        {filtered.slice(0, limit).map((file) => (
-          <PanelFileRow
-            key={file.id}
-            workspaceId={workspaceId}
-            file={file}
-            onOpen={onOpen}
-          />
-        ))}
+        {filtered
+          .slice(currentPage * pageSize, (currentPage + 1) * pageSize)
+          .map((file) => (
+            <PanelFileRow
+              key={file.id}
+              workspaceId={workspaceId}
+              file={file}
+              onOpen={onOpen}
+            />
+          ))}
       </div>
       {!filtered.length && (
         <p className="right-panel__empty">
@@ -140,15 +194,16 @@ export function WorkspaceLibrary({
             : "Files shared or created here will appear here."}
         </p>
       )}
-      {filtered.length > limit && (
-        <button
-          type="button"
-          className="workspace-panel__link"
-          onClick={() => setLimit((value) => value + 40)}
-        >
-          Show more files ({filtered.length - limit})
-        </button>
-      )}
+      <PanelPagination
+        total={filtered.length}
+        page={currentPage}
+        pageSize={pageSize}
+        label="Files"
+        onChange={(next) => {
+          setPage(next);
+          if (region.current) region.current.scrollTop = 0;
+        }}
+      />
       <details
         className="workspace-library__technical"
         onToggle={(event) => setTechnical(event.currentTarget.open)}
@@ -172,45 +227,47 @@ export function WorkspaceLibrary({
                 </p>
               ))}
             <div className="workspace-library__cards">
-              {visibleWorkingFiles.slice(0, limit).map((file) => (
-                <button
-                  type="button"
-                  className="workspace-library__card"
-                  key={file.agentId + ":" + file.path}
-                  onClick={() =>
-                    onOpen({
+              {visibleWorkingFiles
+                .slice(
+                  currentWorkingPage * pageSize,
+                  (currentWorkingPage + 1) * pageSize,
+                )
+                .map((file) => (
+                  <PanelFileRow
+                    key={file.agentId + ":" + file.path}
+                    workspaceId={workspaceId}
+                    onOpen={onOpen}
+                    file={{
                       id: "library:" + file.agentId + ":" + file.path,
-                      kind: "file",
                       title: file.name,
-                      target: {
-                        type: "artifact",
-                        workspaceId,
-                        agentId: file.agentId,
-                        relativePath: file.path,
+                      detail:
+                        agents.find((agent) => agent.id === file.agentId)
+                          ?.name ?? "Agent workspace",
+                      origin: "created",
+                      updatedAt: "",
+                      tab: {
+                        id: "library:" + file.agentId + ":" + file.path,
+                        kind: "file",
                         title: file.name,
+                        target: {
+                          type: "artifact",
+                          workspaceId,
+                          agentId: file.agentId,
+                          relativePath: file.path,
+                          title: file.name,
+                        },
                       },
-                    })
-                  }
-                >
-                  <FileText size={21} aria-hidden="true" />
-                  <span className="workspace-library__detail">
-                    <strong>{file.name}</strong>
-                    <small>
-                      {agents.find((agent) => agent.id === file.agentId)?.name}
-                    </small>
-                  </span>
-                </button>
-              ))}
+                    }}
+                  />
+                ))}
             </div>
-            {visibleWorkingFiles.length > limit && (
-              <button
-                type="button"
-                className="workspace-panel__link"
-                onClick={() => setLimit((value) => value + 40)}
-              >
-                Show more agent files
-              </button>
-            )}
+            <PanelPagination
+              total={visibleWorkingFiles.length}
+              page={currentWorkingPage}
+              pageSize={pageSize}
+              label="Agent files"
+              onChange={setWorkingPage}
+            />
             {!listing.isFetching &&
               !listing.data?.some((result) => result.error) &&
               !visibleWorkingFiles.length && (

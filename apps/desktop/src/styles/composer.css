@@ -1,13 +1,4 @@
-/*
- * Universal composer: a Codex-inspired horizontal input framed by a Google AI
- * Studio-style gradient ring. Controls run left-to-right along a single row:
- *   [+] attach · [gear] connectors & commands · [shield] permissions
- *                                        [mic] voice · [send]
- * Upward-opening menus surface plugin + command pickers and a permissions view.
- */
-
-/* Gradient halo wrapper — a subtle, muted ring (sage / slate / warm) rather
- * than Google AI Studio's saturated rainbow. */
+/* Shared writing surface and upward-opening conversation controls. */
 .composer-glow {
   position: relative;
   width: min(100%, 1040px);
@@ -126,8 +117,7 @@
   box-shadow: none;
 }
 
-/* The card itself — solid off-white surface that masks everything but the
- * gradient ring at the padded edge. */
+/* The writing field grows above the persistent control row. */
 .composer {
   position: relative;
   display: flex;

@@ -407,40 +407,71 @@ The obsolete History and Project WorkItems implementations have been removed.
 
 ### Provider usage and reset continuation
 
-The account Usage view shows only connected account providers and their reported
-subscription windows, with percent used and reported reset times. API-key and
-custom routes are excluded. Missing measurements remain unavailable; stale
-measurements are explicitly marked. Its Settings link opens Usage breakdowns,
-where token, model, cost and attempt details remain available.
+Usage is one destination from the account menu and Settings, with Cost, Tokens
+and Limits views. The account menu opens Limits first; history and its styles
+load only when opened. Limits shows connected account providers and their
+reported subscription windows, percent used and reset times. API-key and custom
+routes are excluded. Stale readings remain visible while independent checks
+finish. Opening Limits refreshes absent or stale data with a five-minute cooldown
+after a completed check, including failures. Renderer deadlines do not duplicate
+native work. Account, workspace, connection revision and component generations
+fence delayed results. The composer performs no usage polling.
 
-Usage breakdowns are a derived view of the canonical encrypted attempt ledger, covering the
-last 30 days including partial failed and interrupted attempts. It adds no
-conversation or output store. Repeated streaming frames replace the current
-provider turn's snapshot; distinct tool turns accumulate within that attempt.
-Cached reads are included in input, cache writes are additive, and reasoning is
-included in output. Missing categories remain unknown. Provider-reported amounts,
-API-equivalent estimates and unpriced attempts stay separate. OpenRouter's
-documented response `usage.cost` is provider-reported; Claude/OpenCode SDK prices
-are estimates. Optional user-entered rates require an exact model, HTTPS source,
-observation date and separate nonzero cache-category rates.
-The ordinary embedded API host observes usage in the existing native response
-stream and passes the same bytes/headers to its SDK. This observer keeps partial
-receipts before failure, replaces per-call snapshots and deduplicates completed
-steps; older unsupported wire data can retain SDK token measurements with unknown
-cost. It does not add a remote call, buffer entire responses or collect transcripts.
+History derives from the canonical encrypted attempt ledger over 24 hours, 7,
+30 or 90 days, including partial failed and interrupted attempts. It adds no
+conversation or output store. Local calendar boundaries are validated UTC
+instants, including 23/25-hour days across daylight-saving changes. New receipts
+retain their observation time across later recovery/status writes; legacy
+receipts fall back to the saved attempt timestamp. Repeated streaming frames
+replace a provider turn's snapshot; distinct tool turns accumulate. Cached reads
+are included in input, cache writes are additive, and reasoning is already in
+output. Missing categories remain unknown. Provider-reported amounts,
+API-equivalent estimates and unpriced attempts stay separate, including measured
+zero. OpenRouter's documented `usage.cost` is provider-reported; Claude/OpenCode
+SDK costs are estimates.
 
-The model-picker entry reads only cached allowance, and full history aggregation
-is lazy. Each provider refresh is independent, retaining stale saved measurements
-when collection fails. The native probe launches only the account-owned managed
-Codex app-server (`account/read`, `account/rateLimits/read`) or Claude SDK
-(`get_usage` control request); it submits no user prompt. Personal CLI profiles,
-auth files and transcripts are never searched. Unknown protocol/runtime support
-or unsupported routes report unavailable. Codex preserves provider-reported
-bucket durations and optional reset dates; Claude's supported five-hour, weekly
-and model-scoped windows are normalized to UTC. Measurements expire after five
-minutes and reconnect/account changes invalidate their authority. Identity is an
-opaque native hash; where no stable provider account ID is reported, the UI says
-that only the managed connection is identified.
+Public exact-model standard API rates come from the
+[LiteLLM catalogue](https://github.com/BerriAI/litellm/blob/main/model_prices_and_context_window.json).
+The native credential-free request sends no account data or model history,
+follows no redirects, and has byte/time limits. It runs when history opens, at
+most daily after success or once per five minutes after failure. Cached prices
+remain usable for seven days with explicit freshness, then expire. Automatic
+pricing requires exact vendor/model identity, measured cache categories and a
+recorded standard request tier. New renderer-owned receipts retain that tier;
+legacy/background receipts without it and speed premiums need an override.
+Ambiguous model families, missing category rates and uncertain context tiers
+remain unpriced. User overrides require an exact model, HTTPS source, observation
+date and separate cache-category rates (zero is explicit). They replace automatic
+and SDK estimates, can be reset, and never replace a provider-reported amount.
+Inline streaming cost may remain unknown until this lazy projection applies a
+price; it never guesses provider-wide rates.
+
+External Codex and Claude activity can be imported through a native JSONL file
+picker. This is a one-shot read with no default paths, folder discovery, auth-file
+access or background scanning. Mivlet's own data directory is excluded. Only
+hashed receipt identities, model IDs, timestamps and token/cost measurements are
+retained in encrypted workspace preferences; conversation text and paths never
+enter React or saved imports. Repeated Codex cumulative boundaries and Claude
+message snapshots count once across files and reimports. Forked Codex history
+and records without stable identities are excluded. Imports are bounded to 64
+files, 32 MiB per file, 128 MiB per selection, 20 seconds of reading and 20,000
+receipts. Excluded input is reported as partial coverage. Imported history has
+its own source selection and is never added to Mivlet totals, where cross-source
+identity cannot be proven. Removing imports leaves original files and Mivlet
+attempts intact.
+
+Allowance probes launch only the account-owned managed Codex app-server
+(`account/read`, `account/rateLimits/read`) or Claude SDK (`get_usage` control
+request); they submit no user prompt. Personal CLI profiles and auth files are
+never searched. Unknown runtime/protocol support reports unavailable. Codex
+retains bucket durations and optional reset dates; Claude's five-hour, weekly
+and model-scoped windows normalize to UTC. Readings expire after five minutes.
+Identity is an opaque native hash; missing provider account IDs identify only
+the managed connection. There is one managed connection per provider, so Limits
+does not claim multi-account pooling. Cursor, Grok and OpenCode routes remain
+gated on verified Mivlet account isolation and cannot supply limits. Antigravity's
+managed ACP route has no Mivlet quota adapter. No personal CLI token or
+undocumented account dashboard endpoint is used to work around these boundaries.
 
 After a native typed provider limit failure, the user can request one continuation
 for an exact exhausted allowance/reset opportunity and reconcile prior effects.
@@ -460,6 +491,11 @@ reset recovery, plus PRs [15108](https://github.com/pingdotgg/t3code/pull/15108)
 (warm cached data), [16970](https://github.com/pingdotgg/t3code/pull/16970)
 (provider filtering), and [17147](https://github.com/pingdotgg/t3code/pull/17147)
 (independent loading). Mivlet retains its own native custody and Work authority.
+Consolidated views, date ranges, source coverage and automatic pricing also
+reference [T3's usage implementation at `6cecd227`](https://github.com/pingdotgg/t3code/blob/6cecd22789f11fd325933a5d8859d6c09d6e7261/docs/user/usage.md),
+including its pricing, transcript readers and limit adapters. Mivlet keeps its
+existing account boundary and narrower native source support. T3 environment/hub
+management and reset-credit redemption are not implemented.
 Protocol sources: [Codex app-server](https://learn.chatgpt.com/docs/app-server)
 and [OpenRouter usage accounting](https://openrouter.ai/docs/cookbook/administration/usage-accounting).
 Fixture tests establish parsing, storage and admission fences; authenticated

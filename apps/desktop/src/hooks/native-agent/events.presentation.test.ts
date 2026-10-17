@@ -73,6 +73,16 @@ describe("native stream text presentation", () => {
     vi.clearAllTimers();
     vi.useRealTimers();
   });
+  it("retains the admitted pricing tier on the latest partial receipt after failure", async () => {
+    const h = harness(); h.session.pricingTier = "priority";
+    await consumeNativeAgentEvents(stream([
+      { type: "usage", inputTokens: 40, outputTokens: 5, costUsd: 0, costUnknown: true },
+      { type: "usage", inputTokens: 50, outputTokens: 7, costUsd: 0, costUnknown: true },
+      { type: "error", message: "Interrupted fixture stream" },
+    ]), h.session);
+    expect(h.session.persisted.usage).toMatchObject({ inputTokens: 50, outputTokens: 7, pricingTier: "priority", costUnknown: true });
+    expect(h.save.mock.lastCall?.[0].usage).toEqual(h.session.persisted.usage);
+  });
 
   it("coalesces 100 deltas into one screen update while preserving every canonical checkpoint", async () => {
     const h = harness();

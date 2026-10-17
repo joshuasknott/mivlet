@@ -1,14 +1,17 @@
 import "@testing-library/jest-dom/vitest";
-import { useState } from "react";
-import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BackendProvider, ProviderAllowance } from "@mivlet/protocol";
 import { listBackendProviders } from "@mivlet/connectors/backends/registry";
 import { AccountDialog } from "../agents/AccountDialog";
-import { SettingsPage } from "../pages/SettingsPage";
-import { SettingsModal } from "../settings/SettingsModal";
-import type { SettingsRuntime } from "../settings/settings-runtime";
 import { connectedSubscriptions, SubscriptionUsage } from "./SubscriptionUsage";
 import { listRuntimeBackends } from "../../runtime/domains/providers";
 import {
@@ -59,9 +62,68 @@ beforeEach(() => {
 });
 
 describe("connected subscription usage", () => {
+  it("keeps account scope and measurement freshness inspectable without exposing opaque identity", async () => {
+    const report = {
+      ...allowance("codex"),
+      identity: "private-account-hash",
+    };
+    vi.mocked(readProviderAllowance).mockResolvedValue(report);
+    render(<SubscriptionUsage providers={[codex]} />);
+    await screen.findByRole("progressbar");
+    expect(screen.queryByText(report.identity)).toBeNull();
+    const details = screen.getByText("Measurement details");
+    expect(details.parentElement).not.toHaveAttribute("open");
+    fireEvent.click(details);
+    expect(
+      screen.getByText(
+        "This managed connection; provider account identity unavailable",
+      ),
+    ).toBeVisible();
+    expect(screen.getByText("Last checked")).toBeVisible();
+    expect(
+      screen.getAllByText(new Date(report.checkedAt).toLocaleString()),
+    ).toHaveLength(2);
+  });
+  it("shows a stale cache immediately, automatically refreshes it, and respects failed-check cooldown", async () => {
+    let complete!: (value: ProviderAllowance) => void;
+    const stale = {
+      ...allowance("codex", 62),
+      checkedAt: new Date(Date.now() - 600_000).toISOString(),
+      observedAt: new Date(Date.now() - 600_000).toISOString(),
+    };
+    vi.mocked(readProviderAllowance).mockResolvedValue(stale);
+    vi.mocked(refreshProviderAllowance).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const view = render(<SubscriptionUsage providers={[codex]} />);
+    expect(await screen.findByText("62% used · last measured")).toBeVisible();
+    expect(refreshProviderAllowance).toHaveBeenCalledExactlyOnceWith("codex");
+    await act(async () => complete(allowance("codex", 15)));
+    expect(await screen.findByText("15% used")).toBeVisible();
+    view.unmount();
+    vi.mocked(refreshProviderAllowance).mockClear();
+    vi.mocked(readProviderAllowance).mockResolvedValue({
+      ...stale,
+      status: "stale",
+      checkedAt: new Date().toISOString(),
+    });
+    render(<SubscriptionUsage providers={[codex]} />);
+    expect(await screen.findByText("62% used · last measured")).toBeVisible();
+    expect(refreshProviderAllowance).not.toHaveBeenCalled();
+  });
   it("collects the first measurement on opening Usage when the connection has no cache", async () => {
-    vi.mocked(readProviderAllowance).mockResolvedValue({ ...allowance("codex"), status: "unavailable", windows: [] });
-    vi.mocked(refreshProviderAllowance).mockResolvedValue(allowance("codex", 18));
+    vi.mocked(readProviderAllowance).mockResolvedValue({
+      ...allowance("codex"),
+      status: "unavailable",
+      checkedAt: "",
+      windows: [],
+    });
+    vi.mocked(refreshProviderAllowance).mockResolvedValue(
+      allowance("codex", 18),
+    );
     render(<SubscriptionUsage providers={[codex]} />);
     expect(await screen.findByText("18% used")).toBeVisible();
     expect(refreshProviderAllowance).toHaveBeenCalledExactlyOnceWith("codex");
@@ -69,10 +131,25 @@ describe("connected subscription usage", () => {
   });
   it("does not restart pending reads when discovery replaces equivalent provider arrays", async () => {
     let complete!: (value: ProviderAllowance) => void;
-    vi.mocked(readProviderAllowance).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
-    const view = render(<SubscriptionUsage providers={[codex]} connectedProviderIds={["codex"]} />);
+    vi.mocked(readProviderAllowance).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    const view = render(
+      <SubscriptionUsage
+        providers={[codex]}
+        connectedProviderIds={["codex"]}
+      />,
+    );
     await waitFor(() => expect(readProviderAllowance).toHaveBeenCalledOnce());
-    view.rerender(<SubscriptionUsage providers={[{ ...codex, models: [...codex.models] }]} connectedProviderIds={["codex"]} />);
+    view.rerender(
+      <SubscriptionUsage
+        providers={[{ ...codex, models: [...codex.models] }]}
+        connectedProviderIds={["codex"]}
+      />,
+    );
     await act(async () => complete(allowance("codex", 42)));
     expect(screen.getByText("42% used")).toBeVisible();
     expect(readProviderAllowance).toHaveBeenCalledOnce();
@@ -81,12 +158,32 @@ describe("connected subscription usage", () => {
   it("times out stalled reads, allows retry and closing, and ignores the late reply", async () => {
     vi.useFakeTimers();
     let complete!: (value: ProviderAllowance) => void;
-    vi.mocked(readProviderAllowance).mockImplementationOnce(() => new Promise(resolve => { complete = resolve; }));
-    vi.mocked(refreshProviderAllowance).mockResolvedValue(allowance("codex", 24));
+    vi.mocked(readProviderAllowance).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          complete = resolve;
+        }),
+    );
+    vi.mocked(refreshProviderAllowance).mockResolvedValue(
+      allowance("codex", 24),
+    );
     const close = vi.fn();
-    const view = render(<AccountDialog kind="usage" name="Fixture" providers={[codex]} onClose={close} onSignOut={vi.fn()} />);
+    const view = render(
+      <AccountDialog
+        kind="usage"
+        name="Fixture"
+        providers={[codex]}
+        onClose={close}
+        onSignOut={vi.fn()}
+      />,
+    );
     try {
-      await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
+      await act(async () => {
+        await vi.dynamicImportSettled();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_001);
+      });
       expect(screen.getByRole("alert")).toHaveTextContent("Try Refresh again");
       expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
       fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
@@ -94,7 +191,9 @@ describe("connected subscription usage", () => {
       expect(screen.getByText("24% used")).toBeVisible();
       await act(async () => complete(allowance("codex", 99)));
       expect(screen.queryByText("99% used")).toBeNull();
-      fireEvent.click(screen.getByRole("button", { name: "Close account dialog" }));
+      fireEvent.click(
+        screen.getByRole("button", { name: "Close account dialog" }),
+      );
       expect(close).toHaveBeenCalledOnce();
     } finally {
       view.unmount();
@@ -104,12 +203,20 @@ describe("connected subscription usage", () => {
 
   it("times out missing connection metadata and recovers on Refresh", async () => {
     vi.useFakeTimers();
-    vi.mocked(listRuntimeBackends).mockImplementationOnce(() => new Promise(() => {})).mockResolvedValueOnce([codex]);
-    vi.mocked(refreshProviderAllowance).mockResolvedValue(allowance("codex", 21));
+    vi.mocked(listRuntimeBackends)
+      .mockImplementationOnce(() => new Promise(() => {}))
+      .mockResolvedValueOnce([codex]);
+    vi.mocked(refreshProviderAllowance).mockResolvedValue(
+      allowance("codex", 21),
+    );
     const view = render(<SubscriptionUsage />);
     try {
-      await act(async () => { await vi.advanceTimersByTimeAsync(10_001); });
-      expect(screen.getByRole("alert")).toHaveTextContent("Connected subscriptions could not be loaded");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_001);
+      });
+      expect(screen.getByRole("alert")).toHaveTextContent(
+        "Connected subscriptions could not be loaded",
+      );
       fireEvent.click(screen.getByRole("button", { name: "Refresh" }));
       await act(async () => {});
       expect(screen.getByText("21% used")).toBeVisible();
@@ -344,7 +451,7 @@ describe("connected subscription usage", () => {
     expect(screen.queryByText("92% used")).not.toBeInTheDocument();
   });
 
-  it("opens the existing Settings breakdowns and reads history only there", async () => {
+  it("opens history inside Usage and reads the ledger only after choosing it", async () => {
     vi.mocked(readProviderUsage).mockResolvedValue({
       checkedAt: new Date().toISOString(),
       since: new Date().toISOString(),
@@ -353,45 +460,27 @@ describe("connected subscription usage", () => {
       models: [],
       allowances: [],
     });
-    function Navigation() {
-      const [breakdowns, setBreakdowns] = useState(false);
-      return breakdowns ? (
-        <SettingsModal
-          activeTab="usage"
-          onSelectTab={() => {}}
-          onClose={() => {}}
-        >
-          <SettingsPage
-            activeTab="usage"
-            runtime={{} as SettingsRuntime}
-            workspaceName="Fixture"
-            theme="light"
-            onThemeChange={() => {}}
-            titleId="settings-modal-title"
-          />
-        </SettingsModal>
-      ) : (
-        <AccountDialog
-          kind="usage"
-          name="Fixture"
-          providers={providers}
-          onOpenBreakdowns={() => setBreakdowns(true)}
-          onSignOut={vi.fn()}
-          onClose={() => {}}
-        />
-      );
-    }
     const user = userEvent.setup();
-    render(<Navigation />);
+    render(
+      <AccountDialog
+        kind="usage"
+        name="Fixture"
+        providers={providers}
+        onSignOut={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
     await screen.findAllByRole("progressbar");
     expect(readProviderUsage).not.toHaveBeenCalled();
     await user.click(
-      screen.getByRole("button", { name: "View breakdowns in Settings" }),
+      screen.getByRole("button", { name: "View usage history" }),
     );
     expect(
-      await screen.findByRole("heading", { name: "Usage breakdowns" }),
+      await screen.findByRole("tab", { name: "Cost", selected: true }),
     ).toBeInTheDocument();
-    expect(await screen.findByRole("combobox")).toBeInTheDocument();
+    expect(
+      await screen.findByRole("combobox", { name: "Provider" }),
+    ).toBeInTheDocument();
     expect(readProviderUsage).toHaveBeenCalledOnce();
   });
 });

@@ -313,6 +313,10 @@ fn apply_event(
                 cached_input_tokens: event["cachedInputTokens"].as_u64(),
                 cache_write_tokens: event["cacheWriteTokens"].as_u64(),
                 reasoning_tokens: event["reasoningTokens"].as_u64(),
+                pricing_tier: None,
+                observed_at: Some(
+                    chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+                ),
             });
         }
         Some("approval-request" | "tool-request") => {

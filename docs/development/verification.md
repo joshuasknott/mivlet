@@ -32,8 +32,17 @@ inventory. Provider discovery and cached usage reads run off the native window
 thread; renderer reads time out after ten seconds with an explicit retry. A timeout
 does not cancel native IPC. Tests cover stalled reads, late replies and equivalent
 provider inventories without restarting a pending read. The composer performs no
-usage polling. A connected provider without a cached allowance is checked once
-when Usage opens. Verified account-owned Codex sessions reconcile missing legacy
+usage polling. Absent and stale allowances refresh on opening, with independent
+cached results, coalesced native probes and a five-minute completed-check
+cooldown, including failures. The complete Usage destination is deferred from
+Settings; its styles stay separate from the conversation reset control. Focused
+usage tests cover additive cache writes, unknown versus measured
+zero (including chart inspection), date/source queries, late replies, pricing,
+overrides and scoped requests. Native tests cover exact-model/category/context
+pricing, imported snapshot deduplication, encryption and receipt/UTC/DST dates.
+File-picker import, authenticated limits and packaged UI still need their own
+native acceptance; browser fixtures cannot establish those capabilities.
+Verified account-owned Codex sessions reconcile missing legacy
 connection metadata without invalidating existing measurements on each discovery.
 
 `useAccountWorkspace` owns account requests and scope transitions;

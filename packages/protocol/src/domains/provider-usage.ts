@@ -40,15 +40,54 @@ export interface ProviderUsageModel extends UsageTokenCategories {
   estimatedCostAttempts: number;
   unpricedAttempts: number;
   latestObservedAt: string;
+  cachedInputAttempts?: number;
+  cacheWriteAttempts?: number;
+  reasoningAttempts?: number;
+  cacheSavingsUsd?: number;
+}
+
+export type ProviderUsagePeriod = "24h" | "7d" | "30d" | "90d";
+export type ProviderUsageSource = "mivlet" | "imported";
+
+/** Explicit UTC instants at local calendar boundaries, including DST changes. */
+export interface ProviderUsageQuery {
+  since: string;
+  until: string;
+  bucketStarts: string[];
+  source: ProviderUsageSource;
+}
+
+export interface ProviderUsageBucket extends ProviderUsageModel {
+  startsAt: string;
+}
+
+export interface ProviderUsageImportSummary {
+  records: number;
+  skipped: number;
+  importedAt?: string;
+  providers: string[];
+}
+
+export interface ProviderUsagePricingStatus {
+  status: "available" | "stale" | "unavailable";
+  source: string;
+  observedAt?: string;
+  checkedAt?: string;
+  reason?: string;
 }
 
 export interface ProviderUsageReport {
   checkedAt: string;
-  coverage: "saved-mivlet-attempts";
+  coverage: "saved-mivlet-attempts" | "imported-provider-history";
   models: ProviderUsageModel[];
   allowances: ProviderAllowance[];
   prices: ProviderUsagePrice[];
   since: string;
+  until?: string;
+  buckets?: ProviderUsageBucket[];
+  pricing?: ProviderUsagePricingStatus;
+  imports?: ProviderUsageImportSummary;
+  missingUsageAttempts?: number;
 }
 
 /** User supplied exact-model rates; source and date remain inspectable with estimates. */
@@ -61,6 +100,7 @@ export interface ProviderUsagePrice {
   cacheWritePerMillionUsd?: number;
   source: string;
   observedAt: string;
+  origin?: "automatic" | "override";
 }
 
 export interface ProviderResetContinuation {
