@@ -55,19 +55,21 @@ fn target(ctx: &Context<'_>, target: &Target) -> Result<Work> {
     Ok(item)
 }
 fn offer(ctx: &Context<'_>, item: &Work) -> Result<Offer> {
+    // Keep admission evidence in the existing encrypted receipt domain. Work
+    // remains the canonical queue; this prefix cannot collide with call receipts.
     repo::get(
         ctx.conn,
         ctx.store,
         &ctx.scope.private,
-        Kind::HostedTask,
-        &item.id,
+        Kind::Receipt,
+        &format!("hosted-task:{}", item.id),
     )?
     .ok_or_else(|| invalid("This cloud review or receipt is unavailable."))
 }
 fn put_offer(ctx: &Context<'_>, offer: &Offer, item: &Work) -> Result<()> {
     ctx.put(
-        Kind::HostedTask,
-        &item.id,
+        Kind::Receipt,
+        &format!("hosted-task:{}", item.id),
         Some(&item.conversation_id),
         None,
         offer,
