@@ -21,6 +21,7 @@ function lock(value) {
   ui.connect.disabled = value;
   ui.retry.disabled = value;
   ui.agent.disabled = value || Boolean(pendingMutation);
+  for (const control of ui.work.querySelectorAll("[data-mutation]")) control.disabled = value || Boolean(pendingMutation);
 }
 async function request(path, body) {
   const controller = new AbortController();
@@ -66,9 +67,13 @@ function element(tag, text, className) {
 }
 async function call(name, arguments_) { return request("/remote/call", {name, arguments: arguments_}); }
 async function mutate(name, arguments_, sent = false) {
-  if (busy || !session) return;
+  if (busy || !session || pendingMutation) return;
+  pendingMutation = { name, arguments: {...arguments_, requestId: crypto.randomUUID()}, sent };
+  await sendPendingMutation();
+}
+async function sendPendingMutation() {
+  if (busy || !session || !pendingMutation) return;
   const version = epoch;
-  pendingMutation ??= { name, arguments: {...arguments_, requestId: crypto.randomUUID()}, sent };
   lock(true);
   notice("Sending…");
   try {
@@ -123,6 +128,8 @@ function renderWork(items) {
     actions.append(view);
     if (item.canControl && !terminal.has(item.status)) {
       const stop = element("button","Stop task");
+      stop.dataset.mutation = "stop";
+      stop.disabled = busy || Boolean(pendingMutation);
       stop.addEventListener("click",() => void mutate("mivlet_stop_work",{workspaceId:session.workspaceId,agentId:item.agentId,workId:item.id,expectedGeneration:item.generation}));
       actions.append(stop);
     }
@@ -165,7 +172,7 @@ ui.composer.addEventListener("submit", event => {
   const text = ui.request.value.trim();
   if (session && text && !pendingMutation) void mutate("mivlet_request_task",{workspaceId:session.workspaceId,agentId:ui.agent.value,text},true);
 });
-ui.retry.addEventListener("click",() => { if (pendingMutation) void mutate(pendingMutation.name,pendingMutation.arguments,pendingMutation.sent); });
+ui.retry.addEventListener("click",() => void sendPendingMutation());
 ui.disconnect.addEventListener("click",async () => {
   try { await request("/remote/disconnect",{}); reset("Disconnected from this browser. Existing tasks continue on your computer."); }
   catch { notice("Could not disconnect. Revoke this browser in Mivlet Settings to end its access."); }
@@ -183,7 +190,7 @@ ui.notifications.addEventListener("click",async () => {
       notifications = true;
     }
   } catch { notifications = false; }
-  ui.notifications.textContent = notifications ? "Notifications on while this page is open" : "Notifications unavailable";
+  ui.notifications.textContent = notifications ? "Notifications on while this view is active" : "Notifications unavailable";
 });
 document.addEventListener("visibilitychange",() => { if (!document.hidden) void refresh(); else clearTimeout(timer); });
 async function initialize() {

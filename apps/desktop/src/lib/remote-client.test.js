@@ -39,12 +39,19 @@ describe("phone client against shared task contracts",()=>{
     await vi.waitFor(()=>expect(document.getElementById("retry-panel").hidden).toBe(false));
     expect(document.getElementById("request").value).toBe("One request");
     const original=calls.find(call=>call.body?.name==="mivlet_request_task").body;
+    const stop=document.querySelector("[data-mutation=stop]");
+    expect(stop.disabled).toBe(true);
+    // Even a dispatched event cannot turn another action into an implicit retry.
+    stop.dispatchEvent(new Event("click"));
     await vi.advanceTimersByTimeAsync(10000);
     expect(calls.filter(call=>call.body?.name==="mivlet_request_task")).toHaveLength(1);
+    expect(calls.filter(call=>call.body?.name==="mivlet_stop_work")).toHaveLength(0);
+    expect(document.querySelector("[data-mutation=stop]").disabled).toBe(true);
     document.getElementById("retry").click();
     await vi.waitFor(()=>expect(document.getElementById("retry-panel").hidden).toBe(true));
     const mutations=calls.filter(call=>call.body?.name==="mivlet_request_task");
     expect(mutations).toHaveLength(2);expect(mutations[1].body).toEqual(original);
     expect(document.getElementById("send").disabled).toBe(false);
+    expect(document.querySelector("[data-mutation=stop]").disabled).toBe(false);
   });
 });

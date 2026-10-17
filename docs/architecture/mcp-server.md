@@ -93,7 +93,7 @@ desktop Settings to stop its outstanding tasks and invalidate all access.
 The client renders untrusted results as text, polls only while visible and retains
 the exact request ID after an uncertain write. It never retries a write
 automatically. Opt-in browser notifications describe status changes without task
-content while the page is open. This does not provide closed-page Web Push or a
+content while the view is active. Polling pauses when the page is hidden. This does not provide background or closed-page Web Push or a
 hosted relay. The desktop must stay running, awake and reachable. Use the remote
 HTTPS setup below for a phone outside the computer; a loopback URL is local only.
 

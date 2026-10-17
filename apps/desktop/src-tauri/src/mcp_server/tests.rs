@@ -212,6 +212,95 @@ fn task(e: &Engine, token: &str, id: &str) -> Value {
 }
 
 #[test]
+fn shared_work_limits_preserve_attention_active_and_recent_tasks() {
+    use crate::collaboration::models::WorkStatus;
+    use crate::store::repos::collaboration::{put, Kind};
+    let e = engine("http://127.0.0.1:39440");
+    let token = login(&e, Access::RequestTasks);
+    let initial = task(&e, &token, "bounded-list-request");
+    e.transaction(|conn, scope, _| {
+        let template = tools::work(conn, e.store, scope, initial["id"].as_str().unwrap())?;
+        for index in 0..70 {
+            let mut work = template.clone();
+            work.id = format!("old-{index:03}");
+            work.status = WorkStatus::Completed;
+            work.updated_at = format!("2026-01-01T00:00:{:02}Z", index % 60);
+            put(
+                conn,
+                e.store,
+                &scope.private,
+                Kind::Work,
+                &work.id,
+                Some(&work.conversation_id),
+                None,
+                &work,
+            )?;
+        }
+        for (id, status, updated_at, shared) in [
+            (
+                "zz-attention",
+                WorkStatus::AwaitingUser,
+                "2025-01-01T00:00:00Z",
+                true,
+            ),
+            (
+                "zz-running",
+                WorkStatus::Running,
+                "2025-01-01T00:00:00Z",
+                true,
+            ),
+            (
+                "zz-newest",
+                WorkStatus::Completed,
+                "2026-10-17T00:00:00Z",
+                true,
+            ),
+            (
+                "zz-private",
+                WorkStatus::AwaitingUser,
+                "2026-10-17T01:00:00Z",
+                false,
+            ),
+        ] {
+            let mut work = template.clone();
+            work.id = id.into();
+            work.status = status;
+            work.updated_at = updated_at.into();
+            if !shared {
+                work.external_client = None;
+            }
+            put(
+                conn,
+                e.store,
+                &scope.private,
+                Kind::Work,
+                &work.id,
+                Some(&work.conversation_id),
+                None,
+                &work,
+            )?;
+        }
+        Ok(())
+    })
+    .unwrap();
+    let result = tools::invoke(
+        &e,
+        &token,
+        "mivlet_work",
+        json!({"workspaceId":"default","agentId":"agent-one"}),
+    )
+    .unwrap();
+    let items = result["work"].as_array().unwrap();
+    assert_eq!(items.len(), 64);
+    assert_eq!(result["truncated"], true);
+    assert_eq!(items[0]["id"], "zz-attention");
+    for id in ["zz-attention", "zz-running", "zz-newest"] {
+        assert!(items.iter().any(|item| item["id"] == id), "missing {id}");
+    }
+    assert!(!items.iter().any(|item| item["id"] == "zz-private"));
+}
+
+#[test]
 fn oauth_pkce_resource_redirect_replay_and_default_scope() {
     let e = engine("http://127.0.0.1:39440");
     let client = register(&e);
