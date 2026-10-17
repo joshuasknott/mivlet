@@ -10,6 +10,7 @@ import { compactStyleNames } from "./compact-style-names";
 it.each([false, true])(
   "keeps production CSS, JSX and custom properties consistent (source alias: %s)",
   async (alias) => {
+    const wideNames = Array.from({ length: 70 }, (_, index) => `fixture-wide-${index}`);
     const root = await mkdtemp(join(tmpdir(), "mivlet-style-import-"));
     const src = join(root, "src");
     const linkedSrc = join(root, "linked-src");
@@ -30,6 +31,7 @@ it.each([false, true])(
       .fixture-card--active { padding: 7px; }
       .fixture-action__close { margin: 3px; }
       .fixture-protocol { display: block; }
+      ${wideNames.map((name, index) => `.${name} { padding: ${index}px; }`).join("\n")}
     `,
       );
       await writeFile(
@@ -46,6 +48,7 @@ it.each([false, true])(
         document.body.append(element);
         return element;
       }
+      window.wideFixture = [${wideNames.map(name => `<span className="${name}" />`).join(",")}];
       const active = true;
       const action = "close";
       const protocol = "fixture-protocol";
@@ -99,7 +102,13 @@ it.each([false, true])(
         dom.window.eval(js.code);
         const fixture = (dom.window as unknown as { fixture: HTMLElement[] })
           .fixture;
-        expect(fixture[0].className).toMatch(/^_[0-9a-z]+--active$/);
+        expect(fixture[0].className).toMatch(/^_[0-9a-zA-Z]+--active$/);
+        const wide = (dom.window as unknown as { wideFixture: HTMLElement[] }).wideFixture;
+        expect(wide.some(element => /[A-Z]/.test(element.className))).toBe(true);
+        wide.forEach((element, index) => {
+          expect(element.className).toMatch(/^_[0-9a-zA-Z]+$/);
+          expect(getComputedStyle(element).padding).toBe(`${index}px`);
+        });
         expect(getComputedStyle(fixture[0]).padding).toBe("7px");
         expect(getComputedStyle(fixture[2]).fontWeight).toBe("700");
         expect(cssText).toContain(`.${fixture[1].className}`);
