@@ -11,7 +11,9 @@ afterEach(() => clearActiveRuntimeDataScope());
 it("sends only native masked enrollment metadata and revokes the exact current revision", async () => {
   const api: HostedProviderApi = { list: vi.fn().mockResolvedValue([connection]), enroll: vi.fn().mockResolvedValue(connection), revoke: vi.fn().mockResolvedValue({ ...connection, enabled: false }) };
   render(<HostedProviderSettings workspaceId="workspace" agents={agents} api={api} />);
-  fireEvent.click(await screen.findByRole("button", { name: "Replace key" }));
+  const replace = await screen.findByRole("button", { name: "Replace key" });
+  await waitFor(() => expect(replace).toBeEnabled());
+  fireEvent.click(replace);
   await waitFor(() => expect(api.enroll).toHaveBeenCalledWith({ workspaceId: "workspace", agentId: "atlas", providerId: "openai", credentialId: "cloud", expectedRevision: 7 }));
   expect(screen.queryByLabelText(/API key/i)).toBeNull();
   await waitFor(() => expect(screen.getByRole("button", { name: "Disconnect" })).toBeEnabled());

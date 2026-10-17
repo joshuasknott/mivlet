@@ -19,7 +19,9 @@ function api(over: Partial<HostedTaskApi> = {}): HostedTaskApi {
 async function openReview() {
   fireEvent.click(screen.getByRole("button", { name: "Continue in cloud…" }));
   const select = await screen.findByRole("combobox", { name: "Cloud API connection" });
+  await waitFor(() => expect(select).toBeEnabled());
   fireEvent.change(select, { target: { value: "cloud-key" } });
+  await waitFor(() => expect(screen.getByRole("button", { name: "Review cloud task" })).toBeEnabled());
   fireEvent.click(screen.getByRole("button", { name: "Review cloud task" }));
   return screen.findByRole("dialog");
 }
@@ -83,7 +85,9 @@ it("drops a late prepared review after an account change", async () => {
   const changed = vi.fn().mockResolvedValue(undefined);
   render(<HostedTaskControls item={item} api={actions} onChanged={changed} />);
   fireEvent.click(screen.getByRole("button", { name: "Continue in cloud…" }));
-  fireEvent.change(await screen.findByRole("combobox"), { target: { value: "cloud-key" } });
+  const select = await screen.findByRole("combobox");
+  await waitFor(() => expect(select).toBeEnabled());
+  fireEvent.change(select, { target: { value: "cloud-key" } });
   fireEvent.click(screen.getByRole("button", { name: "Review cloud task" }));
   setActiveRuntimeDataScope("workspace", "account-b");
   await act(async () => finish(review()));
