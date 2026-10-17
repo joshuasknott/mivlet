@@ -56,6 +56,7 @@ pub(super) fn router(engine: Arc<Engine>) -> Router {
         .route("/oauth/wait/{ticket}", get(wait))
         .route("/oauth/token", post(token))
         .route("/mcp", post(mcp).get(mcp_get).delete(mcp_get))
+        .merge(super::remote::router())
         .layer(DefaultBodyLimit::max(64 * 1024))
         .layer(middleware::from_fn_with_state(engine.clone(), guard))
         .with_state(engine)
@@ -86,6 +87,26 @@ fn bearer(headers: &HeaderMap) -> Option<&str> {
 }
 
 async fn guard(State(engine): State<Arc<Engine>>, request: Request, next: Next) -> Response {
+    let remote_page =
+        request.uri().path() == "/remote" || request.uri().path().starts_with("/remote/");
+    if remote_page && !engine.config.remote_access {
+        return StatusCode::NOT_FOUND.into_response();
+    }
+    if remote_page
+        && request.method() != axum::http::Method::GET
+        && (request
+            .headers()
+            .get(header::ORIGIN)
+            .and_then(|value| value.to_str().ok())
+            != Some(engine.origin.as_str())
+            || request
+                .headers()
+                .get("x-mivlet-remote")
+                .and_then(|value| value.to_str().ok())
+                != Some("1"))
+    {
+        return StatusCode::FORBIDDEN.into_response();
+    }
     let expected = engine
         .origin
         .split_once("://")
@@ -157,6 +178,9 @@ async fn guard(State(engine): State<Arc<Engine>>, request: Request, next: Next) 
     headers.insert("referrer-policy", "no-referrer".parse().unwrap());
     headers.insert("x-content-type-options", "nosniff".parse().unwrap());
     headers.insert(header::CONTENT_SECURITY_POLICY,"default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'".parse().unwrap());
+    if remote_page {
+        headers.insert(header::CONTENT_SECURITY_POLICY, "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'".parse().unwrap());
+    }
     if let Some(origin) = origin {
         if let Ok(value) = origin.parse() {
             headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, value);

@@ -69,7 +69,33 @@ The listener binds only `127.0.0.1`. It validates the exact configured Host, rej
 unknown browser Origins and session IDs, bounds request bodies/concurrent calls,
 and limits request rates and registrations. Browser access is opt-in for exact
 HTTPS origins. No wildcard CORS, cookie authority, forwarded-header authority,
-arbitrary credential passthrough or dynamic metadata fetching is used.
+arbitrary credential passthrough or dynamic metadata fetching is used. MCP
+requests never accept browser cookies as authorization.
+
+### Phone and web view
+
+Enable **Phone and web view** before starting the sharing server. Its separate
+`/remote` address opens a responsive client for the agents and Work deliberately
+shared with that browser. Each browser connects through the same desktop consent
+flow; read-only remains the default. Permitted clients can request new tasks,
+read bounded saved results, and stop only tasks they started. Consequential tool
+approvals and interrupted-task continuation stay on the desktop.
+
+The native server owns OAuth PKCE and bearer credentials. The phone receives an
+opaque, rotated HttpOnly/SameSite-Strict cookie, with Secure and the `__Host-`
+prefix on HTTPS. No credentials enter JavaScript, browser storage or result text.
+Every operation rechecks the underlying grant, account, scope and expiry. Writes
+require the exact same Origin and a fixed custom header; this cookie is accepted
+only by the opt-in phone routes, never by MCP. Disconnect removes the browser's
+session; already accepted tasks continue within their grant. Revoke its grant in
+desktop Settings to stop its outstanding tasks and invalidate all access.
+
+The client renders untrusted results as text, polls only while visible and retains
+the exact request ID after an uncertain write. It never retries a write
+automatically. Opt-in browser notifications describe status changes without task
+content while the page is open. This does not provide closed-page Web Push or a
+hosted relay. The desktop must stay running, awake and reachable. Use the remote
+HTTPS setup below for a phone outside the computer; a loopback URL is local only.
 
 Remote mode requires a user-operated HTTPS reverse proxy or tunnel reachable by
 the client. Set its exact public HTTPS origin before starting the server. Forward

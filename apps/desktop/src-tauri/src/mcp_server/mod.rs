@@ -3,6 +3,7 @@
 mod http;
 mod models;
 mod oauth;
+mod remote;
 pub(crate) mod repository;
 #[cfg(test)]
 mod tests;
@@ -34,6 +35,7 @@ struct Engine {
     origin: String,
     config: Config,
     oauth: Mutex<oauth::State>,
+    remote: Mutex<remote::Sessions>,
     app: Option<tauri::AppHandle>,
     inflight: Arc<tokio::sync::Semaphore>,
     rate: Mutex<(std::time::Instant, u32)>,
@@ -142,6 +144,7 @@ pub async fn mcp_server_start(
             .unwrap_or_else(|| format!("http://127.0.0.1:{port}")),
         config,
         oauth: Mutex::new(oauth::State::default()),
+        remote: Mutex::new(remote::Sessions::default()),
         app: Some(app.clone()),
         inflight: Arc::new(tokio::sync::Semaphore::new(16)),
         rate: Mutex::new((std::time::Instant::now(), 0)),
@@ -242,6 +245,10 @@ pub fn mcp_server_status(
             }
             Ok(Status {
                 endpoint: current.as_ref().map(|r| r.engine.resource()),
+                remote_url: current
+                    .as_ref()
+                    .filter(|r| r.engine.config.remote_access)
+                    .map(|r| format!("{}/remote", r.engine.origin)),
                 pending,
                 grants: saved.grants,
                 history: saved.history,

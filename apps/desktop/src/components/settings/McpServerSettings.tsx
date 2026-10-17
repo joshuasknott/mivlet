@@ -34,6 +34,7 @@ export function McpServerSettings({
   const [port, setPort] = useState("39440");
   const [origin, setOrigin] = useState("");
   const [browserOrigins, setBrowserOrigins] = useState("");
+  const [remoteAccess, setRemoteAccess] = useState(false);
   const refresh = async () => {
     try {
       setStatus(await getMcpServerStatus());
@@ -117,6 +118,10 @@ export function McpServerSettings({
         </header>
         {status?.endpoint ? (
           <>
+            {status.remoteUrl && <label>
+              Phone and web URL
+              <input readOnly value={status.remoteUrl} onFocus={(event) => event.target.select()} />
+            </label>}
             <label>
               MCP URL
               <input
@@ -165,6 +170,7 @@ export function McpServerSettings({
                   startMcpServer({
                     port: Number(port),
                     publicOrigin: origin.trim() || undefined,
+                    remoteAccess,
                     browserOrigins: browserOrigins
                       .split(",")
                       .map((s) => s.trim())
@@ -188,6 +194,11 @@ export function McpServerSettings({
             </label>
             <details>
               <summary>Remote and browser access</summary>
+              <label>
+                <input type="checkbox" checked={remoteAccess} disabled={busy} onChange={(event) => setRemoteAccess(event.target.checked)} />
+                Enable phone and web view
+              </label>
+              <p>Follow shared work and send or stop permitted tasks from another browser. Approve each browser here. Tool approvals stay on this computer.</p>
               <p>
                 Remote clients require your own HTTPS reverse proxy forwarding
                 to this loopback port, preserving Host, and disabling access-log

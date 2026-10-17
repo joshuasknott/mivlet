@@ -129,7 +129,11 @@ pub(super) fn invoke(engine: &Engine, token: &str, name: &str, value: Value) -> 
             if name == "mivlet_work" {
                 let items = repo::list::<Work>(conn, engine.store, &scope.private, Kind::Work)?;
                 let items: Vec<_> = items.iter().filter(|w| &w.agent_id == agent && shared(w, &grant)).collect();
-                return Ok(json!({"work":items.iter().take(64).map(|w| summary(w)).collect::<Vec<_>>(),"truncated":items.len()>64}));
+                return Ok(json!({"work":items.iter().take(64).map(|w| {
+                    let mut item = summary(w);
+                    item["canControl"] = json!(grant.access == Access::RequestTasks && w.external_client.as_ref().is_some_and(|client| client.grant_id == grant.id));
+                    item
+                }).collect::<Vec<_>>(),"truncated":items.len()>64}));
             }
             let request = if write { args.request_id.as_ref().filter(|id| id.len() >= 8 && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b)))
                 .ok_or_else(|| invalid("Supply a stable requestId of 8-128 letters, digits, dashes or underscores."))?.clone() } else { String::new() };
