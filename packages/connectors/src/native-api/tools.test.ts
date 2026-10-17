@@ -16,6 +16,14 @@ const request: NativeCompletionRequest = {
 };
 
 describe("native application action schemas", () => {
+  it("binds public empty-field entry to observed identity and literal text", () => {
+    const tool=registeredToolSpecs().find(tool=>tool.name==="local-browser-fill")!;
+    const schema=JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["fieldRef","origin","name","text"]);
+    expect(Object.keys(schema.properties)).toEqual(["fieldRef","origin","name","text"]);
+    expect(schema.additionalProperties).toBe(false);
+    expect(tool.defaultRisk).toBe("critical");
+  });
   it("offers explicit owned-tab activation with no raw browser target or script input", () => {
     const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-activate")!;
     const schema = JSON.parse(tool.parameters);

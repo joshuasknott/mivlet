@@ -6,7 +6,7 @@ use serde_json::Value;
 use std::sync::Arc;
 
 pub(super) fn supported(tool: &str) -> bool {
-    tool == "local-browser-activate"
+    matches!(tool, "local-browser-activate" | "local-browser-fill")
 }
 
 #[derive(Deserialize)]
@@ -14,6 +14,14 @@ pub(super) fn supported(tool: &str) -> bool {
 struct Activation {
     activation_ref: String,
     origin: String,
+}
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct FormEntry {
+    field_ref: String,
+    origin: String,
+    name: String,
+    text: String,
 }
 
 pub(super) async fn execute(
@@ -24,6 +32,27 @@ pub(super) async fn execute(
     agent: String,
     generation: u64,
 ) -> Result<ToolResult, String> {
+    if tool == "local-browser-fill" {
+        let input: FormEntry = serde_json::from_value(arguments)
+            .map_err(|_| "Use a current fieldRef, exact origin/name and public text.")?;
+        validate_reference(&input.field_ref, &input.origin)?;
+        if input.name.is_empty()
+            || input.name.chars().count() > 160
+            || input.name.chars().any(char::is_control)
+            || input.text.is_empty()
+            || input.text.len() > 2048
+            || crate::secret_redaction::secret_marker_survives(&input.text)
+            || crate::secret_redaction::looks_secret(&input.text)
+        {
+            return Err(
+                "Invalid public browser form entry. No browser input was dispatched.".into(),
+            );
+        }
+        let output=tauri::async_runtime::spawn_blocking(move||crate::local_computer::browser::fill(
+            &computers,&workspace,&agent,generation,&input.field_ref,&input.origin,&input.name,&input.text,
+        )).await.map_err(|_|"Browser form entry outcome is uncertain. Observe before another action; never replay it.")??;
+        return Ok(ToolResult { ok: true, output });
+    }
     if tool != "local-browser-activate" {
         return Err("Unsupported owned-browser action.".into());
     }

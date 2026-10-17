@@ -29,6 +29,11 @@ mod controls;
 #[cfg(debug_assertions)]
 #[path = "fixture_server.rs"]
 mod fixture_server;
+#[path = "forms.rs"]
+mod forms;
+#[cfg(debug_assertions)]
+#[path = "forms_acceptance.rs"]
+mod forms_acceptance;
 #[path = "helper.rs"]
 mod helper;
 #[path = "navigation.rs"]
@@ -399,10 +404,33 @@ pub(super) struct BrowserProcess {
     navigation: std::collections::HashMap<String, navigation::Choice>,
     activation: std::collections::HashMap<String, navigation::Choice>,
     controls: std::collections::HashMap<String, controls::Choice>,
+    fields: std::collections::HashMap<String, forms::Choice>,
     scroll: Option<(String, scrolling::Choice)>,
 }
 
 impl BrowserProcess {
+    pub(super) fn fill(
+        &mut self,
+        hwnd: u64,
+        generation: u64,
+        reference: &str,
+        origin: &str,
+        name: &str,
+        text: &str,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::control::NativeDispatch<'_>,
+    ) -> Result<String, String> {
+        forms::fill(
+            self,
+            (hwnd, generation),
+            reference,
+            origin,
+            name,
+            text,
+            check,
+            dispatch,
+        )
+    }
     pub(super) fn activate(
         &mut self,
         hwnd: u64,
@@ -653,6 +681,7 @@ impl BrowserProcess {
                 navigation: std::collections::HashMap::new(),
                 activation: std::collections::HashMap::new(),
                 controls: std::collections::HashMap::new(),
+                fields: std::collections::HashMap::new(),
                 scroll: None,
             })
         }

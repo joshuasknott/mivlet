@@ -194,6 +194,25 @@ enum Request<'a> {
     Click(&'a str, &'a str, &'a str),
     Scroll(&'a str, &'a str, &'a str),
     Activate(&'a str, &'a str),
+    Fill(&'a str, &'a str, &'a str, &'a str),
+}
+pub(crate) fn fill(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+    name: &str,
+    text: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Fill(reference, origin, name, text),
+    )
 }
 pub(crate) fn activate(
     computers: &LocalComputerState,
@@ -305,6 +324,16 @@ fn execute(
                 })
             };
             match arguments {
+                Request::Fill(reference, origin, name, text) => process.fill(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    name,
+                    text,
+                    &check,
+                    &checked_dispatch,
+                ),
                 Request::Activate(reference, origin) => process.activate(
                     window.identity.hwnd,
                     generation,

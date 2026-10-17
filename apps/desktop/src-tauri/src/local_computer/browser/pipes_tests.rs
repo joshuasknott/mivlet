@@ -1,6 +1,100 @@
 use super::*;
 
 #[test]
+fn public_form_wire_uses_only_fixed_source_and_passes_text_as_data() {
+    use serde_json::{json, Value};
+    let input = Pair::new(false).unwrap();
+    let mut output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    for method in [Command::FillEmpty, Command::ResolveField] {
+        assert!(control
+            .read_command(
+                method,
+                json!({"functionDeclaration":"untrusted()"}),
+                Some("session"),
+                &|| Ok(())
+            )
+            .is_err());
+    }
+    let worker = std::thread::spawn(move || {
+        let mut reader = Framed::new(input.child);
+        let mut next = || -> Value {
+            serde_json::from_slice(
+                &reader
+                    .read(Instant::now() + Duration::from_secs(5), &|| Ok(()))
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        for step in 0..4 {
+            let message = next();
+            let result = match step {
+                0 => {
+                    assert_eq!(message["method"], "Page.createIsolatedWorld");
+                    assert_eq!(message["params"]["grantUniveralAccess"], false);
+                    json!({"executionContextId":17})
+                }
+                1 => {
+                    assert_eq!(message["method"], "DOM.resolveNode");
+                    assert_eq!(message["params"]["backendNodeId"], 42);
+                    assert_eq!(message["params"]["executionContextId"], 17);
+                    json!({"object":{"objectId":"native-field"}})
+                }
+                2 => {
+                    assert_eq!(message["method"], "Runtime.callFunctionOn");
+                    assert_eq!(
+                        message["params"]["functionDeclaration"],
+                        forms_script::FILL_EMPTY
+                    );
+                    assert_eq!(message["params"]["objectId"], "native-field");
+                    assert_eq!(
+                        message["params"]["arguments"][0]["value"],
+                        "');untrusted();//"
+                    );
+                    assert_eq!(message["params"]["userGesture"], false);
+                    json!({"result":{"type":"string","value":"filled"}})
+                }
+                _ => {
+                    assert_eq!(message["method"], "Runtime.releaseObject");
+                    json!({})
+                }
+            };
+            output
+                .child
+                .write_all(
+                    format!(
+                        "{}\0",
+                        json!({"id":message["id"],"sessionId":"session","result":result})
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+        }
+    });
+    let count = std::cell::Cell::new(0);
+    assert_eq!(
+        control
+            .fill_empty(
+                "frame",
+                "session",
+                42,
+                "https://example.test",
+                &json!({"tag":"INPUT","attributes":[]}),
+                "');untrusted();//",
+                &|| Ok(()),
+                &|start| {
+                    count.set(count.get() + 1);
+                    start()
+                }
+            )
+            .unwrap(),
+        "filled"
+    );
+    worker.join().unwrap();
+    assert_eq!(count.get(), 1);
+}
+
+#[test]
 fn tab_activation_cannot_use_the_read_channel_and_dispatches_one_fixed_native_target() {
     use serde_json::{json, Value};
     let input = Pair::new(false).unwrap();

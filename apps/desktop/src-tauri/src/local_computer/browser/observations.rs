@@ -168,6 +168,7 @@ pub(super) fn tabs(
 ) -> Result<String, String> {
     process.tabs = None;
     process.navigation.clear();
+    process.fields.clear();
     process.activation.clear();
     process.controls.clear();
     process.scroll = None;
@@ -482,6 +483,7 @@ pub(super) fn observe(
     check: &dyn Fn() -> Result<(), String>,
 ) -> Result<String, String> {
     process.controls.clear();
+    process.fields.clear();
     process.scroll = None;
     let origin = exact_origin(requested_origin)?;
     // Consume before I/O; this choice cannot be replayed by a later observation.
@@ -543,6 +545,20 @@ pub(super) fn observe(
     } else {
         (Value::Null, None)
     };
+    let (fields, field_choices) = if visible {
+        super::forms::capture(
+            process,
+            (hwnd, generation, window),
+            &target,
+            &session,
+            &before,
+            &origin,
+            &nodes,
+            check,
+        )?
+    } else {
+        (Vec::new(), HashMap::new())
+    };
     let after = frame(
         &call(process, Command::Frames, json!({}), Some(&session), check)?,
         &origin,
@@ -552,9 +568,10 @@ pub(super) fn observe(
     }
     check()?;
     process.controls = choices;
+    process.fields = field_choices;
     let scroll_ref = scroll.as_ref().map(|(reference, _)| reference.clone());
     process.scroll = scroll;
-    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"viewport":viewport,"scrollRef":scroll_ref,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"fields":fields,"fieldsPartial":true,"fieldScope":"empty-public-text-only","controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"viewport":viewport,"scrollRef":scroll_ref,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
 pub(super) fn checked_tree(
@@ -756,6 +773,7 @@ pub(super) fn acceptance(
     }
     super::tab_acceptance::run(process, hwnd, &origin, check, dispatch)?;
     super::scroll_acceptance::run(process, hwnd, &origin, check, dispatch)?;
+    super::forms_acceptance::run(process, hwnd, &origin, check, dispatch)?;
     eprintln!("Owned browser DOM fixture: document-bound navigation and visible-tab public button click each dispatched once and verified by fresh observation; public text read; field values, editable descendants and subframes omitted; outside origin, consumed refs, password field and file chooser refused.");
     Ok(())
 }

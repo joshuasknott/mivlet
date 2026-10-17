@@ -119,6 +119,7 @@ pub(super) fn navigate(
     process.navigation.clear();
     process.activation.clear();
     process.controls.clear();
+    process.fields.clear();
     process.scroll = None;
     let (window, pages) = observations::targets(process, hwnd, check)?;
     let page = pages
@@ -184,6 +185,7 @@ pub(super) fn activate(
     process.navigation.clear();
     process.activation.clear();
     process.controls.clear();
+    process.fields.clear();
     process.scroll = None;
     let (window, pages) = observations::targets(process, hwnd, check)?;
     if !pages

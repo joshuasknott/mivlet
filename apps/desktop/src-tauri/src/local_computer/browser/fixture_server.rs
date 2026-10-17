@@ -107,6 +107,7 @@ fn serve(mut stream: TcpStream, stop: &AtomicBool) {
         .and_then(|line| line.strip_prefix("GET "))
         .and_then(|line| line.strip_suffix(" HTTP/1.1"));
     let body = match path {
+        Some("/form") => "<!doctype html><title>Public form fixture</title><h1>Public form</h1><label>Public topic<input id=topic type=text aria-label='Public topic' oninput=\"document.getElementById('result').textContent='Field edited once'\"></label><p id=result>Not edited</p><label>Existing content<input aria-label='Existing content' value='Human text preserved'></label>",
         Some("/scroll") => "<!doctype html><title>Scroll fixture</title><script>Object.defineProperty(Document.prototype,'visibilityState',{get:()=> 'visible'});</script><style>body{margin:0}main{position:relative;min-height:5000px;background:#eee}button{position:absolute;top:1250px;left:40px;height:40px}#result{position:absolute;top:1300px}</style><main><h1>Public scrolling report</h1><button onclick=\"document.getElementById('result').textContent='Scrolled action verified'\">Finish scroll</button><button style=\"top:50px\" onclick=\"window.open('/second','_blank')\">Open scroll companion</button><p id=result>Not finished</p></main>",
         Some("/private") => "<!doctype html><title>Private step</title><label>Password<input type=password value='Hidden password delta'></label>",
         Some("/file") => "<!doctype html><title>Private file step</title><label>Choose file<input type=file></label>",
