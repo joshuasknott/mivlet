@@ -825,7 +825,7 @@ mod tests {
             assert!(route(&value, path).is_none(), "{path}");
         }
         assert_eq!(
-            navigation(
+            crate::local_computer::live_preview::navigation_allowed(
                 &format!("{}/baseline", value.origin),
                 &format!("{}/restricted", value.origin)
             ),
