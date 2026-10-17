@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
-import { compactStyleNames, compactStyleText, styleNameMap } from "./compact-style-names";
+import { compactStyleNames, compactStyleSource, compactStyleText, styleNameMap } from "./compact-style-names";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,15 +51,25 @@ it("compacts class tokens without changing longer opaque IDs or ARIA references"
     "._0 #dialog-panel-title {}",
   );
 });
-it("still preserves exact tokens inside imports and opaque selectors", () => {
+it("preserves CSS module addresses while compacting the matching class basename", () => {
+  const code = 'import "./dialog-panel.css"; import layer from "./dialog-panel.css?inline"; const selector = ".menu-panel:hover"; const ui = <><div className="dialog-panel" /><div className="menu-panel" /></>;';
   const map = styleNameMap(
     ".dialog-panel {} .menu-panel {}",
-    sources(
-      'import "./dialog-panel.css"; const selector = ".menu-panel:hover"; const ui = <><div className="dialog-panel" /><div className="menu-panel" /></>;',
-    ),
+    sources(code),
   );
-  expect(map.has("dialog-panel")).toBe(false);
+  expect(map.has("dialog-panel")).toBe(true);
   expect(map.has("menu-panel")).toBe(false);
+  const transformed = compactStyleSource(code, "component.tsx", map);
+  expect(transformed).toContain('import "./dialog-panel.css"');
+  expect(transformed).toContain('from "./dialog-panel.css?inline"');
+  expect(transformed).toContain('className="_0"');
+  expect(transformed).toContain('".menu-panel:hover"');
+});
+it("keeps non-CSS imports and dynamic module addresses opaque", () => {
+  for (const code of ['import "./dialog-panel";', 'const css = import("./dialog-panel.css");']) {
+    const map = styleNameMap(".dialog-panel{}", sources(`${code} const ui = <div className="dialog-panel" />;`));
+    expect(map.has("dialog-panel")).toBe(false);
+  }
 });
 it("preserves classes assembled from dynamic prefixes", () => {
   const map = styleNameMap(

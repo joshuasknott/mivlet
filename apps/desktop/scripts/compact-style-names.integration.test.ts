@@ -20,7 +20,7 @@ it.each([false, true])(
         linkedSrc,
         process.platform === "win32" ? "junction" : "dir",
       );
-      await writeFile(join(src, "entry.css"), '@import "./layers/base.css";');
+      await writeFile(join(src, "fixture-card.css"), '@import "./layers/base.css";');
       await writeFile(
         join(src, "layers/base.css"),
         `
@@ -39,7 +39,7 @@ it.each([false, true])(
       await writeFile(
         join(src, "entry.tsx"),
         `
-      import "./entry.css";
+      import "./fixture-card.css";
       function h(tag, props) {
         const element = document.createElement(tag);
         Object.assign(element, props);

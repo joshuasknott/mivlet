@@ -63,6 +63,10 @@ export function styleNameMap(
       true,
     );
     const visit = (node: ts.Node) => {
+      // CSS filenames are module addresses, not consumers of a similarly named
+      // class. The source transform preserves these exact specifier ranges.
+      if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)
+        && /\.css(?:\?|$)/.test(node.moduleSpecifier.text)) return;
       if (
         ts.isStringLiteralLike(node) ||
         ts.isTemplateHead(node) ||
@@ -145,6 +149,21 @@ export function compactStyleText(
   );
 }
 
+export function compactStyleSource(code: string, fileName: string, names: ReadonlyMap<string, string>): string {
+  const source = ts.createSourceFile(fileName, code, ts.ScriptTarget.Latest, true);
+  const addresses = source.statements.filter(ts.isImportDeclaration)
+    .map(node => node.moduleSpecifier)
+    .filter(node => ts.isStringLiteral(node) && /\.css(?:\?|$)/.test(node.text));
+  let end = 0;
+  let result = "";
+  for (const address of addresses) {
+    result += compactStyleText(code.slice(end, address.getStart(source)), names);
+    result += code.slice(address.getStart(source), address.end);
+    end = address.end;
+  }
+  return result + compactStyleText(code.slice(end), names);
+}
+
 export function compactStyleNames(sourceRoot: string): Plugin {
   let names: Map<string, string>;
   // Vite resolves imported files through real paths, including Windows short
@@ -191,7 +210,9 @@ export function compactStyleNames(sourceRoot: string): Plugin {
           return null;
         }
       }
-      const transformed = compactStyleText(code, names);
+      const transformed = /\.css(?:\?|$)/.test(id)
+        ? compactStyleText(code, names)
+        : compactStyleSource(code, id.split("?")[0], names);
       return transformed === code ? null : { code: transformed, map: null };
     },
   };
