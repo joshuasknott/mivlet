@@ -31,7 +31,7 @@ export function HostedCodingSelection({ candidates, value, onChange, onLoad, dis
       </div>
       {matches.length > 100 && <p className="cloud-panel-muted">Showing 100 matches. Refine your search for more.</p>}
       <p>{selected.size} files selected · {candidates.files.filter(file => selected.has(file.path)).reduce((sum, file) => sum + file.sizeBytes, 0).toLocaleString()} bytes</p>
-      {candidates.truncated && <p className="cloud-panel-muted">Private, binary and unsupported files cannot be shared.</p>}
+      {candidates.truncated && <p className="cloud-panel-muted">File list shortened. Private, binary, oversized and unsupported files are omitted.</p>}
       <label>New files the agent may create (optional)<textarea rows={2} maxLength={16384} disabled={disabled} value={value.newPaths} onChange={event => onChange({ ...value, newPaths: event.target.value })} placeholder="src/menu.test.ts" aria-describedby={help} /></label>
       <p className="cloud-panel-muted" id={help}>One exact relative file name per line; no folders or wildcards.</p>
       <details><summary>Checks to run (optional)</summary><label>Exact check arguments<textarea rows={3} maxLength={16384} spellCheck={false} disabled={disabled} value={value.checks} onChange={event => onChange({ ...value, checks: event.target.value })} placeholder={'["/usr/bin/python3", "-m", "unittest"]'} /></label><p className="cloud-panel-muted">Up to four checks: one JSON argument array per line. Use installed cloud programs only. No downloads, network or shell commands.</p></details>
