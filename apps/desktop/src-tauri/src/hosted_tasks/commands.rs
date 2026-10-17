@@ -258,12 +258,11 @@ pub(crate) async fn hosted_text_stop(
 ) -> Result<ControlResult, String> {
     main(&window)?;
     let ticket = ticket(&state, &request.workspace_id, &request.agent_id)?;
-    commit(&ticket, || hosted::stop(&app, &ticket, &request))?;
-    let next = hosted::pending(&app)?
-        .into_iter()
-        .find(|t| t.work_id == request.work_id)
-        .ok_or("Cloud Stop is saved. Refresh its current state.")?;
-    refresh(&app, &state, &next).await
+    let (stopped, next) = commit(&ticket, || hosted::stop(&app, &ticket, &request))?;
+    match next {
+        Some(next) => refresh(&app, &state, &next).await,
+        None => Ok(stopped),
+    }
 }
 #[tauri::command]
 pub(crate) async fn hosted_provider_list(
