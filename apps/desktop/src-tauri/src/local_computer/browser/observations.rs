@@ -169,6 +169,7 @@ pub(super) fn tabs(
     process.tabs = None;
     process.navigation.clear();
     process.fields.clear();
+    process.downloads.clear();
     process.activation.clear();
     process.controls.clear();
     process.scroll = None;
@@ -484,6 +485,7 @@ pub(super) fn observe(
 ) -> Result<String, String> {
     process.controls.clear();
     process.fields.clear();
+    process.downloads.clear();
     process.scroll = None;
     let origin = exact_origin(requested_origin)?;
     // Consume before I/O; this choice cannot be replayed by a later observation.
@@ -559,6 +561,20 @@ pub(super) fn observe(
     } else {
         (Vec::new(), HashMap::new())
     };
+    let (downloads, download_choices) = if visible {
+        super::downloads::capture(
+            process,
+            (hwnd, generation, window),
+            &target,
+            &session,
+            &before,
+            &origin,
+            &nodes,
+            check,
+        )?
+    } else {
+        (Vec::new(), HashMap::new())
+    };
     let after = frame(
         &call(process, Command::Frames, json!({}), Some(&session), check)?,
         &origin,
@@ -569,9 +585,10 @@ pub(super) fn observe(
     check()?;
     process.controls = choices;
     process.fields = field_choices;
+    process.downloads = download_choices;
     let scroll_ref = scroll.as_ref().map(|(reference, _)| reference.clone());
     process.scroll = scroll;
-    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"fields":fields,"fieldsPartial":true,"fieldScope":"empty-public-text-only","controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"viewport":viewport,"scrollRef":scroll_ref,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
+    Ok(json!({"origin":origin,"content":content.content,"truncated":content.truncated,"controls":controls,"controlsPartial":true,"fields":fields,"fieldsPartial":true,"downloads":downloads,"downloadsPartial":true,"fieldScope":"empty-public-text-only","controlScope":"visible-tab-buttons-http-links","tabVisible":visible,"controlExpiresSeconds":30,"viewport":viewport,"scrollRef":scroll_ref,"inputValues":"omitted","scope":"top-frame-only","trust":"external-untrusted","instructionAuthority":"none","inputAuthority":false}).to_string())
 }
 
 pub(super) fn checked_tree(

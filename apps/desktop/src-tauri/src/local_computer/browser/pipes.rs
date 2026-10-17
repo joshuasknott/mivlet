@@ -315,6 +315,8 @@ pub(super) struct ControlPipe {
     pub output: Framed,
     sequence: u32,
     interrupted: bool,
+    download_tracking: bool,
+    download_events: std::collections::VecDeque<serde_json::Value>,
 }
 
 /// Closed native protocol surface. Navigation additionally requires the native
@@ -333,6 +335,7 @@ pub(super) enum Command {
     ResolveField,
     FillEmpty,
     ReleaseObject,
+    DownloadPolicy,
     Quads,
     Layout,
     Hit,
@@ -356,6 +359,7 @@ impl Command {
             Self::ResolveField => "DOM.resolveNode",
             Self::FillEmpty => "Runtime.callFunctionOn",
             Self::ReleaseObject => "Runtime.releaseObject",
+            Self::DownloadPolicy => "Browser.setDownloadBehavior",
             Self::Quads => "DOM.getContentQuads",
             Self::Layout => "Page.getLayoutMetrics",
             Self::Hit => "DOM.getNodeForLocation",
@@ -367,6 +371,35 @@ impl Command {
     }
 }
 impl ControlPipe {
+    pub(super) fn download_policy(
+        &mut self,
+        path: Option<&std::path::Path>,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<(), String> {
+        if path.is_some() {
+            self.download_tracking = true;
+            self.download_events.clear();
+        }
+        let params = if let Some(path) = path {
+            serde_json::json!({"behavior":"allowAndName","downloadPath":path.to_str().ok_or("The private download folder is unsupported.")?,"eventsEnabled":true})
+        } else {
+            serde_json::json!({"behavior":"default","eventsEnabled":false})
+        };
+        self.exchange(Command::DownloadPolicy, params, None, check, Some(dispatch))?;
+        if path.is_none() {
+            self.download_tracking = false;
+            self.download_events.clear();
+        }
+        Ok(())
+    }
+    pub(super) fn poll_downloads(
+        &mut self,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<Vec<serde_json::Value>, String> {
+        self.read_command(Command::Version, serde_json::json!({}), None, check)?;
+        Ok(self.download_events.drain(..).collect())
+    }
     pub(super) fn fill_empty(
         &mut self,
         frame: &str,
@@ -437,6 +470,8 @@ impl ControlPipe {
             output: Framed::new(output),
             sequence: 0,
             interrupted: false,
+            download_tracking: false,
+            download_events: std::collections::VecDeque::new(),
         }
     }
     pub(super) fn read_command(
@@ -451,6 +486,7 @@ impl ControlPipe {
             Command::Navigate
                 | Command::Activate
                 | Command::FillEmpty
+                | Command::DownloadPolicy
                 | Command::Click
                 | Command::Scroll
         ) {
@@ -596,6 +632,14 @@ impl ControlPipe {
                     serde_json::from_slice(&self.output.read(deadline, check)?)
                         .map_err(|_| FAILURE)?;
                 if response.get("id").is_none() && response["method"].is_string() {
+                    if self.download_tracking {
+                        if let Some(event) = download_event(&response)? {
+                            if self.download_events.len() >= 16 {
+                                return Err("The private download event bound was exceeded.".into());
+                            }
+                            self.download_events.push_back(event);
+                        }
+                    }
                     continue;
                 }
                 if response["id"]
@@ -637,6 +681,58 @@ impl ControlPipe {
         }
         check()
     }
+}
+
+fn download_event(message: &serde_json::Value) -> Result<Option<serde_json::Value>, String> {
+    use serde_json::json;
+    let method = message["method"].as_str().unwrap_or_default();
+    if !matches!(
+        method,
+        "Browser.downloadWillBegin" | "Browser.downloadProgress"
+    ) {
+        return Ok(None);
+    }
+    if message.get("sessionId").is_some() {
+        return Err("A download event came from an unsupported browser session.".into());
+    }
+    let params = &message["params"];
+    let guid = params["guid"]
+        .as_str()
+        .filter(|guid| {
+            guid.len() == 36
+                && guid.bytes().enumerate().all(|(index, byte)| {
+                    if matches!(index, 8 | 13 | 18 | 23) {
+                        byte == b'-'
+                    } else {
+                        byte.is_ascii_hexdigit()
+                    }
+                })
+        })
+        .ok_or("The native download identity is invalid.")?;
+    if method == "Browser.downloadWillBegin" {
+        let frame = params["frameId"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 100)
+            .ok_or("The native download frame is invalid.")?;
+        let url = params["url"]
+            .as_str()
+            .filter(|url| url.len() <= 2048)
+            .ok_or("The native download URL is invalid.")?;
+        return Ok(Some(
+            json!({"kind":"begin","guid":guid,"frameId":frame,"url":url}),
+        ));
+    }
+    let state = params["state"]
+        .as_str()
+        .filter(|state| matches!(*state, "inProgress" | "completed" | "canceled"))
+        .ok_or("The native download state is invalid.")?;
+    let bytes = params["receivedBytes"]
+        .as_f64()
+        .filter(|bytes| bytes.is_finite() && *bytes >= 0.0 && *bytes <= 9_007_199_254_740_991.0)
+        .ok_or("The native download byte count is invalid.")?;
+    Ok(Some(
+        json!({"kind":"progress","guid":guid,"state":state,"receivedBytes":bytes}),
+    ))
 }
 
 fn visibility(value: &serde_json::Value) -> Result<bool, String> {

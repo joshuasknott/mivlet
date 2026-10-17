@@ -253,7 +253,8 @@ across input-driver Stop. The profile is independent of the user's
 usual browser profile, but the window still shares the interactive Windows session.
 The published browser outlives the input driver and Stop for human takeover;
 unpublished cancelled launches are closed, and account/app shutdown closes the
-owned browser job. Native upload/download custody remains pending.
+owned browser job. An explicitly approved native download is the exception: it
+closes that owned browser job after transfer to seal file custody.
 
 `local-browser-handover` records the public manual-step reason in the canonical
 current Work, fences its current run, revokes computer input and retains the
@@ -304,10 +305,33 @@ The one bounded write retains account/lease/generation/Stop fences. The reply
 contains status and character count, no field value. Page event handlers may send
 entered text to the website, so the normal exact approval binds the full payload
 digest. Fresh observation is required; errors after dispatch remain uncertain and
-are never replayed. Editing populated fields and native upload/download custody
-remain pending. The closed native operation uses the official
+are never replayed. Editing populated fields and native uploads remain pending.
+The closed native operation uses the official
 [DOM node resolution](https://chromedevtools.github.io/devtools-protocol/tot/DOM/#method-resolveNode)
 and [Runtime function-call protocol](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-callFunctionOn).
+
+`local-browser-download` consumes a separate 30-second observed-link choice with
+the exact origin, public link name and URL, a passive filename and a 1–10 second
+timeout. Browser authentication stays in Chromium. A fixed native download policy
+uses a fresh private staging directory and Chromium GUID filenames; native events
+must prove one exact source frame/URL/GUID with monotonic completion at most 8 MiB.
+Redirected final URLs, multiple downloads, credential-shaped URLs, unsupported
+formats, incomplete files, links and credential markers fail closed. Native code
+checks staging every 25 ms; this watchdog is not a disk quota and writes can
+briefly exceed its bound. Suggested browser filenames are never exported.
+
+The browser policy covers its context, so this initial capability deliberately
+closes the agent-owned browser Job after transfer, then confirms all its processes
+exited before inspecting exactly one completed file. Active failure or Stop also
+closes that Job; normal Stop outside transfer keeps the browser open. This is part
+of the exact approval. The ordinary foreground lease and privacy checks cover the
+transfer; final import has no more browser input and retains account/generation
+fences. A fresh directory rename imports validated bytes into the agent's
+`Downloads/download-*` workspace without overwriting files. The receipt contains
+relative path, size and SHA-256; it is not publication. A new browser open/window
+selection is required afterward. The private profile remains native-owned.
+See the official [download policy](https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-setDownloadBehavior)
+and [download progress events](https://chromedevtools.github.io/devtools-protocol/tot/Browser/#event-downloadProgress).
 
 For a visible HTTP(S) tab, observation also exposes a bounded subset of named,
 enabled top-frame buttons and HTTP links as opaque `controlRef` choices.
@@ -380,8 +404,9 @@ locks; cancellation and response waits happen outside them. The fixed native
 `Page.navigate` call sends no referrer or JavaScript. A successful reply means
 only dispatched, not verified page load: the agent must list and observe again.
 Errors, downloads and interrupted replies have uncertain outcomes and are not
-replayed. Browser-managed downloads are not imported or presented as Mivlet
-artifacts; native transfer custody and richer DOM inputs remain pending.
+replayed. Downloads caused by ordinary navigation/click are not imported or
+presented as Mivlet artifacts; only the separately approved native download path
+has managed custody. Native uploads and richer DOM inputs remain pending.
 
 The driver is private to Rust; React receives no driver methods, process handles,
 raw accessibility tokens or screenshots. Native code only exposes:

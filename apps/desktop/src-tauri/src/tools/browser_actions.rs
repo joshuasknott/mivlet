@@ -8,7 +8,10 @@ use std::sync::Arc;
 pub(super) fn supported(tool: &str) -> bool {
     matches!(
         tool,
-        "local-browser-activate" | "local-browser-fill" | "local-browser-handover"
+        "local-browser-activate"
+            | "local-browser-fill"
+            | "local-browser-handover"
+            | "local-browser-download"
     )
 }
 
@@ -40,6 +43,17 @@ pub(super) async fn execute(
     agent: String,
     generation: u64,
 ) -> Result<ToolResult, String> {
+    if tool == "local-browser-download" {
+        let input: crate::local_computer::browser::DownloadRequest =
+            serde_json::from_value(arguments).map_err(|_| {
+                "Use one current downloadRef, exact observed origin/name/URL and passive filename."
+            })?;
+        validate_reference(&input.download_ref, &input.origin)?;
+        let output = tauri::async_runtime::spawn_blocking(move || crate::local_computer::browser::download(
+            &computers, &workspace, &agent, generation, &input,
+        )).await.map_err(|_| "Browser download was interrupted. No action was replayed; inspect the browser and workspace before continuing.")??;
+        return Ok(ToolResult { ok: true, output });
+    }
     if tool == "local-browser-handover" {
         let input: Handover =
             serde_json::from_value(arguments).map_err(|_| "Describe the human browser step.")?;

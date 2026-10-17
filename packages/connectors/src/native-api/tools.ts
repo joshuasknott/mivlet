@@ -190,6 +190,12 @@ const TOOL_DEFINITIONS: BackendTool[] = [
     parameters:toolParameters({fieldRef:textParameter,origin:textParameter,name:textParameter,text:{type:"string",minLength:1,maxLength:2048}},["fieldRef","origin","name","text"],true)
   },
   {
+    name: "local-browser-download",
+    description: "Download one fresh visible public link using this owned browser's native authentication. Exact origin/name/URL, passive output filename, 1–10 second timeout, max 8 MiB. Native final URL must match; no redirects/cookies/host paths. The owned browser closes after transfer or active failure/Stop. Completed bytes enter private workspace Downloads; publication is separate.",
+    defaultMode: "full-access", defaultRisk: "critical",
+    parameters: toolParameters({downloadRef:textParameter,origin:textParameter,name:textParameter,url:textParameter,fileName:{type:"string",minLength:1,maxLength:160},timeoutSeconds:{type:"integer",minimum:1,maximum:10}},["downloadRef","origin","name","url","fileName","timeoutSeconds"],true)
+  },
+  {
     name:"local-browser-handover",
     description:"Hand the owned browser to the user for a private or manual step. Save task attention, revoke this turn's control and keep the browser open. User must explicitly continue; never resume or reselect in this turn.",
     defaultMode:"full-access",defaultRisk:"high",

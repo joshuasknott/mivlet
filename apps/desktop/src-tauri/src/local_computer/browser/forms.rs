@@ -225,6 +225,7 @@ pub(super) fn fill(
     validate_text(text)?;
     let choice = process.fields.remove(reference).ok_or(STALE)?;
     process.fields.clear();
+    process.downloads.clear();
     process.controls.clear();
     process.navigation.clear();
     process.activation.clear();
