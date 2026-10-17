@@ -82,6 +82,7 @@ pub(crate) async fn hosted_task_prepare_coding(
         task_id: opaque("task")?,
         run_id: opaque("cloud-run")?,
     };
+    let _preparing = crate::local_computer::coding::hosted_repository::preparing(&task)?;
     let snapshot = crate::local_computer::coding::hosted_repository::capture_snapshot(
         &app,
         &state,

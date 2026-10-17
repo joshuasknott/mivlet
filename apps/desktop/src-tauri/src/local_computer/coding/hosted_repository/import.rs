@@ -99,6 +99,7 @@ fn retained(
     let task = task_for_target(app, ticket, &target.target())?;
     let current = crate::collaboration::hosted_repository::current_for_import(app, ticket, &task)?;
     let (directory, repo) = storage::repository(state, &task, &current.repository)?;
+    let _custody = files::lease(&storage::home(&directory, &repo)?)?;
     let (root, record) = storage::load(&directory, &repo, ticket, &target.snapshot_id)?;
     bound_context(&current, &record.snapshot)?;
     let output: output::SavedOutput =

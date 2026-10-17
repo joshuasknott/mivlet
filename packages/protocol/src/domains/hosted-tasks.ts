@@ -172,4 +172,3 @@ export interface HostedTaskCapabilityReceipt {
   token: string;
   expiresAt: number;
 }
-

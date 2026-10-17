@@ -283,7 +283,10 @@ fn missing_runtime_is_clear_after_persisting_uncertainty_without_reclassifying_n
             "Cloud task request failed (hosted-coding-runtime-required).",
             || super::super::result_at(ctx, &target, None).map_err(|error| error.to_string()),
         );
-        assert!(unavailable.err().unwrap().contains("Workers Paid Containers"));
+        assert!(unavailable
+            .err()
+            .unwrap()
+            .contains("Workers Paid Containers"));
         let item = ctx.item(&target.work_id)?;
         assert_eq!(item.execution_owner.as_deref(), Some("hosted"));
         assert_eq!(item.hosted_task.as_ref().unwrap().phase, "dispatching");
@@ -313,6 +316,258 @@ fn missing_runtime_is_clear_after_persisting_uncertainty_without_reclassifying_n
             || Err("The exact Work stopped.".into()),
         );
         assert_eq!(stopped.unwrap_err(), "The exact Work stopped.");
+        Ok(())
+    });
+}
+
+#[test]
+fn four_cancelled_preparations_release_slots_but_matching_or_live_preparation_stays_protected() {
+    fixture(&store(), |ctx| {
+        let (mut target, mut review) = prepared(ctx, false)?;
+        let mut retired = 0;
+        for cycle in 0..4 {
+            let task = TaskIdentity::from_binding(&target.workspace_id, &review.admission.binding)
+                .unwrap();
+            let snapshot = review
+                .admission
+                .binding
+                .repository
+                .as_ref()
+                .unwrap()
+                .snapshot
+                .clone();
+            assert!(!crate::collaboration::hosted_repository::retire_at(
+                ctx,
+                &task,
+                &snapshot,
+                || {
+                    retired += 1;
+                    Ok(())
+                }
+            )?);
+            let preparing =
+                crate::local_computer::coding::hosted_repository::preparing(&task).unwrap();
+            // Same native transaction as cancel_review: invalidate the old
+            // held review before any source custody can be reclaimed.
+            queue::hold(ctx, &target.work_id, target.expected_generation, false)?;
+            let mut item = ctx.item(&target.work_id)?;
+            item.hosted_task = None;
+            ctx.work(&item)?;
+            assert!(!crate::collaboration::hosted_repository::retire_at(
+                ctx,
+                &task,
+                &snapshot,
+                || {
+                    retired += 1;
+                    Ok(())
+                }
+            )?);
+            drop(preparing);
+            assert!(crate::collaboration::hosted_repository::retire_at(
+                ctx,
+                &task,
+                &snapshot,
+                || {
+                    retired += 1;
+                    Ok(())
+                }
+            )?);
+            let request = Prepare {
+                workspace_id: target.workspace_id.clone(),
+                agent_id: target.agent_id.clone(),
+                work_id: target.work_id.clone(),
+                expected_generation: item.generation,
+                credential_id: "credential-unit".into(),
+                credential_revision: 1,
+                mode: Some("offline-coding".into()),
+                web_scope: None,
+                selected_paths: Some(vec!["main.ts".into()]),
+                writable_paths: Some(vec![]),
+                checks: Some(vec![]),
+            };
+            queue::hold(ctx, &item.id, item.generation, true)?;
+            let mut request = request;
+            request.expected_generation = ctx.item(&item.id)?.generation;
+            let next = TaskIdentity {
+                work_generation: request.expected_generation,
+                task_id: format!("task-coding-cycle-{cycle}"),
+                run_id: format!("cloud-run-cycle-{cycle}"),
+                ..task
+            };
+            let repo = review.admission.binding.repository.clone().unwrap();
+            review = prepare_at(
+                ctx,
+                &request,
+                &HostedComputerScope {
+                    workspace_id: "cloud-workspace".into(),
+                    device_id: "device-unit".into(),
+                },
+                4,
+                "https://tasks.example.test",
+                &[ProviderConnection {
+                    credential_id: "credential-unit".into(),
+                    provider_id: "openai".into(),
+                    revision: 1,
+                    enabled: true,
+                    created_at: 1,
+                    updated_at: 1,
+                    expires_at: chrono::Utc::now().timestamp_millis() + 100000,
+                }],
+                false,
+                &next,
+                repo,
+            )?;
+            target = request.target();
+        }
+        assert_eq!(retired, 4);
+        assert_eq!(
+            ctx.item(&target.work_id)?
+                .hosted_task
+                .as_ref()
+                .unwrap()
+                .phase,
+            "review"
+        );
+        Ok(())
+    });
+}
+#[test]
+fn retention_keeps_uncertain_import_and_scope_states_until_exact_terminal_acknowledgement() {
+    fixture(&store(), |ctx| {
+        let (mut target, review) = prepared(ctx, true)?;
+        let _gate = cloud::dispatch::AdmissionGuard::retain(&review.admission.binding);
+        let saved = claim_at(ctx, &target, &review.review_id)?;
+        let task =
+            TaskIdentity::from_binding(&target.workspace_id, &saved.admission.binding).unwrap();
+        let snapshot = saved
+            .admission
+            .binding
+            .repository
+            .as_ref()
+            .unwrap()
+            .snapshot
+            .clone();
+        assert!(!crate::collaboration::hosted_repository::retire_at(
+            ctx,
+            &task,
+            &snapshot,
+            || panic!("running snapshot retired")
+        )?);
+        super::super::result_at(ctx, &target, Some(completed(&saved, true, false)))?;
+        let original = ctx.item(&target.work_id)?;
+        for phase in [
+            "awaiting-import",
+            "scope-change-required",
+            "stop-pending",
+            "reconcile-required",
+            "dispatching",
+            "accepted",
+        ] {
+            let mut item = original.clone();
+            item.hosted_task.as_mut().unwrap().phase = phase.into();
+            ctx.work(&item)?;
+            assert!(!crate::collaboration::hosted_repository::retire_at(
+                ctx,
+                &task,
+                &snapshot,
+                || panic!("nonterminal snapshot retired")
+            )?);
+        }
+        ctx.work(&original)?;
+        let (_, next) = stop_at(ctx, &target)?;
+        target = next.unwrap();
+        assert!(!crate::collaboration::hosted_repository::retire_at(
+            ctx,
+            &task,
+            &snapshot,
+            || panic!("unacknowledged Stop retired")
+        )?);
+        Ok(())
+    });
+    fixture(&store(), |ctx| {
+        let (target, review) = prepared(ctx, true)?;
+        let _gate = cloud::dispatch::AdmissionGuard::retain(&review.admission.binding);
+        let saved = claim_at(ctx, &target, &review.review_id)?;
+        let task =
+            TaskIdentity::from_binding(&target.workspace_id, &saved.admission.binding).unwrap();
+        let snapshot = saved
+            .admission
+            .binding
+            .repository
+            .as_ref()
+            .unwrap()
+            .snapshot
+            .clone();
+        let (_, next) = stop_at(ctx, &target)?;
+        let target = next.unwrap();
+        // Authenticated cancellation is a later sequence, with no output or
+        // retained proposal, before any completed output. An already completed
+        // server result cannot be rewritten as a successful cancellation.
+        let mut ack = completed(&saved, true, false);
+        ack.snapshot.status = "cancelled".into();
+        ack.snapshot.generation += 1;
+        ack.snapshot.sequence += 1;
+        ack.snapshot.coding = None;
+        ack.snapshot.result_sha256 = None;
+        ack.snapshot.result_bytes = 0;
+        ack.text.clear();
+        super::super::result_at(ctx, &target, Some(ack))?;
+        assert!(crate::collaboration::hosted_repository::retire_at(
+            ctx,
+            &task,
+            &snapshot,
+            || Ok(())
+        )?);
+        Ok(())
+    });
+}
+#[test]
+fn completed_retention_requires_exact_native_provenance_and_reconciled_unchanged_output() {
+    fixture(&store(), |ctx| {
+        let (target, review) = prepared(ctx, false)?;
+        let _gate = cloud::dispatch::AdmissionGuard::retain(&review.admission.binding);
+        let saved = claim_at(ctx, &target, &review.review_id)?;
+        let task =
+            TaskIdentity::from_binding(&target.workspace_id, &saved.admission.binding).unwrap();
+        let snapshot = saved
+            .admission
+            .binding
+            .repository
+            .as_ref()
+            .unwrap()
+            .snapshot
+            .clone();
+        super::super::result_at(ctx, &target, Some(completed(&saved, false, false)))?;
+        assert!(crate::collaboration::hosted_repository::retire_at(
+            ctx,
+            &task,
+            &snapshot,
+            || Ok(())
+        )?);
+        let mut wrong = task.clone();
+        wrong.run_id = "different-run".into();
+        assert!(!crate::collaboration::hosted_repository::retire_at(
+            ctx,
+            &wrong,
+            &snapshot,
+            || panic!("wrong run retired")
+        )?);
+        wrong = task.clone();
+        wrong.work_generation += 1;
+        assert!(!crate::collaboration::hosted_repository::retire_at(
+            ctx,
+            &wrong,
+            &snapshot,
+            || panic!("wrong generation retired")
+        )?);
+        let mut wrong_scope = task;
+        wrong_scope.local_workspace_id = "other-workspace".into();
+        assert!(!crate::collaboration::hosted_repository::retire_at(
+            ctx,
+            &wrong_scope,
+            &snapshot,
+            || panic!("wrong account workspace retired")
+        )?);
         Ok(())
     });
 }
