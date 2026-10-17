@@ -133,8 +133,15 @@ a reviewed pinned extension and currently fail as missing commands.
 return a job identity while Rust retains the operation ticket. They require an
 explicit 1–86400 second lifetime and the existing exact single-use approval over
 the full command, selected repository/files, network policy and timeout. Ordinary
-command timeouts remain unchanged. There is no interactive stdin or provider
-shell fallback.
+command timeouts remain unchanged. A persistent start may explicitly approve
+`interactive: true` to retain a private stdin pipe. `command-input` requires the
+exact job/generation and next monotonic input sequence, bound to the normal
+single-use model approval. The main-window user control uses the same native
+scope/epoch and sequence checks. Native history persists the consumed sequence
+before writing; it saves no input text. Delivery is bounded to two seconds
+outside authority/registry locks. An uncertain write kills the exact Job and
+never replays; an accepted receipt confirms pipe bytes, not application success.
+There is no TTY, resize, provider shell or host-shell fallback.
 
 `command-jobs` lists this agent's bounded native history. `command-output` reads
 after a sequence cursor, returning at most 32 KiB with explicit dropped-history

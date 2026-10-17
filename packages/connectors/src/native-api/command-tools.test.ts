@@ -21,6 +21,8 @@ describe("native command lifecycle permits", () => {
         { command: `${args.command} changed` },
         { network: true },
         { timeoutSeconds: 601 },
+        { interactive: true },
+        ...(name === "repository-start" ? [{ previewPort: 4173 }] : []),
       ]) {
         const changed = buildToolApproval(
           "codex",
@@ -30,6 +32,16 @@ describe("native command lifecycle permits", () => {
         expect(changed.dataUsed).not.toEqual(initial.dataUsed);
       }
     }
+  });
+  it("binds exact input bytes, sequence and job identity to an explicit mutation approval", () => {
+    const args = { jobId: "one", jobGeneration: 2, inputSequence: 1, text: "inspect\n" };
+    const initial = buildToolApproval("codex", "command-input", JSON.stringify(args));
+    expect(initial.mode).toBe("full-access");
+    expect(initial.riskLevel).toBe("high");
+    for (const change of [{ text: "inspect" }, { inputSequence: 2 }, { jobGeneration: 3 }, { jobId: "two" }]) {
+      expect(buildToolApproval("codex", "command-input", JSON.stringify({ ...args, ...change })).dataUsed).not.toEqual(initial.dataUsed);
+    }
+    expect(lookupTool("command-input")?.parameters).toContain("inputSequence");
   });
   it("binds exact stop identity and generation and exposes only bounded read operations", () => {
     const initial = buildToolApproval(
