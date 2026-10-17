@@ -106,7 +106,7 @@ pub(crate) fn navigation(expected: &str, uri: &str) -> Option<bool> {
     let parsed = url::Url::parse(expected).ok()?;
     let token = parsed
         .host_str()?
-        .strip_prefix("mivlet-preview-probe-")?
+        .strip_prefix("mivlet-proof-")?
         .strip_suffix(".localhost")?;
     if token.len() != 48
         || !token
@@ -190,7 +190,7 @@ pub(crate) async fn verify(
             let probe = Arc::new(Probe {
                 attempt,
                 origin: format!(
-                    "http://mivlet-preview-probe-{token}.localhost:{}",
+                    "http://mivlet-proof-{token}.localhost:{}",
                     listener
                         .local_addr()
                         .map_err(|_| "Native probe address is unavailable.")?
@@ -698,7 +698,7 @@ mod tests {
         Probe {
             attempt: 4,
             origin: format!(
-                "http://mivlet-preview-probe-{}.localhost:12345",
+                "http://mivlet-proof-{}.localhost:12345",
                 "a".repeat(48)
             ),
             frame_id: "frame".into(),
@@ -723,6 +723,14 @@ mod tests {
             result_cue: AtomicBool::new(true),
             restricted_started: Mutex::new(Some(Instant::now() - Duration::from_millis(1300))),
         }
+    }
+    #[test]
+    fn native_probe_hostname_is_a_valid_bounded_dns_label() {
+        let value = probe();
+        let origin = url::Url::parse(&value.origin).unwrap();
+        let host = origin.host_str().unwrap();
+        assert!(host.split('.').all(|label| !label.is_empty() && label.len() <= 63));
+        assert!(host.starts_with("mivlet-proof-"));
     }
     #[test]
     fn canceled_callbacks_and_server_tail_cannot_change_a_new_attempt() {
