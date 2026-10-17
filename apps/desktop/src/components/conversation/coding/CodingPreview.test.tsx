@@ -36,7 +36,7 @@ describe("native running-app preview", () => {
     fireEvent.click(screen.getByRole("button", { name: "Add to message" }));
     expect(props.onDraft).toHaveBeenCalledWith(expect.stringContaining("Make the heading smaller"));
     expect(props.onDraft).toHaveBeenCalledWith(expect.stringContaining("untrusted page evidence"));
-    expect(frame()).toHaveAttribute("sandbox", "allow-scripts allow-same-origin");
+    expect(frame()).toHaveAttribute("sandbox", "allow-scripts allow-same-origin allow-forms");
   });
   it("renders an unavailable native state without an iframe or synthetic URL", async () => {
     render(<CodingPreview target={target} readPreview={async () => ({ status: "unavailable", message: "This session has no approved preview port." })} closePreview={vi.fn()} validatePreviewPick={vi.fn()} onDraft={vi.fn()} />);
