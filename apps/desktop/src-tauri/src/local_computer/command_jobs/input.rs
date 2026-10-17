@@ -29,6 +29,7 @@ pub(super) fn dispatch(
     input: InputRequest,
 ) -> Result<Value, String> {
     validate(&input)?;
+    crate::execution_control::ensure_active_execution_allowed()?;
     let control = ticket.with_current(|| {
         let mut inner = jobs.inner.lock().map_err(|_| "Command jobs are unavailable.")?;
         let index = inner.records.iter().position(|record| record.id == input.job_id).ok_or("This command job is unavailable in the selected agent scope.")?;
@@ -65,6 +66,7 @@ pub(super) fn dispatch(
     // No generation, registry, approval or observation lock crosses pipe I/O.
     jobs.persist()?;
     ticket.check()?;
+    crate::execution_control::ensure_active_execution_allowed()?;
     let delivery = control.write_input(&control.binding(), input.text)?;
     Ok(
         json!({"jobId": input.job_id, "jobGeneration": input.job_generation,
