@@ -29,15 +29,15 @@ export function HostedCodingImport({ item, snapshot, api, approve, onChanged, on
   const output = progress.output;
   return <section className="cloud-panel-coding-import" aria-label="Returned cloud files">
     <h3>Cloud files are ready to review</h3>
-    <p>Changes stay separate until import. A checkpoint protects the current copy.</p>
+    <p>Changes stay separate until import, which checkpoints your current copy.</p>
     {progress.completedChecks.map(check => <p className="cloud-panel-muted" key={check.id}>{check.id} · exit {check.exitCode}{check.truncated ? " · output shortened" : ""}</p>)}
-    {progress.proposal && <div role="status"><p>Paused: the agent requested more access. Importing existing changes grants no new access. Review a fresh task to continue.</p><details><summary>Requested change</summary><pre>{progress.proposal.tool}{"\n"}{progress.proposal.arguments}</pre></details></div>}
+    {progress.proposal && <div role="status"><p>Paused for more access. Import grants no new access; continuing needs a fresh task review.</p><details><summary>Requested change</summary><pre>{progress.proposal.tool}{"\n"}{progress.proposal.arguments}</pre></details></div>}
     <button type="button" className="button button-secondary" disabled={pending || disabled || !current()} onClick={() => void run("review", async () => {
       const requested = { workspaceId: item.workspaceId, agentId: item.agentId, workId: item.id, expectedGeneration: latest.current.generation, snapshotId: output.snapshotId, outputManifestSha256: output.outputManifestSha256 };
       const result = await boundedHostedRead(api.reviewImport(requested));
       if (!current()) return;
       if (latest.current.generation !== requested.expectedGeneration || canonicalHostedTaskJson(result.snapshot) !== canonicalHostedTaskJson(binding.repository.snapshot)
-        || canonicalHostedTaskJson(result.output) !== canonicalHostedTaskJson(output)) throw new Error("The returned files or task changed. Refresh cloud status before reviewing again.");
+        || canonicalHostedTaskJson(result.output) !== canonicalHostedTaskJson(output)) throw new Error("The returned files or task changed. Refresh cloud status, then review again.");
       cancel.current = false; setTarget(requested); setReview(result); setAttempted(false);
     })}>Review returned changes</button>
     {error && !review && <p role="alert">{error}</p>}
@@ -59,7 +59,7 @@ export function HostedCodingImport({ item, snapshot, api, approve, onChanged, on
         if (!current()) return;
         if (result.snapshotId !== target.snapshotId || result.outputManifestSha256 !== target.outputManifestSha256
           || result.repositoryId !== review.snapshot.repositoryId || result.outputTreeId !== review.outputTreeId || !result.verificationInvalidated)
-          throw new Error("The import outcome needs checking. Close this review and refresh cloud status; do not repeat the import.");
+          throw new Error("Check the import outcome. Close this review and refresh cloud status. Do not import again.");
         setReview(undefined); await boundedHostedRead(onChanged());
       })} />}
   </section>;
@@ -72,15 +72,15 @@ function ImportConsent({ review, pending, attempted, stale, error, onClose, onSt
   const [confirmation, setConfirmation] = useState("");
   const expired = useReviewExpiry(review.expiresAt);
   const unavailable = stale || expired || attempted;
-  return <HostedConsentFrame label="Returned files" title="Review cloud changes" closeLabel="Close import review" pending={pending} onClose={onClose}><p>Review these changes before importing them into this task’s working copy.</p>
+  return <HostedConsentFrame label="Returned files" title="Review cloud changes" closeLabel="Close import review" pending={pending} onClose={onClose}><p>Review changes before importing into this task’s copy.</p>
     <ul className="cloud-panel-coding-file-summary">{review.changes.map(change => <li key={change.path}><code>{change.path}</code><span>{change.status}</span></li>)}</ul>
     <pre className="cloud-panel-coding-diff" aria-label="Cloud changes diff" tabIndex={0}>{review.diff || "No text changes."}</pre>
-    {review.truncated && <p role="alert">This diff is shortened. The complete file names and hashes are in Technical details.</p>}
-    <p>A checkpoint is saved before importing. Run checks again on this computer after import.</p>
+    {review.truncated && <p role="alert">Shortened diff. See Technical details for all file names and hashes.</p>}
+    <p>Import saves a checkpoint first. Rerun checks here afterward.</p>
     <details><summary>Technical details</summary><pre>{JSON.stringify({ snapshot: review.snapshot, output: review.output, currentTreeId: review.currentTreeId, outputTreeId: review.outputTreeId, head: review.head }, null, 2)}</pre></details>
     <p>{review.approval.consequence}</p>
     <ApprovalConfirmation phrase={review.approval.confirmationPhrase} value={confirmation} onChange={setConfirmation} pending={pending} />
-    {unavailable && <p role="alert">This review is unavailable. Close it and refresh cloud status for a new review.</p>}
+    {unavailable && <p role="alert">Review unavailable. Close it and refresh cloud status for a new review.</p>}
     {error && <p role="alert">{error}</p>}
     {pending && <button type="button" className="button button-secondary" onClick={onStop}>Stop task</button>}
     <footer><button type="button" className="button button-secondary" disabled={pending} onClick={onClose}>Keep changes for later</button><button type="button" className="button button-primary" disabled={pending || unavailable || Boolean(review.approval.confirmationPhrase && confirmation !== review.approval.confirmationPhrase)} onClick={() => onImport(confirmation)}>Import changes once</button></footer>
