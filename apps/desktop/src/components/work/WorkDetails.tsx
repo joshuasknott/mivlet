@@ -152,6 +152,18 @@ export function WorkDetails({
           </details>
         </section>
       ) : null}
+      {item.outcomeGoal ? <section className="work-details-section">
+        <h3>Outcome goal</h3><p>{item.outcomeGoal.objective}</p><p>{item.outcomeGoal.successCriteria}</p>
+        <small>{item.outcomeGoal.status === "completed" ? "Agent reports achieved" : item.outcomeGoal.status} · {item.turnCount}/{item.maxTurns} turns · {item.tokenUsage.toLocaleString()}/{item.maxTokens.toLocaleString()} reported tokens</small>
+        {item.outcomeGoal.report ? <p>{item.outcomeGoal.report.text}</p> : null}
+        <small>Agent reports are evidence of the report, not independent verification of an external outcome.</small>
+      </section> : null}
+      {item.liveSteering?.length ? <section className="work-details-section">
+        <h3>Live guidance receipts</h3><ol className="work-steering-list">{item.liveSteering.map(event => <li key={event.id}>
+          <small>{new Date(event.createdAt).toLocaleString()} · {event.delivery}</small><p>{event.text}</p>
+          <small>{event.delivery === "accepted" ? "Codex accepted this guidance for the exact active turn. Earlier actions remain unchanged." : event.delivery === "rejected" ? "The provider did not accept this guidance. It was not automatically sent as another turn." : "Delivery is unconfirmed. Review the saved result before continuing; do not resend automatically."}</small>
+        </li>)}</ol>
+      </section> : null}
       {item.steering?.length ? (
         <section className="work-details-section">
           <h3>Steering</h3>

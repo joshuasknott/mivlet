@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { loadRuntimeConversationDraft, saveRuntimeConversationDraft } from "../runtime/domains/conversations";
 import type { ComposerAttachment } from "../lib/types";
+import type { OutcomeGoalInput } from "@mivlet/protocol";
 
 export interface ComposerScope {
   workspaceId: string;
@@ -10,6 +11,7 @@ export interface ComposerScope {
   threadId?: string;
 }
 interface ComposerContent {
+  outcomeGoal?: OutcomeGoalInput;
   text: string;
   attachments: ComposerAttachment[];
   recipientId?: string;
@@ -60,6 +62,10 @@ function decode(content: string): ComposerContent {
   const value = JSON.parse(content) as ComposerContent;
   if (!value || typeof value.text !== "string" || !Array.isArray(value.attachments)
     || (value.replyWorkId !== undefined && typeof value.replyWorkId !== "string")
+    || (value.outcomeGoal !== undefined && (!value.outcomeGoal || typeof value.outcomeGoal.objective !== "string"
+      || typeof value.outcomeGoal.successCriteria !== "string" || !Number.isInteger(value.outcomeGoal.maxTurns)
+      || value.outcomeGoal.maxTurns < 1 || value.outcomeGoal.maxTurns > 24 || !Number.isInteger(value.outcomeGoal.maxTokens)
+      || value.outcomeGoal.maxTokens < 1000 || value.outcomeGoal.maxTokens > 512000))
     || value.attachments.length > 12 || value.attachments.some((a) => !a || typeof a.id !== "string" || typeof a.name !== "string" || typeof a.type !== "string" || typeof a.sizeBytes !== "number" || (a.sourceId !== undefined && typeof a.sourceId !== "string"))
   ) {
     throw new Error("Could not restore this conversation's composer.");
@@ -177,6 +183,8 @@ export function useScopedComposer(scope?: ComposerScope) {
     attachments: entry?.ready ? entry.content.attachments : [],
     recipientId: entry?.content.recipientId,
     replyWorkId: entry?.content.replyWorkId,
+    outcomeGoal: entry?.content.outcomeGoal,
+    setOutcomeGoal: (outcomeGoal: OutcomeGoalInput | undefined) => mutate(content => ({ ...content, outcomeGoal })),
     setReplyWork: (replyWorkId: string | undefined) => mutate(content => ({ ...content, replyWorkId })),
     setRecipient: (recipientId: string) => mutate(content => ({ ...content, recipientId })),
     setText: (text: string) => mutate((content) => ({ ...content, text })),

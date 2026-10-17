@@ -52,6 +52,11 @@ pub(super) fn live(
             .current_run_id
             .clone()
             .ok_or_else(|| invalid("Wait for the active provider turn before steering."))?;
+        if item.live_steering.iter().any(|old| {
+            old.run_id == run && matches!(old.delivery.as_str(), "pending" | "uncertain")
+        }) {
+            return Err(invalid("Inspect the existing live guidance receipt before sending another update. Unconfirmed input is never resent."));
+        }
         item.live_steering.push(LiveWorkSteering {
             id: event.into(),
             text,
