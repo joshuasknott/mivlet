@@ -16,6 +16,17 @@ const request: NativeCompletionRequest = {
 };
 
 describe("native application action schemas", () => {
+  it("separates private file choices from exact published artifact attachment", () => {
+    const choices=registeredToolSpecs().find(tool=>tool.name==="local-browser-upload-choices")!;
+    expect(JSON.parse(choices.parameters).required).toEqual(["tabRef","origin"]);
+    expect(lookupTool(choices.name)?.defaultRisk).toBe("medium");
+    const tool=registeredToolSpecs().find(tool=>tool.name==="local-browser-upload")!;
+    const schema=JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["uploadRef","origin","name","artifactId"]);
+    expect(Object.keys(schema.properties)).toEqual(schema.required);
+    expect(schema.additionalProperties).toBe(false);
+    expect(lookupTool(tool.name)?.defaultRisk).toBe("critical");
+  });
   it("binds managed browser download custody to one observed link and passive filename", () => {
     const tool=registeredToolSpecs().find(tool=>tool.name==="local-browser-download")!;
     const schema=JSON.parse(tool.parameters);

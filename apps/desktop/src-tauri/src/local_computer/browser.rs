@@ -24,6 +24,63 @@ pub(crate) struct DownloadRequest {
     pub file_name: String,
     pub timeout_seconds: u64,
 }
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UploadRequest {
+    pub upload_ref: String,
+    pub origin: String,
+    pub name: String,
+    pub artifact_id: String,
+}
+pub(crate) fn upload_choices(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::UploadChoices(reference, origin),
+    )
+}
+pub(crate) fn upload(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    input: &UploadRequest,
+) -> Result<String, String> {
+    let (receipt, bytes) = super::artifacts::verified_artifact(
+        computers,
+        &super::artifacts::OpenArtifactRequest {
+            workspace_id: workspace.into(),
+            agent_id: agent.into(),
+            artifact_id: input.artifact_id.clone(),
+            expected_generation: generation,
+        },
+    )?;
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err("Browser uploads support passive published artifacts up to 8 MiB; choose a smaller file or upload manually.".into());
+    }
+    let source = super::artifacts::VerifiedUploadArtifact {
+        bytes,
+        file_name: receipt.export_name,
+        mime_type: receipt.artifact.mime_type,
+        sha256: receipt.sha256,
+    };
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Upload(input, &source),
+    )
+}
 pub(crate) fn download(
     computers: &LocalComputerState,
     workspace: &str,
@@ -225,6 +282,11 @@ enum Request<'a> {
     Activate(&'a str, &'a str),
     Fill(&'a str, &'a str, &'a str, &'a str),
     Download(&'a DownloadRequest),
+    UploadChoices(&'a str, &'a str),
+    Upload(
+        &'a UploadRequest,
+        &'a super::artifacts::VerifiedUploadArtifact,
+    ),
 }
 pub(crate) fn fill(
     computers: &LocalComputerState,
@@ -378,11 +440,12 @@ fn execute(
             return result;
         }
         // Secret-store reads happen before taking any control/authority lock.
-        let account_dispatch = if !matches!(arguments, Request::Read(..)) {
-            Some(crate::account_session::AccountDispatchFence::capture()?)
-        } else {
-            None
-        };
+        let account_dispatch =
+            if !matches!(arguments, Request::Read(..) | Request::UploadChoices(..)) {
+                Some(crate::account_session::AccountDispatchFence::capture()?)
+            } else {
+                None
+            };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         let run = |window: &super::windows::WindowBinding,
                    lease_check: &dyn Fn() -> Result<(), String>,
@@ -418,6 +481,22 @@ fn execute(
                 })
             };
             match arguments {
+                Request::UploadChoices(reference, origin) => process.upload_choices(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    &check,
+                ),
+                Request::Upload(input, source) => process.upload(
+                    window.identity.hwnd,
+                    generation,
+                    input,
+                    source,
+                    &scope.directory,
+                    &check,
+                    &checked_dispatch,
+                ),
                 Request::Download(_) => Err("Browser transfer custody was not established.".into()),
                 Request::Fill(reference, origin, name, text) => process.fill(
                     window.identity.hwnd,
@@ -470,7 +549,7 @@ fn execute(
                 ),
             }
         };
-        let result = if !matches!(arguments, Request::Read(..)) {
+        let result = if !matches!(arguments, Request::Read(..) | Request::UploadChoices(..)) {
             computers.native.act_native(
                 workspace,
                 agent,

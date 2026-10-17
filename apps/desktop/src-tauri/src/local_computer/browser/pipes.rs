@@ -15,6 +15,8 @@ const FAILURE: &str = "The private browser pipe failed. No browser input was ret
 const MAX_FRAME: usize = 1024 * 1024;
 #[path = "forms_script.rs"]
 mod forms_script;
+#[path = "uploads_script.rs"]
+mod uploads_script;
 
 #[cfg(test)]
 #[path = "pipes_tests.rs"]
@@ -336,6 +338,8 @@ pub(super) enum Command {
     FillEmpty,
     ReleaseObject,
     DownloadPolicy,
+    ProbeFile,
+    AttachFile,
     Quads,
     Layout,
     Hit,
@@ -360,6 +364,8 @@ impl Command {
             Self::FillEmpty => "Runtime.callFunctionOn",
             Self::ReleaseObject => "Runtime.releaseObject",
             Self::DownloadPolicy => "Browser.setDownloadBehavior",
+            Self::ProbeFile => "Runtime.callFunctionOn",
+            Self::AttachFile => "DOM.setFileInputFiles",
             Self::Quads => "DOM.getContentQuads",
             Self::Layout => "Page.getLayoutMetrics",
             Self::Hit => "DOM.getNodeForLocation",
@@ -371,6 +377,66 @@ impl Command {
     }
 }
 impl ControlPipe {
+    pub(super) fn empty_file(
+        &mut self,
+        frame: &str,
+        session: &str,
+        backend: u64,
+        origin: &str,
+        metadata: &serde_json::Value,
+        check: &dyn Fn() -> Result<(), String>,
+    ) -> Result<bool, String> {
+        let world=self.exchange(Command::IsolatedWorld,serde_json::json!({"frameId":frame,"worldName":"mivlet-native-upload-read-v1","grantUniveralAccess":false}),Some(session),check,None)?;
+        let context = world["executionContextId"]
+            .as_u64()
+            .filter(|id| *id > 0 && *id <= i32::MAX as u64)
+            .ok_or("The native file-field context is unavailable.")?;
+        let object = self.exchange(
+            Command::ResolveField,
+            serde_json::json!({"backendNodeId":backend,"executionContextId":context}),
+            Some(session),
+            check,
+            None,
+        )?;
+        let object = object["object"]["objectId"]
+            .as_str()
+            .filter(|id| !id.is_empty() && id.len() <= 512)
+            .ok_or("The native file-field identity is unavailable.")?;
+        let result=self.exchange(Command::ProbeFile,serde_json::json!({"objectId":object,"functionDeclaration":uploads_script::EMPTY_FILE,"arguments":[{"value":origin},{"value":metadata}],"returnByValue":true,"generatePreview":false,"silent":true,"userGesture":false,"awaitPromise":false,"throwOnSideEffect":true}),Some(session),check,None)?;
+        if result.get("exceptionDetails").is_some() || result["result"]["type"] != "string" {
+            return Err("The browser could not confirm an empty public file field.".into());
+        }
+        let empty = match result["result"]["value"].as_str() {
+            Some("empty") => true,
+            Some("occupied" | "stale" | "unsupported") => false,
+            _ => return Err("The browser returned an unsupported file-field state.".into()),
+        };
+        self.exchange(
+            Command::ReleaseObject,
+            serde_json::json!({"objectId":object}),
+            Some(session),
+            check,
+            None,
+        )?;
+        Ok(empty)
+    }
+    pub(super) fn attach_file(
+        &mut self,
+        session: &str,
+        backend: u64,
+        path: &std::path::Path,
+        check: &dyn Fn() -> Result<(), String>,
+        dispatch: &super::super::super::control::NativeDispatch<'_>,
+    ) -> Result<(), String> {
+        self.exchange(
+            Command::AttachFile,
+            serde_json::json!({"backendNodeId":backend,"files":[path]}),
+            Some(session),
+            check,
+            Some(dispatch),
+        )
+        .map(|_| ())
+    }
     pub(super) fn download_policy(
         &mut self,
         path: Option<&std::path::Path>,
@@ -487,6 +553,7 @@ impl ControlPipe {
                 | Command::Activate
                 | Command::FillEmpty
                 | Command::DownloadPolicy
+                | Command::AttachFile
                 | Command::Click
                 | Command::Scroll
         ) {
@@ -498,6 +565,7 @@ impl ControlPipe {
                 | Command::Visibility
                 | Command::ResolveField
                 | Command::ReleaseObject
+                | Command::ProbeFile
         ) {
             return Err("Only the fixed native visibility probe may create or evaluate its private context.".into());
         }

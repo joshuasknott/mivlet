@@ -1,6 +1,65 @@
 use super::*;
 
 #[test]
+fn native_file_assignment_is_closed_to_readers_and_sends_one_exact_node_path() {
+    use serde_json::{json, Value};
+    let input = Pair::new(false).unwrap();
+    let mut output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    for command in [Command::AttachFile, Command::ProbeFile] {
+        assert!(control
+            .read_command(
+                command,
+                json!({"files":["untrusted"],"functionDeclaration":"untrusted()"}),
+                Some("session"),
+                &|| Ok(())
+            )
+            .is_err());
+    }
+    let worker = std::thread::spawn(move || {
+        let mut reader = Framed::new(input.child);
+        let message: Value = serde_json::from_slice(
+            &reader
+                .read(Instant::now() + Duration::from_secs(3), &|| Ok(()))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(message["method"], "DOM.setFileInputFiles");
+        assert_eq!(message["params"]["backendNodeId"], 42);
+        assert_eq!(
+            message["params"]["files"],
+            json!(["C:\\native-staging\\report.csv"])
+        );
+        assert!(message["params"].get("selector").is_none());
+        output
+            .child
+            .write_all(
+                format!(
+                    "{}\0",
+                    json!({"id":message["id"],"sessionId":"session","result":{}})
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+    });
+    let writes = std::cell::Cell::new(0);
+    control
+        .attach_file(
+            "session",
+            42,
+            std::path::Path::new("C:\\native-staging\\report.csv"),
+            &|| Ok(()),
+            &|action| {
+                writes.set(writes.get() + 1);
+                action()
+            },
+        )
+        .unwrap();
+    worker.join().unwrap();
+    assert_eq!(writes.get(), 1);
+}
+
+#[test]
 fn native_download_events_omit_browser_filename_and_bound_the_download_identity() {
     use serde_json::json;
     let event = json!({"method":"Browser.downloadWillBegin","params":{"guid":"baadf00d-1234-5678-9abc-0123456789ab","frameId":"frame","url":"https://example.test/report.csv","suggestedFilename":"private-user-name.csv"}});

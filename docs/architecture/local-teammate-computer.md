@@ -305,7 +305,7 @@ The one bounded write retains account/lease/generation/Stop fences. The reply
 contains status and character count, no field value. Page event handlers may send
 entered text to the website, so the normal exact approval binds the full payload
 digest. Fresh observation is required; errors after dispatch remain uncertain and
-are never replayed. Editing populated fields and native uploads remain pending.
+are never replayed. Editing populated fields remains unsupported.
 The closed native operation uses the official
 [DOM node resolution](https://chromedevtools.github.io/devtools-protocol/tot/DOM/#method-resolveNode)
 and [Runtime function-call protocol](https://chromedevtools.github.io/devtools-protocol/tot/Runtime/#method-callFunctionOn).
@@ -332,6 +332,36 @@ relative path, size and SHA-256; it is not publication. A new browser open/windo
 selection is required afterward. The private profile remains native-owned.
 See the official [download policy](https://chromedevtools.github.io/devtools-protocol/tot/Browser/#method-setDownloadBehavior)
 and [download progress events](https://chromedevtools.github.io/devtools-protocol/tot/Browser/#event-downloadProgress).
+
+Uploads use a separate read projection, `local-browser-upload-choices`, with a
+fresh tab reference and exact origin. It returns only public `aria-label` names
+and 30-second single-use references for empty, visible top-frame single-file
+inputs. It returns no page text, existing filename or field value. Other private
+fields, occupied file inputs, multiple/directory/capture inputs, missing public
+labels and unsupported controls fail closed. One fixed read-only isolated-world
+function checks only native node metadata, visibility and `files.length`; it
+never reads a selected file's name or value. Ordinary page reads keep their
+existing file-field privacy refusal.
+
+`local-browser-upload` binds the exact observed field/origin/name and one published
+artifact ID. Native code reopens that immutable account/workspace/agent receipt,
+verifies passive content and SHA-256, then stages at most 8 MiB under native
+custody. The file input's accept rule, document/loader, node, attributes, empty
+state, geometry, visibility and exact DOM hit are checked again before one fenced
+`DOM.setFileInputFiles` dispatch. No caller path, selector or script is accepted.
+The website's input/change handlers may transmit the whole file immediately, as
+the exact approval states. A successful receipt confirms attachment, not final
+submission or the website's processing outcome. Interrupted input is never replayed.
+
+Staged bytes and their containing directory remain pinned and immutable until
+the owned browser Job exits. At most four uploads (32 MiB combined) are retained
+per owned browser; close/reopen it before more. Normal Stop preserves that browser
+and its file custody. Account/app shutdown closes its Job before custody cleanup.
+The task guard requires durable human handover after successful or uncertain
+attachment so the user can inspect the file-valued page and confirm submission.
+The retired turn cannot select/read/act again after handover; continuing requires
+the user's explicit fresh request. See the fixed native
+[file assignment protocol](https://chromedevtools.github.io/devtools-protocol/tot/DOM/#method-setFileInputFiles).
 
 For a visible HTTP(S) tab, observation also exposes a bounded subset of named,
 enabled top-frame buttons and HTTP links as opaque `controlRef` choices.
@@ -406,7 +436,8 @@ only dispatched, not verified page load: the agent must list and observe again.
 Errors, downloads and interrupted replies have uncertain outcomes and are not
 replayed. Downloads caused by ordinary navigation/click are not imported or
 presented as Mivlet artifacts; only the separately approved native download path
-has managed custody. Native uploads and richer DOM inputs remain pending.
+has managed custody. Rich editors, existing text replacement and arbitrary form
+controls remain outside these bounded DOM operations.
 
 The driver is private to Rust; React receives no driver methods, process handles,
 raw accessibility tokens or screenshots. Native code only exposes:

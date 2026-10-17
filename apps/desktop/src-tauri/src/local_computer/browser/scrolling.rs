@@ -316,6 +316,7 @@ pub(super) fn scroll(
     process.navigation.clear();
     process.fields.clear();
     process.downloads.clear();
+    process.upload_choices.clear();
     process.activation.clear();
     process.tabs = None;
     if native_ref != reference {

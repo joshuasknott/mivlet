@@ -84,7 +84,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 64] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 66] = [
     "repository-pr-read",
     "repository-pr-local",
     "repository-pr-action",
@@ -134,6 +134,8 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 64] = [
     "local-browser-activate",
     "local-browser-fill",
     "local-browser-download",
+    "local-browser-upload-choices",
+    "local-browser-upload",
     "local-browser-handover",
     "local-browser-click",
     "local-browser-scroll",
@@ -354,8 +356,11 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "local-browser-click"
         | "local-browser-scroll"
         | "local-browser-fill"
-        | "local-browser-download" => Some(("full-access", "critical")),
-        "local-browser-tabs" | "local-browser-observe" => Some(("read-only", "medium")),
+        | "local-browser-download"
+        | "local-browser-upload" => Some(("full-access", "critical")),
+        "local-browser-tabs" | "local-browser-observe" | "local-browser-upload-choices" => {
+            Some(("read-only", "medium"))
+        }
         "local-app-select" => Some(("read-only", "medium")),
         "local-app-observe" | "local-desktop-observe" => Some(("read-only", "medium")),
         "local-app-action" | "local-desktop-action" => Some(("full-access", "critical")),
@@ -457,6 +462,8 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-browser-activate"
             | "local-browser-fill"
             | "local-browser-download"
+            | "local-browser-upload-choices"
+            | "local-browser-upload"
             | "local-browser-handover"
             | "local-browser-click"
             | "local-browser-scroll"
@@ -2685,6 +2692,42 @@ mod connector_authority_tests {
             &approved.approval.request
         )
         .is_err());
+    }
+
+    #[test]
+    fn browser_upload_permit_rejects_changed_artifact_field_origin_or_reference_and_consumes_once()
+    {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("upload-permits.json");
+        let mut approved = request("local-browser-upload");
+        approved.arguments = json!({"uploadRef":"a".repeat(48),"origin":"https://example.test","name":"Upload report","artifactId":format!("artifact-{}","b".repeat(64))});
+        approved.workspace_id = Some("workspace".into());
+        approved.agent_id = Some("agent".into());
+        approved.computer_generation = Some(7);
+        approved.approval.request.data_used =
+            approval_argument_previews(&approved.tool, &approved.arguments)
+                .unwrap()
+                .into_iter()
+                .collect();
+        approved.approval.request.data_used.extend([
+            argument_digest(&approved.arguments).unwrap(),
+            "Computer workspace: workspace".into(),
+            "Computer agent: agent".into(),
+            "Computer generation: 7".into(),
+        ]);
+        persist_permit(&path, &approved);
+        for (key, value) in [
+            ("artifactId", format!("artifact-{}", "c".repeat(64))),
+            ("origin", "https://other.test".into()),
+            ("name", "Other file field".into()),
+            ("uploadRef", "d".repeat(48)),
+        ] {
+            let mut changed = approved.clone();
+            changed.arguments[key] = value.into();
+            assert!(verify_execution_permit(&path, &changed).is_err());
+        }
+        verify_execution_permit(&path, &approved).unwrap();
+        assert!(verify_execution_permit(&path, &approved).is_err());
     }
 
     #[test]

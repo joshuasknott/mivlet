@@ -121,6 +121,7 @@ pub(super) fn navigate(
     process.controls.clear();
     process.fields.clear();
     process.downloads.clear();
+    process.upload_choices.clear();
     process.scroll = None;
     let (window, pages) = observations::targets(process, hwnd, check)?;
     let page = pages
@@ -188,6 +189,7 @@ pub(super) fn activate(
     process.controls.clear();
     process.fields.clear();
     process.downloads.clear();
+    process.upload_choices.clear();
     process.scroll = None;
     let (window, pages) = observations::targets(process, hwnd, check)?;
     if !pages
