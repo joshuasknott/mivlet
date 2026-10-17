@@ -25,6 +25,9 @@ fn start(ctx: &Context<'_>) -> Result<(Prepare, HostedComputerScope, Vec<Provide
             credential_revision: 1,
             mode: None,
             web_scope: None,
+            selected_paths: None,
+            writable_paths: None,
+            checks: None,
         },
         HostedComputerScope {
             workspace_id: "cloud-workspace".into(),
@@ -302,6 +305,7 @@ fn answer(offer: &Offer) -> TaskResult {
             updated_at: now,
             retained_until: now + 86_400_000,
             research: None,
+            coding: None,
         },
         text: text.into(),
     }
