@@ -70,6 +70,18 @@ the previous Browser Run session.
 
 ## Deployment prerequisites
 
+The checked-in `@cloudflare/sandbox` version remains `0.13.0-next.738.2`.
+Its Dockerfile now pins the matching official amd64 image by immutable digest:
+`docker.io/cloudflare/sandbox:0.13.0-next.738.2@sha256:f4b2137219568aa44539ab93c0e774db6bcab323c134c5088447916e58f15e75`.
+The [official npm metadata](https://registry.npmjs.org/@cloudflare%2Fsandbox/0.13.0-next.738.2)
+and [Docker Hub metadata](https://hub.docker.com/v2/repositories/cloudflare/sandbox/tags/0.13.0-next.738.2)
+were checked on 2026-10-17; they identify package commit
+`e952c0c41432cf91d2dedd1c9726f47c8a582ba4` and the active image digest above.
+Cloudflare's [version-matching guidance](https://developers.cloudflare.com/sandbox/sdk/configuration/dockerfile/)
+requires the image to match the Worker package. Current `@cloudflare/sandbox`
+1.x is a separate API line and is not silently substituted here. Registry
+metadata proves the pin exists; it does not establish deployed runtime behavior.
+
 The separate [OpenCode and Agents fixture](hosted-opencode-prototype.md)
 passes local Workerd model/tool execution, scheduling, exact approval and durable
 receipt recovery in separate SDK databases. It accepts fixed synthetic data and
