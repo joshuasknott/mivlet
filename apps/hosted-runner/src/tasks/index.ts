@@ -21,7 +21,7 @@ const SAFE_FAILURES = new Set([
   "task-admission-conflict", "task-admission-expired", "task-generation-mismatch", "task-not-found", "hosted-task-quota",
   "task-capability-expired", "task-capability-replayed", "task-capability-rate-limited", "task-custody-configuration-required",
   "invalid-research-domain", "invalid-research-url", "invalid-research-scope", "research-url-outside-scope", "research-secret-url", "research-policy-review-required",
-  "invalid-coding-path", "invalid-coding-scope", "invalid-coding-check", "invalid-coding-manifest", "invalid-coding-chunk", "coding-chunk-conflict", "coding-task-not-current", "coding-output-mismatch", "coding-file-incomplete", "coding-file-hash-mismatch", "coding-source-content-refused", "coding-policy-review-required", "hosted-coding-runtime-required",
+  "invalid-coding-path", "invalid-coding-scope", "invalid-coding-check", "invalid-coding-manifest", "invalid-coding-chunk", "coding-chunk-conflict", "coding-task-not-current", "coding-output-mismatch", "coding-file-incomplete", "coding-file-hash-mismatch", "coding-source-content-refused", "coding-policy-review-required", "coding-metadata-limit", "hosted-coding-runtime-required",
 ]);
 const json = (value: unknown, status = 200) => Response.json(value, { status, headers: { "cache-control": "no-store", "x-content-type-options": "nosniff" } });
 

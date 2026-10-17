@@ -10,7 +10,7 @@ export interface CodingCheckResult {
 }
 /** Private service RPC only. No fetch proxy, host path or provider key API. */
 export interface CodingRuntimeBinding {
-  prerequisites(image: string): Promise<{ image: string; network: "disabled"; proof: "positive-and-negative-v1" }>;
+  prerequisites(image: string): Promise<{ image: string; network: "disabled"; proof: "positive-and-negative-v1"; processIsolation: "uid-seccomp-v1" }>;
   begin(value: CodingCheckStart): Promise<void>;
   file(leaseId: string, path: string, content: string): Promise<void>;
   run(leaseId: string, checkId: string): Promise<CodingCheckResult>;
