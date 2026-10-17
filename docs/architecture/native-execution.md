@@ -32,6 +32,23 @@ a policy limited to the preview's HTTP/WebSocket origin, data/blob media and loc
 scripts/styles; external resources, nested frames, native protocols and reporting
 endpoints are excluded. Application CSP remains enforced. HTTP and upgrade headers,
 request size, concurrency, lifetime and total transferred bytes are bounded.
+The proxy strips upstream connection policies and reporting endpoints, adds a
+native `Connection-Allowlist` limited to its own origin, and blocks WebRTC and
+redirects. Redirecting applications need a separate validated redirect adapter;
+even same-origin HTTP redirects are currently unsupported. Cookie Domain
+attributes are removed so cookies remain on the one opaque preview host. Request
+body framing accepts a single bounded Content-Length body; chunked requests and
+HTTP pipelining are rejected.
+
+Before the first descriptor, native WebView2 environment metadata must report
+Chromium 152 or newer and a controlled hidden frame must prove enforcement. The
+native fixture observes a successful loopback fetch and real STUN binding packet,
+then verifies that the restricted document reaches its own control routes while
+neither its forbidden fetch nor its separate STUN socket receives traffic during
+a bounded native observation window. Renderer result messages cannot declare
+success. The probe owns unpredictable fixture routes, exact document registrations,
+a ten-second deadline, and cleanup on account, task-generation or exact job Stop.
+An unsupported runtime or inconclusive probe exposes no app preview.
 
 Public point feedback is optional: a fixed bootstrap is added only to a normal,
 uncompressed bounded first HTML head chunk. CSP may block it, in which case the UI
