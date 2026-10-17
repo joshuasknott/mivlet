@@ -1,5 +1,8 @@
 // No tokens or provider credentials enter this client. All dynamic content is text.
 const byId = (id) => document.getElementById(id);
+const managedPath = location.pathname.match(/^\/d\/([a-f0-9]{64})\/remote$/);
+const basePath = managedPath ? `/d/${managedPath[1]}` : "";
+const remotePath = (path) => `${basePath}${path}`;
 const ui = Object.fromEntries(["connection","subtitle","notice","connect-panel","connect","workspace","agent","refresh","work","empty","truncated","result","result-content","close-result","composer","request","disconnect","send","read-only","retry-panel","retry","notifications"].map(id => [id, byId(id)]));
 let session;
 let epoch = 0;
@@ -28,12 +31,14 @@ async function request(path, body) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
   try {
-    const response = await fetch(path, { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", signal: controller.signal, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json", "X-Mivlet-Remote": "1" }, body: JSON.stringify(body) }) });
+    const response = await fetch(remotePath(path), { method: body === undefined ? "GET" : "POST", credentials: "same-origin", cache: "no-store", signal: controller.signal, ...(body === undefined ? {} : { headers: { "Content-Type": "application/json", "X-Mivlet-Remote": "1" }, body: JSON.stringify(body) }) });
     if (response.status === 204) return undefined;
     const result = await response.json();
     if (!response.ok) {
       const error = new Error(result.error || "The request could not be completed.");
-      error.rejected = true;
+      // A relay/server timeout can follow a committed native write. Preserve
+      // its original request ID for explicit reconciliation/retry.
+      error.rejected = response.status < 500 && response.status !== 408;
       if (response.status === 401) reset("Access expired or was revoked. Connect this browser again.");
       throw error;
     }
@@ -159,8 +164,22 @@ async function refresh() {
 }
 ui.connect.addEventListener("click", async () => {
   lock(true);
+  const version = epoch;
   try {
     const response = await request("/remote/connect",{});
+    if (basePath) {
+      if (response.pending !== true) throw new Error("The connection request was invalid.");
+      notice("Approve this browser in Mivlet Settings on your computer. Choose the agents and access to share.");
+      const deadline = Date.now() + 300000;
+      while (version === epoch && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        if (version !== epoch) return;
+        const consent = await request("/remote/consent");
+        if (consent.connected === true) { await initialize(); return; }
+        if (consent.pending !== true) throw new Error("The connection request expired. Connect again.");
+      }
+      throw new Error("The connection request expired. Connect again.");
+    }
     if (!/^\/oauth\/wait\/[A-Za-z0-9_-]{43}$/.test(response.authorizeUrl)) throw new Error("The sign-in address was invalid.");
     location.assign(response.authorizeUrl);
   } catch (error) { notice(error.message); lock(false); }
@@ -195,7 +214,7 @@ async function notificationStatus(version) {
   } catch { /* Local HTTP and unsupported services keep the explicit opt-in. */ }
 }
 async function pushWorker() {
-  await navigator.serviceWorker.register("/remote/sw.js",{scope:"/remote"});
+  await navigator.serviceWorker.register(remotePath("/remote/sw.js"),{scope:remotePath("/remote")});
   let timeout;
   try {
     return await Promise.race([navigator.serviceWorker.ready,new Promise((_,reject) => { timeout=setTimeout(() => reject(new Error("The notification worker did not become ready. Try again.")),10000); })]);
@@ -256,5 +275,5 @@ async function initialize() {
     void notificationStatus(version);
   } catch { if (version === epoch) reset("Connect this browser to see the work you choose to share."); }
 }
-if (new URLSearchParams(location.search).has("connection")) { history.replaceState(null,"","/remote"); notice("Sign-in expired or was declined. Connect again when ready."); }
+if (new URLSearchParams(location.search).has("connection")) { history.replaceState(null,"",remotePath("/remote")); notice("Sign-in expired or was declined. Connect again when ready."); }
 void initialize();

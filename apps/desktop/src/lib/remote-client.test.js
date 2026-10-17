@@ -6,6 +6,7 @@ let calls;
 let failNextMutation;
 let failNextRead;
 beforeEach(()=>{
+  history.replaceState(null,"","/remote");
   vi.resetModules();vi.useFakeTimers();document.body.innerHTML=page;
   Object.defineProperty(document,"hidden",{configurable:true,value:false});
   calls=[];failNextMutation=false;failNextRead=false;
@@ -20,6 +21,45 @@ beforeEach(()=>{
 afterEach(()=>{vi.clearAllTimers();vi.useRealTimers();vi.unstubAllGlobals();document.body.replaceChildren();});
 const start=async()=>{await import("../../src-tauri/src/mcp_server/remote/app.js");await vi.waitFor(()=>expect(document.querySelector(".task-request")).not.toBeNull());};
 describe("phone client against shared task contracts",()=>{
+  it("uses only its managed base path and keeps the entire consent exchange native",async()=>{
+    const prefix=`/d/${"a".repeat(64)}`;history.replaceState(null,"",`${prefix}/remote`);
+    let connected=false;
+    fetch.mockImplementation(async(path,options)=>{
+      const body=options.body && JSON.parse(options.body);calls.push({path,options,body});
+      const route=path.slice(prefix.length);
+      if(route==="/remote/session" && !connected) return {ok:false,status:401,json:async()=>({error:"Connect first"})};
+      if(route==="/remote/connect") return {ok:true,status:200,json:async()=>({pending:true})};
+      if(route==="/remote/consent") {connected=true;return {ok:true,status:200,json:async()=>({connected:true})};}
+      return {ok:true,status:200,json:async()=>replies[body?.name || route]};
+    });
+    await import("../../src-tauri/src/mcp_server/remote/app.js");
+    await vi.waitFor(()=>expect(document.getElementById("notice").textContent).toContain("Connect this browser"));
+    document.getElementById("connect").click();
+    await vi.advanceTimersByTimeAsync(1501);
+    await vi.waitFor(()=>expect(document.querySelector(".task-request")).not.toBeNull());
+    expect(calls.every(call=>call.path.startsWith(`${prefix}/remote/`))).toBe(true);
+    expect(calls.some(call=>call.path.includes("oauth"))).toBe(false);
+    expect(calls.some(call=>JSON.stringify(call.body ?? {}).includes("code_verifier"))).toBe(false);
+  });
+  it("keeps an HTTP503 write uncertain and reuses its original ID only on explicit retry",async()=>{
+    const normal=fetch.getMockImplementation();let unavailable=true;
+    fetch.mockImplementation(async(path,options)=>{
+      const result=await normal(path,options);
+      if(unavailable && options.body && JSON.parse(options.body).name==="mivlet_request_task") {
+        unavailable=false;return {ok:false,status:503,json:async()=>({error:"Connection lost before confirmation"})};
+      }
+      return result;
+    });
+    await start();document.getElementById("request").value="Exactly one request";
+    document.getElementById("composer").dispatchEvent(new Event("submit",{bubbles:true,cancelable:true}));
+    await vi.waitFor(()=>expect(document.getElementById("retry-panel").hidden).toBe(false));
+    const original=calls.find(call=>call.body?.name==="mivlet_request_task").body;
+    await vi.advanceTimersByTimeAsync(15000);
+    expect(calls.filter(call=>call.body?.name==="mivlet_request_task")).toHaveLength(1);
+    document.getElementById("retry").click();
+    await vi.waitFor(()=>expect(document.getElementById("retry-panel").hidden).toBe(true));
+    expect(calls.filter(call=>call.body?.name==="mivlet_request_task")[1].body).toEqual(original);
+  });
   it("does not let an old notification status read replace an accepted opt-in",async()=>{
     const key=new Uint8Array(65);key[0]=4;
     const state={publicKey:btoa(String.fromCharCode(...key)).replace(/=/g,"").replace(/\+/g,"-").replace(/\//g,"_"),enabled:false,deliveryFailed:false};

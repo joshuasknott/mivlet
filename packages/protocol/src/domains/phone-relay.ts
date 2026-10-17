@@ -35,7 +35,7 @@ export interface PhoneRelayStatus {
 }
 export interface PhoneRelayDisconnectRequest { connectionId: string; epoch: string }
 export interface PhoneRelayConnectRequest { workspaceId: string; cloudWorkspaceId: string; deviceId: string }
-export type PhoneRelayOperation = "begin" | "consent" | "session" | "call" | "disconnect";
+export type PhoneRelayOperation = "begin" | "consent" | "session" | "call" | "disconnect" | "push-status" | "push-subscribe";
 export interface PhoneRelayRequest {
   version: 1;
   kind: "request";
@@ -87,7 +87,7 @@ export function validatePhoneRelayCapability(value: unknown): PhoneRelayCapabili
   if (Object.keys(p).sort().join(",") !== "accountId,connectionId,deviceId,epoch,expiresAt,issuedAt,nonce,scope,sessionExpiresAt,version,workspaceId"
     || p.version !== 1 || p.scope !== "phone:connect"
     || ![p.accountId, p.workspaceId, p.deviceId, p.nonce].every(v => typeof v === "string" && ID.test(v))
-    || !PHONE_CONNECTION_ID.test(p.connectionId) || !PHONE_CONNECTION_EPOCH.test(p.epoch)
+    || typeof p.connectionId !== "string" || !PHONE_CONNECTION_ID.test(p.connectionId) || typeof p.epoch !== "string" || !PHONE_CONNECTION_EPOCH.test(p.epoch)
     || ![p.issuedAt, p.expiresAt, p.sessionExpiresAt].every(Number.isSafeInteger)
     || p.expiresAt <= p.issuedAt || p.expiresAt > p.issuedAt + PHONE_RELAY_LIMITS.capabilityMs
     || p.sessionExpiresAt < p.expiresAt || p.sessionExpiresAt > p.issuedAt + PHONE_RELAY_LIMITS.sessionMs) {
@@ -101,7 +101,7 @@ async function signingKey(secret: string, usages: KeyUsage[]): Promise<CryptoKey
   return crypto.subtle.importKey("raw", raw, { name: "HMAC", hash: "SHA-256" }, false, usages);
 }
 export async function derivePhoneRelayConnectionId(secret: string, scope: Pick<PhoneRelayCapability, "accountId" | "workspaceId" | "deviceId" | "epoch">): Promise<string> {
-  if (![scope.accountId, scope.workspaceId, scope.deviceId].every(v => ID.test(v)) || !PHONE_CONNECTION_EPOCH.test(scope.epoch)) throw new Error("invalid-phone-scope");
+  if (![scope.accountId, scope.workspaceId, scope.deviceId].every(v => typeof v === "string" && ID.test(v)) || typeof scope.epoch !== "string" || !PHONE_CONNECTION_EPOCH.test(scope.epoch)) throw new Error("invalid-phone-scope");
   const signature = await crypto.subtle.sign("HMAC", await signingKey(secret, ["sign"]), new TextEncoder().encode(JSON.stringify(["connection", scope.accountId, scope.workspaceId, scope.deviceId, scope.epoch])));
   return Array.from(new Uint8Array(signature), byte => byte.toString(16).padStart(2, "0")).join("");
 }
