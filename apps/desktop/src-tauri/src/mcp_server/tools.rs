@@ -1,7 +1,7 @@
 use super::{invalid, models::*, repository, Engine, Result};
 use crate::{
     authorized_scope::AuthorizedCommandScope,
-    collaboration::models::Work,
+    collaboration::models::{Work, WorkStatus},
     store::{
         repos::collaboration::{self as repo, Kind},
         Store,
@@ -91,6 +91,14 @@ fn shared(item: &Work, grant: &Grant) -> bool {
                 .is_some_and(|e| e.grant_id == grant.id))
 }
 
+fn work_priority(item: &Work) -> u8 {
+    match item.status {
+        WorkStatus::AwaitingApproval | WorkStatus::AwaitingUser | WorkStatus::Blocked => 0,
+        WorkStatus::Queued | WorkStatus::Running | WorkStatus::Waiting => 1,
+        _ => 2,
+    }
+}
+
 pub(super) fn invoke(engine: &Engine, token: &str, name: &str, value: Value) -> Result<Value> {
     let args: Arguments =
         serde_json::from_value(value.clone()).map_err(|_| invalid("Invalid tool arguments."))?;
@@ -128,7 +136,9 @@ pub(super) fn invoke(engine: &Engine, token: &str, name: &str, value: Value) -> 
             if !profiles.iter().any(|p| &p.id == agent) { return Err(invalid("The named agent is unavailable.")); }
             if name == "mivlet_work" {
                 let items = repo::list::<Work>(conn, engine.store, &scope.private, Kind::Work)?;
-                let items: Vec<_> = items.iter().filter(|w| &w.agent_id == agent && shared(w, &grant)).collect();
+                let mut items: Vec<_> = items.iter().filter(|w| &w.agent_id == agent && shared(w, &grant)).collect();
+                items.sort_by(|a, b| work_priority(a).cmp(&work_priority(b))
+                    .then_with(|| b.updated_at.cmp(&a.updated_at)).then_with(|| a.id.cmp(&b.id)));
                 return Ok(json!({"work":items.iter().take(64).map(|w| {
                     let mut item = summary(w);
                     item["canControl"] = json!(grant.access == Access::RequestTasks && w.external_client.as_ref().is_some_and(|client| client.grant_id == grant.id));
