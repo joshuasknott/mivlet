@@ -118,14 +118,14 @@ describe("ProviderIcon", () => {
   });
 });
 
-it.each([
+it.each<[string, string, string, string, string | undefined]>([
   ["CoDeX", "codex", "openai", "1.68 1.75 16.65 16.5", "#3941FF"],
   ["claude", "anthropic", "anthropic", "0 0 125 125", "#D97757"],
   ["GOOGLE", "gemini", "gemini", "0 0 24 24", undefined],
   ["gemini", "gemini", "gemini", "0 0 24 24", undefined],
   ["xai", "grok", "xai", "0 0 512 512", undefined],
 ])("retains %s alias artwork, geometry and inherited fill", (provider, brand, symbol, viewBox, colour) => {
-  const { container } = render(<ProviderIcon provider={provider!} size={31} />);
+  const { container } = render(<ProviderIcon provider={provider} size={31} />);
   const mark = container.querySelector("svg")!;
   expect(mark).toHaveAttribute("data-provider-brand", brand);
   expect(mark).toHaveAttribute("viewBox", viewBox);
