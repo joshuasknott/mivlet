@@ -45,6 +45,7 @@ fn receipt_requires_exact_binding_checksum_budget_and_monotonic_native_sequence(
         created_at: 1000,
         updated_at: 2000,
         retained_until: 1000 + 86_400_000,
+        research: None,
     };
     let result = TaskResult {
         snapshot,
