@@ -3,7 +3,7 @@
 //! closed native consumer. Interrupted transfers never replay.
 mod capture;
 mod hosted;
-pub(crate) use hosted::hosted_provider_enroll;
+pub(crate) use hosted::*;
 mod custody;
 mod repository;
 pub(crate) mod runtime;
