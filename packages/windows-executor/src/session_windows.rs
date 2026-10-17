@@ -10,7 +10,9 @@ use std::{
 };
 use windows_sys::Win32::{
     Foundation::*,
-    Security::*,
+    Security::{
+        Authorization::ConvertStringSidToSidW, Isolation::GetAppContainerNamedObjectPath, *,
+    },
     Storage::FileSystem::*,
     System::{JobObjects::*, Pipes::*, Threading::*, IO::*},
 };
@@ -103,7 +105,45 @@ impl Endpoint {
         spec: &PreviewSpec,
         control: SessionControl,
     ) -> Result<PreviewStream, String> {
-        let name = wide(&spec.pipe_name);
+        // LOCAL is relative to the creating AppContainer, not the desktop
+        // broker. Resolve its exact native namespace from our retained SID.
+        let leaf = spec
+            .pipe_name
+            .strip_prefix(r"\\.\pipe\LOCAL\")
+            .ok_or("The private preview pipe identity is invalid.")?;
+        let mut sid = ptr::null_mut();
+        if unsafe { ConvertStringSidToSidW(wide(&self.profile).as_ptr(), &mut sid) } == 0 {
+            return Err(security::error(
+                "Resolve private preview namespace identity",
+            ));
+        }
+        let mut object_path = vec![0u16; 4096];
+        let mut length = 0;
+        let resolved = unsafe {
+            GetAppContainerNamedObjectPath(
+                ptr::null_mut(),
+                sid,
+                object_path.len() as u32,
+                object_path.as_mut_ptr(),
+                &mut length,
+            )
+        };
+        unsafe {
+            LocalFree(sid.cast());
+        }
+        if resolved == 0 || length == 0 || length as usize > object_path.len() {
+            return Err(security::error("Resolve private preview namespace"));
+        }
+        let end = object_path
+            .iter()
+            .position(|unit| *unit == 0)
+            .ok_or("The private preview namespace is invalid.")?;
+        let object_path = String::from_utf16(&object_path[..end])
+            .map_err(|_| "The private preview namespace is invalid.")?;
+        if !object_path.starts_with('\\') || !object_path.ends_with(&self.profile) {
+            return Err("The private preview namespace changed identity.".into());
+        }
+        let name = wide(format!(r"\\.\pipe{object_path}\{leaf}"));
         unsafe {
             WaitNamedPipeW(name.as_ptr(), 200);
         }
