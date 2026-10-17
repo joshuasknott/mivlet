@@ -49,3 +49,44 @@ Object.defineProperty(net.Server.prototype, "address", {
     return { address: "127.0.0.1", family: "IPv4", port };
   }
 });
+
+// Optional, bounded picker bootstrap. Preserve application CSP and compression:
+// if a normal first HTML chunk cannot be instrumented, the preview still works
+// and the UI receives no picker-ready signal. No script policy is bypassed.
+const emit = http.Server.prototype.emit;
+Object.defineProperty(http.Server.prototype, "emit", {
+  configurable: true,
+  writable: true,
+  value: function (event, ...args) {
+    if (event === "request" && redirected.has(this) && args[1]) {
+      const response = args[1];
+      let inspected = false;
+      for (const method of ["write", "end"]) {
+        const original = response[method];
+        response[method] = function (...values) {
+          const chunk = values[0];
+          if (!inspected && (typeof chunk === "string" || Buffer.isBuffer(chunk)) && chunk.length > 0) {
+            inspected = true;
+            const html = String(response.getHeader("content-type") || "").toLowerCase().includes("text/html");
+            if (html && !response.headersSent && !response.getHeader("content-encoding")) {
+              const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk, typeof values[1] === "string" ? values[1] : "utf8");
+              if (bytes.length <= 65536) {
+                const lower = bytes.toString("latin1").toLowerCase();
+                const head = lower.indexOf("<head");
+                const end = head < 0 ? -1 : lower.indexOf(">", head);
+                if (end >= 0) {
+                  const script = Buffer.from('<script defer src="/__mivlet_preview/picker.js"></script>');
+                  response.removeHeader("content-length");
+                  response.removeHeader("etag");
+                  values[0] = Buffer.concat([bytes.subarray(0, end + 1), script, bytes.subarray(end + 1)]);
+                }
+              }
+            }
+          }
+          return Reflect.apply(original, this, values);
+        };
+      }
+    }
+    return Reflect.apply(emit, this, [event, ...args]);
+  }
+});
