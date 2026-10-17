@@ -11,6 +11,10 @@ export function commonRouteChunk(id: string): string | undefined {
     || /\/src\/runtime\/domains\/hosted-tasks\.ts$/.test(path)) return "cloud-tasks";
   if (/\/src\/components\/navigation\/(?:RepositoryFiles|RepositoryCopies|RepositoryCheckpoints|PullRequestReview)\.tsx$/.test(path)
     || /\/src\/components\/navigation\/(?:repository-files|repository-copies|repository-checkpoints|pull-request-review)\.css$/.test(path)) return "repository-inspection";
+  // Library setup and the deferred inspection views share these thin native
+  // wrappers. Give that shared edge its own home: automatic placement in the
+  // Library chunk would make inspection import its own lazy-loading parent.
+  if (/\/src\/runtime\/domains\/(?:coding|repository-copies)\.ts$/.test(path)) return "repository-runtime";
   return undefined;
 }
 

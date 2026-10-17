@@ -15,9 +15,11 @@ it("keeps correlated deferred cloud/repository fragments in common-accounted coh
   expect(commonRouteChunk("/mivlet/apps/desktop/src/runtime/domains/hosted-tasks.ts")).toBe("cloud-tasks");
   for (const name of ["RepositoryFiles", "RepositoryCopies", "RepositoryCheckpoints", "PullRequestReview"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/navigation/${name}.tsx`)).toBe("repository-inspection");
+  for (const name of ["coding", "repository-copies"])
+    expect(commonRouteChunk(`/mivlet/apps/desktop/src/runtime/domains/${name}.ts`)).toBe("repository-runtime");
   // Do not move the eager shell, native shared runtime, unrelated route or
   // existing separately-accounted conversation/history feature into the group.
-  for (const path of ["shell/WorkspaceContextPanel.tsx", "components/pages/SettingsPage.tsx", "components/navigation/WorkspaceLibrary.tsx", "runtime/domains/local-computer.ts", "runtime/domains/coding.ts", "runtime/domains/repository-checkpoints.ts", "shell/WorkspaceHistory.tsx"])
+  for (const path of ["shell/WorkspaceContextPanel.tsx", "components/pages/SettingsPage.tsx", "components/navigation/WorkspaceLibrary.tsx", "runtime/domains/local-computer.ts", "runtime/domains/command-jobs.ts", "runtime/domains/repository-checkpoints.ts", "runtime/bridge.ts", "shell/WorkspaceHistory.tsx"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBeUndefined();
 });
 
