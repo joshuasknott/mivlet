@@ -283,7 +283,7 @@ fn missing_runtime_is_clear_after_persisting_uncertainty_without_reclassifying_n
             "Cloud task request failed (hosted-coding-runtime-required).",
             || super::super::result_at(ctx, &target, None).map_err(|error| error.to_string()),
         );
-        assert!(unavailable.unwrap_err().contains("Workers Paid Containers"));
+        assert!(unavailable.err().unwrap().contains("Workers Paid Containers"));
         let item = ctx.item(&target.work_id)?;
         assert_eq!(item.execution_owner.as_deref(), Some("hosted"));
         assert_eq!(item.hosted_task.as_ref().unwrap().phase, "dispatching");
