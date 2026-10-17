@@ -161,6 +161,103 @@ fn bounded_write(
 #[cfg(test)]
 mod tests {
     #[test]
+    fn non_draining_child_fixture() {
+        if std::env::var_os("MIVLET_TEST_NON_DRAINING_CODEX").is_none() {
+            return;
+        }
+        use std::io::Write;
+        println!("MIVLET_PIPE_READY");
+        std::io::stdout().flush().unwrap();
+        // This exact test subprocess intentionally never reads its stdin.
+        std::thread::sleep(std::time::Duration::from_secs(30));
+    }
+
+    #[test]
+    fn stop_terminates_owned_child_while_real_stdin_is_blocked() {
+        use super::super::*;
+        use std::io::{BufRead, BufReader, Write};
+        use std::process::Stdio;
+        let mut command = Command::new(std::env::current_exe().unwrap());
+        command
+            .args([
+                "--exact",
+                "codex_app_server::steering::tests::non_draining_child_fixture",
+                "--nocapture",
+            ])
+            .env("MIVLET_TEST_NON_DRAINING_CODEX", "1")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            command.creation_flags(0x08000000);
+        }
+        let mut child = crate::provider_process::SupervisedChild::spawn(command).unwrap();
+        let stdout = child.stdout.take().unwrap();
+        let stdin = Arc::new(Mutex::new(child.stdin.take().unwrap()));
+        let child = Arc::new(Mutex::new(child));
+        let (ready, started) = mpsc::channel();
+        thread::spawn(move || {
+            for line in BufReader::new(stdout).lines().map_while(Result::ok) {
+                if line == "MIVLET_PIPE_READY" {
+                    let _ = ready.send(());
+                    break;
+                }
+            }
+        });
+        started.recv_timeout(Duration::from_secs(5)).unwrap();
+        let request_id = format!("blocked-pipe-test-{}", uuid::Uuid::new_v4());
+        active_runs().lock().unwrap().insert(
+            request_id.clone(),
+            ActiveCodexRun {
+                run_id: None,
+                thread_id: None,
+                turn_id: None,
+                steering: HashMap::new(),
+                stdin: stdin.clone(),
+                child: child.clone(),
+                computer: None,
+                supports_images: false,
+                approval_kinds: Arc::new(Mutex::new(HashMap::new())),
+                image_delivery_stopped: Arc::new(Mutex::new(false)),
+            },
+        );
+        let (entered, writing) = mpsc::channel();
+        let (exited, finished) = mpsc::channel();
+        let writer = stdin.clone();
+        let result = super::bounded_write(
+            move || {
+                let mut pipe = writer.lock().unwrap();
+                entered.send(()).unwrap();
+                let output = pipe
+                    .write_all(&vec![b'x'; 8 * 1024 * 1024])
+                    .map_err(|e| e.to_string());
+                let _ = exited.send(());
+                output
+            },
+            Duration::from_millis(100),
+            || {
+                writing.recv_timeout(Duration::from_secs(5)).unwrap();
+                assert!(
+                    stdin.try_lock().is_err(),
+                    "non-draining child must still hold its writer"
+                );
+                interrupt_codex_app_server_turn(CodexInterruptRequest {
+                    request_id: request_id.clone(),
+                    thread_id: String::new(),
+                    turn_id: None,
+                })
+                .unwrap();
+                assert!(!active_runs().lock().unwrap().contains_key(&request_id));
+                assert!(child.lock().unwrap().try_wait().unwrap().is_some());
+            },
+        );
+        assert!(!result);
+        finished.recv_timeout(Duration::from_secs(5)).unwrap();
+    }
+
+    #[test]
     fn stalled_provider_write_cannot_prevent_independent_kill() {
         use std::sync::{mpsc, Arc, Mutex};
         use std::time::Duration;

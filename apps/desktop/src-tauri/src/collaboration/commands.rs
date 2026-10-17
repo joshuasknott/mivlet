@@ -427,6 +427,14 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
             let work_id = id.clone();
             if let Some(refs) = &attachments {
                 work::validate_attachments(refs)?;
+                if refs.iter().any(|attachment| {
+                    matches!(
+                        attachment.availability.as_str(),
+                        "transient" | "image-input"
+                    )
+                }) {
+                    return Err(invalid("Prepare the original files and images in the agent workspace before queueing this request, so its saved inputs survive restart."));
+                }
             }
             if let Some(recipient_ids) = recipient_ids {
                 if recipient_ids.first().is_none_or(|first| first != &agent_id) {

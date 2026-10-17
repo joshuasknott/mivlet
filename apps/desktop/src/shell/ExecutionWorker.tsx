@@ -229,6 +229,10 @@ export function ExecutionWorker({
           ? await prepareSharedExecutionAttachments({ work: session.work, root: requestRoot, attachments: session.attachments,
               node: await controller.localComputer.refresh(), isCurrent: () => service.current(session) })
           : session.attachments;
+        if (sharedRequestAttachmentIds(session.work, requestRoot).length) {
+          const receipt = inherited.find(attachment => attachment.workspaceFile)?.workspaceFile;
+          if (receipt) batch = { computerId: receipt.computerId, batchId: receipt.batchId };
+        }
         const resolved = resolveWorkAttachments(inherited, session.work);
         if (resolved.error) throw new Error(resolved.error);
         controller.resetCancellation();
@@ -266,7 +270,7 @@ export function ExecutionWorker({
                 .join(", ")}. Reattach them before continuing.`,
             );
         }
-        batch = staged.batch;
+        batch = staged.batch ?? batch;
         if (!service.current(session)) return;
         const { ids, tools: connectorTools } =
           await controller.beginConnectorTurn();
@@ -390,6 +394,9 @@ export function ExecutionWorker({
               )
                 throw new Error("This assignment was stopped before dispatch.");
               if (session.work.schedule) await service.bindScheduledWork(session, attemptId);
+              // A lost IPC reply may still have committed the binding. Retain
+              // its exact passive inputs once admission is attempted.
+              adopted = true;
               await service.command({
                 action: "bind-work",
                 ...scope,

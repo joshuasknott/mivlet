@@ -97,7 +97,9 @@ export interface WorkAttachment {
   name: string;
   mimeType: string;
   sizeBytes: number;
-  /** image-input and transient bytes existed only in memory and cannot be restored after restart. */
+  /** New root requests require durable workspace/source refs. Legacy transient
+   * inputs need originals; native child inputs may reference an exact durable
+   * ancestor input which is verified and copied into the recipient workspace. */
   availability: "image-input" | "transient" | "knowledge-context" | "workspace-file";
   /** Workspace-file refs carry the staged path under the account root's Attachments/. */
   relativePath?: string;

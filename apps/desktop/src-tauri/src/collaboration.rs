@@ -1,7 +1,7 @@
 //! Account-private teammates and durable coordination. Membership and
 //! contributions never grant provider, connector, file or computer authority.
-pub(crate) mod background;
 pub(crate) mod attachment_sources;
+pub(crate) mod background;
 mod capture_summary;
 mod chats;
 mod commands;
@@ -16,8 +16,8 @@ pub(crate) mod pr_watches;
 pub(crate) mod provider_continuation;
 pub(crate) mod provider_continuation_read;
 mod provider_resets;
-pub(crate) mod restore;
 mod queue;
+pub(crate) mod restore;
 mod schedules;
 mod steering;
 pub(crate) mod ui;
@@ -504,6 +504,20 @@ pub async fn collaboration_command(
                 )?;
             }
             let new_work = match &request.command {
+                Command::StartWork {
+                    id,
+                    agent_id,
+                    attachments: Some(refs),
+                    ..
+                } => {
+                    work::verify_attachment_files(
+                        computers.as_deref(),
+                        scope.data.workspace_id(),
+                        agent_id,
+                        refs,
+                    )?;
+                    Some(id.clone())
+                }
                 Command::StartWork { id, .. } => Some(id.clone()),
                 _ => None,
             };

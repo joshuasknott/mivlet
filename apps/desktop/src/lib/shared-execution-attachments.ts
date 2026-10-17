@@ -1,5 +1,5 @@
 import type { CollaborationWorkItem, LocalComputerAttachmentReceipt, LocalComputerSnapshot } from "@mivlet/protocol";
-import { stageRuntimeWorkAttachments } from "../runtime/domains/local-computer";
+import { discardRuntimeLocalComputerAttachmentBatch, stageRuntimeWorkAttachments } from "../runtime/domains/local-computer";
 import type { ComposerAttachment } from "./types";
 
 /** Native Work, rather than a renderer-supplied source path, identifies the
@@ -17,7 +17,7 @@ export async function prepareSharedExecutionAttachments(input: {
   attachments: readonly ComposerAttachment[];
   node: Pick<LocalComputerSnapshot, "workspaceId" | "agentId" | "computerId" | "generation"> | null;
   isCurrent: () => boolean;
-}, stage = stageRuntimeWorkAttachments): Promise<ComposerAttachment[]> {
+}, stage = stageRuntimeWorkAttachments, discard = discardRuntimeLocalComputerAttachmentBatch): Promise<ComposerAttachment[]> {
   const ids = sharedRequestAttachmentIds(input.work, input.root);
   if (!ids.length) return [...input.attachments];
   const { work, node } = input;
@@ -25,9 +25,10 @@ export async function prepareSharedExecutionAttachments(input: {
     throw new Error("This recipient's computer is unavailable. Refresh it before preparing the shared request files.");
   const receipts = await stage({ workspaceId: work.workspaceId, agentId: work.agentId, workId: work.id,
     expectedWorkGeneration: work.generation, expectedGeneration: node.generation, attachmentIds: ids });
+  try {
   if (!input.isCurrent()) throw new Error("This assignment changed while its shared inputs were prepared. No provider request was sent.");
   const byId = new Map<string, LocalComputerAttachmentReceipt>((receipts ?? []).map(receipt => [receipt.attachmentId, receipt]));
-  if (!receipts || receipts.length !== ids.length || byId.size !== ids.length || ids.some(id => {
+  if (!receipts || receipts.length !== ids.length || byId.size !== ids.length || new Set(receipts.map(receipt => receipt.batchId)).size !== 1 || ids.some(id => {
     const receipt = byId.get(id);
     const source = input.root?.attachments?.find(ref => ref.id === id);
     return !receipt || !source || receipt.computerId !== node.computerId || receipt.sha256 !== source.sha256
@@ -46,4 +47,12 @@ export async function prepareSharedExecutionAttachments(input: {
       status: `Workspace/${receipt.relativePath}` });
   }
   return [...supplied.values()];
+  } catch (error) {
+    // These batches have never reached bind-work. Cleanup uses only the exact
+    // returned recipient identity; no original sender batch can be removed.
+    for (const batchId of new Set(receipts?.filter(receipt => receipt.computerId === node.computerId).map(receipt => receipt.batchId))) {
+      await discard({ workspaceId: work.workspaceId, agentId: work.agentId, computerId: node.computerId, batchId }).catch(() => undefined);
+    }
+    throw error;
+  }
 }
