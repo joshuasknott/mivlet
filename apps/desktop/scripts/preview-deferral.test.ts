@@ -56,3 +56,26 @@ it.each(["components/navigation/PanelContent.tsx", "components/search/SearchFile
   expect(graph.has(output)).toBe(false);
   expect(graph.has(office)).toBe(false);
 });
+
+it("keeps the Side Chat list/editor off the shell and conversation notice graph", () => {
+  const list = resolve(sourceRoot, "components/conversation/SideChats.tsx");
+  const notice = resolve(sourceRoot, "components/conversation/SideChatContextNotice.tsx");
+  const panel = resolve(sourceRoot, "shell/WorkspaceContextPanel.tsx");
+  expect(staticGraph(list).has(notice)).toBe(true);
+  expect(staticGraph(resolve(sourceRoot, "shell/ConversationPane.tsx")).has(notice)).toBe(true);
+  for (const entry of [panel, notice, resolve(sourceRoot, "shell/ConversationPane.tsx")]) {
+    expect(staticGraph(entry).has(list)).toBe(false);
+  }
+  // The functionality still has a real deferred entry; removing it is not an optimization.
+  const source = ts.createSourceFile(panel, readFileSync(panel, "utf8"), ts.ScriptTarget.Latest, true);
+  const dynamicImports: string[] = [];
+  function visit(node: ts.Node) {
+    if (ts.isCallExpression(node) && node.expression.kind === ts.SyntaxKind.ImportKeyword
+      && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])) {
+      dynamicImports.push(node.arguments[0].text);
+    }
+    ts.forEachChild(node, visit);
+  }
+  visit(source);
+  expect(dynamicImports).toContain("../components/conversation/SideChats");
+});

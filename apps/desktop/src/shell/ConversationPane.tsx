@@ -41,7 +41,7 @@ import { ContextRecoveryPanel } from "../components/conversation/ContextRecovery
 import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
 import type { ConversationTurn } from "../lib/conversation-presentation-types";
-import { SideChatContextNotice } from "../components/conversation/SideChats";
+import { SideChatContextNotice } from "../components/conversation/SideChatContextNotice";
 import { AssistantConversationRuntime } from "../components/conversation/AssistantConversationRuntime";
 import { ConversationRecap } from "../components/conversation/ConversationRecap";
 import { ConversationRestore } from "../components/conversation/ConversationRestore";
