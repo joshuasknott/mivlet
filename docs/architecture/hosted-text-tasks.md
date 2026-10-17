@@ -192,7 +192,14 @@ and final results are checked against the exact enrolled key before the relevant
 model, sandbox or result boundary. Checks materialize a fresh candidate tree;
 their filesystem changes are discarded, and receipts bind the candidate digest.
 Task source, output and proposals are purged from cloud task storage after 24
-hours. Native source custody remains bounded to four snapshots per copy.
+hours. Native source custody remains bounded to four snapshots per copy. Before
+another capture, native automatically releases only exact reconciled terminal
+snapshots or provably unclaimed abandoned reviews. A live preparation guard spans
+capture through review publication. Matching held reviews, active/uncertain
+tasks, pending imports and recovery evidence remain protected. The copy and
+snapshot leases exclude readers during retirement; only the atomic retirement
+rename runs under the canonical Work transaction, and bounded recursive cleanup
+runs afterward. Unknown preparation data is preserved.
 
 An unreviewed file/check/tool request parks its exact proposal and authenticated
 partial candidate as `needs-review`, with canonical Work awaiting the user.

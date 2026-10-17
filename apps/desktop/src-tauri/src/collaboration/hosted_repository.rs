@@ -4,9 +4,13 @@ use crate::local_computer::{
     authority::OperationTicket,
     coding::hosted_repository::{Target, TaskIdentity},
 };
+mod retention;
 #[cfg(test)]
 #[path = "hosted_repository_tests.rs"]
 mod tests;
+#[cfg(test)]
+pub(super) use retention::retire_at;
+pub(crate) use retention::retire_snapshot;
 
 pub(crate) struct RepositoryContext {
     pub repository: crate::local_computer::coding::RepositoryWorkBinding,

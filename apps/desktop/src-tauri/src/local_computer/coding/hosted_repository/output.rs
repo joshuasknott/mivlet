@@ -95,6 +95,7 @@ pub(crate) fn retained_output(
 ) -> Result<Option<OutputManifest>, String> {
     let current = crate::collaboration::hosted_repository::current_for_import(app, ticket, task)?;
     let (directory, repo) = storage::repository(state, task, &current.repository)?;
+    let _custody = files::lease(&storage::home(&directory, &repo)?)?;
     let (root, record) = storage::load(&directory, &repo, ticket, snapshot_id)?;
     bound_context(&current, &record.snapshot)?;
     if record.task != *task {
@@ -129,6 +130,7 @@ pub(crate) struct OutputStager {
     manifest: OutputManifest,
     progress: BTreeMap<String, u64>,
     _lease: fs::File,
+    _custody: fs::File,
 }
 impl OutputStager {
     pub(crate) fn begin(
@@ -144,6 +146,7 @@ impl OutputStager {
         )?;
         let (directory, repo) =
             storage::repository(state, &authenticated.task, &current.repository)?;
+        let custody = files::lease(&storage::home(&directory, &repo)?)?;
         let (root, record) = storage::load(
             &directory,
             &repo,
@@ -202,6 +205,7 @@ impl OutputStager {
             manifest: authenticated.manifest,
             progress,
             _lease: lease,
+            _custody: custody,
         })
     }
     pub(crate) fn write_chunk(

@@ -43,6 +43,7 @@ pub(crate) fn capture_snapshot(
     let full_tree_id = files::tree_id(&root, COPY_LIMITS, || ticket.check().is_ok())?;
     let head = git::run(&directory, &repo, &["rev-parse", "HEAD"], ticket)?;
     let home = storage::home(&directory, &repo)?;
+    retention::prune(app, ticket, &directory, &repo, &home)?;
     let pending = storage::reserve(&home)?;
     let tree = pending.path().join("input");
     fs::create_dir(&tree).map_err(|_| "Cannot stage source files.")?;
@@ -123,6 +124,7 @@ pub(crate) fn read_snapshot_chunk(
 ) -> Result<Vec<u8>, String> {
     let current = crate::collaboration::hosted_repository::current(app, ticket, task, true)?;
     let (directory, repo) = storage::repository(state, task, &current.repository)?;
+    let _custody = files::lease(&storage::home(&directory, &repo)?)?;
     let (root, record) = storage::load(&directory, &repo, ticket, snapshot_id)?;
     bound_context(&current, &record.snapshot)?;
     if record.task != *task {
