@@ -156,6 +156,16 @@ fn exact_job_review_retains_copy_after_library_switch_and_never_changes_index_or
     );
     authority.revoke(1).unwrap();
     assert!(inspect(&directory, &jobs, &target, &ticket).is_err());
+    drop(ticket);
+    copy_manager::save_copy(&directory, &repo).unwrap();
+    let viewer = authority.begin_viewer(2).unwrap();
+    let mut retained = target.clone();
+    retained.expected_generation = 2;
+    let review = inspect(&directory, &jobs, &retained, &viewer).unwrap();
+    assert_eq!(review["repository"]["id"], repo.id);
+    assert_eq!(review["jobGeneration"], 1);
+    retained.job_generation = 2;
+    assert!(inspect(&directory, &jobs, &retained, &viewer).is_err());
 }
 
 #[test]
