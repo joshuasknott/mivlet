@@ -60,6 +60,8 @@ fn source_paths_reject_private_control_alias_and_host_path_names() {
         "file:stream",
         "CON",
         "trailing.",
+        "node_modules/package/index.js",
+        "src/secrets/value.ts",
     ] {
         assert!(public_path(path).is_err(), "{path}");
     }
@@ -67,6 +69,7 @@ fn source_paths_reject_private_control_alias_and_host_path_names() {
     assert!(public_content(b"version https://git-lfs.github.com/spec/v1\noid sha256:abc").is_err());
     assert!(public_content(br"Read C:\Users\fixture\private.txt").is_err());
     assert!(public_content(&vec![b'x'; FILE_BYTES as usize + 1]).is_err());
+    assert!(public_path(&format!("{}.ts", "x".repeat(238))).is_err());
 }
 #[test]
 fn manifests_seal_order_sizes_names_and_exact_writable_scope() {
@@ -136,6 +139,14 @@ fn manifests_seal_order_sizes_names_and_exact_writable_scope() {
         )
         .is_err(),
         "empty write scope is read only"
+    );
+    assert!(
+        validate_snapshot(&snapshot(vec![entry("Src/a.ts", b"one")], &["src/new.ts"])).is_err(),
+        "new writable paths cannot alias input directories by case"
+    );
+    assert!(
+        validate_snapshot(&snapshot(vec![entry("src/a.ts", b"one")], &["src"])).is_err(),
+        "a newly writable file cannot replace a selected parent directory"
     );
 }
 #[test]
