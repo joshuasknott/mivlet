@@ -1072,6 +1072,7 @@ export type * from "./domains/provider-usage";
 export type { ProviderContinuationInput, ProviderContinuationMessage, ProviderContinuation } from "./domains/provider-continuation";
 export * from "./domains/hosted-tasks.js";
 export * from "./domains/hosted-public-web.js";
+export * from "./domains/hosted-coding.js";
 export * from "./domains/hosted-task-controls.js";
 export * from "./domains/hosted-task-capability.js";
 export type { PhoneRelayCapability, PhoneRelayStatus, PhoneRelayConnectRequest, PhoneRelayDisconnectRequest, PhoneRelayOperation, PhoneRelayRequest, PhoneRelayReply, PhoneRelayHello } from "./domains/phone-relay.js";
