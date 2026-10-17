@@ -27,6 +27,10 @@ struct Probe {
     expires: Instant,
     cancel: AtomicBool,
     phase: AtomicU8,
+    baseline_document: AtomicBool,
+    baseline_control: AtomicBool,
+    failure_stage: AtomicU8,
+    preflights: AtomicU32,
     baseline_http: AtomicU32,
     restricted_http: AtomicU32,
     baseline_udp: AtomicU32,
@@ -206,6 +210,10 @@ pub(crate) async fn verify(
                 expires: Instant::now() + LIFETIME,
                 cancel: AtomicBool::new(false),
                 phase: AtomicU8::new(0),
+                baseline_document: AtomicBool::new(false),
+                baseline_control: AtomicBool::new(false),
+                failure_stage: AtomicU8::new(0),
+                preflights: AtomicU32::new(0),
                 baseline_http: AtomicU32::new(0),
                 restricted_http: AtomicU32::new(0),
                 baseline_udp: AtomicU32::new(0),
@@ -262,6 +270,11 @@ fn cleanup(window: &tauri::WebviewWindow, attempt: u64) {
             None
         }
     }) {
+        #[cfg(debug_assertions)]
+        if std::env::var("MIVLET_PREVIEW_NETWORK_ACCEPTANCE").as_deref() == Ok("1") {
+            eprintln!("Native preview proof diagnostics: version={} phase={} baselineDocument={} baselineControl={} baselineFetch={} baselineStun={} baselineRtc={} restrictedControl={} restrictedRtc={} restrictedFetch={} restrictedStun={} resultCue={} fixtureFailureStage={} preflights={} status={}",
+                crate::interactive_network_guard::diagnostic_version(),probe.phase.load(Ordering::Acquire),probe.baseline_document.load(Ordering::Acquire),probe.baseline_control.load(Ordering::Acquire),probe.baseline_http.load(Ordering::Acquire),probe.baseline_udp.load(Ordering::Acquire),probe.baseline_rtc.load(Ordering::Acquire),probe.restricted_control.load(Ordering::Acquire),probe.restricted_rtc.load(Ordering::Acquire),probe.restricted_http.load(Ordering::Acquire),probe.restricted_udp.load(Ordering::Acquire),probe.result_cue.load(Ordering::Acquire),probe.failure_stage.load(Ordering::Acquire),probe.preflights.load(Ordering::Acquire),STATE.load(Ordering::Acquire)&3);
+        }
         probe.cancel.store(true, Ordering::Release);
         let _ = evaluate(
             window,
@@ -371,6 +384,10 @@ fn connection(mut stream: TcpStream, probe: &Probe) {
     if !live(probe) {
         return;
     }
+    if std::str::from_utf8(&bytes).is_ok_and(|text| text.starts_with("OPTIONS ")) {
+        probe.preflights.fetch_add(1, Ordering::AcqRel);
+        return;
+    }
     let Some(path) = std::str::from_utf8(&bytes)
         .ok()
         .and_then(|text| text.lines().next())
@@ -404,11 +421,15 @@ fn connection(mut stream: TcpStream, probe: &Probe) {
     }
     let mut headers = String::new();
     let mut body = "ok".to_owned();
-    let Some(control) = route(probe, path) else {
+    let failure = failure_route(probe, path);
+    let Some(control) = failure.map(|_| "/failed").or_else(|| route(probe, path)) else {
         return;
     };
     match control {
-        "/baseline" => body = page(probe, false),
+        "/baseline" => {
+            probe.baseline_document.store(true, Ordering::Release);
+            body = page(probe, false);
+        }
         "/restricted" => {
             if !probe.baseline_rtc.load(Ordering::Acquire)
                 || probe.phase.load(Ordering::Acquire) != 0
@@ -447,9 +468,14 @@ fn connection(mut stream: TcpStream, probe: &Probe) {
             probe.result_cue.store(true, Ordering::Release);
         }
         "/failed" => {
+            probe
+                .failure_stage
+                .store(failure.unwrap_or(0), Ordering::Release);
             transition(probe.attempt, 3);
         }
-        "/baseline-control" => {}
+        "/baseline-control" => {
+            probe.baseline_control.store(true, Ordering::Release);
+        }
         "/restricted-control" => {
             probe.restricted_control.store(true, Ordering::Release);
         }
@@ -464,6 +490,21 @@ fn connection(mut stream: TcpStream, probe: &Probe) {
         "text/plain"
     };
     let _=stream.write_all(format!("HTTP/1.1 200 OK\r\nContent-Type: {content}\r\nContent-Length: {}\r\nCache-Control: no-store\r\n{headers}Connection: close\r\n\r\n{body}",body.len()).as_bytes());
+}
+fn failure_route(probe: &Probe, path: &str) -> Option<u8> {
+    [&probe.baseline_nonce, &probe.restricted_nonce]
+        .into_iter()
+        .find_map(|nonce| {
+            let stage = path.strip_prefix(&format!("/failed-{nonce}/"))?;
+            match stage {
+                "control" => Some(1),
+                "fetch" => Some(2),
+                "rtc-unavailable" => Some(3),
+                "rtc-baseline" => Some(4),
+                "result" => Some(5),
+                _ => None,
+            }
+        })
 }
 fn route(probe: &Probe, path: &str) -> Option<&'static str> {
     if path == format!("/forbidden-{}", probe.baseline_nonce) {
@@ -506,18 +547,22 @@ fn page(probe: &Probe, restricted: bool) -> String {
     format!(
         r#"<!doctype html><html><head><title>Native connection verification</title></head><body><script>
     (async()=>{{
-      const restricted={restricted};let pc=null;
+      const restricted={restricted};let pc=null;let stage='control';
       try {{
         if(await(await fetch({control})).text()!=='ok')throw Error('control');
+        stage='fetch';
         let blocked=false;try{{await fetch({victim});}}catch{{blocked=true;}}
         if(blocked!==restricted)throw Error('fetch');
+        stage='rtc-unavailable';
         if(typeof RTCPeerConnection!=='function')throw Error('rtc unavailable');
         if(restricted)await fetch({rtc});
+        stage='rtc-baseline';
         let rejected=false;
         try{{pc=new RTCPeerConnection({{iceServers:[{{urls:{stun}}}]}});pc.createDataChannel('native-proof');await pc.setLocalDescription(await pc.createOffer());await new Promise(resolve=>setTimeout(resolve,900));}}catch{{rejected=true;}}finally{{pc?.close();}}
         if(!restricted&&rejected)throw Error('rtc baseline');
+        stage='result';
         if(restricted){{await fetch({result});}}else{{await fetch({baseline_done});location.replace('/restricted');}}
-      }}catch{{try{{await fetch({failed});}}catch{{}}}}
+      }}catch{{try{{await fetch({failed}+'/'+stage);}}catch{{}}}}
     }})();</script></body></html>"#,
         victim = json!(victim),
         stun = json!(format!(
@@ -610,9 +655,32 @@ pub(crate) fn acceptance() -> Result<(), String> {
         .build(context)
         .map_err(|_| "The disposable native WebView could not start.")?;
     let code = app.run_return(|_, _| {});
-    profile
-        .close()
-        .map_err(|_| "The disposable native WebView profile could not be removed.")?;
+    // WebView2 may release the final profile file locks just after its event
+    // loop exits. Retry only the verified native-created QA directory.
+    let target = std::fs::canonicalize(profile.path())
+        .map_err(|_| "The disposable native WebView profile changed.")?;
+    let temporary = std::fs::canonicalize(std::env::temp_dir())
+        .map_err(|_| "The native temporary directory is unavailable.")?;
+    if !target.is_absolute()
+        || !target.starts_with(&temporary)
+        || !target
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.starts_with("mivlet-preview-network-qa-"))
+    {
+        return Err("The disposable native WebView cleanup target changed.".into());
+    }
+    if profile.close().is_err() {
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            match std::fs::remove_dir_all(&target) {
+                Ok(())=>break,
+                Err(error) if error.kind()==std::io::ErrorKind::NotFound=>break,
+                Err(_) if Instant::now()<deadline=>std::thread::sleep(Duration::from_millis(50)),
+                Err(_)=>return Err("The disposable native WebView profile could not be removed after bounded shutdown.".into()),
+            }
+        }
+    }
     if code == 0 && passed.load(Ordering::Acquire) && verified() {
         Ok(())
     } else {
@@ -641,6 +709,10 @@ mod tests {
             expires: Instant::now() + LIFETIME,
             cancel: AtomicBool::new(false),
             phase: AtomicU8::new(1),
+            baseline_document: AtomicBool::new(true),
+            baseline_control: AtomicBool::new(true),
+            failure_stage: AtomicU8::new(0),
+            preflights: AtomicU32::new(0),
             baseline_http: AtomicU32::new(1),
             restricted_http: AtomicU32::new(0),
             baseline_udp: AtomicU32::new(1),
@@ -713,6 +785,12 @@ mod tests {
             ),
             Some(false)
         );
+        assert_eq!(
+            failure_route(&value, "/failed-base-native-nonce/fetch"),
+            Some(2)
+        );
+        assert!(failure_route(&value, "/failed/fetch").is_none());
+        assert!(failure_route(&value, "/failed-base-native-nonce/claimed-pass").is_none());
     }
     #[test]
     fn rtc_positive_control_accepts_only_actual_stun_binding_requests() {
