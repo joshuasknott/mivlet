@@ -84,7 +84,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 62] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 63] = [
     "repository-pr-read",
     "repository-pr-local",
     "repository-pr-action",
@@ -132,6 +132,7 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 62] = [
     "local-browser-navigate",
     "local-browser-activate",
     "local-browser-fill",
+    "local-browser-handover",
     "local-browser-click",
     "local-browser-scroll",
     "local-app-select",
@@ -345,7 +346,9 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "web-fetch" => Some(("read-only", "medium")),
         "local-app-list" => Some(("read-only", "low")),
         "local-browser-open" => Some(("full-access", "high")),
-        "local-browser-navigate" | "local-browser-activate" => Some(("full-access", "high")),
+        "local-browser-navigate" | "local-browser-activate" | "local-browser-handover" => {
+            Some(("full-access", "high"))
+        }
         "local-browser-click" | "local-browser-scroll" | "local-browser-fill" => {
             Some(("full-access", "critical"))
         }
@@ -450,6 +453,7 @@ fn is_computer_tool(tool: &str) -> bool {
             | "local-browser-navigate"
             | "local-browser-activate"
             | "local-browser-fill"
+            | "local-browser-handover"
             | "local-browser-click"
             | "local-browser-scroll"
             | "local-app-select"

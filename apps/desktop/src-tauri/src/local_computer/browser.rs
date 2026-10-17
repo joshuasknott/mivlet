@@ -7,9 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(windows)]
 use std::{collections::HashMap, sync::Mutex};
 
+#[path = "browser/handover.rs"]
+mod handover;
 #[cfg(windows)]
 #[path = "browser/windows.rs"]
 mod platform;
+pub(crate) use handover::handover;
 
 pub(super) trait LaunchStop: Send + Sync {
     fn stop(&self);

@@ -66,7 +66,7 @@ describe("conversation computer tools", () => {
     const previous = ["run-shell", "local-browser-action", "local-browser-observe"].map(name => ({ name, description: "old", parameters: "{}" }));
     const names = conversationComputerTools(previous, true, true, enabled).map(tool => tool.name);
     expect(names).not.toContain("run-shell");
-    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-observe", "local-browser-open", "local-browser-tabs", "local-browser-activate", "local-browser-fill", "local-browser-navigate", "local-browser-scroll", "local-browser-click"]);
+    expect(names.filter(name => name.startsWith("local-browser"))).toEqual(["local-browser-observe", "local-browser-open", "local-browser-tabs", "local-browser-activate", "local-browser-fill", "local-browser-handover", "local-browser-navigate", "local-browser-scroll", "local-browser-click"]);
     expect(conversationComputerTools(previous, true, true, enabled).find(tool => tool.name === "local-browser-observe")?.description).toContain("top-frame");
     expect(names).toContain("local-app-observe");
   });

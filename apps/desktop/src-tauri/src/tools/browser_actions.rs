@@ -6,7 +6,10 @@ use serde_json::Value;
 use std::sync::Arc;
 
 pub(super) fn supported(tool: &str) -> bool {
-    matches!(tool, "local-browser-activate" | "local-browser-fill")
+    matches!(
+        tool,
+        "local-browser-activate" | "local-browser-fill" | "local-browser-handover"
+    )
 }
 
 #[derive(Deserialize)]
@@ -23,6 +26,11 @@ struct FormEntry {
     name: String,
     text: String,
 }
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct Handover {
+    reason: String,
+}
 
 pub(super) async fn execute(
     tool: &str,
@@ -32,6 +40,14 @@ pub(super) async fn execute(
     agent: String,
     generation: u64,
 ) -> Result<ToolResult, String> {
+    if tool == "local-browser-handover" {
+        let input: Handover =
+            serde_json::from_value(arguments).map_err(|_| "Describe the human browser step.")?;
+        let output = tauri::async_runtime::spawn_blocking(move || crate::local_computer::browser::handover(
+            &computers, &workspace, &agent, generation, &input.reason,
+        )).await.map_err(|_| "Browser handover was interrupted. Inspect saved task attention and use Stop if control is still active.")??;
+        return Ok(ToolResult { ok: true, output });
+    }
     if tool == "local-browser-fill" {
         let input: FormEntry = serde_json::from_value(arguments)
             .map_err(|_| "Use a current fieldRef, exact origin/name and public text.")?;

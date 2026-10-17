@@ -255,6 +255,14 @@ The published browser outlives the input driver and Stop for human takeover;
 unpublished cancelled launches are closed, and account/app shutdown closes the
 owned browser job. Native upload/download custody remains pending.
 
+`local-browser-handover` records the public manual-step reason in the canonical
+current Work, fences its current run, revokes computer input and retains the
+owned browser. It does not read private page data. The user completes the step
+in that window and explicitly continues the task; a new request must discover,
+select and observe the current window again. The retired turn cannot acquire a
+new lease, including under Full Access. A native handover remains saved even if
+the cancelled provider cannot receive its terminal tool reply.
+
 Shared `local-browser-tabs` and `local-browser-observe` provide text reads in the
 agent's owned browser through the same selected-window lease and global approval
 policy. A sole visible native main window and a sole Chromium window identity must
