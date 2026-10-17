@@ -25,7 +25,7 @@
     "security": {
       "csp": {
         "default-src": "'self'",
-        "frame-src": "https: http://127.0.0.1:* http://127.0.0.2:*",
+        "frame-src": "https: http://127.0.0.1:* http://127.0.0.2:* http://*.localhost:*",
         "script-src": "'self'",
         "connect-src": "'self' ipc: http://ipc.localhost",
         "font-src": "'self'",

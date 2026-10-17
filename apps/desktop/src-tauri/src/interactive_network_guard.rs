@@ -30,7 +30,11 @@ thread_local! {
 }
 fn allow(frames: &mut Frames, frame: &str, uri: &str, registered: bool) -> bool {
     if let Some(expected) = frames.get(frame) {
-        return expected == uri;
+        return crate::local_computer::live_preview::navigation_allowed(expected, uri)
+            .unwrap_or_else(|| expected == uri);
+    }
+    if crate::local_computer::live_preview::navigation_allowed(uri, uri) == Some(false) {
+        return false;
     }
     if registered {
         if frames.len() >= MAX_FRAMES {
@@ -42,11 +46,10 @@ fn allow(frames: &mut Frames, frame: &str, uri: &str, registered: bool) -> bool 
 }
 impl Fence {
     fn allow(&mut self, session: &str, frame: &str, uri: &str, registered: bool) -> bool {
-        if self
-            .sessions
-            .get(session)
-            .is_some_and(|expected| expected != uri)
-        {
+        if self.sessions.get(session).is_some_and(|expected| {
+            !crate::local_computer::live_preview::navigation_allowed(expected, uri)
+                .unwrap_or_else(|| expected == uri)
+        }) {
             return false;
         }
         let allowed = allow(&mut self.frames, frame, uri, registered);
@@ -216,7 +219,9 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
                         &session,
                         frame,
                         uri,
-                        crate::mcp_app_host::is_registered_mcp_url(uri),
+                        crate::mcp_app_host::is_registered_mcp_url(uri)
+                            || crate::local_computer::live_preview::registered_origin(uri)
+                                .is_some(),
                     )
                 })
                 .unwrap_or(false),
@@ -267,7 +272,8 @@ pub(crate) fn install(core: &ICoreWebView2) -> windows::core::Result<()> {
                     session,
                     target,
                     uri,
-                    crate::mcp_app_host::is_registered_mcp_url(uri),
+                    crate::mcp_app_host::is_registered_mcp_url(uri)
+                        || crate::local_computer::live_preview::registered_origin(uri).is_some(),
                 )
             })
             .unwrap_or(false)
@@ -358,5 +364,19 @@ mod tests {
         assert!(!fence.allow("child", "different-frame", "https://example.com", false));
         assert!(fence.allow("child", "different-frame", issued, true));
         assert!(fence.allow("ordinary", "normal", "https://example.com", false));
+    }
+    #[test]
+    fn expired_native_preview_origin_cannot_be_reintroduced_as_an_ordinary_frame() {
+        let issued = "http://aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.localhost:41234/";
+        let mut frames = Frames::new();
+        assert!(!allow(&mut frames, "new-preview", issued, false));
+        frames.insert("retained".into(), issued.into());
+        assert!(!allow(&mut frames, "retained", issued, false));
+        assert!(!allow(
+            &mut frames,
+            "retained",
+            "http://127.0.0.1:1420/",
+            false
+        ));
     }
 }

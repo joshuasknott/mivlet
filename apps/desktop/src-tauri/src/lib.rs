@@ -412,6 +412,8 @@ pub fn run() {
             local_computer::command_jobs::native_command_jobs,
             local_computer::command_jobs::native_command_stop,
             local_computer::command_jobs::input::native_command_input,
+            local_computer::live_preview::native_command_preview,
+            local_computer::live_preview::native_preview_feedback,
             local_computer::execution_setup::native_execution_setup,
             local_computer::local_computer_status,
             local_computer::local_computer_files,
