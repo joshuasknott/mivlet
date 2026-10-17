@@ -91,6 +91,7 @@ export function WorkspaceHistory({
         item={selected}
         onOpen={onOpenConversation}
         onProviderReset={(command) => service.command(command)}
+        onChanged={service.refresh}
         onStop={(id) => service.stop(id)}
         onContinue={async (id, generation) => {
           await service.command({

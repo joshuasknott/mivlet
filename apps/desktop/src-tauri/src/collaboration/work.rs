@@ -360,6 +360,25 @@ fn new_work_with_parent(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        hosted_task: None,
+        repository_binding: crate::local_computer::coding::capture_work_repository(
+            ctx.scope.data.workspace_id(),
+            &agent_id,
+            ctx.time,
+        )
+        .map_err(StoreError::Invalid)?,
+        queue: Some(WorkQueue {
+            held: false,
+            order: ctx
+                .all_work()?
+                .iter()
+                .filter_map(|item| item.queue.as_ref().map(|queue| queue.order))
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1),
+        }),
+        outcome_goal: None,
+        live_steering: vec![],
         external_client: None,
         execution_owner: None,
         reset_continuation: None,
@@ -416,9 +435,29 @@ pub(super) fn current(
     generation: u32,
     run: Option<&str>,
 ) -> Result<Work> {
+    current_in(ctx, key, generation, run, false)
+}
+
+/// An explicit native file-import review can inspect its parked coding owner.
+/// This never authorizes provider dispatch or continuation of that assignment.
+pub(super) fn current_for_user_review(
+    ctx: &Context<'_>,
+    key: &str,
+    generation: u32,
+    run: Option<&str>,
+) -> Result<Work> {
+    current_in(ctx, key, generation, run, true)
+}
+fn current_in(
+    ctx: &Context<'_>,
+    key: &str,
+    generation: u32,
+    run: Option<&str>,
+    user_review: bool,
+) -> Result<Work> {
     let item = ctx.item(key)?;
     if item.generation != generation
-        || !item.status.active()
+        || !(item.status.active() || user_review && item.status == WorkStatus::AwaitingUser)
         || run.is_some_and(|run| item.current_run_id.as_deref() != Some(run))
     {
         return Err(invalid(
@@ -517,6 +556,9 @@ pub(super) fn bind(
 ) -> Result<()> {
     id(run)?;
     let mut item = current(ctx, key, generation, None)?;
+    if item.execution_owner.as_deref() == Some("hosted") {
+        return Err(invalid("Cloud Work cannot bind a local provider attempt. Refresh or cancel its authenticated cloud task first."));
+    }
     if crate::background_worker::owns_work(&item) && !crate::background_worker::is_worker() {
         return Err(invalid(
             "This Work belongs to the native background owner. Reconnect to inspect or stop it.",
@@ -533,6 +575,7 @@ pub(super) fn bind(
     if item.status != WorkStatus::Queued {
         return Err(invalid("This assignment is not queued."));
     }
+    super::queue::ensure_dispatchable(ctx, &item)?;
     if let Some(refs) = attachments {
         validate_attachments(refs)?;
         item.attachments = refs.to_vec();
@@ -717,9 +760,22 @@ pub(super) fn finish(
         .unwrap_or(8_000);
     let mut root = ctx.item(&item.root_id)?;
     item.token_usage = item.token_usage.saturating_add(usage);
+    super::goals::finished(&mut item, run);
+    super::goals::enforce_budget(&mut item);
+    if item.live_steering.iter().any(|event| {
+        event.run_id == run && matches!(event.delivery.as_str(), "pending" | "uncertain")
+    }) {
+        item.status = WorkStatus::AwaitingUser;
+        item.awaiting_user = false;
+        item.reason = Some("Live guidance has no confirmed delivery receipt. Review the saved result before continuing; it was not resent.".into());
+        if let Some(goal) = item.outcome_goal.as_mut() {
+            goal.status = "paused".into();
+        }
+    }
     item.updated_at = ctx.time.into();
     if root.id != item.id {
         root.token_usage = root.token_usage.saturating_add(usage);
+        super::goals::enforce_budget(&mut root);
         ctx.work(&root)?;
     }
     ctx.work(&item)?;
@@ -757,6 +813,9 @@ pub(super) fn agent_command(
     call: &str,
     command: AgentCommand,
 ) -> Result<()> {
+    if ctx.item(key)?.execution_owner.as_deref() == Some("hosted") {
+        return Err(invalid("Cloud text tasks have no native tools, delegation, or coordination actions. Only an authenticated task receipt may finish this Work."));
+    }
     bounded(call, 256, "Tool call ID")?;
     let receipt = format!("call-{:x}", Sha256::digest(format!("{run}:{call}")));
     if let Some(old) = repo::get::<AgentCommand>(
@@ -779,6 +838,9 @@ pub(super) fn agent_command(
         return Err(invalid("This assignment is not executing."));
     }
     match &command {
+        AgentCommand::GoalReport { status, text } => {
+            super::goals::report(ctx, &mut item, run, status, text)?;
+        }
         AgentCommand::Delegate {
             agent_id,
             prompt,
@@ -1010,6 +1072,7 @@ pub(super) fn invalidate_descendants(
             && item.status != WorkStatus::Cancelled
         {
             item.generation += 1;
+            super::hosted::mark_stop(&mut item);
             if let Some(reset) = &mut item.reset_continuation {
                 if reset.state == "armed" {
                     reset.state = "review-required".into();

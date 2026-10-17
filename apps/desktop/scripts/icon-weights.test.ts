@@ -21,6 +21,20 @@ const imported =
 const allWeights = ["bold", "duotone", "fill", "light", "regular", "thin"];
 
 describe("icon weight analysis", () => {
+  it("keeps window controls directly analyzable while preserving other consumers' weights", () => {
+    const fileName = join(process.cwd(), "src/components/WindowControls.tsx");
+    const source = { fileName, code: readFileSync(fileName, "utf8") };
+    const result = collect([source, {
+      fileName: "composer.tsx",
+      code: 'import { X } from "@phosphor-icons/react/dist/csr/X"; const close = <X weight="bold" />;',
+    }]);
+    expect(result?.get("Minus")).toEqual(new Set(["regular"]));
+    expect(result?.get("Square")).toEqual(new Set(["regular"]));
+    expect(result?.get("X")).toEqual(new Set(["regular", "bold"]));
+    // A future icon context still disables pruning, including these glyphs.
+    expect(collect([source, { fileName: "context.tsx", code: 'import { IconContext } from "@phosphor-icons/react";' }])).toBeNull();
+  });
+
   it("handles indirect uses inside generic TypeScript functions", () => {
     const result = collect([
       {

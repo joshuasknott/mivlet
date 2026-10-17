@@ -40,10 +40,11 @@ import { resolveWorkspaceMentions } from "../lib/collaboration-mentions";
 import { ContextRecoveryPanel } from "../components/conversation/ContextRecoveryPanel";
 import { buildConversationHandoff } from "../lib/conversation-handoff";
 import { mentionedBuiltinPlugins } from "../lib/builtin-plugins";
-import type { ConversationTurn } from "../lib/conversation-presentation";
-import { SideChatContextNotice } from "../components/conversation/SideChats";
+import type { ConversationTurn } from "../lib/conversation-presentation-types";
+import { SideChatContextNotice } from "../components/conversation/SideChatContextNotice";
 import { AssistantConversationRuntime } from "../components/conversation/AssistantConversationRuntime";
 import { ConversationRecap } from "../components/conversation/ConversationRecap";
+import { ConversationRestore } from "../components/conversation/ConversationRestore";
 import {
   registerRuntimeMcpAppResource,
   releaseRuntimeMcpAppResource,
@@ -57,9 +58,12 @@ import {
   useMcpAppApprovalTarget,
 } from "../components/conversation/McpAppApprovalPortal";
 import { conversationUi } from "../runtime/domains/conversation-ui";
-import { branchInputMessageId } from "../lib/conversation-branches";
+import { branchActionBlockReason, branchInputMessageId } from "../lib/conversation-branches";
 import { useConversationOrigin } from "./useConversationOrigin";
 import type { ConversationOriginNavigation } from "./useWorkspaceNavigation";
+import { prepareExecutionAttachments } from "../lib/execution-attachments";
+import { ConversationWorkControls } from "../components/work/ConversationWorkControls";
+import { previewFeedbackWork } from "../lib/preview-feedback";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -451,6 +455,8 @@ export function ConversationPane({
   const responder = agentById.get(
     mentions?.recipientIds[0] ?? replyTarget?.agentId ?? recipientId,
   );
+  const submissionScope = useRef({ owner, responderId: responder?.id, localAgentId: displayAgent.id });
+  submissionScope.current = { owner, responderId: responder?.id, localAgentId: displayAgent.id };
   const { selectBranch, submitConversationBranch, branchSelectionPending } =
     useConversationBranches({
       conversationId: room.id,
@@ -490,6 +496,7 @@ export function ConversationPane({
     if (
       replyTarget &&
       (composer.attachments.length ||
+        composer.outcomeGoal ||
         (mentions &&
           (mentions.recipientIds.length !== 1 ||
             mentions.recipientIds[0] !== replyTarget.agentId)))
@@ -516,6 +523,8 @@ export function ConversationPane({
         (attachment) =>
           !attachment.imageInput &&
           !attachment.sourceId &&
+          !attachment.workspaceFile &&
+          !attachment.durableRef &&
           !attachment.transientBytes,
       )
     ) {
@@ -527,6 +536,14 @@ export function ConversationPane({
     setPending(true);
     setError("");
     try {
+      const expectedOwner = owner;
+      const expectedRoomGeneration = room.generation;
+      const expectedResponder = responder.id;
+      const isCurrent = () => appScope.current.active && appScope.current.roomId === room.id
+        && appScope.current.generation === expectedRoomGeneration
+        && submissionScope.current.owner?.internalUserId === expectedOwner?.internalUserId
+        && submissionScope.current.owner?.memberId === expectedOwner?.memberId
+        && submissionScope.current.responderId === expectedResponder;
       await runtime.flushSnapshot();
       await service.refresh();
       if (mentionedBuiltinPlugins(prompt).length)
@@ -553,15 +570,22 @@ export function ConversationPane({
       if (replyTarget) {
         await service.reply(replyTarget.id, replyTarget.generation, prompt);
       } else {
+        if (composer.attachments.length && submissionScope.current.localAgentId !== expectedResponder)
+          throw new Error("Choose this agent as the recipient before staging files for its request.");
+        const prepared = composer.attachments.length
+          ? await prepareExecutionAttachments(composer.attachments, localComputer, service.workspaceId, expectedResponder, isCurrent)
+          : { attachments: composer.attachments };
+        if (!isCurrent()) throw new Error("The conversation or account changed before this request was saved. Your draft has been kept.");
         await service.submit(
           room.id,
           responder.id,
           prompt,
           recipient === "discussion",
-          composer.attachments,
+          prepared.attachments,
           mentions?.recipientIds,
           branchParentMessageId,
           revisionWorkId,
+          composer.outcomeGoal,
         );
       }
       clearOutputRevision();
@@ -790,6 +814,9 @@ export function ConversationPane({
             {history ? (
               <ConversationRecap work={work} onInspect={onInspectWork} />
             ) : null}
+            {history ? <ConversationRestore workspaceId={service.workspaceId} conversationId={room.id} agentId={displayAgent.id}
+              blockedReason={branchSelectionPending || originNavigation.pending ? "Wait for the current conversation view to finish updating." : branchActionBlockReason(work)}
+              onReloadHistory={async () => { await service.loadHistory(room.id, true); await service.refresh(); }} /> : null}
             <ConversationFeed
               messages={history?.messages ?? []}
               agent={displayAgent}
@@ -886,7 +913,12 @@ export function ConversationPane({
               }}
               onOpenConnector={onPlugins}
               onDraftResponse={(text) => {
-                composer.setText(text);
+                composer.appendText(text);
+                focus();
+              }}
+              onDraftPreview={(text, source) => {
+                const original = previewFeedbackWork(service.getSnapshot().data.work, room.id, source);
+                composer.stageWorkFeedback(original.id, original.agentId, text);
                 focus();
               }}
               onSaveMemory={(title, value) =>
@@ -914,22 +946,6 @@ export function ConversationPane({
                 })
               }
             />
-            {running
-              .filter(
-                (item) =>
-                  item.status === "queued" &&
-                  !sessions.some((session) => session.work.id === item.id),
-              )
-              .map((item) => (
-                <p
-                  className="conversation-attention"
-                  key={item.id}
-                  role="status"
-                >
-                  Queued for {item.agentName}. It starts when this teammate and
-                  its provider have capacity.
-                </p>
-              ))}
             {approvalPanel}
             {dockedApprovalPanel}
             {contextFailure && history ? (
@@ -962,6 +978,8 @@ export function ConversationPane({
           </div>
         </div>
         <div className="conversation-pane-composer">
+          <ConversationWorkControls key={room.id} work={state.data.work} conversationId={room.id}
+            service={service} goalDraft={composer.outcomeGoal} onGoalDraftChange={composer.setOutcomeGoal} disabled={pending} />
           {composer.replyWorkId ? (
             <p className="conversation-attention" role="status">
               Following up with{" "}

@@ -116,7 +116,7 @@ describe("native local computer",()=>{
     await act(async()=>{await expect(result.current.refresh()).rejects.toThrow("native runtime has disconnected");});
     expect(result.current.node).toBeNull();expect(result.current.error).toBe("The native runtime has disconnected.");
     await act(async()=>{await result.current.refresh();});
-    expect(result.current.node?.plugins?.computer).toBe(true);expect(result.current.error).toBeNull();
+    await waitFor(()=>{expect(result.current.node?.plugins?.computer).toBe(true);expect(result.current.error).toBeNull();});
   });
   it("backs off idle status reads to thirty seconds without capturing images",async()=>{
     vi.useFakeTimers();hook();await act(async()=>{await vi.advanceTimersByTimeAsync(50);});expect(mocks.load).toHaveBeenCalledOnce();

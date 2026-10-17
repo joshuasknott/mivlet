@@ -17,7 +17,7 @@ import {
 import {
   GENERATED_UI_INSTRUCTIONS,
   loadGeneratedUiInstructions,
-} from "../../lib/generated-interface";
+} from "../../lib/generated-ui-instructions";
 import type { AgentBackend } from "@mivlet/connectors";
 import { cancelNativeAgentRun } from "./cancellation";
 import { nativeAgentContextScope } from "./context";

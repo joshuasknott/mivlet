@@ -1,6 +1,241 @@
 use super::*;
 
 #[test]
+fn native_file_assignment_is_closed_to_readers_and_sends_one_exact_node_path() {
+    use serde_json::{json, Value};
+    let input = Pair::new(false).unwrap();
+    let mut output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    for command in [Command::AttachFile, Command::ProbeFile] {
+        assert!(control
+            .read_command(
+                command,
+                json!({"files":["untrusted"],"functionDeclaration":"untrusted()"}),
+                Some("session"),
+                &|| Ok(())
+            )
+            .is_err());
+    }
+    let worker = std::thread::spawn(move || {
+        let mut reader = Framed::new(input.child);
+        let message: Value = serde_json::from_slice(
+            &reader
+                .read(Instant::now() + Duration::from_secs(3), &|| Ok(()))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(message["method"], "DOM.setFileInputFiles");
+        assert_eq!(message["params"]["backendNodeId"], 42);
+        assert_eq!(
+            message["params"]["files"],
+            json!(["C:\\native-staging\\report.csv"])
+        );
+        assert!(message["params"].get("selector").is_none());
+        output
+            .child
+            .write_all(
+                format!(
+                    "{}\0",
+                    json!({"id":message["id"],"sessionId":"session","result":{}})
+                )
+                .as_bytes(),
+            )
+            .unwrap();
+    });
+    let writes = std::cell::Cell::new(0);
+    control
+        .attach_file(
+            "session",
+            42,
+            std::path::Path::new("C:\\native-staging\\report.csv"),
+            &|| Ok(()),
+            &|action| {
+                writes.set(writes.get() + 1);
+                action()
+            },
+        )
+        .unwrap();
+    worker.join().unwrap();
+    assert_eq!(writes.get(), 1);
+}
+
+#[test]
+fn native_download_events_omit_browser_filename_and_bound_the_download_identity() {
+    use serde_json::json;
+    let event = json!({"method":"Browser.downloadWillBegin","params":{"guid":"baadf00d-1234-5678-9abc-0123456789ab","frameId":"frame","url":"https://example.test/report.csv","suggestedFilename":"private-user-name.csv"}});
+    let safe = download_event(&event).unwrap().unwrap();
+    assert_eq!(safe["kind"], "begin");
+    assert!(!safe.to_string().contains("private-user-name"));
+    for guid in [
+        "../private",
+        "------------------------------------",
+        "baadf00d123456789abc0123456789abcdef00",
+    ] {
+        let mut changed = event.clone();
+        changed["params"]["guid"] = guid.into();
+        assert!(download_event(&changed).is_err());
+    }
+    let mut changed = event.clone();
+    changed["sessionId"] = "other-session".into();
+    assert!(download_event(&changed).is_err());
+    assert!(download_event(
+        &json!({"method":"Network.requestWillBeSent","params":{"headers":{"Cookie":"private"}}})
+    )
+    .unwrap()
+    .is_none());
+}
+
+#[test]
+fn browser_download_policy_cannot_use_the_read_channel() {
+    let input = Pair::new(false).unwrap();
+    let output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    assert!(control
+        .read_command(
+            Command::DownloadPolicy,
+            serde_json::json!({"behavior":"allow","downloadPath":"untrusted"}),
+            None,
+            &|| Ok(())
+        )
+        .is_err());
+}
+
+#[test]
+fn public_form_wire_uses_only_fixed_source_and_passes_text_as_data() {
+    use serde_json::{json, Value};
+    let input = Pair::new(false).unwrap();
+    let mut output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    for method in [Command::FillEmpty, Command::ResolveField] {
+        assert!(control
+            .read_command(
+                method,
+                json!({"functionDeclaration":"untrusted()"}),
+                Some("session"),
+                &|| Ok(())
+            )
+            .is_err());
+    }
+    let worker = std::thread::spawn(move || {
+        let mut reader = Framed::new(input.child);
+        let mut next = || -> Value {
+            serde_json::from_slice(
+                &reader
+                    .read(Instant::now() + Duration::from_secs(5), &|| Ok(()))
+                    .unwrap(),
+            )
+            .unwrap()
+        };
+        for step in 0..4 {
+            let message = next();
+            let result = match step {
+                0 => {
+                    assert_eq!(message["method"], "Page.createIsolatedWorld");
+                    assert_eq!(message["params"]["grantUniveralAccess"], false);
+                    json!({"executionContextId":17})
+                }
+                1 => {
+                    assert_eq!(message["method"], "DOM.resolveNode");
+                    assert_eq!(message["params"]["backendNodeId"], 42);
+                    assert_eq!(message["params"]["executionContextId"], 17);
+                    json!({"object":{"objectId":"native-field"}})
+                }
+                2 => {
+                    assert_eq!(message["method"], "Runtime.callFunctionOn");
+                    assert_eq!(
+                        message["params"]["functionDeclaration"],
+                        forms_script::FILL_EMPTY
+                    );
+                    assert_eq!(message["params"]["objectId"], "native-field");
+                    assert_eq!(
+                        message["params"]["arguments"][0]["value"],
+                        "');untrusted();//"
+                    );
+                    assert_eq!(message["params"]["userGesture"], false);
+                    json!({"result":{"type":"string","value":"filled"}})
+                }
+                _ => {
+                    assert_eq!(message["method"], "Runtime.releaseObject");
+                    json!({})
+                }
+            };
+            output
+                .child
+                .write_all(
+                    format!(
+                        "{}\0",
+                        json!({"id":message["id"],"sessionId":"session","result":result})
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+        }
+    });
+    let count = std::cell::Cell::new(0);
+    assert_eq!(
+        control
+            .fill_empty(
+                "frame",
+                "session",
+                42,
+                "https://example.test",
+                &json!({"tag":"INPUT","attributes":[]}),
+                "');untrusted();//",
+                &|| Ok(()),
+                &|start| {
+                    count.set(count.get() + 1);
+                    start()
+                }
+            )
+            .unwrap(),
+        "filled"
+    );
+    worker.join().unwrap();
+    assert_eq!(count.get(), 1);
+}
+
+#[test]
+fn tab_activation_cannot_use_the_read_channel_and_dispatches_one_fixed_native_target() {
+    use serde_json::{json, Value};
+    let input = Pair::new(false).unwrap();
+    let mut output = Pair::new(true).unwrap();
+    let mut control = ControlPipe::new(input.parent, output.parent);
+    assert!(control
+        .read_command(
+            Command::Activate,
+            json!({"targetId":"untrusted"}),
+            None,
+            &|| Ok(())
+        )
+        .is_err());
+    let worker = std::thread::spawn(move || {
+        let mut reader = Framed::new(input.child);
+        let message: Value = serde_json::from_slice(
+            &reader
+                .read(Instant::now() + Duration::from_secs(5), &|| Ok(()))
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(message["method"], "Target.activateTarget");
+        assert_eq!(message["params"], json!({"targetId":"native-target"}));
+        assert!(message.get("sessionId").is_none());
+        output
+            .child
+            .write_all(format!("{}\0", json!({"id":message["id"],"result":{}})).as_bytes())
+            .unwrap();
+    });
+    let calls = std::cell::Cell::new(0);
+    control
+        .activate("native-target", &|| Ok(()), &|start| {
+            calls.set(calls.get() + 1);
+            start()
+        })
+        .unwrap();
+    worker.join().unwrap();
+    assert_eq!(calls.get(), 1);
+}
+
+#[test]
 fn visibility_probe_accepts_only_a_plain_known_state_without_exceptions() {
     use serde_json::json;
     assert!(visibility(&json!({"result":{"type":"string","value":"visible"}})).unwrap());

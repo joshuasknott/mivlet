@@ -75,11 +75,23 @@ describe("workspace Library", () => {
     expect(onOpen).toHaveBeenCalledWith(files[124].tab);
     expect(listRuntimeLocalComputerFiles).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "" } });
-    fireEvent.click(
-      screen.getByRole("button", { name: "Show more files (85)" }),
-    );
-    expect(screen.getByRole("button", { name: /Result 79/ })).toBeVisible();
-    expect(screen.queryByRole("button", { name: /Result 80 / })).toBeNull();
+    expect(
+      screen.getAllByRole("button", { name: /^Open Result/ }),
+    ).toHaveLength(24);
+    fireEvent.click(screen.getByRole("button", { name: "Next files page" }));
+    expect(
+      screen.getByRole("button", { name: "Open Result 47" }),
+    ).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Open Result 0" })).toBeNull();
+    expect(
+      screen.getAllByRole("button", { name: /^Open Result/ }),
+    ).toHaveLength(24);
+    fireEvent.change(screen.getByRole("searchbox"), {
+      target: { value: "Result 124" },
+    });
+    expect(
+      screen.getByRole("button", { name: "Open Result 124" }),
+    ).toBeVisible();
   });
   it("shows attachments only for the current workspace and chat", async () => {
     vi.mocked(listRuntimeLocalComputerFiles).mockResolvedValue({

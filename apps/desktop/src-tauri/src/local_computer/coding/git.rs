@@ -1,11 +1,11 @@
-use super::{checkout, process, save, Input, OperationTicket, Repository};
+use super::{checkout, process, save_repository as save, Input, OperationTicket, Repository};
 use serde_json::{json, Value};
 use std::{ffi::OsString, fs, path::Path, process::Command};
 
 // Keep canonical paths for native validation. Git's clone destination parser
 // rejects the Windows verbatim prefix; Git handles long paths itself with the
 // process-local core.longpaths setting. Preserve UTF-16 and UNC identity.
-fn git_path(path: &Path) -> OsString {
+pub(super) fn git_path(path: &Path) -> OsString {
     #[cfg(windows)]
     {
         use std::os::windows::ffi::{OsStrExt, OsStringExt};

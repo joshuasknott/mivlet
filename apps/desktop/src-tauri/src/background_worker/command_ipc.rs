@@ -130,7 +130,14 @@ pub(super) async fn serve(app: tauri::AppHandle, mut pipe: NamedPipeServer) {
             .await;
             let result = match request {
                 Ok(Ok(request)) => {
-                    let tool_permit = if matches!(&request.action, Action::Tool { .. }) {
+                    // Input may wait on a full child pipe. Keep the separate
+                    // control capacity available to Status and immediate Stop.
+                    let tool_permit = if matches!(
+                        &request.action,
+                        Action::Tool { .. }
+                            | Action::Input { .. }
+                            | Action::RepositoryReview { .. }
+                    ) {
                         Some(tools.try_acquire_owned())
                     } else {
                         None

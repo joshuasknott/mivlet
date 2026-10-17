@@ -79,7 +79,7 @@ fn native_persistent_repository_job_lifecycle_acceptance() {
     let ticket = authority.begin_agent(1).unwrap();
     let cancelled = ticket.cancellation();
     let result: Value = serde_json::from_str(&jobs::start(directory.clone(), ticket, jobs.clone(),
-        json!({"repositoryId":repo.id,"command":"node -e \"require('fs').writeFileSync('persistent-only.txt','discard');console.log('native owned job');setTimeout(()=>{},60000)\"", "network":false,"timeoutSeconds":60})).unwrap()).unwrap();
+        json!({"repositoryId":repo.id,"command":"node -e \"require('fs').writeFileSync('persistent-only.txt','discard');console.log('native owned job');setTimeout(()=>{},60000)\"", "network":false,"timeoutSeconds":60}), None).unwrap()).unwrap();
     let id = result["job"]["id"].as_str().unwrap();
     let deadline = Instant::now() + Duration::from_secs(180);
     loop {

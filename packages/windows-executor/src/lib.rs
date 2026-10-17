@@ -10,16 +10,20 @@ mod files;
 #[cfg(all(test, windows))]
 mod lifecycle_acceptance;
 pub mod output;
+#[cfg(all(test, windows))]
+mod session_acceptance;
 pub use output::OutputLog;
 pub mod repository_files;
 mod repository_import;
 pub use repository_import::{
     acknowledge_recovery as acknowledge_repository_import, recover as recover_repository_import,
-    Recovery as RepositoryImportRecovery,
+    HostedRepositoryImportSource, Recovery as RepositoryImportRecovery,
 };
 #[cfg(windows)]
 mod process;
 mod runtime;
+pub mod session;
+pub use session::{InputDelivery, PreviewSpec, PreviewStream, SessionControl, SessionOptions};
 #[cfg(windows)]
 mod security;
 #[cfg(windows)]
@@ -86,7 +90,7 @@ pub enum ExecutionMode {
     Persistent,
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Binding {
     pub scope_id: String,
@@ -268,6 +272,37 @@ pub fn run_with_output(
     current: impl Fn() -> bool,
     launch: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>,
 ) -> Result<CompletedRun, String> {
+    run_with_session(
+        resource_root,
+        input,
+        script,
+        network,
+        timeout_seconds,
+        limits,
+        binding,
+        mode,
+        output,
+        None,
+        current,
+        launch,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn run_with_session(
+    resource_root: &Path,
+    input: &Path,
+    script: &str,
+    network: bool,
+    timeout_seconds: u64,
+    limits: Limits,
+    binding: Binding,
+    mode: ExecutionMode,
+    output: OutputLog,
+    session: Option<SessionControl>,
+    current: impl Fn() -> bool,
+    launch: impl FnOnce(&mut dyn FnMut() -> Result<(), String>) -> Result<(), String>,
+) -> Result<CompletedRun, String> {
     struct Close(OutputLog);
     impl Drop for Close {
         fn drop(&mut self) {
@@ -306,6 +341,7 @@ pub fn run_with_output(
             binding,
             mode,
             output,
+            session,
             current,
             launch,
         )
@@ -318,6 +354,7 @@ pub fn run_with_output(
             network,
             limits,
             binding,
+            session,
             mode,
             output,
             current,

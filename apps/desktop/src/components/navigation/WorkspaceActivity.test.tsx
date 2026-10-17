@@ -30,6 +30,42 @@ const props = (work: CollaborationWorkItem[] = []) => ({
 });
 
 describe("bounded Activity summary", () => {
+  it("keeps a large output collection in a closed disclosure with a bounded preview and a Files link", () => {
+    const input = { ...props(), files: Array.from({ length: 150 }, (_, index) => ({
+      id: "output-" + index, title: "Output " + index + ".md", detail: "Created here", origin: "created" as const, updatedAt: "2026-10-17",
+      tab: { id: "output-" + index, kind: "file" as const, title: "Output " + index + ".md", text: "Retained file contents" },
+    })) };
+    render(<WorkspaceActivity {...input} />);
+    expect(screen.getByText("Output 0.md")).not.toBeVisible();
+    fireEvent.click(screen.getByText("Recent files"));
+    expect(screen.getAllByRole("button", { name: /^Open Output/ })).toHaveLength(2);
+    expect(screen.queryByText("Output 149.md")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View all files" }));
+    expect(input.onNavigate).toHaveBeenCalledWith("files");
+  });
+
+
+  it("shows only the latest completed work and a bounded timeline with exact work navigation", () => {
+    const input = props(
+      Array.from({ length: 150 }, (_, index) =>
+        item("done-" + index, "completed"),
+      ),
+    );
+    render(<WorkspaceActivity {...input} />);
+    expect(
+      screen.getByRole("region", { name: "Latest completed work" }),
+    ).toBeVisible();
+    expect(
+      screen
+        .getByRole("region", { name: "Recent activity" })
+        .querySelectorAll("li"),
+    ).toHaveLength(3);
+    expect(screen.queryByText("Task done-149")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "View result" }));
+    expect(input.onInspect).toHaveBeenCalledWith("done-0");
+    expect(input.onNavigate).toHaveBeenCalledWith("history");
+  });
+
   it("keeps a large completed history out of the current-work overview", () => {
     const input = props([
       ...Array.from({ length: 200 }, (_, index) =>
@@ -68,7 +104,8 @@ describe("bounded Activity summary", () => {
 
   it("never offers a fabricated completed-result review when nothing is active", () => {
     render(<WorkspaceActivity {...props([item("completed", "completed")])} />);
-    expect(screen.getByText("Nothing in progress.")).toBeVisible();
+    expect(screen.getByRole("button", { name: "View result" })).toBeVisible();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
     expect(screen.queryByRole("button", { name: "Review" })).toBeNull();
   });
 });

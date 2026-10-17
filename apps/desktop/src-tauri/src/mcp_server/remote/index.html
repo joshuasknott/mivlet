@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#faf9f7">
+  <title>Mivlet · Your agents</title>
+  <link rel="stylesheet" href="/remote/styles.css">
+  <link rel="manifest" href="/remote/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/remote/icon.png">
+  <script type="module" src="/remote/app.js"></script>
+</head>
+<body>
+  <header class="top"><a href="/remote" class="wordmark">Mivlet</a><span id="connection" class="pill">Not connected</span></header>
+  <main>
+    <div class="heading"><h1>Your agents</h1><p id="subtitle">Connect to your computer</p></div>
+    <p id="notice" role="status" aria-live="polite"></p>
+    <section id="connect-panel" class="card" aria-label="Connect browser">
+      <h2>Keep up with your work</h2>
+      <p>Connect this browser, then approve its request in Mivlet → Settings → External assistants. Choose which agents and tasks it can access.</p>
+      <button id="connect" class="primary" disabled>Connect to Mivlet</button>
+      <p class="muted">Your computer must stay awake, signed in and running Mivlet.</p>
+    </section>
+    <section id="workspace" hidden>
+      <div class="toolbar"><label>Agent <select id="agent" aria-label="Agent"></select></label><button id="refresh">Refresh</button></div>
+      <div id="work" aria-live="off"></div>
+      <p id="empty" class="muted" hidden>No shared work yet. Ask your agent to get started.</p>
+      <p id="truncated" class="muted" hidden>Showing up to 64 shared tasks. Open Mivlet for the complete history.</p>
+      <section id="result" class="card" hidden aria-label="Task result"><div class="toolbar"><h2>Result</h2><button id="close-result">Close result</button></div><div id="result-content"></div><p class="muted">A bounded copy of the latest saved results. Open Mivlet for files and the full conversation.</p></section>
+      <form id="composer" class="card composer">
+        <label for="request">What would you like done?</label>
+        <textarea id="request" rows="3" maxlength="2000" placeholder="Ask your agent…" required></textarea>
+        <div class="toolbar"><button id="disconnect" type="button" class="text-button">Disconnect</button><button id="send" class="primary" type="submit">Send request</button></div>
+        <p id="read-only" class="muted" hidden>This browser has read-only access. Change access in Mivlet to request tasks.</p>
+      </form>
+      <div id="retry-panel" class="card" hidden><p>The connection ended before the result arrived. Check the task list, or retry the same request safely.</p><button id="retry">Retry same request</button></div>
+      <button id="notifications" class="text-button">Notify when work changes</button>
+      <p id="notification-help" class="muted" hidden>Keep your computer awake and Mivlet open. On iPhone or iPad, add this page to your Home Screen first.</p>
+    </section>
+  </main>
+</body>
+</html>

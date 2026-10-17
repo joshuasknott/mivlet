@@ -59,6 +59,8 @@ pub struct CopyAction {
 pub struct LinkedWork {
     id: String,
     status: WorkStatus,
+    #[serde(skip)]
+    repository_id: Option<String>,
 }
 
 #[derive(Clone, Default)]
@@ -216,8 +218,63 @@ fn same_owner(left: &Owner, right: &Owner) -> bool {
     left.account == right.account && left.workspace == right.workspace && left.agent == right.agent
 }
 
-// Scope-less Work records cannot identify an older copy: protect all copies of
-// that agent until unfinished work has been reviewed, including blocked work.
+/// Resolve only a native-owned retained copy. This never changes the selection.
+pub(super) fn owned_repository(
+    directory: &Path,
+    id: &str,
+    workspace: &str,
+    agent: &str,
+) -> Result<Repository, String> {
+    owned_repository_in_account(
+        directory,
+        id,
+        crate::account_session::binding()?,
+        workspace,
+        agent,
+    )
+}
+
+pub(super) fn owned_repository_in_account(
+    directory: &Path,
+    id: &str,
+    account: &str,
+    workspace: &str,
+    agent: &str,
+) -> Result<Repository, String> {
+    if !valid_id(id) {
+        return Err("Invalid repository copy identity.".into());
+    }
+    let root = directory.join(id);
+    let actual: Owner = read_json(&root.join("ownership.json"))?;
+    if actual.account != account || actual.workspace != workspace || actual.agent != agent {
+        return Err(
+            "Repository copy ownership changed. Start a fresh task after selecting its repository."
+                .into(),
+        );
+    }
+    let repo = saved_repository(directory, id)?;
+    if repo.id != id {
+        return Err(
+            "Repository copy identity changed. Inspect its retained copy before continuing.".into(),
+        );
+    }
+    super::checkout(directory, &repo)?;
+    Ok(repo)
+}
+
+pub(super) fn saved_repository(directory: &Path, id: &str) -> Result<Repository, String> {
+    if !valid_id(id) {
+        return Err("Invalid repository copy identity.".into());
+    }
+    let repo: Repository = read_json(&directory.join(id).join("repository.json"))?;
+    if repo.id != id {
+        return Err("Repository copy identity changed.".into());
+    }
+    Ok(repo)
+}
+
+// Legacy Work without an exact binding still protects every copy. New Work
+// protects its recorded copy; selecting a copy never rewrites that binding.
 fn with_evidence<T>(
     target: &CopyScope,
     action: impl FnOnce(Evidence) -> Result<T, String>,
@@ -251,16 +308,23 @@ fn collect_evidence(
         .collect();
     Ok(Evidence {
         unresolved: work.iter().any(|item| {
-            !matches!(
-                item.status,
-                WorkStatus::Completed | WorkStatus::Failed | WorkStatus::Cancelled
-            )
+            item.repository_binding
+                .as_ref()
+                .is_none_or(|binding| !binding.valid())
+                && !matches!(
+                    item.status,
+                    WorkStatus::Completed | WorkStatus::Failed | WorkStatus::Cancelled
+                )
         }),
         work: work
             .into_iter()
             .map(|item| LinkedWork {
                 id: item.id,
                 status: item.status,
+                repository_id: item
+                    .repository_binding
+                    .filter(|binding| binding.valid())
+                    .map(|binding| binding.repository_id),
             })
             .collect(),
         jobs: execution_evidence(conn, store, &scope.data)?,
@@ -363,7 +427,16 @@ fn inspect(
         selected,
         dirty: None,
         size_bytes: None,
-        linked_work: evidence.work.clone(),
+        linked_work: evidence
+            .work
+            .iter()
+            .filter(|work| {
+                work.repository_id
+                    .as_deref()
+                    .is_none_or(|repository| repository == id)
+            })
+            .cloned()
+            .collect(),
         live_jobs: evidence.jobs.clone(),
         jobs_status: if busy {
             "repository operation active"
@@ -425,10 +498,17 @@ fn inspect(
         if busy {
             return Err("A repository operation is active. Wait or Stop it before cleanup.".into());
         }
-        if evidence.unresolved {
+        if evidence.unresolved
+            || entry.linked_work.iter().any(|work| {
+                !matches!(
+                    work.status,
+                    WorkStatus::Completed | WorkStatus::Failed | WorkStatus::Cancelled
+                )
+            })
+        {
             entry
                 .blockers
-                .push("Unfinished Work belongs to this agent; finish or cancel it first.".into());
+                .push("Unfinished Work may use this copy; finish or cancel it first.".into());
         }
         if !evidence.jobs.is_empty() {
             entry.blockers.push("Active or recoverable provider execution exists in this workspace; exact copy attribution is unavailable.".into());

@@ -96,8 +96,17 @@ fn mark_navigation_guard_failed() {
 #[cfg(windows)]
 fn allow_navigation(state: &mut NavigationFence, frame_id: usize, uri: &str) -> bool {
     match state.expected.get(&frame_id) {
-        Some(expected) => expected == uri,
-        None if is_registered_mcp_url(uri) => {
+        Some(expected) => crate::local_computer::live_preview::navigation_allowed(expected, uri)
+            .unwrap_or_else(|| expected == uri),
+        None if crate::local_computer::live_preview::navigation_allowed(uri, uri)
+            == Some(false) =>
+        {
+            false
+        }
+        None if is_registered_mcp_url(uri)
+            || crate::local_computer::live_preview::registered_origin(uri).is_some()
+            || crate::connection_allowlist_probe::registered(uri) =>
+        {
             state.expected.insert(frame_id, uri.to_owned());
             true
         }
@@ -299,6 +308,13 @@ fn require_navigation_guard() -> Result<(), String> {
     } else {
         Err("MCP App navigation guard is unavailable in this desktop runtime.".into())
     }
+}
+
+pub(crate) fn require_live_preview_guards() -> Result<(), String> {
+    require_navigation_guard()?;
+    #[cfg(windows)]
+    crate::interactive_network_guard::require_connection_allowlist()?;
+    Ok(())
 }
 
 #[cfg(not(windows))]

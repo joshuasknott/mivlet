@@ -8,6 +8,7 @@ import {
 import "@testing-library/jest-dom/vitest";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { McpServerSettings } from "./McpServerSettings";
+vi.mock("./ManagedPhoneSettings", () => ({ ManagedPhoneSettings: () => null }));
 import {
   decideMcpClient,
   getMcpServerStatus,
@@ -41,7 +42,26 @@ beforeEach(() => {
   vi.mocked(getMcpServerStatus).mockResolvedValue(base);
 });
 afterEach(() => vi.useRealTimers());
+function openManualSetup() {
+  fireEvent.click(screen.getByText("Advanced: manual MCP and external assistants"));
+}
 describe("external assistant consent", () => {
+  it("keeps the phone view opt-in and displays only the native-issued address", async () => {
+    vi.mocked(getMcpServerStatus).mockResolvedValue({...base, endpoint:undefined, pending:[]});
+    const view=render(<McpServerSettings workspaceId="default" agents={[]} />);
+    openManualSetup();
+    await waitFor(()=>expect(screen.getByRole("button",{name:"Start MCP server"})).toBeEnabled());
+    const choice=screen.getByLabelText("Enable phone and web view");
+    expect(choice).not.toBeChecked();
+    fireEvent.click(choice);
+    fireEvent.click(screen.getByRole("button",{name:"Start MCP server"}));
+    await waitFor(()=>expect(startMcpServer).toHaveBeenCalledWith(expect.objectContaining({remoteAccess:true})));
+    view.unmount();
+    vi.mocked(getMcpServerStatus).mockResolvedValue({...base,remoteUrl:"https://mivlet.example/remote"});
+    render(<McpServerSettings workspaceId="default" agents={[]} />);
+    openManualSetup();
+    expect(await screen.findByLabelText("Phone and web URL")).toHaveValue("https://mivlet.example/remote");
+  });
   it("requires explicit agents and keeps task access opt-in", async () => {
     render(
       <McpServerSettings
@@ -91,6 +111,7 @@ describe("external assistant consent", () => {
       new Error("This port is unavailable."),
     );
     render(<McpServerSettings workspaceId="default" agents={[]} />);
+    openManualSetup();
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "Start MCP server" }),
@@ -115,6 +136,7 @@ describe("external assistant consent", () => {
         agents={[{ id: "a", name: "Aster" }]}
       />,
     );
+    openManualSetup();
     fireEvent.click(await screen.findByRole("button", { name: "Stop server" }));
     expect(screen.getByRole("status")).toHaveTextContent("Processing request");
     expect(screen.getByRole("button", { name: "Copy URL" })).toBeDisabled();
@@ -152,6 +174,7 @@ describe("external assistant consent", () => {
         agents={[{ id: "a", name: "Aster" }]}
       />,
     );
+    openManualSetup();
     await act(async () => {});
     expect(screen.getByText("Running", { exact: true })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("checkbox", { name: "Aster" }));

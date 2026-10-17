@@ -26,9 +26,11 @@ export default function GeneratedHtmlResponse({
   const [resource, setResource] = useState<Resource>();
   const [opening, setOpening] = useState(false);
   const [error, setError] = useState("");
+  const [frameLoaded, setFrameLoaded] = useState(false);
   const live = useRef<Resource | undefined>(undefined);
   const preview = useRef<HTMLElement>(null);
   const epoch = useRef(0);
+  const openingTimeout = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const owner = { workspaceId, conversationId, agentId };
   const release = useCallback(
     (value: Resource) => {
@@ -48,8 +50,10 @@ export default function GeneratedHtmlResponse({
     setResource(undefined);
     setOpening(false);
     setError("");
+    setFrameLoaded(false);
     return () => {
       ++epoch.current;
+      clearTimeout(openingTimeout.current);
       if (live.current) release(live.current);
       live.current = undefined;
     };
@@ -68,6 +72,14 @@ export default function GeneratedHtmlResponse({
     const version = epoch.current;
     setOpening(true);
     setError("");
+    setFrameLoaded(false);
+    const timeout = setTimeout(() => {
+      if (version !== epoch.current) return;
+      ++epoch.current;
+      setOpening(false);
+      setError("The preview took too long to open. Try again; a late preview will be closed automatically.");
+    }, 20_000);
+    openingTimeout.current = timeout;
     try {
       const result = await conversationUi<Resource>(owner, {
         action: "render-html",
@@ -75,11 +87,8 @@ export default function GeneratedHtmlResponse({
         source,
       });
       // Never frame a caller-supplied/native-bridge URL, even if transport is mocked.
-      if (
-        !/^http:\/\/127\.0\.0\.2:\d+\/[a-f0-9]{64}\/index\.html$/.test(
-          result.url,
-        )
-      ) {
+      const issued = /^http:\/\/127\.0\.0\.2:\d+\/([a-f0-9]{64})\/index\.html$/.exec(result.url);
+      if (!issued || issued[1] !== result.resourceId) {
         release(result);
         throw new Error("The isolated preview origin is unavailable.");
       }
@@ -93,6 +102,7 @@ export default function GeneratedHtmlResponse({
       if (version === epoch.current)
         setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
+      clearTimeout(timeout);
       if (version === epoch.current) setOpening(false);
     }
   };
@@ -102,7 +112,20 @@ export default function GeneratedHtmlResponse({
     live.current = undefined;
     setResource(undefined);
     setOpening(false);
+    setFrameLoaded(false);
   };
+  useEffect(() => {
+    if (!resource || frameLoaded) return;
+    const timeout = setTimeout(() => {
+      ++epoch.current;
+      release(resource);
+      live.current = undefined;
+      setResource(undefined);
+      setOpening(false);
+      setError("The isolated preview did not finish loading. Try opening it again.");
+    }, 20_000);
+    return () => clearTimeout(timeout);
+  }, [resource, frameLoaded, release]);
   useEffect(() => {
     if (!resource) return;
     const stop = () => {
@@ -156,7 +179,7 @@ export default function GeneratedHtmlResponse({
               }
               onClick={() => void open()}
             >
-              {opening ? "Opening…" : "Open preview"}
+              {opening ? "Opening…" : error ? "Retry preview" : "Open preview"}
             </button>
           )}
         </div>
@@ -167,8 +190,10 @@ export default function GeneratedHtmlResponse({
             sandbox="allow-scripts"
             referrerPolicy="no-referrer"
             allow="camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'; fullscreen 'none'"
+            onLoad={() => setFrameLoaded(true)}
           />
         )}
+        {resource && !frameLoaded && <p role="status">Loading isolated preview…</p>}
         <p className="generated-html-note">
           Runs locally. No network or tool access. Closes after 15 minutes.
           Changes reset when closed.

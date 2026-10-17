@@ -15,7 +15,7 @@ import type {
   DurableRunWriter,
   HydratedConversation,
 } from "../../lib/conversation-runtime";
-import type { ResponsePart } from "../../lib/conversation-presentation";
+import type { ResponsePart } from "../../lib/conversation-presentation-types";
 
 export interface NativeAgentState {
   transcript: string;

@@ -212,7 +212,7 @@ export function PluginPanel({
     return (
       <button
         type="button"
-        className="marketplace-connector-row"
+        className="plugin-catalogue-connector-row"
         key={`${placement}-${entry.id}`}
         data-connector-id={entry.id}
         data-availability={connectable ? "available" : "planned"}
@@ -220,18 +220,18 @@ export function PluginPanel({
         aria-label={ariaLabel}
       >
         <span
-          className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}
+          className={`plugin-catalogue-connector-icon plugin-catalogue-connector-icon--${entry.icon}`}
           aria-hidden="true"
         >
           <MarketplaceIcon id={entry.id} icon={entry.icon} />
         </span>
-        <span className="marketplace-connector-row__copy">
+        <span className="plugin-catalogue-connector-row__copy">
           <strong>{entry.name}</strong>
           <span>{entry.description}</span>
           {!connectable ? <small>Planned</small> : null}
         </span>
         <span
-          className={`marketplace-connector-row__action${connected ? " marketplace-connector-row__action--connected" : ""}`}
+          className={`plugin-catalogue-connector-row__action${connected ? " plugin-catalogue-connector-row__action--connected" : ""}`}
           aria-hidden="true"
         >
           {connected ? (
@@ -248,12 +248,12 @@ export function PluginPanel({
 
   return (
     <section className="connectors-marketplace" aria-label="Plugins">
-      <header className="marketplace-page-header">
+      <header className="plugin-catalogue-page-header">
         <div>
           <h1>Plugins</h1>
           <p>Give your agents access to the tools you use.</p>
         </div>
-        {workspaceId ? <button type="button" className="button button--secondary marketplace-add-custom" onClick={() => {
+        {workspaceId ? <button type="button" className="button button-secondary plugin-catalogue-add-custom" onClick={() => {
           setCustomServerId(undefined); setToolServerStatus(""); setToolServersOpen(true);
         }}><Plus size={16} aria-hidden="true" />Add custom plugin</button> : null}
         <label className="connections-search">
@@ -269,16 +269,16 @@ export function PluginPanel({
       </header>
       {!toolServersOpen && toolServerStatus ? <p role="status">{toolServerStatus}</p> : null}
       <section
-        className="marketplace-section marketplace-section--installed"
+        className="plugin-catalogue-section plugin-catalogue-section--installed"
         aria-labelledby="installed-connections-title"
       >
         <h2 id="installed-connections-title">Installed</h2>
         {installedManifests.length || visibleCustomServers.length ? (
-          <div className="marketplace-installed-list">
+          <div className="plugin-catalogue-installed-list">
             {visibleCustomServers.map(server => <button type="button"
-              className="marketplace-installed-connector" key={`custom-${server.id}`} aria-label={`Manage ${server.displayName} custom plugin`}
+              className="plugin-catalogue-installed-connector" key={`custom-${server.id}`} aria-label={`Manage ${server.displayName} custom plugin`}
               onClick={() => { setCustomServerId(server.id); setToolServerStatus(""); setToolServersOpen(true); }}>
-              <span className="marketplace-installed-connector__icon" aria-hidden="true"><PluginsIcon size={26} /></span>
+              <span className="plugin-catalogue-installed-connector__icon" aria-hidden="true"><PluginsIcon size={26} /></span>
               <span>{server.displayName}</span>
             </button>)}
             {installedManifests.map((connector) => {
@@ -287,14 +287,14 @@ export function PluginPanel({
               return (
                 <button
                   type="button"
-                  className="marketplace-installed-connector"
+                  className="plugin-catalogue-installed-connector"
                   key={connector.id}
                   onClick={() => openEntry(entry)}
                   title={connector.name}
                   aria-label={`Manage ${connector.name} from Installed`}
                 >
                   <span
-                    className={`marketplace-installed-connector__icon marketplace-connector-icon--${entry.icon}`}
+                    className={`plugin-catalogue-installed-connector__icon plugin-catalogue-connector-icon--${entry.icon}`}
                     aria-hidden="true"
                   >
                     <MarketplaceIcon
@@ -312,7 +312,7 @@ export function PluginPanel({
             })}
           </div>
         ) : (
-          <p className="marketplace-section__empty">
+          <p className="plugin-catalogue-section__empty">
             {query.trim()
               ? "No installed plugins match this search."
               : "Connect an app and it will appear here."}
@@ -328,9 +328,9 @@ export function PluginPanel({
         const limit = section.id === "featured" ? 6 : 4;
         const shown = expanded ? section.connectors : section.connectors.slice(0, limit);
         const remaining = section.connectors.slice(limit);
-        return <section className="marketplace-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
+        return <section className="plugin-catalogue-section" aria-labelledby={`marketplace-section-${section.id}`} key={section.id}>
           <h2 id={`marketplace-section-${section.id}`}>{section.title}</h2>
-          <div className="marketplace-connector-grid">
+          <div className="plugin-catalogue-connector-grid">
             {section.id === "featured" ? (<>
             {visibleBuiltins.map((entry) => (
               <BuiltinPluginCard
@@ -347,7 +347,7 @@ export function PluginPanel({
           {section.id === "featured" ? (<>
           {builtin.plugins === null ? (
             <p
-              className="marketplace-section__empty"
+              className="plugin-catalogue-section__empty"
               role={builtin.loadError ? "status" : undefined}
             >
               {builtin.loadError
@@ -358,22 +358,22 @@ export function PluginPanel({
             </p>
           ) : null}
           </>) : null}
-          {remaining.length ? <button className="marketplace-see-more" type="button" aria-expanded={expanded} onClick={() => setExpandedSections((current) => expanded ? current.filter((id) => id !== section.id) : [...current, section.id])}>
-            {!expanded ? <span className="marketplace-see-more__icons" aria-hidden="true">{remaining.slice(0, 3).map((entry) => <MarketplaceIcon key={entry.id} id={entry.id} icon={entry.icon} size={17} />)}</span> : null}
+          {remaining.length ? <button className="plugin-catalogue-see-more" type="button" aria-expanded={expanded} onClick={() => setExpandedSections((current) => expanded ? current.filter((id) => id !== section.id) : [...current, section.id])}>
+            {!expanded ? <span className="plugin-catalogue-see-more__icons" aria-hidden="true">{remaining.slice(0, 3).map((entry) => <MarketplaceIcon key={entry.id} id={entry.id} icon={entry.icon} size={17} />)}</span> : null}
             {expanded ? "Show less" : `See ${remaining.slice(0, 2).map((entry) => entry.name).join(", ")}${remaining.length > 2 ? ", and more" : ""}`}
           </button> : null}
         </section>;
       })}
 
       {!hasDirectoryMatches && !visibleCustomServers.length ? (
-        <p className="marketplace-search-empty" role="status">
+        <p className="plugin-catalogue-search-empty" role="status">
           {query.trim() ? `No plugins match “${query.trim()}”.` : "No plugins found."}
         </p>
       ) : null}
 
-      {toolServersOpen && workspaceId ? <div ref={customModalRef} className="connector-detail-modal" role="dialog" aria-modal="true" aria-labelledby="custom-plugin-title" tabIndex={-1}>
-        <div className="connector-detail-modal__panel custom-plugin-dialog">
-          <button type="button" className="connector-detail-modal__close" aria-label="Close custom plugin setup" onClick={() => setToolServersOpen(false)}><X size={17} /></button>
+      {toolServersOpen && workspaceId ? <div ref={customModalRef} className="integration-panel-detail-modal" role="dialog" aria-modal="true" aria-labelledby="custom-plugin-title" tabIndex={-1}>
+        <div className="integration-panel-detail-modal__panel custom-plugin-dialog">
+          <button type="button" className="integration-panel-detail-modal__close" aria-label="Close custom plugin setup" onClick={() => setToolServersOpen(false)}><X size={17} /></button>
           <h2 id="custom-plugin-title">{customServerId ? "Manage custom plugin" : "Add custom plugin"}</h2>
           <LocalMcpSettings workspaceId={workspaceId} initialAdding={!customServerId} serverId={customServerId} onStatus={setToolServerStatus} onSaved={() => setCustomRevision(value => value + 1)} />
           {toolServerStatus ? <p role="status">{toolServerStatus}</p> : null}
@@ -382,7 +382,7 @@ export function PluginPanel({
       {selectedEntryId && (selectedEntry || selectedBuiltinEntry) ? (
         <div
           ref={detailModalRef}
-          className="connector-detail-modal"
+          className="integration-panel-detail-modal"
           role="dialog"
           aria-modal="true"
           aria-labelledby={`connector-detail-${selectedEntryId}`}
@@ -394,13 +394,13 @@ export function PluginPanel({
           }}
         >
           <div
-            className="connector-detail-modal__panel"
+            className="integration-panel-detail-modal__panel"
             onMouseDown={(event) => event.stopPropagation()}
           >
             <button
               ref={detailCloseRef}
               type="button"
-              className="connector-detail-modal__close"
+              className="integration-panel-detail-modal__close"
               aria-label="Close plugin setup"
               onClick={() => setSelectedEntryId(null)}
             >
@@ -456,11 +456,11 @@ function PlannedConnectorDetails({
   titleId: string;
 }) {
   return (
-    <article className="connector-detail connector-detail--planned">
-      <p className="connector-detail__eyebrow">Plugins</p>
-    <div className="connector-detail__header">
+    <article className="integration-panel-detail integration-panel-detail--planned">
+      <p className="integration-panel-detail__eyebrow">Plugins</p>
+    <div className="integration-panel-detail__header">
         <span
-          className={`marketplace-connector-icon marketplace-connector-icon--${entry.icon}`}
+          className={`plugin-catalogue-connector-icon plugin-catalogue-connector-icon--${entry.icon}`}
           aria-hidden="true"
         >
           <MarketplaceIcon id={entry.id} icon={entry.icon} />
@@ -469,11 +469,11 @@ function PlannedConnectorDetails({
           <h2 id={titleId}>{entry.name}</h2>
           <p>{entry.description}</p>
         </div>
-        <span className="connector-detail__status connector-detail__status--planned">
+        <span className="integration-panel-detail__status integration-panel-detail__status--planned">
           Planned
         </span>
       </div>
-      <div className="connector-detail__body connector-detail__body--single">
+      <div className="integration-panel-detail__body integration-panel-detail__body--single">
         <div>
           <span>Availability</span>
           <p>
@@ -483,7 +483,7 @@ function PlannedConnectorDetails({
           </p>
         </div>
       </div>
-      <div className="connector-detail__actions">
+      <div className="integration-panel-detail__actions">
         <button type="button" disabled>
           Not available yet
         </button>
@@ -513,33 +513,33 @@ function ConnectorDetails({
   const configured = !["configuration-required", "unavailable"].includes(detail.className);
   const granted = connector.scopes?.filter((scope) => scope.granted) ?? [];
 
-  return <article className="connector-detail" aria-label={`${connector.name} details`} aria-busy={busy}>
-    <PluginDetailHeader name={connector.name} description={findMarketplaceConnector(connector.id)?.description ?? connector.name} icon={<span className={`connector-card__logo-container connector-card__logo-container--${connector.id}`}><ConnectorIcon id={connector.id} /></span>} titleId={titleId} status={busy ? "Connecting…" : ready ? "Connected" : detail.label} statusClass={detail.className} />
+  return <article className="integration-panel-detail" aria-label={`${connector.name} details`} aria-busy={busy}>
+    <PluginDetailHeader name={connector.name} description={findMarketplaceConnector(connector.id)?.description ?? connector.name} icon={<span className={`integration-panel-card__logo-container integration-panel-card__logo-container--${connector.id}`}><ConnectorIcon id={connector.id} /></span>} titleId={titleId} status={busy ? "Connecting…" : ready ? "Connected" : detail.label} statusClass={detail.className} />
 
-    {connector.account ? <p className="connector-detail__account">Active connection: {connector.account.email ?? connector.account.displayName}</p> : null}
-    {connected && accounts.length > 1 ? <label className="connector-detail__account">
+    {connector.account ? <p className="integration-panel-detail__account">Active connection: {connector.account.email ?? connector.account.displayName}</p> : null}
+    {connected && accounts.length > 1 ? <label className="integration-panel-detail__account">
       <span>Account</span>
       <select aria-label="Active connection" disabled={busy} value={accounts.find((option) => option.active)?.connectionId ?? ""}
         onChange={(event) => onSwitchAccount(connector.id, event.target.value)}>
         {accounts.map(({ account, connectionId }) => <option key={connectionId} value={connectionId}>{account.email ?? account.displayName}</option>)}
       </select>
     </label> : null}
-    <p className="connector-detail__intro">{ready ? "Ready to use with any of your agents." : configured ? `Sign in to use ${connector.name} in your conversations.` : "This connection is not available on this installation yet."}</p>
-    <div className="connector-detail__actions">
+    <p className="integration-panel-detail__intro">{ready ? "Ready to use with any of your agents." : configured ? `Sign in to use ${connector.name} in your conversations.` : "This connection is not available on this installation yet."}</p>
+    <div className="integration-panel-detail__actions">
       {ready ? <button type="button" disabled={busy} onClick={() => onUseConnector(connector)}>Use in chat</button> :
-        <button type="button" className="button--primary" disabled={busy || !configured} onClick={() => void run(() => onConnect(connector))}>
+        <button type="button" className="button-primary" disabled={busy || !configured} onClick={() => void run(() => onConnect(connector))}>
           {busy ? "Connecting…" : configured ? needsRepair ? "Reconnect" : "Connect" : "Unavailable"}
         </button>}
       {connected || connector.account ? <button type="button" disabled={busy} onClick={() => void run(() => onDisconnect(connector.id))}>Disconnect</button> : null}
     </div>
-    {notice ? <p className="connector-detail__notice" role="alert">{notice}</p> : null}
-    {!ready && detail.summary ? <p className="connector-detail__notice" role="status">{detail.summary}</p> : null}
+    {notice ? <p className="integration-panel-detail__notice" role="alert">{notice}</p> : null}
+    {!ready && detail.summary ? <p className="integration-panel-detail__notice" role="status">{detail.summary}</p> : null}
     <PluginOverview id={connector.id} access={ready ? connectorAccessSummary(connector) : "Chosen when you connect"} onExample={ready && !busy ? (prompt) => onUseConnector(connector, prompt) : undefined} />
-    <p className="connector-detail__hint">{ready ? connectorAccessSummary(connector) : "Choose your account and grant access on the sign-in page."} Actions follow your workspace approval preference.</p>
-    <details className="connector-guide">
+    <p className="integration-panel-detail__hint">{ready ? connectorAccessSummary(connector) : "Choose your account and grant access on the sign-in page."} Actions follow your workspace approval preference.</p>
+    <details className="integration-panel-guide">
       <summary>About this connection</summary>
       {granted.length ? <><p>Access granted</p><ul>{granted.map((scope) => <li key={scope.id}>{scope.label}</li>)}</ul></> : null}
-      {connected ? <button type="button" className="connector-detail__text-action" disabled={busy || connector.sync?.phase === "syncing"} onClick={() => onRefresh(connector.id)}>Sync files</button> : null}
+      {connected ? <button type="button" className="integration-panel-detail__text-action" disabled={busy || connector.sync?.phase === "syncing"} onClick={() => onRefresh(connector.id)}>Sync files</button> : null}
     </details>
   </article>;
 }

@@ -117,6 +117,8 @@ describe("native agent providers", () => {
     ).toMatchObject({
       inputTokens: 42,
       outputTokens: 7,
+      pricingTier: "standard",
+      observedAt: expect.any(String),
     });
     // costUsd is provider-priced; just assert it is a finite number.
     expect(Number.isFinite(result.current.state.usage?.costUsd ?? NaN)).toBe(

@@ -95,16 +95,16 @@ export function WorkStatusBadge({
 }) {
   const presentation = workPresentation(item);
   return (
-    <span className="work-badges">
+    <span className="task-panel-badges">
       <span
-        className="work-status-badge"
+        className="task-panel-status-badge"
         data-state={presentation.state}
         title={presentation.detail}
       >
         {presentation.label}
       </span>
       {presentation.detail ? (
-        <small className="work-status-detail">{presentation.detail}</small>
+        <small className="task-panel-status-detail">{presentation.detail}</small>
       ) : null}
     </span>
   );

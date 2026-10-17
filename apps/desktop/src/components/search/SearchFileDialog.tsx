@@ -3,7 +3,7 @@ import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { previewRuntimeLocalComputerFile } from "../../runtime/domains/local-computer";
 import type { SearchNavigationTarget } from "../../lib/search/navigation";
 import type { LocalComputerFilePreview } from "@mivlet/protocol";
-import { OfficePreview } from "../conversation/OfficePreview";
+const OfficePreview = lazy(() => import("../conversation/ArtifactPreview").then(module => ({ default: module.OfficePreview })));
 const PdfPreview = lazy(() => import("../conversation/PdfPreview").then(module => ({ default: module.PdfPreview })));
 
 export function SearchFileDialog({ target, title, text, imageDataUrl, onClose, embedded = false }: {
@@ -28,7 +28,7 @@ export function SearchFileDialog({ target, title, text, imageDataUrl, onClose, e
       .catch(error => { if (current) setContent(error instanceof Error ? error.message : "This file is unavailable."); });
     return () => { current = false; };
   }, [target, text]);
-  const officeContent = office?.pdfBase64 ? <Suspense fallback={<p role="status">Loading PDF preview…</p>}><PdfPreview key={office.path} base64={office.pdfBase64} title={title} /></Suspense> : office?.office ? <OfficePreview office={office.office} truncated={office.truncated} notice={office.content} /> : null;
+  const officeContent = office?.pdfBase64 ? <Suspense fallback={<p role="status">Loading PDF preview…</p>}><PdfPreview key={office.path} base64={office.pdfBase64} title={title} /></Suspense> : office?.office ? <Suspense fallback={<p role="status">Loading Office preview…</p>}><OfficePreview office={office.office} truncated={office.truncated} notice={office.content} /></Suspense> : null;
   if (embedded) return <div className="right-panel__library" ref={panel} aria-label={`${title} preview`}>{officeContent ?? (imageDataUrl && /^data:image\/(png|jpeg|gif|webp);base64,/.test(imageDataUrl) ? <img src={imageDataUrl} alt={title} style={{ display: "block", maxWidth: "100%", objectFit: "contain", margin: "auto" }} /> : <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{content}</pre>)}</div>;
   return <div className="side-chat-dialog-backdrop"><div ref={panel} className="side-chat-dialog" role="dialog" aria-modal="true" aria-label={title}>
     <header><h2>{title}</h2><button style={{ minWidth: 44, minHeight: 44 }} onClick={onClose} aria-label="Close file preview">×</button></header>

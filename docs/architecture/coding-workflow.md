@@ -1,5 +1,28 @@
 # Local coding workflow
 
+Connected recovery records one immutable file checkpoint before a native Work
+turn's first approved repository write, command or commit. Its link binds the
+account, agent, conversation, user-message parent, Work/run generations and exact
+retained private copy. Older tasks have no invented restore point. Existing
+checkpoint count and storage bounds apply; snapshots are never deleted
+automatically.
+
+The conversation recovery control previews the actual file diff and conversation
+target, then uses the existing exact single-use checkpoint approval. A native
+encrypted intent is written before file execution. Native before/after receipts
+permit the conversation compare-and-swap while the restored copy stays locked
+and matches the reviewed tree. A first-turn rewind creates an explicit empty
+root checkpoint rather than treating an omitted head as empty. Older message
+branches and the before-restore file checkpoint remain saved.
+
+Files and conversation restore in a recoverable sequence. Interrupted or partial
+outcomes remain visible. Inspect the actual tree and immutable backup receipts
+before deliberately finishing the conversation step, cancelling an unchanged
+pending restore, or reviewing a fresh approval to revert files. No mutation
+replays on reload. Sent messages, remote publication and other external effects
+remain in place; restored code needs new checks. Removing linked metadata keeps
+file checkpoints; delete old snapshots explicitly in Files when storage is full.
+
 An agent can work on a real local Git repository through Mivlet-owned tools.
 Open Library, expand Repository, select a named agent and attach the repository
 using the native folder picker. Ask that agent to inspect the project, make a
@@ -11,7 +34,16 @@ actions through Mivlet's existing approval system.
 The native service copies the selected repository's committed HEAD into private
 workspace/agent storage on a new `mivlet/<id>` branch. Uncommitted source work is
 not included. The source repository, its index and its branches are untouched.
-Each agent has one selected repository; older copies remain on disk. Library →
+Each agent has one selected repository; older copies remain on disk. New tasks
+retain the selected copy's immutable identity at admission. Selecting a different
+copy later does not move queued work: repository status, file operations, commands,
+checkpoints and approved publication continue against the task's original copy.
+These operations save that copy without changing the selection shown in Library.
+Tasks started without a repository, and legacy tasks without a saved binding,
+must start a fresh request after attachment before using repository tools. This
+binding adds no file or command permission and does not create another copy.
+PR watches still require the task's copy to be selected when configured.
+Library →
 Repository → Retained copies inventories copies across this account, including
 ownership, source repository, account-relative managed path, branch/HEAD, current
 dirty state, logical file bytes and linked Work. Choose the owning agent in the
@@ -47,8 +79,10 @@ is required to retry. Cleanup never resumes automatically after restart.
 
 This baseline has no retained-copy checkpoint status service or detached-command
 supervisor. The inventory labels those limits; unknown per-copy metadata protects
-cleanup. Work records do not carry exact repository-copy IDs, so unfinished Work
-protects all of that agent's copies. Integrating checkpoint, PR or detached-job
+cleanup. New Work records carry exact repository-copy IDs, so unfinished bound
+Work protects its own copy. Legacy, missing or malformed bindings still protect
+all of that agent's copies. Active or recoverable provider attempts without exact
+attribution retain their conservative guard. Integrating checkpoint, PR or detached-job
 services must replace these conservative guards with their canonical status
 evidence under this same lock; do not remove guards based on missing evidence.
 Exact cleanup inspection is limited to 200,000 entries and 2 GiB of file bytes;
@@ -138,7 +172,8 @@ isolated snapshot; all writes are discarded, including on success. The repositor
 stays locked until the job and all descendants end. Use `command-stop` or the
 Commands panel's Stop job control, then approve a new start to pick up changes.
 Network remains off by default; approval does not add a loopback exemption or
-host-browser access. There is no interactive terminal. Closing the native owner
+host-browser access. Explicitly interactive jobs accept bounded line input;
+full-screen terminal applications and resize are unsupported. Closing the native owner
 ends its jobs; restart retains nonsecret status, reports uncertainty and never
 replays commands. See [the lifecycle contract](native-execution.md#live-output-and-controlled-jobs).
 

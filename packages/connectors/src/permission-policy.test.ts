@@ -141,6 +141,22 @@ describe("permission profile policy", () => {
     expect(effectForBrowserAction("browser.download")).toBe("local-write");
     expect(effectForBrowserAction("browser.dom-dump")).toBeNull();
   });
+
+  it("keeps browser transfer discovery read-only and every transfer approval-gated", () => {
+    const discovery = effectForTool("local-browser-upload-choices");
+    expect(discovery).toBe("browser-read");
+    expect(evaluatePermissionPolicy({ mode: "read-only", effect: discovery! }))
+      .toMatchObject({ allowed: true, approvalRequired: false });
+    for (const tool of ["local-browser-upload", "local-browser-download"]) {
+      const effect = effectForTool(tool);
+      expect(effect, tool).toBe("browser-state-mutation");
+      expect(evaluatePermissionPolicy({ mode: "read-only", effect: effect! }).allowed).toBe(false);
+      for (const mode of ["trusted-scope", "full-access"] as const) {
+        expect(evaluatePermissionPolicy({ mode, effect: effect!, riskLevel: "critical" }))
+          .toMatchObject({ allowed: true, approvalRequired: true });
+      }
+    }
+  });
 });
 
 describe("plain approval choices map to one strict policy", () => {

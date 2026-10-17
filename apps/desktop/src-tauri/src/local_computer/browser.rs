@@ -7,9 +7,95 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(windows)]
 use std::{collections::HashMap, sync::Mutex};
 
+#[path = "browser/handover.rs"]
+mod handover;
 #[cfg(windows)]
 #[path = "browser/windows.rs"]
 mod platform;
+pub(crate) use handover::handover;
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct DownloadRequest {
+    pub download_ref: String,
+    pub origin: String,
+    pub name: String,
+    pub url: String,
+    pub file_name: String,
+    pub timeout_seconds: u64,
+}
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct UploadRequest {
+    pub upload_ref: String,
+    pub origin: String,
+    pub name: String,
+    pub artifact_id: String,
+}
+pub(crate) fn upload_choices(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::UploadChoices(reference, origin),
+    )
+}
+pub(crate) fn upload(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    input: &UploadRequest,
+) -> Result<String, String> {
+    let (receipt, bytes) = super::artifacts::verified_artifact(
+        computers,
+        &super::artifacts::OpenArtifactRequest {
+            workspace_id: workspace.into(),
+            agent_id: agent.into(),
+            artifact_id: input.artifact_id.clone(),
+            expected_generation: generation,
+        },
+    )?;
+    if bytes.len() > 8 * 1024 * 1024 {
+        return Err("Browser uploads support passive published artifacts up to 8 MiB; choose a smaller file or upload manually.".into());
+    }
+    let source = super::artifacts::VerifiedUploadArtifact {
+        bytes,
+        file_name: receipt.export_name,
+        mime_type: receipt.artifact.mime_type,
+        sha256: receipt.sha256,
+    };
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Upload(input, &source),
+    )
+}
+pub(crate) fn download(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    input: &DownloadRequest,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Download(input),
+    )
+}
 
 pub(super) trait LaunchStop: Send + Sync {
     fn stop(&self);
@@ -193,6 +279,48 @@ enum Request<'a> {
     Navigate(&'a str, &'a str, &'a str),
     Click(&'a str, &'a str, &'a str),
     Scroll(&'a str, &'a str, &'a str),
+    Activate(&'a str, &'a str),
+    Fill(&'a str, &'a str, &'a str, &'a str),
+    Download(&'a DownloadRequest),
+    UploadChoices(&'a str, &'a str),
+    Upload(
+        &'a UploadRequest,
+        &'a super::artifacts::VerifiedUploadArtifact,
+    ),
+}
+pub(crate) fn fill(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+    name: &str,
+    text: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Fill(reference, origin, name, text),
+    )
+}
+pub(crate) fn activate(
+    computers: &LocalComputerState,
+    workspace: &str,
+    agent: &str,
+    generation: u64,
+    reference: &str,
+    origin: &str,
+) -> Result<String, String> {
+    execute(
+        computers,
+        workspace,
+        agent,
+        generation,
+        Request::Activate(reference, origin),
+    )
 }
 pub(crate) fn scroll(
     computers: &LocalComputerState,
@@ -247,12 +375,77 @@ fn execute(
     #[cfg(windows)]
     {
         let scope = computers.scope(workspace, agent)?;
+        if let Request::Download(input) = arguments {
+            let download_workspace = computers.tool_workspace_root(workspace, agent)?;
+            let account = crate::account_session::AccountDispatchFence::capture()?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            let check = || {
+                computers.ensure_open()?;
+                ticket.check()?;
+                crate::account_session::ensure_current()?;
+                if computers.browsers.closing.load(Ordering::Acquire)
+                    || std::time::Instant::now() >= deadline
+                {
+                    return Err("The browser transfer stopped; no action was replayed.".into());
+                }
+                Ok(())
+            };
+            let transfer = computers.native.transfer_native(
+                workspace,
+                agent,
+                generation,
+                &ticket,
+                |window, lease_check, dispatch| {
+                    let check_transfer = || {
+                        lease_check()?;
+                        check()
+                    };
+                    let dispatch_transfer = |start: &mut dyn FnMut() -> Result<(), String>| {
+                        dispatch(&mut || account.with_current(&mut *start))
+                    };
+                    let mut processes = computers
+                        .browsers
+                        .processes
+                        .lock()
+                        .map_err(|_| "The owned browser is unavailable.")?;
+                    let process = processes
+                        .get_mut(&scope.key)
+                        .filter(|process| process.alive())
+                        .ok_or("Select this agent's owned browser before a download.")?;
+                    process.download(
+                        window.identity.hwnd,
+                        generation,
+                        input,
+                        &scope.directory,
+                        &check_transfer,
+                        &dispatch_transfer,
+                    )
+                },
+            );
+            let commit = |action: &mut dyn FnMut() -> Result<(), String>| {
+                check()?;
+                account.with_current(&mut || ticket.with_current(&mut *action))
+            };
+            let result = transfer.and_then(|transfer| {
+                transfer.finish(
+                    input,
+                    &scope.directory,
+                    &download_workspace,
+                    &check,
+                    &commit,
+                )
+            });
+            let result = ticket.finish(result);
+            computers.native.stop_scope(workspace, agent, generation, "Browser download finished or stopped. The owned browser was closed for transfer custody; select a fresh owned window before further input.");
+            return result;
+        }
         // Secret-store reads happen before taking any control/authority lock.
-        let account_dispatch = if !matches!(arguments, Request::Read(..)) {
-            Some(crate::account_session::AccountDispatchFence::capture()?)
-        } else {
-            None
-        };
+        let account_dispatch =
+            if !matches!(arguments, Request::Read(..) | Request::UploadChoices(..)) {
+                Some(crate::account_session::AccountDispatchFence::capture()?)
+            } else {
+                None
+            };
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
         let run = |window: &super::windows::WindowBinding,
                    lease_check: &dyn Fn() -> Result<(), String>,
@@ -288,6 +481,41 @@ fn execute(
                 })
             };
             match arguments {
+                Request::UploadChoices(reference, origin) => process.upload_choices(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    &check,
+                ),
+                Request::Upload(input, source) => process.upload(
+                    window.identity.hwnd,
+                    generation,
+                    input,
+                    source,
+                    &scope.directory,
+                    &check,
+                    &checked_dispatch,
+                ),
+                Request::Download(_) => Err("Browser transfer custody was not established.".into()),
+                Request::Fill(reference, origin, name, text) => process.fill(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    name,
+                    text,
+                    &check,
+                    &checked_dispatch,
+                ),
+                Request::Activate(reference, origin) => process.activate(
+                    window.identity.hwnd,
+                    generation,
+                    reference,
+                    origin,
+                    &check,
+                    &checked_dispatch,
+                ),
                 Request::Read(Some((reference, origin))) => {
                     process.observe_tab(window.identity.hwnd, generation, reference, origin, &check)
                 }
@@ -321,7 +549,7 @@ fn execute(
                 ),
             }
         };
-        let result = if !matches!(arguments, Request::Read(..)) {
+        let result = if !matches!(arguments, Request::Read(..) | Request::UploadChoices(..)) {
             computers.native.act_native(
                 workspace,
                 agent,

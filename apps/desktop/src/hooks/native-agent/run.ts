@@ -521,6 +521,7 @@ export async function runNativeAgentTurn(
     toolNameByCall,
     lastPersistedTranscriptLength: 0,
     lastPersistedAt: Date.now(),
+    pricingTier: providerRequest.serviceTier ?? "standard",
   };
   const eventStream = backend.run(
     { ...providerRequest, ...(providerRoute ? { providerRoute } : {}) },

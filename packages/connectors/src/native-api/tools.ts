@@ -173,9 +173,45 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   },
   {
     name: "local-browser-observe",
-    description: "Read public top-frame text at exact origin/tabRef; 30s controlRefs/scrollRef+viewport. Private fields stop reads; no input grant.",
+    description: "Read public top-frame text at exact origin/tabRef; 30s controlRefs/scrollRef/empty-text fieldRefs + viewport. Values omitted; private fields stop reads; no input grant.",
     defaultMode: "read-only", defaultRisk: "medium",
     parameters: toolParameters({ tabRef: textParameter, origin: textParameter }, ["tabRef", "origin"], true)
+  },
+  {
+    name: "local-browser-activate",
+    description: "Select an owned tab once: 30s activationRef and exact origin. Requires selected foreground browser. List/observe afterward; no replay.",
+    defaultMode: "full-access", defaultRisk: "high",
+    parameters: toolParameters({ activationRef: textParameter, origin: textParameter }, ["activationRef", "origin"], true)
+  },
+  {
+    name: "local-browser-fill",
+    description: "Enter public text once in an empty ordinary text/search/textarea field: fresh fieldRef, exact origin/name and text. Foreground only. Existing values/private/sign-in/payment/file fields excluded. Observe afterward; no script/selector or replay.",
+    defaultMode:"full-access",defaultRisk:"critical",
+    parameters:toolParameters({fieldRef:textParameter,origin:textParameter,name:textParameter,text:{type:"string",minLength:1,maxLength:2048}},["fieldRef","origin","name","text"],true)
+  },
+  {
+    name: "local-browser-download",
+    description: "Download one fresh visible public link using this owned browser's native authentication. Exact origin/name/URL, passive output filename, 1–10 second timeout, max 8 MiB. Native final URL must match; no redirects/cookies/host paths. The owned browser closes after transfer or active failure/Stop. Completed bytes enter private workspace Downloads; publication is separate.",
+    defaultMode: "full-access", defaultRisk: "critical",
+    parameters: toolParameters({downloadRef:textParameter,origin:textParameter,name:textParameter,url:textParameter,fileName:{type:"string",minLength:1,maxLength:160},timeoutSeconds:{type:"integer",minimum:1,maximum:10}},["downloadRef","origin","name","url","fileName","timeoutSeconds"],true)
+  },
+  {
+    name:"local-browser-handover",
+    description:"Hand the owned browser to the user for a private or manual step. Save task attention, revoke this turn's control and keep the browser open. User must explicitly continue; never resume or reselect in this turn.",
+    defaultMode:"full-access",defaultRisk:"high",
+    parameters:toolParameters({reason:{type:"string",minLength:1,maxLength:240}},["reason"],true)
+  },
+  {
+    name:"local-browser-upload-choices",
+    description:"Inspect only labelled empty single-file fields in one fresh tabRef at exact origin. Returns 30s uploadRefs and public labels; no page text, selected filenames or values. Private/occupied/unsupported file fields stop reads. Does not attach a file.",
+    defaultMode:"read-only",defaultRisk:"medium",
+    parameters:toolParameters({tabRef:textParameter,origin:textParameter},["tabRef","origin"],true)
+  },
+  {
+    name:"local-browser-upload",
+    description:"Attach one published passive artifact (<=8 MiB) to a fresh observed empty single-file uploadRef, exact origin/name and artifactId. Native receipt/hash verified; no host path/bytes exposed. Page handlers may upload immediately. No separate submit or replay; hand browser to user for file-valued confirmation afterward.",
+    defaultMode:"full-access",defaultRisk:"critical",
+    parameters:toolParameters({uploadRef:textParameter,origin:textParameter,name:textParameter,artifactId:textParameter},["uploadRef","origin","name","artifactId"],true)
   },
   {
     name: "local-browser-navigate",

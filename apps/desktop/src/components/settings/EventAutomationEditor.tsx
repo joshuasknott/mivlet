@@ -129,7 +129,7 @@ export function EventAutomationEditor({
   };
   return (
     <form
-      className="event-automations__editor local-schedules__editor"
+      className="automation-panel-automations__editor local-schedules__editor"
       onSubmit={(submit) => {
         submit.preventDefault();
         if (
@@ -162,7 +162,7 @@ export function EventAutomationEditor({
       }}
     >
       <strong>{schedule ? "Edit event trigger" : "New event trigger"}</strong>
-      <div className="event-automations__pair">
+      <div className="automation-panel-automations__pair">
         <label>
           Agent
           <select
@@ -239,7 +239,7 @@ export function EventAutomationEditor({
           />
         </label>
       )}
-      <div className="event-automations__pair">
+      <div className="automation-panel-automations__pair">
         <div>
           <label>
             Selected JSON fields, one per line
@@ -278,7 +278,7 @@ export function EventAutomationEditor({
           </small>
         </div>
       </div>
-      <div className="event-automations__pair">
+      <div className="automation-panel-automations__pair">
         <label>
           Ignore events older than (minutes)
           <input
@@ -341,7 +341,7 @@ export function EventAutomationEditor({
         />
       </label>
       {schedule ? (
-        <label className="event-automations__check">
+        <label className="automation-panel-automations__check">
           <input
             type="checkbox"
             checked={rotate}
@@ -357,7 +357,7 @@ export function EventAutomationEditor({
       )}
       <details>
         <summary>Preview the produced request</summary>
-        <div className="event-automations__preview">
+        <div className="automation-panel-automations__preview">
           <label>
             Example JSON payload
             <textarea
@@ -376,7 +376,7 @@ export function EventAutomationEditor({
           </small>
           <button
             type="button"
-            className="button button--secondary"
+            className="button button-secondary"
             disabled={pending}
             onClick={() => {
               const generation = previewGeneration.current;
@@ -414,10 +414,10 @@ export function EventAutomationEditor({
           {error}
         </p>
       ) : null}
-      <div className="event-automations__pair">
+      <div className="automation-panel-automations__pair">
         <button
           type="submit"
-          className="button button--primary"
+          className="button button-primary"
           disabled={
             pending ||
             !supported ||
@@ -430,7 +430,7 @@ export function EventAutomationEditor({
         </button>
         <button
           type="button"
-          className="button button--secondary"
+          className="button button-secondary"
           disabled={pending}
           onClick={onClose}
         >

@@ -22,22 +22,22 @@ export function BuiltinPluginCard({
   return (
     <button
       type="button"
-      className="marketplace-connector-row"
+      className="plugin-catalogue-connector-row"
       data-connector-id={entry.id}
       data-availability="available"
       aria-label={label}
       onClick={onOpen}
     >
-      <span className="marketplace-connector-icon" aria-hidden="true">
+      <span className="plugin-catalogue-connector-icon" aria-hidden="true">
         <MarketplaceIcon id={entry.id} />
       </span>
-      <span className="marketplace-connector-row__copy">
+      <span className="plugin-catalogue-connector-row__copy">
         <strong>{entry.name}</strong>
         <span>{entry.description}</span>
         <small>{unavailable ? "Unavailable" : enabled ? "Enabled" : "Disabled"}</small>
       </span>
       <span
-        className={`marketplace-connector-row__action${enabled ? " marketplace-connector-row__action--enabled" : ""}`}
+        className={`plugin-catalogue-connector-row__action${enabled ? " plugin-catalogue-connector-row__action--enabled" : ""}`}
         aria-hidden="true"
       >
         {enabled ? <Check size={19} weight="bold" /> : <Plus size={19} />}

@@ -18,6 +18,7 @@ const base = () => ({
   identity: "workspace:chat",
   title: "Launch planning",
   open: true,
+  onOpen: vi.fn(),
   onClose: vi.fn(),
   onCloseComputer: vi.fn(),
   onChatActiveChange: vi.fn(),
@@ -27,21 +28,51 @@ beforeEach(() => {
 });
 
 describe("contextual workspace panel", () => {
+  it("keeps the rail available when an agent or project inspector replaces the page", () => {
+    const props = base();
+    render(<WorkspaceRightNav {...props} replaced activity={() => <p>Retained Activity</p>} />);
+    expect(screen.getByRole("tablist")).toBeVisible();
+    expect(screen.getByText("Retained Activity")).not.toBeVisible();
+    expect(screen.getByLabelText("Workspace panel")).toHaveAttribute("data-replaced", "true");
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    expect(props.onOpen).toHaveBeenCalledOnce();
+    expect(props.onClose).not.toHaveBeenCalled();
+  });
+
+
   it("announces dock targets and releases replaced apps without closing the next inspector", () => {
     const ready = vi.fn();
     const closed = vi.fn();
     window.addEventListener("mivlet:mcp-app-panel-ready", ready);
     window.addEventListener("mivlet:mcp-app-panel-closed", closed);
-    const first: RightPanelTab = { id: "app:first", kind: "mcp-app", title: "First tool" };
-    const second: RightPanelTab = { id: "app:second", kind: "mcp-app", title: "Second tool" };
-    const props = { ...base(), renderTab: (tab: RightPanelTab) => <div data-mcp-app-panel={tab.id}>{tab.title}</div> };
+    const first: RightPanelTab = {
+      id: "app:first",
+      kind: "mcp-app",
+      title: "First tool",
+    };
+    const second: RightPanelTab = {
+      id: "app:second",
+      kind: "mcp-app",
+      title: "Second tool",
+    };
+    const props = {
+      ...base(),
+      renderTab: (tab: RightPanelTab) => (
+        <div data-mcp-app-panel={tab.id}>{tab.title}</div>
+      ),
+    };
     const view = render(<WorkspaceRightNav {...props} request={first} />);
-    expect(ready.mock.calls.at(-1)?.[0].detail).toMatchObject({ id: first.id, target: expect.any(HTMLElement) });
+    expect(ready.mock.calls.at(-1)?.[0].detail).toMatchObject({
+      id: first.id,
+      target: expect.any(HTMLElement),
+    });
     view.rerender(<WorkspaceRightNav {...props} request={second} />);
     expect(closed.mock.calls.at(-1)?.[0].detail.id).toBe(first.id);
     expect(screen.getByText("Second tool", { selector: "div" })).toBeVisible();
     expect(ready.mock.calls.at(-1)?.[0].detail.id).toBe(second.id);
-    view.rerender(<WorkspaceRightNav {...props} request={second} open={false} />);
+    view.rerender(
+      <WorkspaceRightNav {...props} request={second} open={false} />,
+    );
     expect(closed).toHaveBeenCalledTimes(1);
     view.rerender(<WorkspaceRightNav {...props} request={second} />);
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
@@ -88,7 +119,8 @@ describe("contextual workspace panel", () => {
     });
     view.rerender(<WorkspaceRightNav {...props} request={request} />);
     expect(screen.getByText("Document contents")).toBeVisible();
-    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByRole("tablist")).toBeVisible();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(screen.getByRole("textbox")).toHaveValue("launch");
     expect(screen.getByRole("tab", { name: "Files" })).toHaveFocus();
@@ -108,7 +140,8 @@ describe("contextual workspace panel", () => {
     );
     expect(screen.queryByText("Launch brief content")).toBeNull();
     expect(screen.getByText("Second content")).toBeVisible();
-    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.getByRole("tablist")).toBeVisible();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
   });
 
   it("never reopens a stale request on chat or scope changes", () => {
@@ -239,7 +272,7 @@ describe("contextual workspace panel", () => {
     expect(props.onChatActiveChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("hides the entire panel without cancelling or losing its inspected content", () => {
+  it("collapses only the content and keeps the three rail controls visible without losing the inspector", () => {
     const props = {
       ...base(),
       request,
@@ -252,8 +285,50 @@ describe("contextual workspace panel", () => {
     expect(props.onClose).toHaveBeenCalledOnce();
     view.rerender(<WorkspaceRightNav {...props} open={false} />);
     expect(screen.getByText("Saved document")).not.toBeVisible();
+    expect(screen.getByRole("tablist")).toBeVisible();
+    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    fireEvent.click(
+      screen.getByRole("button", { name: "Open workspace panel" }),
+    );
+    expect(props.onOpen).toHaveBeenCalledOnce();
     view.rerender(<WorkspaceRightNav {...props} />);
     expect(screen.getByText("Saved document")).toBeVisible();
+  });
+
+  it("opens a collapsed collection from the rail and collapses the selected page on a second click", () => {
+    const props = {
+      ...base(),
+      library: <input aria-label="Retained file search" />,
+    };
+    const view = render(<WorkspaceRightNav {...props} open={false} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    expect(props.onOpen).toHaveBeenCalledOnce();
+    view.rerender(<WorkspaceRightNav {...props} />);
+    fireEvent.change(screen.getByRole("textbox"), {
+      target: { value: "brief" },
+    });
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    expect(props.onClose).toHaveBeenCalledOnce();
+    view.rerender(<WorkspaceRightNav {...props} open={false} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
+    view.rerender(<WorkspaceRightNav {...props} />);
+    expect(screen.getByRole("textbox")).toHaveValue("brief");
+  });
+
+  it("uses vertical arrow navigation and leaves the rail reachable while inspecting", () => {
+    const props = { ...base(), renderTab: () => <p>Inspected file</p> };
+    const view = render(<WorkspaceRightNav {...props} />);
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Activity" }), {
+      key: "ArrowDown",
+    });
+    expect(screen.getByRole("tab", { name: "Files" })).toHaveFocus();
+    view.rerender(<WorkspaceRightNav {...props} request={request} />);
+    fireEvent.click(screen.getByRole("tab", { name: "Memory" }));
+    expect(screen.queryByText("Inspected file")).toBeNull();
+    expect(screen.getByRole("tab", { name: "Memory" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    );
   });
 
   it("traps narrow-screen focus, closes with Escape and restores the opener", () => {

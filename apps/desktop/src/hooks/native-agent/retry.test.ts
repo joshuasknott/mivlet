@@ -1,7 +1,7 @@
 import type { ExecutionAttempt } from "@mivlet/protocol";
 import { describe, expect, it } from "vitest";
 import { buildRetryTurnRequest, describeRetryBlock } from "./retry";
-import { GENERATED_UI_INSTRUCTIONS } from "../../lib/generated-interface";
+import { GENERATED_UI_INSTRUCTIONS } from "../../lib/generated-ui-instructions";
 
 function attempt(
   patch: Partial<ExecutionAttempt> = {},

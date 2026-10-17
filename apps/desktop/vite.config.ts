@@ -1,11 +1,19 @@
 import { fileURLToPath, URL } from "node:url";
+import { realpathSync } from "node:fs";
 import { configDefaults, defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import { pruneUnusedIconWeights } from "./scripts/icon-weights";
 import { compactStyleNames } from "./scripts/compact-style-names";
+import { treeShakeAssistantPrimitives } from "./scripts/assistant-primitives";
+import { assistantInputDependency, commonRouteChunk } from "./scripts/common-route-chunks";
+import { shareEmittedConstants } from "./scripts/compact-constants";
+import { normalizeEmittedCode } from "./scripts/minify-workspace";
 
 export default defineConfig({
   plugins: [
+    normalizeEmittedCode(),
+    shareEmittedConstants(),
+    treeShakeAssistantPrimitives(),
     compactStyleNames(fileURLToPath(new URL("./src", import.meta.url))),
     react(),
     pruneUnusedIconWeights([
@@ -43,6 +51,14 @@ export default defineConfig({
   server: {
     port: 1420,
     strictPort: true,
+    // Worktrees can share a pnpm dependency directory through a junction.
+    // Permit its resolved assets without exposing the surrounding checkout.
+    fs: {
+      allow: [
+        fileURLToPath(new URL("../../", import.meta.url)),
+        realpathSync(fileURLToPath(new URL("../../node_modules", import.meta.url))),
+      ],
+    },
     watch: {
       ignored: ["**/src-tauri/target/**"],
     },
@@ -67,17 +83,27 @@ export default defineConfig({
     rollupOptions: {
       output: {
         onlyExplicitManualChunks: true,
-        manualChunks(id) {
+        manualChunks(id, { getModuleInfo }) {
+          const route = commonRouteChunk(id);
+          if (route) return route;
+          // These small session controls share one deferred conversation island.
+          // Opening a session no longer fetches four mutually importing chunks.
+          if (/[/\\]components[/\\]conversation[/\\]coding[/\\]/.test(id))
+            return "ConversationPane-sessions";
           // The PDF engine is loaded only when a verified PDF preview opens.
           if (/[/\\]node_modules[/\\]pdfjs-dist[/\\]/.test(id))
             return "pdf-renderer";
-          if (id.includes("@phosphor-icons") || id === "\0mivlet-icon-wrapper") return "icons";
+          // Entry already loads these common modules with React. Sharing the
+          // vendor request removes repeated imports without an eager graph change.
+          if (id.includes("@phosphor-icons") || id === "\0mivlet-icon-wrapper"
+            || id === "\0commonjsHelpers.js") return "vendor";
           // Conversation-only UI engines are reached through the lazy
           // ConversationPane boundary. Keeping their package graphs in
           // dedicated chunks prevents the shell's generic vendor chunk from
           // eagerly pulling OpenUI, assistant-ui, or MCP App code at startup.
           if (id.includes("vite/preload-helper")) return "feature-preload";
-          if (id.includes("@assistant-ui") || /[/\\]assistant-stream[/\\]/.test(id)) return "assistant-ui";
+          if (id.includes("@assistant-ui") || /[/\\]assistant-stream[/\\]/.test(id)
+            || assistantInputDependency(id, getModuleInfo)) return "assistant-ui";
           // Zod is used only by the generated-interface catalogues and their
           // OpenUI runtime. Do not pull its schema engine into eager vendor.
           if (/[/\\]zod[/\\]/.test(id)) return "interface-schema";

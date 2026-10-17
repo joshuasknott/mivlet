@@ -3,6 +3,10 @@
 mod http;
 mod models;
 mod oauth;
+mod relay;
+mod relay_socket;
+mod remote;
+pub use relay::*;
 pub(crate) mod repository;
 #[cfg(test)]
 mod tests;
@@ -34,6 +38,8 @@ struct Engine {
     origin: String,
     config: Config,
     oauth: Mutex<oauth::State>,
+    remote: Mutex<remote::Sessions>,
+    push: remote::push::PushState,
     app: Option<tauri::AppHandle>,
     inflight: Arc<tokio::sync::Semaphore>,
     rate: Mutex<(std::time::Instant, u32)>,
@@ -134,6 +140,11 @@ pub async fn mcp_server_start(
     if current.is_some() {
         return Err("Stop the current MCP server before changing its address.".into());
     }
+    if relay::active(&app) {
+        return Err(
+            "Disconnect managed phone access before starting the manual MCP server.".into(),
+        );
+    }
     let engine = Arc::new(Engine {
         store,
         origin: config
@@ -142,6 +153,8 @@ pub async fn mcp_server_start(
             .unwrap_or_else(|| format!("http://127.0.0.1:{port}")),
         config,
         oauth: Mutex::new(oauth::State::default()),
+        remote: Mutex::new(remote::Sessions::default()),
+        push: remote::push::PushState::default(),
         app: Some(app.clone()),
         inflight: Arc::new(tokio::sync::Semaphore::new(16)),
         rate: Mutex::new((std::time::Instant::now(), 0)),
@@ -162,7 +175,10 @@ pub async fn mcp_server_start(
         loop {
             tokio::select! {
                 _ = &mut serving => break,
-                _ = tick.tick() => { if lifecycle.expire().is_err() { break; } }
+                _ = tick.tick() => {
+                    if lifecycle.expire().is_err() { break; }
+                    remote::push::schedule(lifecycle.clone());
+                }
             }
         }
         let _ = lifecycle.transaction(|conn, scope, saved| {
@@ -219,10 +235,14 @@ pub fn mcp_server_status(
     let store = crate::store::try_global().ok_or("Sign in to Mivlet first.")?;
     let server = app.state::<Server>();
     let mut current = server.0.lock().map_err(|_| "MCP server unavailable.")?;
-    let pending = current
+    let consent_engine = current
         .as_ref()
-        .map(|r| {
-            r.engine
+        .map(|r| r.engine.clone())
+        .or_else(|| relay::engine(&app));
+    let pending = consent_engine
+        .as_ref()
+        .map(|engine| {
+            engine
                 .oauth
                 .lock()
                 .map(|mut state| state.pending())
@@ -242,6 +262,10 @@ pub fn mcp_server_status(
             }
             Ok(Status {
                 endpoint: current.as_ref().map(|r| r.engine.resource()),
+                remote_url: current
+                    .as_ref()
+                    .filter(|r| r.engine.config.remote_access)
+                    .map(|r| format!("{}/remote", r.engine.origin)),
                 pending,
                 grants: saved.grants,
                 history: saved.history,
@@ -260,11 +284,12 @@ pub fn mcp_server_decide(
     main(&window)?;
     let server = app.state::<Server>();
     let current = server.0.lock().map_err(|_| "MCP server unavailable.")?;
-    let engine = &current
+    let engine = current
         .as_ref()
-        .ok_or("Start the MCP server first.")?
-        .engine;
-    oauth::decide(engine, decision).map_err(|e| e.to_string())
+        .map(|running| running.engine.clone())
+        .or_else(|| relay::engine(&app))
+        .ok_or("Start external access before approving this browser.")?;
+    oauth::decide(&engine, decision).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

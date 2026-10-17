@@ -357,7 +357,7 @@ export function RepositoryCheckpoints({
                 </dl>
               </details>
               <button
-                className="button button--primary"
+                className="button button-primary"
                 type="button"
                 disabled={
                   busy ||
@@ -413,7 +413,7 @@ export function RepositoryCheckpoints({
               <div className="repository-files__actions">
                 <button
                   type="submit"
-                  className="button button--primary"
+                  className="button button-primary"
                   disabled={
                     disabled ||
                     busy ||

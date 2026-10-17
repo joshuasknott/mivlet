@@ -205,6 +205,10 @@ export interface ExecutionAttempt {
     costUsd: number;
     costEstimated?: boolean;
     costUnknown?: boolean;
+    /** Admitted request tier; legacy receipts do not establish standard pricing. */
+    pricingTier?: "standard" | "fast" | "priority";
+    /** Time this measurement was received, retained across later recovery/status writes. */
+    observedAt?: string;
   };
   pendingApprovalIds: string[];
   recoverable: boolean;

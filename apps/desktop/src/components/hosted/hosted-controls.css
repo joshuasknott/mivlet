@@ -1,0 +1,126 @@
+.cloud-panel-task-controls,
+.cloud-panel-provider-settings {
+  color: var(--ink);
+  font-size: var(--text-14);
+  line-height: 1.5;
+}
+.cloud-panel-task-controls { margin-block: 10px; }
+.cloud-panel-actions,
+.cloud-panel-task-controls__start { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.cloud-panel-task-controls button,
+.cloud-panel-provider-settings button,
+.cloud-panel-consent button { min-height: 44px; }
+.cloud-panel-task-controls label,
+.cloud-panel-provider-settings label,
+.cloud-panel-consent label { display: grid; gap: 6px; }
+.cloud-panel-task-controls select,
+.cloud-panel-task-controls textarea,
+.cloud-panel-provider-settings select,
+.cloud-panel-consent input {
+  max-width: 100%;
+  min-height: 44px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-3);
+  color: var(--ink);
+  background: var(--surface);
+  font: inherit;
+}
+.cloud-panel-muted { color: var(--ink-muted); font-size: var(--text-13); }
+.cloud-panel-task-mode { display: flex; flex-wrap: wrap; gap: 8px; flex-basis: 100%; margin: 0; padding: 0; border: 0; }
+.cloud-panel-task-mode legend { margin-bottom: 6px; }
+.cloud-panel-task-mode label { display: flex; align-items: center; gap: 8px; min-height: 44px; padding-inline: 10px; border: 1px solid var(--line); border-radius: var(--radius-3); cursor: pointer; }
+.cloud-panel-task-mode label:has(:checked) { background: var(--surface-hover); }
+.cloud-panel-task-mode input { margin: 0; accent-color: var(--ink); }
+.cloud-panel-research-pages { flex-basis: 100%; min-width: 0; }
+.cloud-panel-research-pages textarea { box-sizing: border-box; width: 100%; resize: vertical; }
+.cloud-panel-research-pages p { margin-block: 6px 10px; }
+.cloud-panel-research-scope { overflow-wrap: anywhere; margin-block: 16px; }
+.cloud-panel-research-scope h3 { margin: 12px 0 6px; font-size: var(--text-13); font-weight: 500; }
+.cloud-panel-research-scope ul { list-style: none; padding: 0; }
+.cloud-panel-research-scope li { margin-block: 6px; }
+.cloud-panel-research-scope li > span,
+.cloud-panel-research-scope li > small { display: block; }
+.cloud-panel-task-outcome pre { max-height: 360px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 12px; background: var(--surface-hover); }
+.cloud-panel-task-controls [role="alert"],
+.cloud-panel-provider-settings [role="alert"],
+.cloud-panel-consent [role="alert"] { color: var(--caution); }
+.cloud-panel-provider-settings > label { margin-block: 12px; max-width: 320px; }
+.cloud-panel-card__heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; }
+.cloud-panel-card__heading h2 { margin: 0; }
+.cloud-panel-card__heading > span { padding: 5px 10px; border-radius: var(--radius-3); background: var(--surface-hover); color: var(--ink-muted); }
+.cloud-panel-provider-list { display: grid; gap: 10px; margin-block: 20px; }
+.cloud-panel-provider-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius-3); }
+.cloud-panel-provider-row strong,
+.cloud-panel-provider-row small { display: block; }
+.cloud-panel-provider-row small { color: var(--ink-muted); margin-top: 3px; }
+.cloud-panel-consent-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 180;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgb(0 0 0 / 26%);
+}
+.cloud-panel-consent {
+  box-sizing: border-box;
+  width: min(100%, 500px);
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 16%);
+}
+.cloud-panel-consent > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cloud-panel-consent > header button { display: grid; place-items: center; min-width: 44px; padding: 0; border: 0; background: transparent; color: var(--ink-muted); }
+.cloud-panel-consent h2 { margin: 12px 0 0; font-size: var(--text-30); line-height: 1.3; letter-spacing: -0.025em; }
+.cloud-panel-consent > p { margin: 6px 0 16px; }
+.cloud-panel-consent__task { display: flex; gap: 14px; align-items: center; padding: 14px; margin-block: 16px; border: 1px solid var(--line); border-radius: var(--radius-3); }
+.cloud-panel-consent__task div { min-width: 0; }
+.cloud-panel-consent__task small,
+.cloud-panel-consent__task strong { display: block; overflow-wrap: anywhere; }
+.cloud-panel-consent__task strong { max-height: 90px; overflow: auto; font-weight: 500; }
+.cloud-panel-consent__text { margin-block: 16px; }
+.cloud-panel-consent__text h3 { font-size: var(--text-13); font-weight: 500; margin: 0 0 8px; }
+.cloud-panel-consent__text > div { margin-bottom: 8px; }
+.cloud-panel-consent__text > div > strong { font-size: var(--text-12); text-transform: capitalize; color: var(--ink-muted); }
+.cloud-panel-consent pre { margin: 4px 0 0; padding: 12px; border-radius: var(--radius-3); background: var(--surface-hover); white-space: pre-wrap; overflow-wrap: anywhere; font-size: var(--text-12); }
+.cloud-panel-consent__facts { display: grid; gap: 14px; margin: 18px 0; padding: 18px 0 0; list-style: none; border-top: 1px solid var(--line); }
+.cloud-panel-consent__facts li { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 12px; }
+.cloud-panel-consent__facts li > svg { margin-top: 2px; }
+.cloud-panel-consent__destination { margin-block: 12px; overflow-wrap: anywhere; }
+.cloud-panel-consent footer { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+.cloud-panel-consent footer button { flex: 1; padding: 10px 14px; }
+.cloud-panel-coding-selection { flex-basis: 100%; min-width: 0; }
+.cloud-panel-coding-selection > label,
+.cloud-panel-coding-selection > details { margin-block: 12px; }
+.cloud-panel-coding-selection input[type="search"] { box-sizing: border-box; width: 100%; min-height: 44px; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-3); background: var(--surface); color: var(--ink); font: inherit; }
+.cloud-panel-coding-selection textarea { box-sizing: border-box; width: 100%; resize: vertical; }
+.cloud-panel-coding-files { max-height: 320px; overflow: auto; border: 1px solid var(--line); border-radius: var(--radius-3); }
+.cloud-panel-coding-file { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 12px; align-items: center; padding: 6px 12px; border-bottom: 1px solid var(--line); }
+.cloud-panel-coding-file:last-child { border-bottom: 0; }
+.cloud-panel-coding-file code { overflow-wrap: anywhere; }
+.cloud-panel-coding-file small { display: block; color: var(--ink-muted); font-size: var(--text-12); }
+.cloud-panel-coding-file label { display: flex; align-items: center; min-height: 44px; cursor: pointer; }
+.cloud-panel-coding-file input { accent-color: var(--ink); }
+.cloud-panel-coding-file-summary { margin-block: 12px; padding: 8px 12px; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-3); max-height: 240px; overflow: auto; }
+.cloud-panel-coding-file-summary li { display: flex; justify-content: space-between; gap: 16px; padding-block: 8px; overflow-wrap: anywhere; }
+.cloud-panel-coding-file-summary span { flex-shrink: 0; color: var(--ink-muted); font-size: var(--text-12); }
+.cloud-panel-coding-import { margin-block: 16px; }
+.cloud-panel-coding-import pre { overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 320px; }
+.cloud-panel-consent .cloud-panel-coding-diff { max-height: 360px; overflow: auto; white-space: pre; }
+.cloud-panel-coding-selection summary,
+.cloud-panel-coding-import summary { min-height: 44px; align-content: center; cursor: pointer; }
+@media (max-width: 600px) {
+  .cloud-panel-provider-row { grid-template-columns: auto minmax(0, 1fr); }
+  .cloud-panel-provider-row .cloud-panel-actions { grid-column: 1 / -1; }
+  .cloud-panel-consent-backdrop { padding: 12px; }
+  .cloud-panel-consent { padding: 18px; max-height: calc(100dvh - 24px); }
+  .cloud-panel-consent footer { flex-direction: column; }
+  .cloud-panel-coding-file { grid-template-columns: auto auto; gap: 0 12px; }
+  .cloud-panel-coding-file code { grid-column: 1 / -1; padding-block: 6px; }
+}

@@ -9,6 +9,7 @@ import {
   WorkspaceExecution,
   restrictedPermission,
   enqueueWorkspaceDispose,
+  assignmentAttachments,
 } from "./workspace-execution";
 import { providerModelOptions } from "./provider-models";
 
@@ -118,12 +119,48 @@ function fixture(work: CollaborationWorkItem[]) {
 }
 
 describe("native background custody", () => {
+  it("shares deliberate original pixels while dropping another agent's file receipt", () => {
+    const original = { id: "image", name: "image.png", type: "image/png", sizeBytes: 68,
+      imageInput: { id: "image", name: "image.png", mediaType: "image/png" as const, sizeBytes: 68, width: 1, height: 1, dataUrl: "data:image/png;base64,pixels" },
+      workspaceFile: { computerId: "primary-computer", batchId: "batch", attachmentId: "image", originalName: "image.png", mimeType: "image/png", relativePath: "Attachments/primary/image.png", sizeBytes: 68, sha256: "a".repeat(64), stagedAt: "2026-10-17T00:00:00Z" } };
+    const child = fixtureWork("child", "b", { rootId: "root", parentId: "root" });
+    expect(assignmentAttachments(child, [original])[0]).toMatchObject({ imageInput: original.imageInput, workspaceFile: undefined, durableRef: undefined });
+    expect(assignmentAttachments(fixtureWork("root"), [original])[0].workspaceFile).toBe(original.workspaceFile);
+    expect(original.workspaceFile.computerId).toBe("primary-computer");
+  });
+  it("honors canonical queue order and held roots before creating sessions", async () => {
+    const { service } = fixture([
+      fixtureWork("held", "a", { queue: { held: true, order: 1 } }),
+      fixtureWork("later", "b", { queue: { held: false, order: 3 } }),
+      fixtureWork("first", "b", { queue: { held: false, order: 2 } }),
+    ]);
+    await service.refresh();
+    service.admit(agents, models, [provider], "full-access");
+    expect(service.getSnapshot().sessions.map(session => session.work.id)).toEqual(["first"]);
+  });
+  it("submits a goal atomically with its original request and exact attachment references", async () => {
+    const { service, command } = fixture([]);
+    const goal = { objective: "Finish report", successCriteria: "Citations checked", maxTurns: 4, maxTokens: 32000 };
+    await service.submit("room", "a", "Write the report", false, [], undefined, undefined, "goal-request", goal);
+    expect(command).toHaveBeenCalledWith("fixture", expect.objectContaining({ action: "start-work", id: "goal-request", prompt: "Write the report", outcomeGoal: goal, attachments: [] }));
+  });
   it("never admits native Work into a renderer provider session", async () => {
     const { service } = fixture([fixtureWork("background", "a", { executionOwner: "native-background" })]);
     await service.refresh();
     service.admit(agents, models, [provider], "full-access");
     expect(service.getSnapshot().sessions).toEqual([]);
     await service.dispose();
+  });
+  it("keeps hosted custody outside renderer dispatch and app-close cancellation while explicit Stop still fences it", async () => {
+    const { service, command, update } = fixture([fixtureWork("cloud", "a", { executionOwner: "hosted" })]);
+    await service.refresh(); service.admit(agents, models, [provider], "full-access");
+    expect(service.getSnapshot().sessions).toEqual([]);
+    update([fixtureWork("cloud", "a", { executionOwner: "hosted", status: "running" })]); await service.refresh();
+    await service.dispose(); expect(command).not.toHaveBeenCalled();
+    const next = fixture([fixtureWork("cloud", "a", { executionOwner: "hosted", status: "running" })]);
+    await next.service.refresh(); await next.service.stop("cloud");
+    expect(next.command).toHaveBeenCalledWith("fixture", { action: "stop-work", id: "cloud" });
+    expect(next.service.getSnapshot().data.work[0].status).toBe("cancelled"); await next.service.dispose();
   });
   it("window disposal preserves native work while stopping renderer-owned work", async () => {
     const { service, command } = fixture([
@@ -355,7 +392,10 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
       [provider, other],
       "trusted-scope",
     );
-    const [root, child, unrelated] = service.getSnapshot().sessions;
+    const sessions = new Map(service.getSnapshot().sessions.map(session => [session.work.id, session]));
+    const root = sessions.get("root")!;
+    const child = sessions.get("child")!;
+    const unrelated = sessions.get("other")!;
     let finish!: () => void;
     root.cancel = vi.fn(
       () =>

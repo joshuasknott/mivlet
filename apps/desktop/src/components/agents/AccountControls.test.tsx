@@ -68,7 +68,7 @@ describe("account controls", () => {
     vi.mocked(readProviderUsage).mockResolvedValue({ checkedAt: "2026-10-08T12:00:00Z", since: "2026-09-08T12:00:00Z", coverage: "saved-mivlet-attempts", allowances: [], prices: [], models: [{ providerId: "openai", model: "fixture", attempts: 1, inputTokens: 100, outputTokens: 50, reportedCostUsd: 0, reportedCostAttempts: 0, estimatedCostUsd: 0, estimatedCostAttempts: 0, unpricedAttempts: 1, latestObservedAt: "2026-10-08T12:00:00Z" }] });
     render(<ProviderUsageDetails />);
     await waitFor(() => expect(screen.getAllByText("Unavailable")).toHaveLength(2));
-    expect(screen.getByText("100")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /fixture/ })).toHaveTextContent("150");
     expect(screen.queryByText(/\$0/)).not.toBeInTheDocument();
     expect(screen.queryByRole("progressbar")).not.toBeInTheDocument();
   });

@@ -1,3 +1,4 @@
+import { ALLOW_PREVIEW_FALLBACKS } from "../../runtime/preview-policy";
 import {
   useCallback,
   useEffect,
@@ -47,8 +48,10 @@ import {
 import { createProviderConnectionRequests } from "./provider-connection-requests";
 
 function initialProviders(connectedIds: string[]): BackendProvider[] {
-  return enabledMivletProviders(listBackendProviders()).map((provider) => {
-    if (hasTauriRuntime() || provider.backendType !== "native-api" ||
+  const providers = enabledMivletProviders(listBackendProviders());
+  if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) return providers;
+  return providers.map((provider) => {
+    if (provider.backendType !== "native-api" ||
         !connectedIds.includes(provider.id)) return provider;
     return {
       ...provider,
@@ -77,14 +80,14 @@ export function useProviderConnections({
 }) {
   const initialStateRef = useRef(initialState);
   const [connectedBackendIds, setConnectedBackendIds] = useState<string[]>(
-    hasTauriRuntime()
+    !ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()
       ? []
       : initialState.connectedBackendIds.filter(isMivletProviderEnabled),
   );
 
   // Agent-runtime backends. The Rust credential boundary resolves auth state
-  // + capabilities; outside Tauri the preview registry is used so the workspace
-  // shell stays testable. Preview connections remain visibly synthetic, while
+  // + capabilities; development/test browser builds use the preview registry
+  // so the shell stays testable. Preview connections remain visibly synthetic, while
   // the same provider gate is enforced in preview and native builds.
   const [backendProviders, setBackendProviders] = useState<BackendProvider[]>(
     () => initialProviders(initialState.connectedBackendIds),
@@ -240,7 +243,7 @@ export function useProviderConnections({
     setProviderScopeGeneration(workspaceScopeGeneration);
     setBackendProviders(initialProviders(initialStateRef.current.connectedBackendIds));
     setConnectedBackendIds(
-      hasTauriRuntime()
+      !ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()
         ? []
         : initialStateRef.current.connectedBackendIds.filter(
             isMivletProviderEnabled,
@@ -298,9 +301,9 @@ export function useProviderConnections({
   );
 
   // Agent-runtime backend connect/disconnect. The secret is handed to the Rust
-  // credential boundary; React only ever sees the resulting auth state. Outside
-  // Tauri we record a local preview connection so the onboarding gate clears
-  // and the UI stays testable.
+  // credential boundary; React only ever sees the resulting auth state. Explicit
+  // development/test browser builds can record a synthetic preview connection.
+  // Production always requires the installed runtime.
   //
   // The verified path (`connectBackendWithVerify`) is the single connect entry
   // point for onboarding + Settings: store → mark connecting → verify against
@@ -374,6 +377,13 @@ export function useProviderConnections({
       if (!requests.isCurrent(token)) return staleConnection(providerId);
       requests.finishMutation(token);
       if (stored === null) {
+        if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
+          const message = "Connect your AI provider in the installed Mivlet desktop app.";
+          markProviderState(providerId, "needs-auth");
+          setBackendStatus(message);
+          setLastAction(message);
+          return { providerId, outcome: "unsupported", message };
+        }
         // Preview mode (no Tauri runtime): record a local connection only.
         // The secret is the placeholder preview value, never a real key, so no
         // credential is fabricated.
@@ -603,7 +613,9 @@ export function useProviderConnections({
         providerId,
         outcome: "unsupported",
         message:
-          "Browser preview uses a synthetic provider connection; live health checks run in the desktop app.",
+          ALLOW_PREVIEW_FALLBACKS
+            ? "Browser preview uses a synthetic provider connection; live health checks run in the desktop app."
+            : "Check your AI provider in the installed Mivlet desktop app.",
       };
       setBackendStatus(previewResult.message ?? null);
       return previewResult;

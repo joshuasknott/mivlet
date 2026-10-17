@@ -1,7 +1,7 @@
 use super::{invalid, models::*, repository, Engine, Result};
 use crate::{
     authorized_scope::AuthorizedCommandScope,
-    collaboration::models::Work,
+    collaboration::models::{Work, WorkStatus},
     store::{
         repos::collaboration::{self as repo, Kind},
         Store,
@@ -82,13 +82,21 @@ pub(super) fn shareable(
             .collect(),
     )
 }
-fn shared(item: &Work, grant: &Grant) -> bool {
+pub(super) fn shared(item: &Work, grant: &Grant) -> bool {
     grant.agent_ids.contains(&item.agent_id)
         && (grant.work_ids.contains(&item.id)
             || item
                 .external_client
                 .as_ref()
                 .is_some_and(|e| e.grant_id == grant.id))
+}
+
+fn work_priority(item: &Work) -> u8 {
+    match item.status {
+        WorkStatus::AwaitingApproval | WorkStatus::AwaitingUser | WorkStatus::Blocked => 0,
+        WorkStatus::Queued | WorkStatus::Running | WorkStatus::Waiting => 1,
+        _ => 2,
+    }
 }
 
 pub(super) fn invoke(engine: &Engine, token: &str, name: &str, value: Value) -> Result<Value> {
@@ -128,8 +136,14 @@ pub(super) fn invoke(engine: &Engine, token: &str, name: &str, value: Value) -> 
             if !profiles.iter().any(|p| &p.id == agent) { return Err(invalid("The named agent is unavailable.")); }
             if name == "mivlet_work" {
                 let items = repo::list::<Work>(conn, engine.store, &scope.private, Kind::Work)?;
-                let items: Vec<_> = items.iter().filter(|w| &w.agent_id == agent && shared(w, &grant)).collect();
-                return Ok(json!({"work":items.iter().take(64).map(|w| summary(w)).collect::<Vec<_>>(),"truncated":items.len()>64}));
+                let mut items: Vec<_> = items.iter().filter(|w| &w.agent_id == agent && shared(w, &grant)).collect();
+                items.sort_by(|a, b| work_priority(a).cmp(&work_priority(b))
+                    .then_with(|| b.updated_at.cmp(&a.updated_at)).then_with(|| a.id.cmp(&b.id)));
+                return Ok(json!({"work":items.iter().take(64).map(|w| {
+                    let mut item = summary(w);
+                    item["canControl"] = json!(grant.access == Access::RequestTasks && w.external_client.as_ref().is_some_and(|client| client.grant_id == grant.id));
+                    item
+                }).collect::<Vec<_>>(),"truncated":items.len()>64}));
             }
             let request = if write { args.request_id.as_ref().filter(|id| id.len() >= 8 && id.len() <= 128 && id.bytes().all(|b| b.is_ascii_alphanumeric() || b"-_".contains(&b)))
                 .ok_or_else(|| invalid("Supply a stable requestId of 8-128 letters, digits, dashes or underscores."))?.clone() } else { String::new() };

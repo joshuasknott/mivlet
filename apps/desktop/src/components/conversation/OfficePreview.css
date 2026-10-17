@@ -45,9 +45,6 @@
   margin: 0 0 16px;
   font-size: 16px;
 }
-.office-preview__page > h3.office-preview__title {
-  font-size: 22px;
-}
 .office-preview__table {
   max-width: 100%;
   overflow: auto;

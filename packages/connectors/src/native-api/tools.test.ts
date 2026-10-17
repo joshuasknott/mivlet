@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { NativeCompletionRequest } from "@mivlet/protocol";
 import { shapeAnthropicRequest } from "./anthropic";
 import { shapeOpenAiRequest } from "./openai-compat";
-import { registeredToolSpecs } from "./tools";
+import { lookupTool, registeredToolSpecs } from "./tools";
 
 const actionTools = registeredToolSpecs().filter((tool) =>
   ["local-app-action", "local-desktop-action"].includes(tool.name)
@@ -16,6 +16,42 @@ const request: NativeCompletionRequest = {
 };
 
 describe("native application action schemas", () => {
+  it("separates private file choices from exact published artifact attachment", () => {
+    const choices=registeredToolSpecs().find(tool=>tool.name==="local-browser-upload-choices")!;
+    expect(JSON.parse(choices.parameters).required).toEqual(["tabRef","origin"]);
+    expect(lookupTool(choices.name)?.defaultRisk).toBe("medium");
+    const tool=registeredToolSpecs().find(tool=>tool.name==="local-browser-upload")!;
+    const schema=JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["uploadRef","origin","name","artifactId"]);
+    expect(Object.keys(schema.properties)).toEqual(schema.required);
+    expect(schema.additionalProperties).toBe(false);
+    expect(lookupTool(tool.name)?.defaultRisk).toBe("critical");
+  });
+  it("binds managed browser download custody to one observed link and passive filename", () => {
+    const tool=registeredToolSpecs().find(tool=>tool.name==="local-browser-download")!;
+    const schema=JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["downloadRef","origin","name","url","fileName","timeoutSeconds"]);
+    expect(Object.keys(schema.properties)).toEqual(schema.required);
+    expect(schema.properties.timeoutSeconds).toEqual({type:"integer",minimum:1,maximum:10});
+    expect(schema.additionalProperties).toBe(false);
+    expect(lookupTool(tool.name)?.defaultRisk).toBe("critical");
+  });
+  it("binds public empty-field entry to observed identity and literal text", () => {
+    const tool=registeredToolSpecs().find(tool=>tool.name==="local-browser-fill")!;
+    const schema=JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["fieldRef","origin","name","text"]);
+    expect(Object.keys(schema.properties)).toEqual(["fieldRef","origin","name","text"]);
+    expect(schema.additionalProperties).toBe(false);
+    expect(lookupTool(tool.name)?.defaultRisk).toBe("critical");
+  });
+  it("offers explicit owned-tab activation with no raw browser target or script input", () => {
+    const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-activate")!;
+    const schema = JSON.parse(tool.parameters);
+    expect(schema.required).toEqual(["activationRef", "origin"]);
+    expect(Object.keys(schema.properties)).toEqual(["activationRef", "origin"]);
+    expect(schema.additionalProperties).toBe(false);
+    expect(lookupTool(tool.name)?.defaultRisk).toBe("high");
+  });
   it("shares bounded browser scrolling without coordinate, amount or script inputs", () => {
     const tool = registeredToolSpecs().find(tool => tool.name === "local-browser-scroll")!;
     const schema = JSON.parse(tool.parameters);

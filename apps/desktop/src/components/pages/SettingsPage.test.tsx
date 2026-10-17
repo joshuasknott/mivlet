@@ -107,7 +107,9 @@ describe("SettingsPage", () => {
       await act(async () => {
         disclosure.open = true;
         fireEvent(disclosure, new Event("toggle"));
+        await import("../settings/McpServerSettings");
       });
+      fireEvent.click(screen.getByText("Advanced: manual MCP and external assistants"));
       expect(screen.getByText("Running")).toBeVisible();
       expect(getMcpServerStatus).toHaveBeenCalledTimes(1);
       await act(() => vi.advanceTimersByTimeAsync(3000));

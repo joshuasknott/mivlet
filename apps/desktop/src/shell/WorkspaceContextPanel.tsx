@@ -17,7 +17,6 @@ import {
 } from "../components/navigation/PanelContent";
 import { WorkspaceRightNav } from "../components/navigation/WorkspaceRightNav";
 import { SearchFileDialog } from "../components/search/SearchFileDialog";
-import { SideChatList } from "../components/conversation/SideChats";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import type { useLocalProjects } from "../hooks/useLocalProjects";
 import {
@@ -39,6 +38,11 @@ const WorkspaceHistory = lazy(() =>
     default: Component,
   })),
 );
+const SideChatList = lazy(() =>
+  import("../components/conversation/SideChats").then((module) => ({
+    default: module.SideChatList,
+  })),
+);
 const WorkspaceMemories = lazy(() =>
   import("../components/navigation/WorkspaceMemories").then((module) => ({
     default: module.WorkspaceMemories,
@@ -47,6 +51,7 @@ const WorkspaceMemories = lazy(() =>
 
 export function WorkspaceContextPanel({
   hidden,
+  onReveal,
   nav,
   runtime,
   service,
@@ -55,6 +60,7 @@ export function WorkspaceContextPanel({
   renderConversation,
 }: {
   hidden: boolean;
+  onReveal?: () => void;
   nav: WorkspaceNavigation;
   runtime: ShellRuntime;
   service: WorkspaceExecution;
@@ -121,6 +127,8 @@ export function WorkspaceContextPanel({
         setBrowsing({ identity, scope: next });
       }}
       open={!hidden && (nav.contextOpen || Boolean(nav.computer))}
+      replaced={hidden}
+      onOpen={() => { onReveal?.(); nav.setContextOpen(true); }}
       onClose={() => {
         nav.setComputer(null);
         nav.setContextOpen(false);
@@ -255,6 +263,16 @@ export function WorkspaceContextPanel({
             room={room}
             runtime={runtime}
             scope={scope}
+            sourceIds={runtime.workspaceKnowledgeSources.map((source) => source.id)}
+            onOpenSource={(sourceId) => {
+              const source = runtime.workspaceKnowledgeSources.find((entry) => entry.id === sourceId);
+              if (source) nav.setPanelRequest({
+                id: "memory-source:" + sourceId,
+                kind: "file",
+                title: source.title,
+                target: { type: "knowledge-file", workspaceId, sourceId },
+              });
+            }}
           />
         </Suspense>
       }
@@ -284,48 +302,50 @@ export function WorkspaceContextPanel({
       }
       sideChats={
         navContext && navContext.kind !== "work" ? (
-          <SideChatList
-            compact
-            key={navProject?.id ?? navAgent?.id}
-            owner={
-              navContext.kind === "project"
-                ? { kind: "project", id: navContext.project.id }
-                : { kind: "agent", id: navContext.agent.id }
-            }
-            ownerName={
-              navContext.kind === "project"
-                ? navContext.project.name
-                : navContext.agent.name
-            }
-            chats={state.data.conversations}
-            activeId={nav.activeRoom?.id}
-            onOpen={(room) => nav.openPanelChat(room.id)}
-            onCreate={async (title) => {
-              const project = navContext.kind === "project";
-              const room = await createSideChat(service, {
-                title,
-                owner: project
+          <Suspense fallback={<p role="status">Loading Side Chats…</p>}>
+            <SideChatList
+              compact
+              key={navProject?.id ?? navAgent?.id}
+              owner={
+                navContext.kind === "project"
                   ? { kind: "project", id: navContext.project.id }
-                  : { kind: "agent", id: navContext.agent.id },
-                participantIds: project
-                  ? (navTeam?.participantIds ?? [])
-                  : [navContext.agent.id],
-                facilitatorId: project
-                  ? (navTeam?.leadAgentId ?? "")
-                  : navContext.agent.id,
-              });
-              nav.openPanelChat(room.id);
-            }}
-            onRename={async (room, title) => {
-              await renameSideChat(service, room, title);
-            }}
-            onArchive={async (room, archived) => {
-              await setSideChatArchived(service, room, archived);
-            }}
-            onDelete={async (room) => {
-              await deleteSideChat(service, room);
-            }}
-          />
+                  : { kind: "agent", id: navContext.agent.id }
+              }
+              ownerName={
+                navContext.kind === "project"
+                  ? navContext.project.name
+                  : navContext.agent.name
+              }
+              chats={state.data.conversations}
+              activeId={nav.activeRoom?.id}
+              onOpen={(room) => nav.openPanelChat(room.id)}
+              onCreate={async (title) => {
+                const project = navContext.kind === "project";
+                const room = await createSideChat(service, {
+                  title,
+                  owner: project
+                    ? { kind: "project", id: navContext.project.id }
+                    : { kind: "agent", id: navContext.agent.id },
+                  participantIds: project
+                    ? (navTeam?.participantIds ?? [])
+                    : [navContext.agent.id],
+                  facilitatorId: project
+                    ? (navTeam?.leadAgentId ?? "")
+                    : navContext.agent.id,
+                });
+                nav.openPanelChat(room.id);
+              }}
+              onRename={async (room, title) => {
+                await renameSideChat(service, room, title);
+              }}
+              onArchive={async (room, archived) => {
+                await setSideChatArchived(service, room, archived);
+              }}
+              onDelete={async (room) => {
+                await deleteSideChat(service, room);
+              }}
+            />
+            </Suspense>
         ) : undefined
       }
       schedules={

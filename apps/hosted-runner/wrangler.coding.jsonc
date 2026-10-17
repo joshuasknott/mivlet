@@ -1,0 +1,22 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "mivlet-hosted-coding",
+  "main": "src/coding/index.ts",
+  "compatibility_date": "2026-08-28",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "workers_dev": false,
+  "observability": { "enabled": false },
+  "vars": { "SANDBOX_LOG_LEVEL": "error" },
+  // Requires Workers Paid. This private service is not part of the existing
+  // Free task deployment and has no provider/account secrets or public route.
+  "containers": [
+    { "class_name": "OfflineCodingSandbox", "image": "docker.io/cloudflare/sandbox:0.13.0-next.738.2-python@sha256:545b3df29a246f83e6fdb907180ea3169a91ee567d5478823a2248604c6bc353", "instance_type": "lite", "max_instances": 2 },
+    { "class_name": "CodingNetworkBaseline", "image": "docker.io/cloudflare/sandbox:0.13.0-next.738.2-python@sha256:545b3df29a246f83e6fdb907180ea3169a91ee567d5478823a2248604c6bc353", "instance_type": "lite", "max_instances": 1 }
+  ],
+  "durable_objects": { "bindings": [
+    { "name": "OFFLINE_CODING", "class_name": "OfflineCodingSandbox" },
+    { "name": "CODING_NETWORK_BASELINE", "class_name": "CodingNetworkBaseline" },
+    { "name": "CODING_AUTHORITY", "class_name": "CodingAuthority" }
+  ] },
+  "migrations": [{ "tag": "v1-offline-coding", "new_sqlite_classes": ["OfflineCodingSandbox", "CodingNetworkBaseline", "CodingAuthority"] }]
+}

@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { expect, it } from "vitest";
-import { compactStyleNames, compactStyleText, styleNameMap } from "./compact-style-names";
+import { compactStyleNames, compactStyleSource, compactStyleText, styleNameMap } from "./compact-style-names";
 import { mkdtemp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -51,15 +51,25 @@ it("compacts class tokens without changing longer opaque IDs or ARIA references"
     "._0 #dialog-panel-title {}",
   );
 });
-it("still preserves exact tokens inside imports and opaque selectors", () => {
+it("preserves CSS module addresses while compacting the matching class basename", () => {
+  const code = 'import "./dialog-panel.css"; import layer from "./dialog-panel.css?inline"; const selector = ".menu-panel:hover"; const ui = <><div className="dialog-panel" /><div className="menu-panel" /></>;';
   const map = styleNameMap(
     ".dialog-panel {} .menu-panel {}",
-    sources(
-      'import "./dialog-panel.css"; const selector = ".menu-panel:hover"; const ui = <><div className="dialog-panel" /><div className="menu-panel" /></>;',
-    ),
+    sources(code),
   );
-  expect(map.has("dialog-panel")).toBe(false);
+  expect(map.has("dialog-panel")).toBe(true);
   expect(map.has("menu-panel")).toBe(false);
+  const transformed = compactStyleSource(code, "component.tsx", map);
+  expect(transformed).toContain('import "./dialog-panel.css"');
+  expect(transformed).toContain('from "./dialog-panel.css?inline"');
+  expect(transformed).toContain('className="_0"');
+  expect(transformed).toContain('".menu-panel:hover"');
+});
+it("keeps non-CSS imports and dynamic module addresses opaque", () => {
+  for (const code of ['import "./dialog-panel";', 'const css = import("./dialog-panel.css");']) {
+    const map = styleNameMap(".dialog-panel{}", sources(`${code} const ui = <div className="dialog-panel" />;`));
+    expect(map.has("dialog-panel")).toBe(false);
+  }
 });
 it("preserves classes assembled from dynamic prefixes", () => {
   const map = styleNameMap(
@@ -129,5 +139,31 @@ it("keeps imported CSS layers, custom properties and JSX consistent in a real bu
   } finally {
     // mkdtemp created this exact directory; it contains only this test's files.
     await rm(fixture, { recursive: true, force: true });
+  }
+});
+
+it("compacts button variants without changing the HTML element, type or role", () => {
+  const code = '<button type="button" role="button" className="button button-primary"/><button className="button button-secondary"/>';
+  const map = styleNameMap('.button{} .button-primary{} .button-secondary:hover{}', sources(code));
+  expect(map.has("button")).toBe(false);
+  expect(map.has("button-primary")).toBe(true);
+  expect(map.has("button-secondary")).toBe(true);
+  const compact = compactStyleSource(code, "buttons.tsx", map);
+  expect(compact).toContain('<button type="button" role="button"');
+  expect(compact).toContain('className="button ' + map.get("button-primary") + '"');
+  expect(compactStyleText('.button-secondary:hover{}', map)).toBe('.' + map.get("button-secondary") + ':hover{}');
+});
+
+it("keeps task IDs and query keys distinct from their compactable presentation classes", () => {
+  const code = 'const id = `work-${attempt}`; const queries = ["native-command-jobs", "repository-copies", "local-schedules"]; const route = "agent-editor"; const node = <div className="task-panel-details command-job-list repository-copy-list schedule-list agent-profile-dialog" />;';
+  const classes = ["task-panel-details", "command-job-list", "repository-copy-list", "schedule-list", "agent-profile-dialog"];
+  const css = classes.map(name => `.${name}{display:block}`).join("");
+  const map = styleNameMap(css, sources(code));
+  expect(classes.every(name => map.has(name))).toBe(true);
+  const transformed = compactStyleSource(code, "task.tsx", map);
+  expect(transformed.split("const node")[0]).toBe(code.split("const node")[0]);
+  for (const name of classes) {
+    expect(transformed).toContain(map.get(name)!);
+    expect(compactStyleText(css, map)).toContain(`.${map.get(name)}{display:block}`);
   }
 });

@@ -222,6 +222,8 @@ pub(crate) fn start(
         inputs: Vec<String>,
         network: bool,
         timeout_seconds: u64,
+        #[serde(default)]
+        interactive: bool,
     }
     let input: Start =
         serde_json::from_value(arguments).map_err(|_| "Invalid persistent workspace command.")?;
@@ -234,13 +236,17 @@ pub(crate) fn start(
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let root = state.tool_workspace_root(workspace, agent)?;
     let jobs = state.command_jobs(workspace, agent)?;
-    let mut session = jobs.start(
+    let mut session = jobs.start_with_options(
         &ticket,
         None,
         &input.command,
         input.network,
         input.timeout_seconds,
         true,
+        mivlet_windows_executor::SessionOptions {
+            interactive: input.interactive,
+            preview_port: None,
+        },
     )?;
     let snapshot = session.snapshot()?;
     std::thread::Builder::new()

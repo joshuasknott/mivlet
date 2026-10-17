@@ -331,11 +331,6 @@ export function WorkspaceDialogs({
             name={profileName}
             providers={runtime.backendProviders}
             connectedProviderIds={runtime.connectedBackendIds}
-            onOpenBreakdowns={() => {
-              setAccountDialog(null);
-              setSettingsTab("usage");
-              setSettings(true);
-            }}
             onClose={() => setAccountDialog(null)}
             onSignOut={async () => {
               for (const work of service

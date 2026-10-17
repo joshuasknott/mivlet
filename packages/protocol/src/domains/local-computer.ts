@@ -81,6 +81,13 @@ export interface LocalComputerAttachmentStageRequest extends LocalComputerTarget
   attachments: readonly LocalComputerAttachmentStageInput[];
 }
 
+/** Native derives the source only from this queued Work's canonical ancestry. */
+export interface LocalComputerWorkAttachmentRequest extends LocalComputerEpochRequest {
+  workId: string;
+  expectedWorkGeneration: number;
+  attachmentIds: readonly string[];
+}
+
 /** Credential-free proof of the exact bytes and relative path staged. */
 export interface LocalComputerAttachmentReceipt {
   computerId: string;
@@ -98,6 +105,16 @@ export interface LocalComputerAttachmentReceipt {
 export interface LocalComputerAttachmentDiscardRequest extends LocalComputerTarget {
   computerId: string;
   batchId: string;
+}
+
+/** Rehydrate a deliberately reused image; native verifies scope, hash and size. */
+export interface LocalComputerImageAttachmentRequest extends LocalComputerEpochRequest {
+  attachmentId: string;
+  name: string;
+  mimeType: string;
+  relativePath: string;
+  sizeBytes: number;
+  sha256: string;
 }
 
 /**

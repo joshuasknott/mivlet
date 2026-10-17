@@ -2,7 +2,27 @@
 pub(crate) mod checkpoints;
 pub(crate) mod copy_manager;
 mod git;
+pub(crate) mod hosted_repository;
+pub(crate) mod job_review;
 mod jobs;
+pub(crate) mod task_binding;
+pub(crate) use task_binding::{capture_work_repository, RepositoryWorkBinding};
+
+/// A model may not use a persistent session to write into a repository outside
+/// its immutable current Work selection. User-directed terminal controls have
+/// separate exact-job authority and do not pass through this model-only check.
+pub(crate) fn validate_command_repository(
+    workspace: &str,
+    agent: &str,
+    repository: &str,
+) -> Result<(), String> {
+    let task = task_binding::executing_binding(workspace, agent)?
+        .ok_or("A repository session input needs an exact current Work repository binding.")?;
+    if task.binding.repository_id != repository {
+        return Err("This command session belongs to a different repository than the current task. No input was sent; use the task's own copy or explicit terminal controls.".into());
+    }
+    Ok(())
+}
 pub(super) mod process;
 pub(crate) mod pull_requests;
 #[cfg(test)]
@@ -97,6 +117,24 @@ fn save(directory: &Path, repo: &Repository) -> Result<(), String> {
         .map_err(|_| "Repository state could not be saved.")?;
     Ok(())
 }
+/// Save task-owned copy state without changing the human's selected copy.
+fn save_repository(directory: &Path, repo: &Repository) -> Result<(), String> {
+    if load(directory)?.is_some_and(|selected| selected.id == repo.id) {
+        save(directory, repo)
+    } else {
+        copy_manager::save_copy(directory, repo)
+    }
+}
+
+fn task_repository(
+    directory: &Path,
+    task: Option<&task_binding::TaskRepository>,
+) -> Result<Option<Repository>, String> {
+    match task {
+        Some(task) => task.load(directory).map(Some),
+        None => load(directory),
+    }
+}
 fn load(directory: &Path) -> Result<Option<Repository>, String> {
     let path = directory.join("repository.json");
     if !path.exists() {
@@ -136,14 +174,16 @@ fn reconcile_import(
         |action| ticket.with_current(action),
     )?;
     if let Some(recovery) = &recovery {
-        repo.operation = if recovery.checkpoint_id.is_some() {
+        repo.operation = if recovery.hosted_repository.is_some() {
+            "hosted file import outcome uncertain; inspect and use repository-recover"
+        } else if recovery.checkpoint_id.is_some() {
             "checkpoint restore outcome uncertain; inspect and use repository-recover"
         } else {
             "command import outcome uncertain; inspect and use repository-recover"
         }
         .into();
         repo.command_diff_id = None;
-        if recovery.checkpoint_id.is_none() {
+        if recovery.checkpoint_id.is_none() && recovery.hosted_repository.is_none() {
             repo.last_result = Some(process::CommandResult {
                 interrupted: true,
                 output: format!(
@@ -153,12 +193,19 @@ fn reconcile_import(
                 ..Default::default()
             });
         }
-        ticket.with_current(|| save(directory, repo))?;
+        ticket.with_current(|| save_repository(directory, repo))?;
     }
     Ok(recovery)
 }
 fn status(directory: &Path, ticket: &OperationTicket) -> Result<Value, String> {
-    let Some(mut repo) = load(directory)? else {
+    status_for_task(directory, ticket, None)
+}
+fn status_for_task(
+    directory: &Path,
+    ticket: &OperationTicket,
+    task: Option<&task_binding::TaskRepository>,
+) -> Result<Value, String> {
+    let Some(mut repo) = task_repository(directory, task)? else {
         return Ok(json!({"repository": null}));
     };
     let mutex = lock(directory)?;
@@ -285,7 +332,14 @@ pub(crate) fn execute(
     arguments: Value,
     request_id: &str,
 ) -> Result<String, String> {
+    let mut task = task_binding::executing_binding(workspace, agent)?;
     if tool == "repository-pr-watch" {
+        if let Some(task) = &task {
+            let directory = directory(state, workspace, agent)?;
+            let selected = load(&directory)?
+                .ok_or("Select this task's repository before configuring its PR watch.")?;
+            task.binding.check(&selected)?;
+        }
         let request = serde_json::from_value(arguments).map_err(|_| "Invalid PR watch request.")?;
         return Ok(
             pull_requests::watch::configure(state, workspace, agent, generation, request)?
@@ -294,12 +348,26 @@ pub(crate) fn execute(
     }
     let ticket = state.begin_agent_operation(workspace, agent, generation)?;
     let directory = directory(state, workspace, agent)?;
+    if tool == "repository-checkpoint-restore" {
+        if let Some(restore) =
+            checkpoints::conversation::restore_task_for_request(&directory, &ticket, request_id)?
+        {
+            if task
+                .as_ref()
+                .is_some_and(|current| current.binding != restore.binding)
+            {
+                return Err("The current task and reviewed restore belong to different copies. Stop current work before restoring.".into());
+            }
+            task = Some(restore);
+        }
+    }
     if tool == "repository-start" {
         return jobs::start(
             directory,
             ticket,
             state.command_jobs(workspace, agent)?,
             arguments,
+            task,
         );
     }
     // Repository inspection and recovery must not depend on command history.
@@ -313,6 +381,7 @@ pub(crate) fn execute(
         arguments,
         jobs.as_ref(),
         request_id,
+        task.as_ref(),
     )
 }
 #[cfg(test)]
@@ -337,7 +406,7 @@ fn execute_with_request(
     arguments: Value,
     request_id: &str,
 ) -> Result<String, String> {
-    execute_observed(directory, ticket, tool, arguments, None, request_id)
+    execute_observed(directory, ticket, tool, arguments, None, request_id, None)
 }
 fn execute_observed(
     directory: &Path,
@@ -346,15 +415,16 @@ fn execute_observed(
     arguments: Value,
     jobs: Option<&Arc<super::command_jobs::ScopeJobs>>,
     request_id: &str,
+    task: Option<&task_binding::TaskRepository>,
 ) -> Result<String, String> {
     ticket.check()?;
     if tool.starts_with("repository-pr-") {
-        return pull_requests::execute(directory, ticket, tool, arguments);
+        return pull_requests::execute_for_task(directory, ticket, tool, arguments, task);
     }
     let input: Input =
         serde_json::from_value(arguments).map_err(|_| "Invalid repository tool arguments.")?;
     if tool == "repository-status" {
-        return serde_json::to_string(&status(directory, ticket)?)
+        return serde_json::to_string(&status_for_task(directory, ticket, task)?)
             .map_err(|_| "Invalid repository status.".into());
     }
     let mutex = lock(directory)?;
@@ -362,7 +432,8 @@ fn execute_observed(
         .try_lock()
         .map_err(|_| "A repository operation is running. Wait or Stop it before continuing.")?;
     let _lease = mivlet_windows_executor::repository_files::lease(directory)?;
-    let mut repo = load(directory)?.ok_or("Attach a repository in Library first.")?;
+    let mut repo =
+        task_repository(directory, task)?.ok_or("Attach a repository in Library first.")?;
     if input.repository_id != repo.id {
         return Err(
             "Repository selection changed. Inspect status and request a fresh approval.".into(),
@@ -372,7 +443,7 @@ fn execute_observed(
     if let Some(recovery) = import_recovery {
         if tool == "repository-recover" {
             repo.operation = "idle".into();
-            ticket.with_current(|| save(directory, &repo))?;
+            ticket.with_current(|| save_repository(directory, &repo))?;
             mivlet_windows_executor::acknowledge_repository_import(
                 &directory.join(&repo.id).join("checkout"),
                 mivlet_windows_executor::Limits::CODING,
@@ -396,7 +467,8 @@ fn execute_observed(
     }
     let root = checkout(directory, &repo)?;
     if tool.starts_with("repository-checkpoint-") {
-        let result = checkpoints::execute(directory, &mut repo, ticket, tool, &input, request_id);
+        let result =
+            checkpoints::execute(directory, &mut repo, ticket, tool, &input, request_id, task);
         ticket.check()?;
         return result.and_then(|value| {
             serde_json::to_string(&value).map_err(|_| "Invalid checkpoint result.".into())
@@ -429,6 +501,9 @@ fn execute_observed(
                 );
             }
             let target = crate::tools::confine_path(path, &root)?;
+            checkpoints::conversation::capture_before_task_mutation(
+                directory, &repo, ticket, request_id,
+            )?;
             if let Some(parent) = target.parent() {
                 fs::create_dir_all(parent).map_err(|_| "Cannot create repository directory.")?;
             }
@@ -436,7 +511,7 @@ fn execute_observed(
                 fs::write(target, content)
                     .map_err(|_| "Cannot write repository file.".to_owned())?;
                 repo.command_diff_id = None;
-                save(directory, &repo)
+                save_repository(directory, &repo)
             })?;
             json!({"path": path, "bytes": content.len()})
         }
@@ -452,12 +527,15 @@ fn execute_observed(
             if !(1..=900).contains(&timeout) {
                 return Err("Command timeout must be 1–900 seconds.".into());
             }
+            checkpoints::conversation::capture_before_task_mutation(
+                directory, &repo, ticket, request_id,
+            )?;
             repo.operation =
                 "command running; if interrupted inspect changes before continuing".into();
             repo.last_result = None;
             repo.last_command = Some(script.to_owned());
             repo.command_diff_id = None;
-            save(directory, &repo)?;
+            save_repository(directory, &repo)?;
             let mut session = jobs
                 .map(|jobs| {
                     jobs.start(
@@ -470,6 +548,9 @@ fn execute_observed(
                     )
                 })
                 .transpose()?;
+            if let Some(session) = session.as_mut() {
+                jobs::bind_repository(session, &repo, task)?;
+            }
             let (result, completed) = match process::native_run(
                 &root,
                 script,
@@ -488,7 +569,7 @@ fn execute_observed(
                         output: crate::secret_redaction::redact_secret_text_or_omit(&error),
                         ..Default::default()
                     });
-                    save(directory, &repo)?;
+                    save_repository(directory, &repo)?;
                     return Err(error);
                 }
             };
@@ -509,7 +590,7 @@ fn execute_observed(
                             output: crate::secret_redaction::redact_secret_text_or_omit(&error),
                             ..result
                         });
-                        save(directory, &repo)?;
+                        save_repository(directory, &repo)?;
                         return Err(error);
                     }
                 }
@@ -524,7 +605,7 @@ fn execute_observed(
             if !result.interrupted {
                 repo.command_diff_id = git::tree(directory, &repo, ticket).ok();
             }
-            save(directory, &repo)?;
+            save_repository(directory, &repo)?;
             if let Some(committed) = committed_import {
                 // Keep the durable intent and previous tree until repository
                 // state is saved. Cleanup remains outside the Stop fence.
@@ -532,7 +613,12 @@ fn execute_observed(
             }
             serde_json::to_value(result).map_err(|_| "Invalid command result.")?
         }
-        "repository-commit" => git::commit(directory, &mut repo, &input, ticket)?,
+        "repository-commit" => {
+            checkpoints::conversation::capture_before_task_mutation(
+                directory, &repo, ticket, request_id,
+            )?;
+            git::commit(directory, &mut repo, &input, ticket)?
+        }
         "repository-publish" => git::publish(directory, &mut repo, &input, ticket)?,
         "repository-recover" => git::recover(directory, &mut repo, ticket)?,
         _ => return Err("Unknown repository operation.".into()),
