@@ -59,7 +59,7 @@ export async function runRealResearch(binding: HostedPublicWebTaskBinding, input
     // Journal committed, cancellation checked, then one possible send. No SDK
     // auto-retry or restart/continuation replay exists on this path.
     signal.throwIfAborted(); sent = true;
-    const response = await fetch(endpoint, { method: "POST", redirect: "error", headers, body: JSON.stringify(body), signal });
+    const response = await fetch(endpoint, { method: "POST", redirect: "manual", headers, body: JSON.stringify(body), signal });
     if (!response.ok) {
       await response.body?.cancel();
       throw new ProviderFailure([401, 403].includes(response.status) ? "hosted-provider-authentication-required" : "hosted-provider-request-rejected", ![400, 401, 403, 404, 422, 429].includes(response.status));

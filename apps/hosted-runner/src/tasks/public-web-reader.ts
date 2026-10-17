@@ -49,7 +49,19 @@ export const publicWebReader: PublicWebReader = { async read(value, scope, signa
   } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
   bounded.throwIfAborted();
   const bytes = new Uint8Array(size); let at = 0; for (const part of chunks) { bytes.set(part, at); at += part.byteLength; }
-  let text = ""; let title = ""; const links: string[] = []; let linkBytes = 0;
+  return extractPublicPage(bytes, contentType, url, scope, bounded);
+} };
+
+/** Fixed passive extraction shared with the actual Workerd acceptance check. */
+export async function extractPublicPage(bytes: Uint8Array<ArrayBuffer>, contentType: string, url: string,
+  scope: HostedPublicWebScope, signal: AbortSignal): Promise<PublicPage> {
+  signal.throwIfAborted();
+  let text = ""; let title = ""; const links: string[] = []; let linkBytes = 0; let omitted = false;
+  const append = (value: string) => {
+    const remaining = Math.max(0, L.pageTextBytes * 2 - text.length);
+    if (value.length > remaining) omitted = true;
+    text += value.slice(0, remaining);
+  };
   if (/^text\/plain/i.test(contentType)) text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
   else {
     // Two streaming passes: removed subtrees cannot reach the second pass's
@@ -57,6 +69,10 @@ export const publicWebReader: PublicWebReader = { async read(value, scope, signa
     const clean = new HTMLRewriter().on(passive, { element(element) { element.remove(); } })
       .transform(new Response(bytes, { headers: { "content-type": "text/html; charset=utf-8" } }));
     const extracted = new HTMLRewriter()
+      .on("p,div,h1,h2,h3,h4,h5,h6,li,ul,ol,br,hr,section,article,header,footer,table,tr,blockquote,pre", { element(element) {
+        append("\n");
+        if (element.tagName !== "br" && element.tagName !== "hr") element.onEndTag(() => append("\n"));
+      } })
       .on("title", { text(chunk) { if (title.length < 512) title += chunk.text.slice(0, 512 - title.length); } })
       .on("a[href]", { element(element) {
         if (links.length >= L.linksPerPage) return;
@@ -65,17 +81,17 @@ export const publicWebReader: PublicWebReader = { async read(value, scope, signa
           if (!hostedTextContentFailure(link) && !links.includes(link) && linkBytes + bytes <= 4096) { links.push(link); linkBytes += bytes; }
         } catch { /* Out-of-scope links grant no authority. */ }
       } })
-      .onDocument({ text(chunk) { if (text.length < L.pageTextBytes * 2) text += chunk.text.slice(0, L.pageTextBytes * 2 - text.length); } })
+      .onDocument({ text(chunk) { append(chunk.text); } })
       .transform(clean);
     const drain = extracted.body!.getReader();
-    try { for (;;) { bounded.throwIfAborted(); if ((await drain.read()).done) break; } }
+    try { for (;;) { signal.throwIfAborted(); if ((await drain.read()).done) break; } }
     finally { await drain.cancel().catch(() => undefined); drain.releaseLock(); }
   }
-  bounded.throwIfAborted(); text = text.replace(/\s+/g, " ").trim();
-  const truncated = encoder.encode(text).length > L.pageTextBytes;
+  signal.throwIfAborted(); text = text.replace(/\s+/g, " ").trim();
+  const truncated = omitted || encoder.encode(text).length > L.pageTextBytes;
   text = prefix(text, L.pageTextBytes); title = prefix(title.replace(/\s+/g, " ").trim(), 256) || url;
   if (!text || hostedTextContentFailure(text) || hostedTextContentFailure(title)) throw new Error("research-page-content-unavailable");
   const contentBytes = encoder.encode(text).length;
   const contentSha256 = await hostedTaskSha256({ finalUri: url, text });
   return { source: { citationId: `web-${contentSha256.slice(0, 24)}`, title, finalUri: url, fetchedAt: new Date().toISOString(), contentSha256, contentBytes, truncated }, text, links };
-} };
+}
