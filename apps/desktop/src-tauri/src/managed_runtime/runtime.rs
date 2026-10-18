@@ -215,13 +215,13 @@ fn fallback_models(provider_id: &str) -> Vec<BackendModel> {
         .collect()
 }
 
-struct CommandOutput {
-    success: bool,
-    stdout: String,
-    stderr: String,
+pub(super) struct CommandOutput {
+    pub(super) success: bool,
+    pub(super) stdout: String,
+    pub(super) stderr: String,
 }
 
-fn read_limited(mut reader: impl Read, limit: usize) -> String {
+pub(super) fn read_limited(mut reader: impl Read, limit: usize) -> String {
     let mut collected = Vec::new();
     let mut buffer = [0_u8; 4096];
     loop {

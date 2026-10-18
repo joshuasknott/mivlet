@@ -37,18 +37,15 @@ mod acp;
 mod claude;
 mod opencode;
 mod runtime;
-use acp::{
-    acp_approval_payload, extract_acp_models, managed_approval_payload, prompt_text,
-    start_acp_turn, write_json,
-};
-use claude::start_claude_turn;
-use opencode::{open_code_endpoint, open_code_error, sse_frames, start_opencode_turn};
+use acp::{managed_approval_payload, prompt_text, start_acp_turn, write_json};
+use claude::{provider_tool_kind, respond_to_unsupported_claude_control, start_claude_turn};
+use opencode::{open_code_endpoint, open_code_error, start_opencode_turn};
+use runtime::safe_error_message;
 use runtime::{
     cache_models, command_for_provider, find_executable, missing_runtime_message, probe_status,
-    provider_label, run_command, validate_provider_id, workspace_dir,
+    provider_label, read_limited, run_command, validate_provider_id, workspace_dir,
 };
 pub(crate) use runtime::{cached_models, status_for};
-use runtime::{parse_grok_models, parse_opencode_models, safe_error_message};
 use shared_tools::{Dispatch, ToolBridge, ToolSpec};
 
 const STATUS_TIMEOUT: Duration = Duration::from_secs(12);

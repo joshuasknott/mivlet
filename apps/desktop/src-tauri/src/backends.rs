@@ -45,29 +45,21 @@ mod routes;
 pub(crate) use catalog::native_verification_model;
 use catalog::{
     build_provider, catalog_entry, require_supported_provider, resolve_auth_state,
-    validate_backend_secret, validate_catalog_vocabulary, BackendCatalogEntry, CATALOG,
+    validate_backend_secret, validate_catalog_vocabulary, CATALOG, CODEX_CAPS,
 };
 use credentials::{
-    clear_credential_into, list_providers_from, read_connected_backends, scoped_credential_key,
-    store_credential_into, BackendCredentialStore, CredentialStores, KeyringStore,
+    clear_credential_into, list_providers_from, store_credential_into, BackendCredentialStore,
+    CredentialStores,
 };
 pub(crate) use credentials::{
-    connected_providers_for, credential_store, read_credential, record_connected_provider,
-    remove_connected_provider, require_current_internal_user,
+    connected_providers_for, read_credential, record_connected_provider, remove_connected_provider,
+    require_current_internal_user,
 };
-use routes::{
-    account_native_provider_route_id, account_provider_connection_id, apply_codex_cli_status,
-    build_account_native_provider_routes, native_provider_route_reason_with_evidence,
-    validate_native_provider_route_binding,
-};
+use routes::{apply_codex_cli_status, build_account_native_provider_routes};
 pub(crate) use routes::{
-    exact_model_pricing_evidence, native_provider_route_boundary, native_provider_route_reason,
-    provider_route_observation_snapshot, record_current_native_provider_route_observation,
-    record_native_provider_route_observation, select_native_background_route,
-    validate_account_native_provider_model, validate_current_native_provider_route,
-    validate_persisted_native_provider_route_selection,
-    validate_persisted_native_provider_route_selection_for_policy,
-    NATIVE_CITED_BRIEF_POLICY_REVISION,
+    native_provider_route_reason, record_current_native_provider_route_observation,
+    select_native_background_route, validate_current_native_provider_route,
+    validate_persisted_native_provider_route_selection, NATIVE_CITED_BRIEF_POLICY_REVISION,
 };
 
 /// Normalize a backend consequential event and produce the audit entry that

@@ -1,7 +1,7 @@
 //! Claude Agent SDK transport and provider tool handling.
 use super::*;
 
-fn provider_tool_kind(tool_name: &str) -> &'static str {
+pub(super) fn provider_tool_kind(tool_name: &str) -> &'static str {
     match tool_name.to_ascii_lowercase().as_str() {
         "read" => "read",
         "glob" | "grep" | "websearch" | "codesearch" => "search",
@@ -12,7 +12,7 @@ fn provider_tool_kind(tool_name: &str) -> &'static str {
     }
 }
 
-fn respond_to_unsupported_claude_control(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) {
+pub(super) fn respond_to_unsupported_claude_control(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) {
     let Some(request_id) = value.get("request_id").and_then(Value::as_str) else {
         return;
     };

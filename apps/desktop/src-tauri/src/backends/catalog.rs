@@ -20,7 +20,7 @@ pub(super) struct BackendCatalogEntry {
     pub(super) recommended: bool,
 }
 
-const CODEX_CAPS: &[&str] = &[
+pub(super) const CODEX_CAPS: &[&str] = &[
     "authentication",
     "threads",
     "streaming",
