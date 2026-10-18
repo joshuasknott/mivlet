@@ -1,3 +1,9 @@
+use std::{
+    collections::HashSet,
+    ffi::OsString,
+    path::{Path, PathBuf},
+};
+
 use super::*;
 
 fn push_unique_candidate(

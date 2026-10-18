@@ -1,3 +1,5 @@
+use url::Url;
+
 use super::*;
 
 pub(super) fn validated_codex_auth_url(value: &str) -> Result<String, String> {

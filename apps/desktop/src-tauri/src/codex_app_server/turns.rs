@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use super::*;
 
 pub(super) fn model_fast_mode(model: &Value) -> Option<Value> {
