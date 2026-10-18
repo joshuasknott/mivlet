@@ -100,9 +100,7 @@ export function ProviderConnectionFlow({
     checkConnection,
     startBrowserLogin,
     goBack,
-    setLocallyReady,
-    setLocallyConfigured,
-    setLocallyRemoved,
+    setLocalConnection,
   } = useProviderConnection({
     family,
     connectedBackendIds,
@@ -654,9 +652,10 @@ export function ProviderConnectionFlow({
                         onDisconnect?.(selectedMethod.provider.id),
                       )
                         .then(() => {
-                          setLocallyReady(null);
-                          setLocallyConfigured(null);
-                          setLocallyRemoved(selectedMethod.provider.id);
+                          setLocalConnection({
+                            providerId: selectedMethod.provider.id,
+                            state: "removed",
+                          });
                           setReplacingCredential(false);
                           setConfirmingRemoval(false);
                           const message =

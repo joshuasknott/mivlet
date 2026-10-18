@@ -2,7 +2,10 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { BackendVerifyResult } from "@mivlet/protocol";
 import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
 import { isProviderConnected } from "./provider-catalogue-data";
-import type { ProviderConnectionMethod, ProviderFamily } from "./provider-catalogue-data";
+import type {
+  ProviderConnectionMethod,
+  ProviderFamily,
+} from "./provider-catalogue-data";
 
 export interface ProviderConnectionActionsProps {
   family: ProviderFamily;
@@ -30,11 +33,10 @@ export function useProviderConnection({
 }: ProviderConnectionActionsProps) {
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
-  const [locallyReady, setLocallyReady] = useState<string | null>(null);
-  const [locallyConfigured, setLocallyConfigured] = useState<string | null>(
-    null,
-  );
-  const [locallyRemoved, setLocallyRemoved] = useState<string | null>(null);
+  const [localConnection, setLocalConnection] = useState<{
+    providerId: string;
+    state: "ready" | "configured" | "removed";
+  } | null>(null);
   const [replacingCredential, setReplacingCredential] = useState(false);
   const [confirmingRemoval, setConfirmingRemoval] = useState(false);
   const [feedback, setFeedback] = useState<{
@@ -49,13 +51,9 @@ export function useProviderConnection({
   const customModelRef = useRef<HTMLInputElement>(null);
   const customKeyRef = useRef<HTMLInputElement>(null);
   const providerEndpointRef = useRef<HTMLInputElement>(null);
-  const selectedMethod: ProviderConnectionMethod | undefined = family.methods.find(
-    (method) => method.id === selectedMethodId,
-  );
+  const selectedMethod: ProviderConnectionMethod | undefined =
+    family.methods.find((method) => method.id === selectedMethodId);
 
-  useLayoutEffect(() => {
-    closeRef.current?.focus();
-  }, []);
   useLayoutEffect(() => {
     closeRef.current?.focus();
     setShowKey(false);
@@ -75,15 +73,8 @@ export function useProviderConnection({
       });
       setFeedback({ message: copy.message, tone: copy.tone });
       onStatus?.(copy.message);
-      if (result.outcome === "ready") {
-        setLocallyReady(providerId);
-        setLocallyConfigured(null);
-        setLocallyRemoved(null);
-        setReplacingCredential(false);
-      } else if (result.outcome === "configured") {
-        setLocallyConfigured(providerId);
-        setLocallyReady(null);
-        setLocallyRemoved(null);
+      if (result.outcome === "ready" || result.outcome === "configured") {
+        setLocalConnection({ providerId, state: result.outcome });
         setReplacingCredential(false);
       }
       return result;
@@ -101,19 +92,18 @@ export function useProviderConnection({
     }
   };
 
-  const methodVerifiedHere = selectedMethod
-    ? locallyReady === selectedMethod.provider.id
-    : false;
-  const methodConfiguredHere = selectedMethod
-    ? locallyConfigured === selectedMethod.provider.id
-    : false;
-  const methodConnected = selectedMethod
-    ? locallyRemoved === selectedMethod.provider.id
-      ? false
-      : methodVerifiedHere ||
-        methodConfiguredHere ||
-        isProviderConnected(selectedMethod.provider, connectedBackendIds)
-    : false;
+  const localState =
+    localConnection?.providerId === selectedMethod?.provider.id
+      ? localConnection?.state
+      : undefined;
+  const methodVerifiedHere = localState === "ready";
+  const methodConnected = Boolean(
+    selectedMethod &&
+    localState !== "removed" &&
+    (localState === "ready" ||
+      localState === "configured" ||
+      isProviderConnected(selectedMethod.provider, connectedBackendIds)),
+  );
   const methodConnectionLabel = methodVerifiedHere
     ? "Ready"
     : selectedMethod?.provider.backendType === "native-api"
@@ -129,18 +119,10 @@ export function useProviderConnection({
     setFeedback(null);
     try {
       const result = await onCheckConnection(providerId);
-      if (result?.outcome === "ready") {
-        setLocallyReady(providerId);
-        setLocallyConfigured(null);
-        setLocallyRemoved(null);
-      } else if (result?.outcome === "configured") {
-        setLocallyConfigured(providerId);
-        setLocallyReady(null);
-        setLocallyRemoved(null);
+      if (result?.outcome === "ready" || result?.outcome === "configured") {
+        setLocalConnection({ providerId, state: result.outcome });
       } else if (result?.outcome === "auth-failed") {
-        setLocallyReady(null);
-        setLocallyConfigured(null);
-        setLocallyRemoved(providerId);
+        setLocalConnection({ providerId, state: "removed" });
       }
       const copy = result
         ? connectResultCopy(result.outcome, { detail: result.message })
@@ -167,9 +149,7 @@ export function useProviderConnection({
     try {
       const result = await onStartBrowserLogin(providerId);
       if (result.outcome === "ready") {
-        setLocallyReady(providerId);
-        setLocallyConfigured(null);
-        setLocallyRemoved(null);
+        setLocalConnection({ providerId, state: "ready" });
       }
       const copy = connectResultCopy(result.outcome, {
         detail: result.message,
@@ -228,8 +208,6 @@ export function useProviderConnection({
     checkConnection,
     startBrowserLogin,
     goBack,
-    setLocallyReady,
-    setLocallyConfigured,
-    setLocallyRemoved,
+    setLocalConnection,
   };
 }
