@@ -159,6 +159,39 @@ pub async fn list_backends(app: tauri::AppHandle) -> Result<Vec<BackendProvider>
         .map_err(|_| "Provider discovery stopped unexpectedly.".to_string())?
 }
 
+fn apply_codex_models(
+    provider: &mut BackendProvider,
+    models: Vec<crate::codex_app_server::CodexModelCatalogEntry>,
+) {
+    provider.models = models
+        .into_iter()
+        .take(MAX_BACKEND_MODELS)
+        .map(|model| BackendModel {
+            id: model.id,
+            label: model.label,
+            available: true,
+            capabilities: Some(serde_json::json!({ "vision": model.supports_images })),
+            reasoning: model.reasoning,
+            fast_mode: model.fast_mode,
+        })
+        .collect();
+}
+
+fn mark_codex_unavailable(provider: &mut BackendProvider, message: String) {
+    provider.auth_state = "unavailable".to_string();
+    provider.capabilities.clear();
+    provider.models.clear();
+    provider.install_hint = Some(message);
+}
+
+fn validate_discovery_account(expected: &str, current: &str) -> Result<(), String> {
+    if expected == current {
+        Ok(())
+    } else {
+        Err("The account changed during provider discovery.".into())
+    }
+}
+
 fn list_backends_blocking(app: tauri::AppHandle) -> Result<Vec<BackendProvider>, String> {
     let internal_user_id = require_current_internal_user()?;
     let connected = connected_providers_for(&internal_user_id)?;
@@ -183,32 +216,32 @@ fn list_backends_blocking(app: tauri::AppHandle) -> Result<Vec<BackendProvider>,
         }
     }
     if let Some(codex) = providers.iter_mut().find(|provider| provider.id == "codex") {
-        let status = crate::codex_app_server::codex_cli_status();
-        apply_codex_cli_status(codex, &status);
-        if status.authenticated {
-            match crate::codex_app_server::codex_model_catalog() {
-                Ok(models) => {
-                    codex.models = models
-                        .into_iter()
-                        .take(MAX_BACKEND_MODELS)
-                        .map(|model| BackendModel {
-                            id: model.id,
-                            label: model.label,
-                            available: true,
-                            capabilities: Some(
-                                serde_json::json!({ "vision": model.supports_images }),
-                            ),
-                            reasoning: model.reasoning,
-                            fast_mode: model.fast_mode,
-                        })
-                        .collect();
+        match crate::codex_app_server::codex_backend_snapshot() {
+            Ok(snapshot) => {
+                apply_codex_cli_status(codex, &snapshot.status);
+                if snapshot.status.authenticated {
+                    apply_codex_models(codex, snapshot.models);
                 }
-                Err(message) => {
-                    codex.auth_state = "unavailable".to_string();
-                    codex.capabilities.clear();
-                    codex.models.clear();
-                    codex.install_hint = Some(message);
+            }
+            Err(crate::codex_app_server::CodexBackendDiscoveryError::UnsupportedAccountRead) => {
+                // Older Codex runtimes may not expose account/read. Keep the
+                // established CLI status + model probe only for that explicit
+                // protocol incompatibility; model/list never proves auth.
+                let status = crate::codex_app_server::codex_cli_status();
+                apply_codex_cli_status(codex, &status);
+                if status.authenticated {
+                    match crate::codex_app_server::codex_model_catalog() {
+                        Ok(models) => apply_codex_models(codex, models),
+                        Err(message) => mark_codex_unavailable(codex, message),
+                    }
                 }
+            }
+            Err(crate::codex_app_server::CodexBackendDiscoveryError::Unavailable {
+                status,
+                message,
+            }) => {
+                apply_codex_cli_status(codex, &status);
+                mark_codex_unavailable(codex, message);
             }
         }
     }
@@ -271,9 +304,8 @@ fn list_backends_blocking(app: tauri::AppHandle) -> Result<Vec<BackendProvider>,
             provider.install_hint = status.message;
         }
     }
-    if require_current_internal_user()? != internal_user_id {
-        return Err("The account changed during provider discovery.".into());
-    }
+    let current_internal_user_id = require_current_internal_user()?;
+    validate_discovery_account(&internal_user_id, &current_internal_user_id)?;
     if providers
         .iter()
         .any(|provider| provider.id == "codex" && provider.auth_state == "connected")
@@ -396,3 +428,17 @@ pub fn list_native_provider_routes() -> Result<Vec<serde_json::Value>, String> {
 }
 #[cfg(test)]
 mod provider_route_tests;
+
+#[cfg(test)]
+mod discovery_tests {
+    use super::validate_discovery_account;
+
+    #[test]
+    fn provider_discovery_rejects_an_account_switch() {
+        assert!(validate_discovery_account("account-a", "account-a").is_ok());
+        assert_eq!(
+            validate_discovery_account("account-a", "account-b").unwrap_err(),
+            "The account changed during provider discovery."
+        );
+    }
+}

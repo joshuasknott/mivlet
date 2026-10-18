@@ -500,3 +500,46 @@ fn chatgpt_browser_login_parses_only_managed_chatgpt_results() {
     }))
     .is_err());
 }
+
+#[test]
+fn account_read_requires_explicit_authenticated_account_type() {
+    assert_eq!(
+        super::catalog::classify_account_read(&json!({
+            "id": 2,
+            "result": { "account": { "type": "chatgpt" } }
+        })),
+        super::catalog::AccountReadOutcome::Authenticated("chatgpt".into())
+    );
+    assert_eq!(
+        super::catalog::classify_account_read(&json!({
+            "id": 2,
+            "result": { "account": { "type": "apiKey" } }
+        })),
+        super::catalog::AccountReadOutcome::Authenticated("api-key".into())
+    );
+    assert_eq!(
+        super::catalog::classify_account_read(&json!({
+            "id": 2,
+            "error": { "code": "not_logged_in", "message": "Sign in required" }
+        })),
+        super::catalog::AccountReadOutcome::SignedOut
+    );
+    assert_eq!(
+        super::catalog::classify_account_read(&json!({
+            "id": 2,
+            "error": { "code": "method_not_found", "message": "method not found" }
+        })),
+        super::catalog::AccountReadOutcome::Unsupported
+    );
+    assert_eq!(
+        super::catalog::classify_account_read(&json!({
+            "id": 2,
+            "error": { "code": -32601, "message": "unknown method" }
+        })),
+        super::catalog::AccountReadOutcome::Unsupported
+    );
+    assert_eq!(
+        super::catalog::classify_account_read(&json!({ "id": 2, "result": {} })),
+        super::catalog::AccountReadOutcome::Malformed
+    );
+}

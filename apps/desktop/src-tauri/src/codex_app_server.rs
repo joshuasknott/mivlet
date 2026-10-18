@@ -33,13 +33,12 @@ mod login;
 mod steering;
 #[path = "codex_app_server/turns.rs"]
 mod turns;
-use discovery::{
-    codex_candidates_from, codex_command, find_codex_executable, missing_codex_runtime_message,
-};
-use login::{
-    chatgpt_login_details, receive_codex_value, start_codex_browser_login_blocking,
-    validated_codex_auth_url,
-};
+#[cfg(test)]
+use discovery::codex_candidates_from;
+use discovery::{codex_command, find_codex_executable, missing_codex_runtime_message};
+#[cfg(test)]
+use login::{chatgpt_login_details, validated_codex_auth_url};
+use login::{receive_codex_value, start_codex_browser_login_blocking};
 #[tauri::command]
 pub fn codex_cli_status() -> CodexCliStatus {
     catalog::codex_cli_status()
@@ -53,6 +52,13 @@ pub fn codex_cli_status() -> CodexCliStatus {
 pub(crate) fn codex_model_catalog() -> Result<Vec<CodexModelCatalogEntry>, String> {
     catalog::codex_model_catalog()
 }
+
+pub(crate) fn codex_backend_snapshot(
+) -> Result<catalog::CodexBackendSnapshot, catalog::CodexBackendDiscoveryError> {
+    catalog::codex_backend_snapshot()
+}
+
+pub(crate) use catalog::CodexBackendDiscoveryError;
 
 pub(crate) use steering::{steer_active_turn, SteeringDelivery};
 use turns::{
