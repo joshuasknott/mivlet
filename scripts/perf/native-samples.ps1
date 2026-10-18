@@ -7,7 +7,9 @@ $ErrorActionPreference = 'Stop'
 $launchDirectory = (Resolve-Path -LiteralPath $WorkingDirectory).Path
 $launchedAt = [datetime]::UtcNow.ToString('o')
 $watch = [System.Diagnostics.Stopwatch]::StartNew()
-$rootProcess = Start-Process -FilePath $Executable -WorkingDirectory $launchDirectory -WindowStyle Hidden -PassThru
+# This is the interactive app under observation, not a background helper.
+# Preserve its ordinary visible startup and WebView activation behavior.
+$rootProcess = Start-Process -FilePath $Executable -WorkingDirectory $launchDirectory -WindowStyle Normal -PassThru
 # Retain the original kernel process handle throughout observation. Looking up
 # its PID again could attach to an unrelated process after Windows reuses it.
 $null = $rootProcess.Handle

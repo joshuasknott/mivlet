@@ -22,6 +22,12 @@ The profile workflow does not replace required PR checks or full validation.
 
 Close Mivlet normally before each run, then on Windows run:
 
+Keep the desktop unlocked. The observer starts the measured app with a normal,
+visible window; hiding it changes WebView activation and can invalidate startup
+observations. The sampler itself stays hidden. Discard a run that becomes
+unresponsive or never reaches the intended workspace, even if it initially
+exposed a titled native window.
+
 ```powershell
 node scripts/perf/native-observation.mjs --exe C:/path/to/mivlet-desktop.exe --duration 60 --output output/native-run.json
 ```
