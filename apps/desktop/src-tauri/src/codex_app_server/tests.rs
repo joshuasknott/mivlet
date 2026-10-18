@@ -150,6 +150,7 @@ use super::{
     CodexCliStatus, CodexServiceTier, CodexTurnStartRequest,
 };
 use serde_json::json;
+use std::collections::VecDeque;
 
 #[test]
 fn approval_responses_preserve_rpc_id_types() {
@@ -527,6 +528,13 @@ fn account_read_requires_explicit_authenticated_account_type() {
     assert_eq!(
         super::catalog::classify_account_read(&json!({
             "id": 2,
+            "result": { "account": null }
+        })),
+        super::catalog::AccountReadOutcome::SignedOut
+    );
+    assert_eq!(
+        super::catalog::classify_account_read(&json!({
+            "id": 2,
             "error": { "code": "method_not_found", "message": "method not found" }
         })),
         super::catalog::AccountReadOutcome::Unsupported
@@ -541,5 +549,122 @@ fn account_read_requires_explicit_authenticated_account_type() {
     assert_eq!(
         super::catalog::classify_account_read(&json!({ "id": 2, "result": {} })),
         super::catalog::AccountReadOutcome::Malformed
+    );
+    assert_eq!(
+        super::catalog::classify_account_read(&json!({
+            "id": 2,
+            "result": { "account": { "type": "unexpected" } }
+        })),
+        super::catalog::AccountReadOutcome::Malformed
+    );
+}
+
+struct MockCatalogClient {
+    requests: Vec<serde_json::Value>,
+    responses: VecDeque<serde_json::Value>,
+}
+
+impl super::catalog::CodexRpcClient for MockCatalogClient {
+    fn send(&mut self, value: &serde_json::Value) -> Result<(), String> {
+        self.requests.push(value.clone());
+        Ok(())
+    }
+
+    fn receive_response(
+        &mut self,
+        id: i64,
+        _deadline: std::time::Instant,
+    ) -> Result<serde_json::Value, String> {
+        let response = self
+            .responses
+            .pop_front()
+            .ok_or_else(|| "mock response exhausted".to_string())?;
+        if response.get("id").and_then(serde_json::Value::as_i64) != Some(id) {
+            return Err("mock response id mismatch".to_string());
+        }
+        Ok(response)
+    }
+}
+
+fn mock_catalog_client(responses: Vec<serde_json::Value>) -> MockCatalogClient {
+    MockCatalogClient {
+        requests: Vec::new(),
+        responses: responses.into(),
+    }
+}
+
+#[test]
+fn combined_catalog_probe_gates_model_list_on_authenticated_account() {
+    let mut client = mock_catalog_client(vec![
+        json!({ "id": 1, "result": {} }),
+        json!({ "id": 2, "result": { "account": { "type": "chatgpt" } } }),
+        json!({ "id": 3, "result": { "data": [{
+            "model": "gpt-5", "displayName": "GPT-5", "isDefault": true,
+            "inputModalities": ["text"]
+        }] } }),
+    ]);
+    let snapshot = super::catalog::discover_backend_with_client(&mut client, Some("v".into()))
+        .expect("authenticated probe succeeds");
+    assert!(snapshot.status.authenticated);
+    assert_eq!(snapshot.status.auth_method.as_deref(), Some("chatgpt"));
+    assert_eq!(snapshot.models.len(), 1);
+    assert_eq!(
+        client
+            .requests
+            .iter()
+            .filter_map(|request| request.get("method").and_then(|method| method.as_str()))
+            .collect::<Vec<_>>(),
+        vec!["initialize", "initialized", "account/read", "model/list"]
+    );
+}
+
+#[test]
+fn combined_catalog_probe_stops_after_signed_out_account() {
+    let mut client = mock_catalog_client(vec![
+        json!({ "id": 1, "result": {} }),
+        json!({ "id": 2, "result": { "account": null } }),
+    ]);
+    let snapshot = super::catalog::discover_backend_with_client(&mut client, Some("v".into()))
+        .expect("signed-out probe is a valid result");
+    assert!(!snapshot.status.authenticated);
+    assert!(snapshot.models.is_empty());
+    assert_eq!(
+        client
+            .requests
+            .iter()
+            .filter_map(|request| request.get("method").and_then(|method| method.as_str()))
+            .collect::<Vec<_>>(),
+        vec!["initialize", "initialized", "account/read"]
+    );
+}
+
+#[test]
+fn combined_catalog_probe_stops_on_initialization_and_model_errors() {
+    let mut initialization_error = mock_catalog_client(vec![json!({
+        "id": 1,
+        "error": { "code": "bad_initialize" }
+    })]);
+    assert!(matches!(
+        super::catalog::discover_backend_with_client(&mut initialization_error, Some("v".into())),
+        Err(super::catalog::CodexBackendDiscoveryError::Unavailable { .. })
+    ));
+    assert_eq!(initialization_error.requests.len(), 1);
+
+    let mut model_error = mock_catalog_client(vec![
+        json!({ "id": 1, "result": {} }),
+        json!({ "id": 2, "result": { "account": { "type": "apiKey" } } }),
+        json!({ "id": 3, "error": { "code": "model_failure" } }),
+    ]);
+    assert!(matches!(
+        super::catalog::discover_backend_with_client(&mut model_error, Some("v".into())),
+        Err(super::catalog::CodexBackendDiscoveryError::Unavailable { .. })
+    ));
+    assert_eq!(
+        model_error
+            .requests
+            .iter()
+            .filter_map(|request| request.get("method").and_then(|method| method.as_str()))
+            .collect::<Vec<_>>(),
+        vec!["initialize", "initialized", "account/read", "model/list"]
     );
 }

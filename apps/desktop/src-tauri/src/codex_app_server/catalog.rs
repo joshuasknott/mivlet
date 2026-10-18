@@ -28,6 +28,11 @@ struct CodexAppServerClient {
     reader: Option<thread::JoinHandle<()>>,
 }
 
+pub(super) trait CodexRpcClient {
+    fn send(&mut self, value: &Value) -> Result<(), String>;
+    fn receive_response(&mut self, id: i64, deadline: Instant) -> Result<Value, String>;
+}
+
 impl CodexAppServerClient {
     fn start(path: &PathBuf) -> Result<Self, String> {
         let mut command = codex_command(path)?;
@@ -66,12 +71,7 @@ impl CodexAppServerClient {
         })
     }
 
-    fn send(&self, value: &Value) -> Result<(), String> {
-        write_json_line(&self.stdin, value)
-    }
-
-    fn receive_response(&self, id: i64) -> Result<Value, String> {
-        let deadline = Instant::now() + Duration::from_secs(10);
+    fn receive_response_inner(&self, id: i64, deadline: Instant) -> Result<Value, String> {
         loop {
             let remaining = deadline.saturating_duration_since(Instant::now());
             if remaining.is_zero() {
@@ -87,34 +87,22 @@ impl CodexAppServerClient {
         }
     }
 
-    fn initialize(&self) -> Result<(), String> {
-        self.send(&json!({
-            "id": 1,
-            "method": "initialize",
-            "params": {
-                "clientInfo": {
-                    "name": "mivlet",
-                    "title": "Mivlet",
-                    "version": env!("CARGO_PKG_VERSION")
-                },
-                "capabilities": {
-                    "experimentalApi": true,
-                    "requestAttestation": false
-                }
-            }
-        }))?;
-        let response = self.receive_response(1)?;
-        if response.get("error").is_some() {
-            return Err("Codex app-server initialization failed.".into());
-        }
-        self.send(&json!({ "method": "initialized" }))
-    }
-
     fn shutdown(&mut self) {
         self.child.terminate();
-        if let Some(reader) = self.reader.take() {
-            let _ = reader.join();
-        }
+        // A provider descendant can inherit stdout after the supervised root
+        // exits on Unix. Dropping the handle keeps shutdown bounded; Windows
+        // job supervision still terminates the complete provider tree.
+        self.reader.take();
+    }
+}
+
+impl CodexRpcClient for CodexAppServerClient {
+    fn send(&mut self, value: &Value) -> Result<(), String> {
+        write_json_line(&self.stdin, value)
+    }
+
+    fn receive_response(&mut self, id: i64, deadline: Instant) -> Result<Value, String> {
+        self.receive_response_inner(id, deadline)
     }
 }
 
@@ -189,20 +177,50 @@ pub(super) fn codex_backend_snapshot() -> Result<CodexBackendSnapshot, CodexBack
             message,
         }
     })?;
-    client
-        .initialize()
-        .map_err(|message| CodexBackendDiscoveryError::Unavailable {
+    discover_backend_with_client(&mut client, version)
+}
+
+fn initialize_client(client: &mut impl CodexRpcClient, deadline: Instant) -> Result<(), String> {
+    client.send(&json!({
+        "id": 1,
+        "method": "initialize",
+        "params": {
+            "clientInfo": {
+                "name": "mivlet",
+                "title": "Mivlet",
+                "version": env!("CARGO_PKG_VERSION")
+            },
+            "capabilities": {
+                "experimentalApi": true,
+                "requestAttestation": false
+            }
+        }
+    }))?;
+    let response = client.receive_response(1, deadline)?;
+    if response.get("error").is_some() {
+        return Err("Codex app-server initialization failed.".into());
+    }
+    client.send(&json!({ "method": "initialized" }))
+}
+
+pub(super) fn discover_backend_with_client(
+    client: &mut impl CodexRpcClient,
+    version: Option<String>,
+) -> Result<CodexBackendSnapshot, CodexBackendDiscoveryError> {
+    let deadline = Instant::now() + Duration::from_secs(20);
+    initialize_client(client, deadline).map_err(|message| {
+        CodexBackendDiscoveryError::Unavailable {
             status: status_for_auth(version.clone(), false, None),
             message,
-        })?;
-
+        }
+    })?;
     let account_response = client
         .send(&json!({
             "id": 2,
             "method": "account/read",
             "params": { "refreshToken": false }
         }))
-        .and_then(|_| client.receive_response(2))
+        .and_then(|_| client.receive_response(2, deadline))
         .map_err(|message| CodexBackendDiscoveryError::Unavailable {
             status: status_for_auth(version.clone(), false, None),
             message,
@@ -234,7 +252,7 @@ pub(super) fn codex_backend_snapshot() -> Result<CodexBackendSnapshot, CodexBack
             "method": "model/list",
             "params": { "limit": 100 }
         }))
-        .and_then(|_| client.receive_response(3))
+        .and_then(|_| client.receive_response(3, deadline))
         .map_err(|message| CodexBackendDiscoveryError::Unavailable {
             status: status.clone(),
             message,
@@ -288,8 +306,14 @@ pub(super) fn classify_account_read(value: &Value) -> AccountReadOutcome {
             AccountReadOutcome::SignedOut
         };
     }
-    let Some(account_type) = value
-        .pointer("/result/account/type")
+    let Some(account) = value.pointer("/result/account") else {
+        return AccountReadOutcome::Malformed;
+    };
+    if account.is_null() {
+        return AccountReadOutcome::SignedOut;
+    }
+    let Some(account_type) = account
+        .get("type")
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|value| !value.is_empty())
@@ -298,8 +322,8 @@ pub(super) fn classify_account_read(value: &Value) -> AccountReadOutcome {
     };
     let auth_method = match account_type.to_ascii_lowercase().as_str() {
         "chatgpt" => "chatgpt",
-        "apikey" | "api-key" | "api_key" => "api-key",
-        _ => "provider-login",
+        "apikey" => "api-key",
+        _ => return AccountReadOutcome::Malformed,
     };
     AccountReadOutcome::Authenticated(auth_method.to_string())
 }
@@ -340,13 +364,14 @@ fn is_unsupported_account_read(value: &Value) -> bool {
 pub(super) fn codex_model_catalog() -> Result<Vec<CodexModelCatalogEntry>, String> {
     let path = find_codex_executable().ok_or_else(missing_codex_runtime_message)?;
     let mut client = CodexAppServerClient::start(&path)?;
-    client.initialize()?;
+    let deadline = Instant::now() + Duration::from_secs(10);
+    initialize_client(&mut client, deadline)?;
     client.send(&json!({
         "id": 2,
         "method": "model/list",
         "params": { "limit": 100 }
     }))?;
-    let response = client.receive_response(2)?;
+    let response = client.receive_response(2, deadline)?;
     parse_model_list(&response)
 }
 
