@@ -68,3 +68,23 @@ Run `node --test scripts/perf/native-observation.test.mjs` for process attributi
 and statistics regressions. The same suite is included in `pnpm perf:test` and
 the full validation gate. These deterministic tests do not replace a real native
 observation.
+
+## Codex discovery memory
+
+Auth and model discovery share one fresh, supervised Codex app-server. Discovery
+uses a temporary working directory with project documents, MCP servers and turn
+tools disabled; actual agent turns keep their existing execution configuration.
+The metadata reader accepts at most 1 MiB per line and queues at most eight raw
+frames before parsing. Oversized metadata fails closed with a clear error. The
+bound applies to metadata, not conversation output, and protects Mivlet's heap
+from an unbounded provider stream.
+
+Distinguish that buffer from the provider process's own memory. On the observed
+Codex 0.163.0-alpha.10.2 Windows runtime, fresh authenticated discovery still peaks
+near 518 MiB of private committed memory. Public source ties the encrypted
+credential path to age/scrypt; this is source-correlated evidence, not a heap
+trace. Isolating discovery did not remove that allocation in controlled probes.
+Keep account verification fresh and preserve the provider-owned keyring store.
+Do not substitute stale authentication, plaintext credentials or weaker
+encryption to claim a lower startup peak. Re-measure after provider runtime
+changes and report provider and Mivlet process memory separately.

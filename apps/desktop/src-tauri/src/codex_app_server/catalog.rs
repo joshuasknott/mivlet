@@ -1,5 +1,9 @@
 use super::*;
 
+#[path = "catalog_transport.rs"]
+mod transport;
+use transport::CodexAppServerClient;
+
 #[derive(Debug)]
 pub(crate) enum CodexBackendDiscoveryError {
     UnsupportedAccountRead,
@@ -22,95 +26,9 @@ pub(super) enum AccountReadOutcome {
     Malformed,
 }
 
-struct CodexAppServerClient {
-    child: crate::provider_process::SupervisedChild,
-    stdin: Arc<Mutex<ChildStdin>>,
-    receiver: mpsc::Receiver<Value>,
-    reader: Option<thread::JoinHandle<()>>,
-}
-
 pub(super) trait CodexRpcClient {
     fn send(&mut self, value: &Value) -> Result<(), String>;
     fn receive_response(&mut self, id: i64, deadline: Instant) -> Result<Value, String>;
-}
-
-impl CodexAppServerClient {
-    fn start(path: &PathBuf) -> Result<Self, String> {
-        let mut command = codex_command(path)?;
-        command
-            .arg("app-server")
-            .arg("--stdio")
-            .stdin(Stdio::piped())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::null());
-        let mut child = crate::provider_process::SupervisedChild::spawn(command)
-            .map_err(|_| "Mivlet could not start Codex app-server.".to_string())?;
-        let stdin =
-            Arc::new(Mutex::new(child.stdin.take().ok_or_else(|| {
-                "Codex app-server stdin was unavailable.".to_string()
-            })?));
-        let stdout = child
-            .stdout
-            .take()
-            .ok_or_else(|| "Codex app-server stdout was unavailable.".to_string())?;
-        let (sender, receiver) = mpsc::channel();
-        let reader = thread::spawn(move || {
-            let reader = BufReader::new(stdout);
-            for line in reader.lines().map_while(Result::ok) {
-                if let Ok(value) = serde_json::from_str::<Value>(&line) {
-                    if sender.send(value).is_err() {
-                        break;
-                    }
-                }
-            }
-        });
-        Ok(Self {
-            child,
-            stdin,
-            receiver,
-            reader: Some(reader),
-        })
-    }
-
-    fn receive_response_inner(&self, id: i64, deadline: Instant) -> Result<Value, String> {
-        loop {
-            let remaining = deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err("Codex app-server did not return the requested response.".into());
-            }
-            let value = self
-                .receiver
-                .recv_timeout(remaining)
-                .map_err(|_| "Codex app-server did not return the requested response.")?;
-            if value.get("id").and_then(Value::as_i64) == Some(id) {
-                return Ok(value);
-            }
-        }
-    }
-
-    fn shutdown(&mut self) {
-        self.child.terminate();
-        // A provider descendant can inherit stdout after the supervised root
-        // exits on Unix. Dropping the handle keeps shutdown bounded; Windows
-        // job supervision still terminates the complete provider tree.
-        self.reader.take();
-    }
-}
-
-impl CodexRpcClient for CodexAppServerClient {
-    fn send(&mut self, value: &Value) -> Result<(), String> {
-        write_json_line(&self.stdin, value)
-    }
-
-    fn receive_response(&mut self, id: i64, deadline: Instant) -> Result<Value, String> {
-        self.receive_response_inner(id, deadline)
-    }
-}
-
-impl Drop for CodexAppServerClient {
-    fn drop(&mut self) {
-        self.shutdown();
-    }
 }
 
 pub(super) fn codex_cli_status() -> CodexCliStatus {
