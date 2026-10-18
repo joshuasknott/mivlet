@@ -1,5 +1,6 @@
 use super::*;
 
+#[derive(Debug)]
 pub(crate) enum CodexBackendDiscoveryError {
     UnsupportedAccountRead,
     Unavailable {
@@ -197,7 +198,9 @@ fn initialize_client(client: &mut impl CodexRpcClient, deadline: Instant) -> Res
         }
     }))?;
     let response = client.receive_response(1, deadline)?;
-    if response.get("error").is_some() {
+    if response.get("error").is_some()
+        || response.get("result").and_then(Value::as_object).is_none()
+    {
         return Err("Codex app-server initialization failed.".into());
     }
     client.send(&json!({ "method": "initialized" }))

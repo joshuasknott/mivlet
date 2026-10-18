@@ -562,6 +562,7 @@ fn account_read_requires_explicit_authenticated_account_type() {
 struct MockCatalogClient {
     requests: Vec<serde_json::Value>,
     responses: VecDeque<serde_json::Value>,
+    deadline: Option<std::time::Instant>,
 }
 
 impl super::catalog::CodexRpcClient for MockCatalogClient {
@@ -573,8 +574,13 @@ impl super::catalog::CodexRpcClient for MockCatalogClient {
     fn receive_response(
         &mut self,
         id: i64,
-        _deadline: std::time::Instant,
+        deadline: std::time::Instant,
     ) -> Result<serde_json::Value, String> {
+        if let Some(original) = self.deadline {
+            assert_eq!(original, deadline, "requests must share a bounded deadline");
+        } else {
+            self.deadline = Some(deadline);
+        }
         let response = self
             .responses
             .pop_front()
@@ -590,6 +596,7 @@ fn mock_catalog_client(responses: Vec<serde_json::Value>) -> MockCatalogClient {
     MockCatalogClient {
         requests: Vec::new(),
         responses: responses.into(),
+        deadline: None,
     }
 }
 
@@ -667,4 +674,42 @@ fn combined_catalog_probe_stops_on_initialization_and_model_errors() {
             .collect::<Vec<_>>(),
         vec!["initialize", "initialized", "account/read", "model/list"]
     );
+}
+
+#[test]
+fn combined_catalog_probe_distinguishes_unsupported_from_invalid_account() {
+    for (account_response, unsupported) in [
+        (json!({"id": 2, "error": {"code": -32601}}), true),
+        (
+            json!({"id": 2, "result": {"account": {"type": "unexpected"}}}),
+            false,
+        ),
+        (json!({"id": 2, "result": {}}), false),
+    ] {
+        let mut client =
+            mock_catalog_client(vec![json!({"id": 1, "result": {}}), account_response]);
+        let result = super::catalog::discover_backend_with_client(&mut client, None);
+        if unsupported {
+            assert!(matches!(
+                result,
+                Err(super::catalog::CodexBackendDiscoveryError::UnsupportedAccountRead)
+            ));
+        } else {
+            assert!(matches!(
+                result,
+                Err(super::catalog::CodexBackendDiscoveryError::Unavailable { .. })
+            ));
+        }
+        assert_eq!(
+            client.requests.len(),
+            3,
+            "account failures must not request models"
+        );
+    }
+    let mut client = mock_catalog_client(vec![json!({"id": 1})]);
+    assert!(matches!(
+        super::catalog::discover_backend_with_client(&mut client, None),
+        Err(super::catalog::CodexBackendDiscoveryError::Unavailable { .. })
+    ));
+    assert_eq!(client.requests.len(), 1);
 }
