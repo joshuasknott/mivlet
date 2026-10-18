@@ -11,9 +11,9 @@ pub(super) struct NativeIdentitySecretStore;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct KeyringChunkManifest {
-    generation: String,
-    chunks: usize,
-    digest: String,
+    pub(super) generation: String,
+    pub(super) chunks: usize,
+    pub(super) digest: String,
 }
 
 pub(super) fn split_keyring_secret(secret: &str) -> Vec<String> {

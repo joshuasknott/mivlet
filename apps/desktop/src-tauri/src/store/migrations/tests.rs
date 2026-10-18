@@ -1,10 +1,11 @@
 //! Forward migration regression tests.
 
+use super::helpers::{audit_event_has_column, foreign_key_target, table_exists, table_has_column};
 use super::*;
 use crate::store::schema::{
     CURRENT_SCHEMA_VERSION, LEGACY_ORCHESTRATION_SCHEMA_V37, SCHEMA_V1, SCHEMA_V1_TO_V2,
 };
-use rusqlite::Connection;
+use rusqlite::{Connection, OptionalExtension};
 
 fn conn() -> Connection {
     let conn = Connection::open_in_memory().unwrap();

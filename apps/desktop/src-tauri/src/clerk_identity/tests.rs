@@ -180,7 +180,6 @@ fn account_entry_preserves_mode_without_repeating_authentication() {
         .is_err());
     }
 }
-use super::*;
 use std::sync::Mutex;
 
 #[derive(Default)]

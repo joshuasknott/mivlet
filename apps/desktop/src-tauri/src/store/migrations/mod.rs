@@ -216,9 +216,3 @@ use ownership::{
     apply_v8_to_v9, apply_v9_to_v10,
 };
 use repairs::{apply_v35_to_v36, apply_v36_to_v37, apply_v38_to_v39, apply_v42_to_v43};
-
-#[cfg(test)]
-use helpers::{
-    audit_event_has_column, foreign_key_target, table_exists, table_has_column,
-    table_has_composite_primary_key,
-};

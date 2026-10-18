@@ -1,4 +1,7 @@
 use super::*;
+use reqwest::StatusCode;
+
+use super::transport::{has_any_scope, provider_error};
 #[test]
 fn large_read_keeps_records_and_cursor_as_valid_json() {
     let items: Vec<Value> = (0..50).map(|index| json!({"id": format!("file-{index}"), "name": "Report", "description": "x".repeat(500)})).collect();

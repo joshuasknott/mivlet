@@ -184,15 +184,15 @@ pub(super) struct CustomProviderCredential {
     version: u8,
     kind: String,
     base_url: String,
-    model_id: String,
+    pub(super) model_id: String,
     api_key: Option<String>,
 }
 
 #[derive(Clone)]
 pub(super) struct ResolvedProviderConnection {
-    chat_endpoint: String,
-    models_endpoint: Option<String>,
-    auth_header: Option<(String, String)>,
+    pub(super) chat_endpoint: String,
+    pub(super) models_endpoint: Option<String>,
+    pub(super) auth_header: Option<(String, String)>,
 }
 
 pub(super) fn normalize_custom_base_url(raw: &str) -> Result<String, String> {

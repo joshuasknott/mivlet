@@ -4,11 +4,11 @@ use super::*;
 
 #[derive(Clone, Debug)]
 pub(super) struct ClerkIdentityConfig {
-    issuer: String,
-    client_id: String,
-    audience: String,
-    authorized_party: Option<String>,
-    scopes: Vec<String>,
+    pub(super) issuer: String,
+    pub(super) client_id: String,
+    pub(super) audience: String,
+    pub(super) authorized_party: Option<String>,
+    pub(super) scopes: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize)]
@@ -21,7 +21,7 @@ pub(crate) enum ConvexFunctionType {
 
 #[allow(dead_code)] // Reserved for the focused native hosted-account adapter.
 impl ConvexFunctionType {
-    fn endpoint(self) -> &'static str {
+    pub(super) fn endpoint(self) -> &'static str {
         match self {
             Self::Query => "query",
             Self::Mutation => "mutation",
@@ -42,32 +42,32 @@ pub(crate) struct ConvexIdentityCallRequest {
 #[allow(dead_code)]
 #[derive(Serialize)]
 pub(super) struct ConvexFunctionBody<'a> {
-    path: &'a str,
-    args: &'a Value,
-    format: &'static str,
+    pub(super) path: &'a str,
+    pub(super) args: &'a Value,
+    pub(super) format: &'static str,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct AuthorizationServerMetadata {
-    issuer: String,
-    authorization_endpoint: String,
-    token_endpoint: String,
-    jwks_uri: String,
-    userinfo_endpoint: Option<String>,
+    pub(super) issuer: String,
+    pub(super) authorization_endpoint: String,
+    pub(super) token_endpoint: String,
+    pub(super) jwks_uri: String,
+    pub(super) userinfo_endpoint: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct Jwks {
-    keys: Vec<Jwk>,
+    pub(super) keys: Vec<Jwk>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct Jwk {
-    kid: Option<String>,
-    kty: String,
-    alg: Option<String>,
-    n: String,
-    e: String,
+    pub(super) kid: Option<String>,
+    pub(super) kty: String,
+    pub(super) alg: Option<String>,
+    pub(super) n: String,
+    pub(super) e: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -78,7 +78,7 @@ pub(super) enum AudienceClaim {
 }
 
 impl AudienceClaim {
-    fn contains(&self, expected: &str) -> bool {
+    pub(super) fn contains(&self, expected: &str) -> bool {
         match self {
             AudienceClaim::One(value) => value == expected,
             AudienceClaim::Many(values) => values.iter().any(|value| value == expected),
@@ -88,86 +88,86 @@ impl AudienceClaim {
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct TokenClaims {
-    iss: String,
-    sub: String,
+    pub(super) iss: String,
+    pub(super) sub: String,
     #[serde(default)]
-    aud: Option<AudienceClaim>,
-    exp: u64,
+    pub(super) aud: Option<AudienceClaim>,
+    pub(super) exp: u64,
     #[serde(default)]
-    nbf: Option<u64>,
+    pub(super) nbf: Option<u64>,
     #[serde(default)]
-    iat: Option<u64>,
+    pub(super) iat: Option<u64>,
     #[serde(default)]
-    azp: Option<String>,
+    pub(super) azp: Option<String>,
     #[serde(default)]
-    sid: Option<String>,
+    pub(super) sid: Option<String>,
     #[serde(default)]
-    jti: Option<String>,
+    pub(super) jti: Option<String>,
     #[serde(default)]
-    email: Option<String>,
+    pub(super) email: Option<String>,
     #[serde(default)]
-    email_verified: Option<bool>,
+    pub(super) email_verified: Option<bool>,
     #[serde(default)]
-    name: Option<String>,
+    pub(super) name: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct TokenResponse {
-    access_token: String,
+    pub(super) access_token: String,
     #[serde(default)]
-    id_token: Option<String>,
+    pub(super) id_token: Option<String>,
     #[serde(default)]
-    refresh_token: Option<String>,
+    pub(super) refresh_token: Option<String>,
     #[serde(default)]
-    token_type: Option<String>,
+    pub(super) token_type: Option<String>,
     #[serde(default)]
-    expires_in: Option<u64>,
+    pub(super) expires_in: Option<u64>,
     #[serde(default)]
-    scope: Option<String>,
+    pub(super) scope: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct UserInfoResponse {
     #[serde(default)]
-    sub: Option<String>,
+    pub(super) sub: Option<String>,
     #[serde(default)]
-    email: Option<String>,
+    pub(super) email: Option<String>,
     #[serde(default)]
-    email_verified: Option<bool>,
+    pub(super) email_verified: Option<bool>,
     #[serde(default)]
-    name: Option<String>,
+    pub(super) name: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct VerifiedIdentityAttribute {
-    kind: String,
-    normalized_value_hash: String,
-    verified_at: String,
+    pub(super) kind: String,
+    pub(super) normalized_value_hash: String,
+    pub(super) verified_at: String,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct VerifiedAccountDisplayAttributes {
     #[serde(skip_serializing_if = "Option::is_none")]
-    display_name: Option<String>,
+    pub(super) display_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    email: Option<String>,
+    pub(super) email: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct AccountAuthenticationFacts {
-    provider: String,
-    normalized_issuer: String,
-    subject: String,
-    authentication_event_ref: String,
-    session_ref: String,
-    authenticated_at: String,
-    expires_at: String,
-    verified_attributes: Vec<VerifiedIdentityAttribute>,
+    pub(super) provider: String,
+    pub(super) normalized_issuer: String,
+    pub(super) subject: String,
+    pub(super) authentication_event_ref: String,
+    pub(super) session_ref: String,
+    pub(super) authenticated_at: String,
+    pub(super) expires_at: String,
+    pub(super) verified_attributes: Vec<VerifiedIdentityAttribute>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    verified_display_attributes: Option<VerifiedAccountDisplayAttributes>,
+    pub(super) verified_display_attributes: Option<VerifiedAccountDisplayAttributes>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -182,48 +182,48 @@ pub(crate) struct IdentityStatus {
     audience: Option<String>,
     scopes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    authentication: Option<AccountAuthenticationFacts>,
+    pub(super) authentication: Option<AccountAuthenticationFacts>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(super) struct LegacyIdentitySummary {
-    user_id: String,
+    pub(super) user_id: String,
     #[serde(default)]
-    display_name: Option<String>,
+    pub(super) display_name: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct StoredSession {
-    access_token: String,
-    refresh_token: Option<String>,
-    token_type: String,
-    expires_at: u64,
-    scopes: Vec<String>,
-    issuer: String,
-    audience: String,
-    client_id: String,
-    authorized_party: Option<String>,
+    pub(super) access_token: String,
+    pub(super) refresh_token: Option<String>,
+    pub(super) token_type: String,
+    pub(super) expires_at: u64,
+    pub(super) scopes: Vec<String>,
+    pub(super) issuer: String,
+    pub(super) audience: String,
+    pub(super) client_id: String,
+    pub(super) authorized_party: Option<String>,
     #[serde(default)]
-    authentication: Option<AccountAuthenticationFacts>,
+    pub(super) authentication: Option<AccountAuthenticationFacts>,
     #[serde(default, rename = "identity", skip_serializing)]
-    legacy_identity: Option<LegacyIdentitySummary>,
+    pub(super) legacy_identity: Option<LegacyIdentitySummary>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(super) struct PendingClerkOAuth {
-    state: String,
-    verifier: String,
-    redirect_uri: String,
-    issuer: String,
-    client_id: String,
-    audience: String,
-    authorized_party: Option<String>,
-    scopes: Vec<String>,
-    token_endpoint: String,
-    jwks_uri: String,
-    userinfo_endpoint: Option<String>,
-    created_at: u64,
+    pub(super) state: String,
+    pub(super) verifier: String,
+    pub(super) redirect_uri: String,
+    pub(super) issuer: String,
+    pub(super) client_id: String,
+    pub(super) audience: String,
+    pub(super) authorized_party: Option<String>,
+    pub(super) scopes: Vec<String>,
+    pub(super) token_endpoint: String,
+    pub(super) jwks_uri: String,
+    pub(super) userinfo_endpoint: Option<String>,
+    pub(super) created_at: u64,
 }
 
 pub(super) fn now_epoch() -> u64 {

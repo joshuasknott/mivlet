@@ -27,17 +27,20 @@ mod providers_tests;
 
 mod providers;
 
-pub use providers::{
-    auth_header_for, endpoint_for, endpoint_for_model, extra_headers, provider_kind, ProviderKind,
-};
+#[cfg(test)]
+use providers::{auth_header_for, endpoint_for, endpoint_for_model};
 pub(crate) use providers::{
     configured_custom_provider_model_id, normalize_custom_model_id, validate_native_credential,
 };
 use providers::{
-    configured_custom_provider_result, is_additional_native_provider, normalize_alibaba_base_url,
-    openai_compat_profile, parse_alibaba_credential, parse_custom_provider_credential,
-    resolve_provider_connection, shape_deepseek_egress_body, shape_provider_egress_body,
-    OPENAI_COMPAT_PROFILES,
+    configured_custom_provider_result, is_additional_native_provider,
+    parse_custom_provider_credential, resolve_provider_connection, shape_provider_egress_body,
+};
+pub use providers::{extra_headers, provider_kind, ProviderKind};
+#[cfg(test)]
+use providers::{
+    normalize_alibaba_base_url, openai_compat_profile, parse_alibaba_credential,
+    shape_deepseek_egress_body, OPENAI_COMPAT_PROFILES,
 };
 
 /// Strip the SSE `data:` prefix; return None for blank lines, comments,
@@ -1283,6 +1286,8 @@ pub fn cancel_backend_completion(request_id: String) -> Result<bool, String> {
 // ---------------------------------------------------------------------------
 
 mod discovery;
+#[cfg(test)]
+use discovery::is_generation_model;
 use discovery::{
     discovery_cursor, MAX_DISCOVERED_MODELS, MAX_DISCOVERY_PAGES, MAX_DISCOVERY_RESPONSE_BYTES,
 };

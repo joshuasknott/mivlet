@@ -9,7 +9,7 @@ use base64::{
     engine::general_purpose::{STANDARD, URL_SAFE_NO_PAD},
     Engine,
 };
-use reqwest::{Method, StatusCode, Url};
+use reqwest::{Method, Url};
 use serde_json::{json, Value};
 
 use crate::{
@@ -45,14 +45,12 @@ const CALENDAR_EVENTS: &str = "https://www.googleapis.com/auth/calendar.events";
 mod transport;
 pub(crate) use transport::cancel_google_request;
 use transport::{
-    api_url, error, has_any_scope, new_call_id, provider_error, require_scope, send_json,
-    send_raw_json,
+    api_url, error, maybe_applied_error, new_call_id, require_scope, send, send_json, send_raw_json,
 };
 
 mod data;
 use data::{
     calendar_item, drive_item, epoch_string, escape_drive_query, gmail_header, gmail_item, string,
-    strings,
 };
 
 /// Cooperatively cancel an in-flight Google read or mutation. Unknown or

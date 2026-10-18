@@ -59,7 +59,7 @@ pub struct ModelDiscoveryResult {
     pub message: Option<String>,
 }
 
-fn is_generation_model(provider_id: &str, model: &serde_json::Value, id: &str) -> bool {
+pub(super) fn is_generation_model(provider_id: &str, model: &serde_json::Value, id: &str) -> bool {
     if provider_kind(provider_id) == ProviderKind::Gemini {
         return model
             .get("supportedGenerationMethods")

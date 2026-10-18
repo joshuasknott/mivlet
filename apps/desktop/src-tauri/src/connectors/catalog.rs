@@ -3,21 +3,21 @@
 use super::*;
 
 pub(crate) struct ConnectorCatalogEntry {
-    id: &'static str,
-    name: &'static str,
-    auth_mode: &'static str,
-    permissions: &'static [&'static str],
-    scopes: &'static [(&'static str, &'static str, &'static str, bool)],
-    setup_message: &'static str,
-    actions: &'static [&'static str],
+    pub(super) id: &'static str,
+    pub(super) name: &'static str,
+    pub(super) auth_mode: &'static str,
+    pub(super) permissions: &'static [&'static str],
+    pub(super) scopes: &'static [(&'static str, &'static str, &'static str, bool)],
+    pub(super) setup_message: &'static str,
+    pub(super) actions: &'static [&'static str],
 }
 
 pub(crate) struct ConnectorActionPolicy {
-    label: &'static str,
-    mode: &'static str,
-    risk_level: &'static str,
-    consequence: &'static str,
-    confirmation_phrase: Option<&'static str>,
+    pub(super) label: &'static str,
+    pub(super) mode: &'static str,
+    pub(super) risk_level: &'static str,
+    pub(super) consequence: &'static str,
+    pub(super) confirmation_phrase: Option<&'static str>,
 }
 
 pub(crate) const GITHUB_SCOPES: &[(&str, &str, &str, bool)] = &[
