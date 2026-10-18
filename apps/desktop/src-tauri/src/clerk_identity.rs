@@ -14,9 +14,12 @@ mod attempt;
 mod configuration;
 mod secrets;
 mod session;
-pub(crate) use configuration::*;
-pub(super) use secrets::*;
-pub(super) use session::*;
+use configuration::*;
+pub(crate) use configuration::{
+    AccountAuthenticationFacts, ConvexFunctionType, ConvexIdentityCallRequest, IdentityStatus,
+};
+use secrets::*;
+use session::*;
 static LOGIN_ATTEMPTS: LazyLock<attempt::Attempts> = LazyLock::new(attempt::Attempts::default);
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 

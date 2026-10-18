@@ -7,8 +7,9 @@ use std::collections::{BTreeMap, BTreeSet};
 mod catalog;
 mod drive_artifacts;
 mod knowledge;
-pub(crate) use catalog::*;
-pub(super) use knowledge::*;
+pub(crate) use catalog::connection_has_disallowed_github_scope;
+use catalog::*;
+use knowledge::*;
 
 use crate::approvals::resolve_approval;
 use crate::collaboration_connectors;
