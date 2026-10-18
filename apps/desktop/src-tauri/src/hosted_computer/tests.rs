@@ -1,5 +1,6 @@
 //! Focused validation and native-secret regression tests.
 
+use super::contracts::{HostedBrowserNavigationSnapshot, HostedBrowserViewportSnapshot};
 use super::*;
 use crate::store::repos::workspace_directory as directory;
 use std::sync::Mutex;

@@ -16,10 +16,9 @@ use contracts::HostedExecutionCapabilityReceipt;
 pub use contracts::{
     CommitHostedBrowserActionRequest, CommitHostedBrowserNavigationRequest,
     CommitHostedProcessLaunchRequest, HostedBrowserActionDraft, HostedBrowserActionProposal,
-    HostedBrowserNavigateDraft, HostedBrowserNavigateProposal, HostedBrowserNavigationSnapshot,
-    HostedBrowserSnapshot, HostedBrowserTarget, HostedBrowserViewportSnapshot,
-    HostedComputerProvisionReceipt, HostedExecutionNodeSnapshot, HostedProcessDraft,
-    HostedProcessLaunchProposal, HostedProcessSnapshot, HostedProcessTarget,
+    HostedBrowserNavigateDraft, HostedBrowserNavigateProposal, HostedBrowserSnapshot,
+    HostedBrowserTarget, HostedComputerProvisionReceipt, HostedExecutionNodeSnapshot,
+    HostedProcessDraft, HostedProcessLaunchProposal, HostedProcessSnapshot, HostedProcessTarget,
     PreparedHostedBrowserAction, PreparedHostedBrowserNavigation, PreparedHostedProcessLaunch,
 };
 #[cfg(test)]
