@@ -160,6 +160,7 @@ jobs:
         with:
           workspaces: apps/desktop/src-tauri
           shared-key: mivlet-windows-release
+          cache-on-failure: true
       - run: pnpm install --frozen-lockfile
       - name: Build optimized executables with their native resources
         shell: pwsh
@@ -233,6 +234,7 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Final checkout restoration failed.' }
           }
       - uses: actions/upload-artifact@v4
+        if: ${{ always() }}
         with:
           name: native-release-${{ github.sha }}
           path: output/native-release
