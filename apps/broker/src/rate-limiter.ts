@@ -41,10 +41,9 @@ export interface RateLimiter {
 export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
   const clock = options.clock ?? { nowMs: () => Date.now() };
   const maxKeys = options.maxKeys ?? 4096;
-  // `lastSeen` is tracked so an idle-key sweep can drop entries whose window has
-  // expired even when the map has not reached the hard cap, preventing unbounded
-  // growth from distinct (route + peer) keys over time.
-  const windows = new Map<string, { start: number; count: number; lastSeen: number }>();
+  // Expired windows are swept opportunistically, preventing unbounded growth
+  // from distinct (route + peer) keys over time.
+  const windows = new Map<string, { start: number; count: number }>();
 
   /** Drop every entry whose window has elapsed. Returns the number removed. */
   function sweepExpired(now: number): number {
@@ -72,11 +71,10 @@ export function createRateLimiter(options: RateLimiterOptions): RateLimiter {
             return { allowed: false, remaining: 0, retryAfterMs: options.windowMs };
           }
         }
-        windows.set(key, { start: now, count: 1, lastSeen: now });
+        windows.set(key, { start: now, count: 1 });
         return { allowed: true, remaining: options.limit - 1, retryAfterMs: options.windowMs };
       }
       existing.count += 1;
-      existing.lastSeen = now;
       const allowed = existing.count <= options.limit;
       const remaining = Math.max(0, options.limit - existing.count);
       const retryAfterMs = Math.max(0, existing.start + options.windowMs - now);
