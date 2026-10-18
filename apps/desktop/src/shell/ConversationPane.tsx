@@ -10,7 +10,6 @@ import type {
   WorkspaceView,
 } from "@mivlet/protocol";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
-import type { NativeAgentState } from "../hooks/useNativeAgent";
 import { useScopedComposer } from "../hooks/useScopedComposer";
 import { useComposerVoice } from "../hooks/useComposerVoice";
 import { useConversationScroll } from "../hooks/useConversationScroll";
@@ -31,9 +30,9 @@ import { composerModelsFor } from "./composer-models";
 import { resolveProviderModelOption } from "../lib/provider-models";
 import { Composer } from "../components/Composer";
 import { RecipientPicker } from "../components/conversation/RecipientPicker";
+import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import type { ComposerInputHandle } from "../components/ComposerInput";
 import type { ComposerAttachment } from "../lib/types";
-import { ConversationFeed } from "../components/conversation/ConversationFeed";
 import { ConversationIdentity } from "./ConversationIdentity";
 import { agentPresence } from "../lib/agent-presence";
 import { resolveWorkspaceMentions } from "../lib/collaboration-mentions";
@@ -57,13 +56,21 @@ import {
   mcpAppPanelId,
   useMcpAppApprovalTarget,
 } from "../components/conversation/McpAppApprovalPortal";
-import { conversationUi } from "../runtime/domains/conversation-ui";
-import { branchActionBlockReason, branchInputMessageId } from "../lib/conversation-branches";
+import {
+  branchActionBlockReason,
+  branchInputMessageId,
+} from "../lib/conversation-branches";
 import { useConversationOrigin } from "./useConversationOrigin";
 import type { ConversationOriginNavigation } from "./useWorkspaceNavigation";
 import { prepareExecutionAttachments } from "../lib/execution-attachments";
 import { ConversationWorkControls } from "../components/work/ConversationWorkControls";
 import { previewFeedbackWork } from "../lib/preview-feedback";
+import {
+  conversationAuthors,
+  idleAgentState,
+  pendingConversationTurns,
+  responseOutputId,
+} from "./conversation-pane-helpers";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -75,31 +82,6 @@ const ArtifactPreview = lazy(() =>
     default: module.ArtifactPreview,
   })),
 );
-
-const idleAgentState: NativeAgentState = {
-  transcript: "",
-  usage: null,
-  running: false,
-  lastError: null,
-  status: "idle",
-  recoverableAttempts: [],
-  contextReceipts: {},
-  providerRoutes: {},
-  usageReceipts: {},
-  currentAttemptId: null,
-  noTransport: false,
-};
-
-function responseOutputId(
-  messageId: string | undefined,
-  runId: string,
-  text: string,
-) {
-  let hash = 2166136261;
-  for (const character of text)
-    hash = Math.imul(hash ^ character.charCodeAt(0), 16777619);
-  return `response-${messageId ?? runId}-${(hash >>> 0).toString(36)}`;
-}
 
 export function ConversationPane({
   view,
@@ -314,36 +296,7 @@ export function ConversationPane({
     if (item)
       void service.stop(item.id).catch((failure) => service.report(failure));
   };
-  const pendingTurns: ConversationTurn[] = work
-    .filter((item) => !item.parentId && !item.runIds.length)
-    .map((item) => ({
-      id: item.id,
-      prompt: item.userRequest || item.prompt,
-      startedAt: item.createdAt,
-      endedAt: item.updatedAt,
-      parts:
-        item.status === "failed"
-          ? [
-              {
-                id: `${item.id}-error`,
-                kind: "notice",
-                error: true,
-                content: item.reason || "This request could not start.",
-              },
-            ]
-          : [],
-    }));
-  pendingTurns.push(
-    ...work.flatMap((item) =>
-      (item.steering ?? []).map((event) => ({
-        id: event.id,
-        prompt: event.text,
-        startedAt: event.createdAt,
-        endedAt: event.createdAt,
-        parts: [],
-      })),
-    ),
-  );
+  const pendingTurns: ConversationTurn[] = pendingConversationTurns(work);
   const liveStates = sessions
     .filter((session) => session.state)
     .map((session) => ({
@@ -375,7 +328,10 @@ export function ConversationPane({
     () => composerModelsFor(undefined, runtime.modelOptions),
     [runtime.modelOptions],
   );
-  const model = resolveProviderModelOption(runtime.modelOptions, profile?.modelId ?? "");
+  const model = resolveProviderModelOption(
+    runtime.modelOptions,
+    profile?.modelId ?? "",
+  );
   const appApprovals = useMcpAppApprovals(
     runtime,
     `${service.workspaceId}:${room.id}:${room.generation}`,
@@ -399,28 +355,13 @@ export function ConversationPane({
   const inlineApprovals = approvals.filter(
     (approval) => !dockedMcpApprovals.includes(approval),
   );
-  const authors: Record<string, MivletAgentProfile> = Object.fromEntries(
-    state.data.authors
-      .filter((author) => author.conversationId === room.id)
-      .map((author) => [
-        author.runId,
-        {
-          ...(agentById.get(author.agentId) ?? displayAgent),
-          id: author.agentId,
-          name: author.name,
-          avatarSeed:
-            agentById.get(author.agentId)?.avatarSeed ??
-            `blob-v1:${author.agentId}`,
-        },
-      ]),
-  );
-  for (const item of work) {
-    authors[item.id] = {
-      ...(agentById.get(item.agentId) ?? displayAgent),
-      id: item.agentId,
-      name: item.agentName,
-    };
-  }
+  const authors = conversationAuthors({
+    authors: state.data.authors,
+    work,
+    conversationId: room.id,
+    agentById,
+    fallback: displayAgent,
+  });
   const connected = [
     // Capability mentions are inserted only from the current native snapshot.
     ...builtinPluginMentions(localComputer.node?.plugins),
@@ -455,8 +396,16 @@ export function ConversationPane({
   const responder = agentById.get(
     mentions?.recipientIds[0] ?? replyTarget?.agentId ?? recipientId,
   );
-  const submissionScope = useRef({ owner, responderId: responder?.id, localAgentId: displayAgent.id });
-  submissionScope.current = { owner, responderId: responder?.id, localAgentId: displayAgent.id };
+  const submissionScope = useRef({
+    owner,
+    responderId: responder?.id,
+    localAgentId: displayAgent.id,
+  });
+  submissionScope.current = {
+    owner,
+    responderId: responder?.id,
+    localAgentId: displayAgent.id,
+  };
   const { selectBranch, submitConversationBranch, branchSelectionPending } =
     useConversationBranches({
       conversationId: room.id,
@@ -539,11 +488,14 @@ export function ConversationPane({
       const expectedOwner = owner;
       const expectedRoomGeneration = room.generation;
       const expectedResponder = responder.id;
-      const isCurrent = () => appScope.current.active && appScope.current.roomId === room.id
-        && appScope.current.generation === expectedRoomGeneration
-        && submissionScope.current.owner?.internalUserId === expectedOwner?.internalUserId
-        && submissionScope.current.owner?.memberId === expectedOwner?.memberId
-        && submissionScope.current.responderId === expectedResponder;
+      const isCurrent = () =>
+        appScope.current.active &&
+        appScope.current.roomId === room.id &&
+        appScope.current.generation === expectedRoomGeneration &&
+        submissionScope.current.owner?.internalUserId ===
+          expectedOwner?.internalUserId &&
+        submissionScope.current.owner?.memberId === expectedOwner?.memberId &&
+        submissionScope.current.responderId === expectedResponder;
       await runtime.flushSnapshot();
       await service.refresh();
       if (mentionedBuiltinPlugins(prompt).length)
@@ -570,12 +522,26 @@ export function ConversationPane({
       if (replyTarget) {
         await service.reply(replyTarget.id, replyTarget.generation, prompt);
       } else {
-        if (composer.attachments.length && submissionScope.current.localAgentId !== expectedResponder)
-          throw new Error("Choose this agent as the recipient before staging files for its request.");
+        if (
+          composer.attachments.length &&
+          submissionScope.current.localAgentId !== expectedResponder
+        )
+          throw new Error(
+            "Choose this agent as the recipient before staging files for its request.",
+          );
         const prepared = composer.attachments.length
-          ? await prepareExecutionAttachments(composer.attachments, localComputer, service.workspaceId, expectedResponder, isCurrent)
+          ? await prepareExecutionAttachments(
+              composer.attachments,
+              localComputer,
+              service.workspaceId,
+              expectedResponder,
+              isCurrent,
+            )
           : { attachments: composer.attachments };
-        if (!isCurrent()) throw new Error("The conversation or account changed before this request was saved. Your draft has been kept.");
+        if (!isCurrent())
+          throw new Error(
+            "The conversation or account changed before this request was saved. Your draft has been kept.",
+          );
         await service.submit(
           room.id,
           responder.id,
@@ -814,9 +780,22 @@ export function ConversationPane({
             {history ? (
               <ConversationRecap work={work} onInspect={onInspectWork} />
             ) : null}
-            {history ? <ConversationRestore workspaceId={service.workspaceId} conversationId={room.id} agentId={displayAgent.id}
-              blockedReason={branchSelectionPending || originNavigation.pending ? "Wait for the current conversation view to finish updating." : branchActionBlockReason(work)}
-              onReloadHistory={async () => { await service.loadHistory(room.id, true); await service.refresh(); }} /> : null}
+            {history ? (
+              <ConversationRestore
+                workspaceId={service.workspaceId}
+                conversationId={room.id}
+                agentId={displayAgent.id}
+                blockedReason={
+                  branchSelectionPending || originNavigation.pending
+                    ? "Wait for the current conversation view to finish updating."
+                    : branchActionBlockReason(work)
+                }
+                onReloadHistory={async () => {
+                  await service.loadHistory(room.id, true);
+                  await service.refresh();
+                }}
+              />
+            ) : null}
             <ConversationFeed
               messages={history?.messages ?? []}
               agent={displayAgent}
@@ -917,7 +896,11 @@ export function ConversationPane({
                 focus();
               }}
               onDraftPreview={(text, source) => {
-                const original = previewFeedbackWork(service.getSnapshot().data.work, room.id, source);
+                const original = previewFeedbackWork(
+                  service.getSnapshot().data.work,
+                  room.id,
+                  source,
+                );
                 composer.stageWorkFeedback(original.id, original.agentId, text);
                 focus();
               }}
@@ -978,8 +961,15 @@ export function ConversationPane({
           </div>
         </div>
         <div className="conversation-pane-composer">
-          <ConversationWorkControls key={room.id} work={state.data.work} conversationId={room.id}
-            service={service} goalDraft={composer.outcomeGoal} onGoalDraftChange={composer.setOutcomeGoal} disabled={pending} />
+          <ConversationWorkControls
+            key={room.id}
+            work={state.data.work}
+            conversationId={room.id}
+            service={service}
+            goalDraft={composer.outcomeGoal}
+            onGoalDraftChange={composer.setOutcomeGoal}
+            disabled={pending}
+          />
           {composer.replyWorkId ? (
             <p className="conversation-attention" role="status">
               Following up with{" "}
@@ -1040,7 +1030,10 @@ export function ConversationPane({
             }}
             models={models}
             selectedModelId={model?.id ?? profile?.modelId ?? ""}
-            selectedModelLabel={model?.label ?? (profile?.modelId ? "Unavailable model" : "Automatic")}
+            selectedModelLabel={
+              model?.label ??
+              (profile?.modelId ? "Unavailable model" : "Automatic")
+            }
             modelScope={
               recipient === "discussion"
                 ? `${displayAgent.name} leads this discussion using this model. Other participants use their own saved models if invited.`
