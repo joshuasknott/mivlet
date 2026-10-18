@@ -29,17 +29,19 @@ import type {
   ProviderFamily,
 } from "./provider-catalogue-data";
 import { useProviderConnection } from "./useProviderConnection";
-
-const providerMethodIcons = {
-  "api-key": Key,
-  "oauth-browser": Browser,
-  "provider-cli": TerminalWindow,
-  custom: Globe,
-} satisfies Record<ProviderConnectionMethodKind, typeof Key>;
-
 function ProviderMethodIcon({ kind }: { kind: ProviderConnectionMethodKind }) {
-  const Icon = providerMethodIcons[kind] ?? Key;
-  return <Icon size={20} />;
+  switch (kind) {
+    case "api-key":
+      return <Key size={20} />;
+    case "oauth-browser":
+      return <Browser size={20} />;
+    case "provider-cli":
+      return <TerminalWindow size={20} />;
+    case "custom":
+      return <Globe size={20} />;
+    default:
+      return <Key size={20} />;
+  }
 }
 
 export function ProviderConnectionFlow({
