@@ -3,7 +3,8 @@
 //! Provider response parsing is pure and kept separate from the credential-owned
 //! HTTP loop in the parent facade.
 
-use super::{openai_compat_profile, provider_kind, ProviderKind};
+use super::providers::openai_compat_profile;
+use super::{provider_kind, ProviderKind};
 
 /// The maximum number of model ids a discovery response may surface. Caps a
 /// hostile or pathological provider response so the merge step stays bounded.

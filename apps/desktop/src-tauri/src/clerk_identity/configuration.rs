@@ -177,10 +177,10 @@ pub(crate) struct IdentityStatus {
     pub(crate) state: String,
     pub(crate) message: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    issuer: Option<String>,
+    pub(super) issuer: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    audience: Option<String>,
-    scopes: Vec<String>,
+    pub(super) audience: Option<String>,
+    pub(super) scopes: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub(super) authentication: Option<AccountAuthenticationFacts>,
 }
