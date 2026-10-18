@@ -2,6 +2,7 @@
 
 use super::*;
 use serde_json::json;
+use url::Url;
 
 fn request(tool: &str) -> ToolExecutionRequest {
     let (mode, risk) = tool_policy(tool).unwrap_or(("full-access", "critical"));

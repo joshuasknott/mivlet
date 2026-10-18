@@ -27,15 +27,16 @@ mod browser_actions;
 mod files;
 mod web_fetch;
 #[cfg(test)]
+use approval_policy::approval_argument_previews;
+#[cfg(test)]
 use approval_policy::{argument_digest, canonical_json};
 use approval_policy::{
     is_computer_tool, is_protected_secret_tool, require_computer_generation,
     routine_connector_read, validate_tool_name, verify_execution_permit, verify_tool_authority,
 };
 pub(crate) use approval_policy::{tool_policy, validate_tool_approval_binding};
-pub(crate) use files::{
-    bounded_output, run_read_file, run_write_file, MAX_TOOL_INPUT_BYTES, MAX_TOOL_OUTPUT_BYTES,
-};
+use files::MAX_TOOL_OUTPUT_BYTES;
+pub(crate) use files::{run_read_file, run_write_file};
 #[cfg(test)]
 use web_fetch::format_web_page_source;
 pub(crate) use web_fetch::run_web_fetch_egress;
@@ -48,9 +49,7 @@ pub(crate) use web_fetch::{
 use crate::approvals::resolve_approval;
 use crate::connector_api;
 use crate::models::{ApprovalResolutionRequest, ConnectorSearchRequest, APPROVAL_DECISIONS};
-use crate::paths::{
-    execution_approvals_path, harden_workspace_root, normalize_spaces, truncate_characters,
-};
+use crate::paths::{execution_approvals_path, harden_workspace_root};
 
 const ARGUMENT_DIGEST_PREFIX: &str = "Arguments SHA-256: ";
 

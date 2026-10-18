@@ -6,7 +6,7 @@ use crate::models::ConnectorCommandError;
 
 use super::{
     command_error, derive_native_connection_id, finish_metadata_commit, mark_refresh_rejected,
-    now_epoch, read_connections, rollback_credential, same_connection_snapshot, write_connections,
+    read_connections, rollback_credential, same_connection_snapshot, write_connections,
     ConnectorConnection, ConnectorSecretStore, CredentialRollback,
 };
 

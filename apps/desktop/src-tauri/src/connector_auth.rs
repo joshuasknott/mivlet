@@ -12,7 +12,6 @@
 
 use std::{
     collections::BTreeMap,
-    fs,
     path::Path,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -43,7 +42,7 @@ pub(crate) use accounts::{
 use configuration::google_secret_with_store;
 pub(crate) use configuration::{
     auth_broker_url, google_oauth_client_id, provision_connector_configuration,
-    resolve_broker_endpoints, BrokerEndpoints, OAuthProviderConfig,
+    resolve_broker_endpoints, OAuthProviderConfig,
 };
 use configuration::{google_oauth_client_secret, provider_config};
 #[cfg(test)]
