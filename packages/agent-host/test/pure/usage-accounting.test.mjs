@@ -147,6 +147,71 @@ test("cost flags remain cumulative across independent calls and repeated step id
     costUnknown: true,
   });
 });
+test("revising independent finite costs to zero does not publish a floating negative", async () => {
+  const events = [];
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+  const makeStream = (initialCost, revisedCost, gate) =>
+    new ReadableStream({
+      async start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            frame(usage(1, 1, { costUsd: initialCost, costUnknown: false })),
+          ),
+        );
+        await gate.promise;
+        controller.enqueue(
+          new TextEncoder().encode(
+            frame(usage(1, 1, { costUsd: revisedCost, costUnknown: false })),
+          ),
+        );
+        controller.close();
+      },
+    });
+  const gateA = deferred();
+  const gateB = deferred();
+  const firstA = deferred();
+  const firstB = deferred();
+  const secondA = deferred();
+  const secondB = deferred();
+  const onUsage = (event) => {
+    events.push(event);
+    if (events.length === 1) firstA.resolve();
+    if (events.length === 2) firstB.resolve();
+    if (events.length === 3) secondA.resolve();
+    if (events.length === 4) secondB.resolve();
+  };
+  const streamedAccounting = createUsageAccounting(parser, onUsage);
+  const consumeA = streamedAccounting.observe(
+    new Response(makeStream(0.7, 0, gateA)),
+  ).text();
+  await firstA.promise;
+  const consumeB = streamedAccounting.observe(
+    new Response(makeStream(0.1, 0, gateB)),
+  ).text();
+  await firstB.promise;
+  gateA.resolve();
+  await secondA.promise;
+  gateB.resolve();
+  await secondB.promise;
+  await Promise.all([consumeA, consumeB]);
+
+  assert.equal(events.at(-1).costUsd, 0);
+  assert.ok(events.every((event) => event.costUsd >= 0));
+});
+test("malformed negative costs remain observable instead of being normalized", async () => {
+  const events = [];
+  const accounting = createUsageAccounting(parser, (event) => events.push(event));
+  await accounting
+    .observe(new Response(frame(usage(1, 1, { costUsd: -1, costUnknown: false }))))
+    .text();
+  assert.equal(events.at(-1).costUsd, -1);
+});
 test("usage aggregation reads each live snapshot a bounded number of times", async () => {
   let propertyReads = 0;
   const instrumentedParser = () => () => [Object.defineProperties(
