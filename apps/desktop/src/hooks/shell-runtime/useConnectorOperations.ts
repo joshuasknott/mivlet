@@ -53,9 +53,11 @@ export function useConnectorOperations({
   };
 
   const loadConnectorAccounts = async (connectorId: string) => {
+    const generation = connectorScopeRef.current;
     if (!isSupportedConnectorId(connectorId)) return;
     try {
       const accounts = await listRuntimeConnectorAccounts(connectorId);
+      if (connectorScopeRef.current !== generation) return;
       if (accounts) {
         setConnectorAccounts((current) => ({
           ...current,
@@ -63,6 +65,7 @@ export function useConnectorOperations({
         }));
       }
     } catch (error) {
+      if (connectorScopeRef.current !== generation) return;
       setConnectorStatus(
         error instanceof Error
           ? error.message
@@ -173,20 +176,24 @@ export function useConnectorOperations({
     connectorId: string,
     connectionId: string,
   ) => {
+    const generation = connectorScopeRef.current;
     if (!isSupportedConnectorId(connectorId)) return;
     try {
       const manifest = await switchRuntimeConnectorAccount(
         connectorId,
         connectionId,
       );
+      if (connectorScopeRef.current !== generation) return;
       if (manifest) {
         replaceConnectorManifest(manifest);
         await loadConnectorAccounts(connectorId);
+        if (connectorScopeRef.current !== generation) return;
         setConnectorStatus(
           `Using ${manifest.account?.email ?? manifest.account?.displayName ?? "selected account"}.`,
         );
       }
     } catch (error) {
+      if (connectorScopeRef.current !== generation) return;
       setConnectorStatus(
         error instanceof Error
           ? error.message
@@ -196,16 +203,19 @@ export function useConnectorOperations({
   };
 
   const refreshConnector = async (connectorId: string) => {
+    const generation = connectorScopeRef.current;
     const connector = manifestsRef.current.find(
       (manifest) => manifest.id === connectorId,
     );
     if (!connector || !isSupportedConnectorId(connectorId)) return;
+    const workspaceId = workspaceRef.current?.workspaceId ?? "";
     try {
       const sync = await syncRuntimeConnector({
         connectorId,
-        workspaceId: workspaceRef.current?.workspaceId ?? "",
+        workspaceId,
         trigger: "manual",
       });
+      if (connectorScopeRef.current !== generation) return;
       if (sync) {
         replaceConnectorManifest({ ...connector, sync });
         const outcome =
@@ -219,6 +229,7 @@ export function useConnectorOperations({
         );
       }
     } catch (error) {
+      if (connectorScopeRef.current !== generation) return;
       setConnectorStatus(
         error instanceof Error
           ? error.message
