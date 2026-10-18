@@ -2,7 +2,7 @@
 
 const KEYRING_SERVICE: &str = "com.fable.workspace.connectors";
 
-pub(super) trait ConnectorSecretStore: Send + Sync {
+pub(crate) trait ConnectorSecretStore: Send + Sync {
     fn get(&self, key: &str) -> Result<Option<String>, String>;
     fn set(&self, key: &str, secret: &str) -> Result<(), String>;
     fn remove(&self, key: &str) -> Result<(), String>;

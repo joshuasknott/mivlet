@@ -6,7 +6,7 @@ use url::Url;
 use super::{command_error, ConnectorSecretStore, NativeConnectorSecretStore};
 
 #[derive(Clone, Debug)]
-pub(super) struct OAuthProviderConfig {
+pub(crate) struct OAuthProviderConfig {
     pub authorization_endpoint: String,
     pub token_endpoint: Option<String>,
     pub revocation_endpoint: Option<String>,
@@ -19,14 +19,14 @@ pub(super) struct OAuthProviderConfig {
 
 /// The exhaustive OAuth surface the auth broker implements.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
-pub(super) struct BrokerEndpoints {
+pub(crate) struct BrokerEndpoints {
     pub authorization_endpoint: String,
     pub handoff_endpoint: String,
     pub refresh_endpoint: String,
     pub revocation_endpoint: String,
 }
 
-pub(super) fn resolve_broker_endpoints(
+pub(crate) fn resolve_broker_endpoints(
     connector_id: &str,
     broker_url: Option<&str>,
 ) -> Result<BrokerEndpoints, crate::models::ConnectorCommandError> {
@@ -88,7 +88,7 @@ fn broker_route(
     }
 }
 
-pub(super) fn provision_connector_configuration() -> Result<(), String> {
+pub(crate) fn provision_connector_configuration() -> Result<(), String> {
     if let (Some(client_id), Ok(secret)) = (
         google_oauth_client_id(),
         crate::env_compat::var_named("MIVLET_GOOGLE_OAUTH_CLIENT_SECRET"),
@@ -101,7 +101,7 @@ pub(super) fn provision_connector_configuration() -> Result<(), String> {
     Ok(())
 }
 
-pub(super) fn google_oauth_client_id() -> Option<String> {
+pub(crate) fn google_oauth_client_id() -> Option<String> {
     public_configuration(
         "MIVLET_GOOGLE_OAUTH_CLIENT_ID",
         option_env!("MIVLET_GOOGLE_OAUTH_CLIENT_ID")
@@ -109,7 +109,7 @@ pub(super) fn google_oauth_client_id() -> Option<String> {
     )
 }
 
-pub(super) fn auth_broker_url() -> Option<String> {
+pub(crate) fn auth_broker_url() -> Option<String> {
     public_configuration(
         "MIVLET_AUTH_BROKER_URL",
         option_env!("MIVLET_AUTH_BROKER_URL").or(option_env!("FABLE_AUTH_BROKER_URL")),

@@ -14,7 +14,7 @@ use crate::models::{ConnectorAccountOption, ConnectorAccountSummary};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(super) struct ConnectorConnection {
+pub(crate) struct ConnectorConnection {
     pub connector_id: String,
     pub account: ConnectorAccountSummary,
     pub status: String,
@@ -32,7 +32,7 @@ pub(super) struct ConnectorConnection {
     pub is_active: bool,
 }
 
-pub(super) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, String> {
+pub(crate) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, String> {
     if let Some(connections) = crate::store::read_document(path)? {
         return Ok(connections);
     }
@@ -50,7 +50,7 @@ pub(super) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, 
     Ok(connections)
 }
 
-pub(super) fn write_connections(
+pub(crate) fn write_connections(
     path: &Path,
     connections: &[ConnectorConnection],
 ) -> Result<(), String> {
@@ -107,7 +107,7 @@ pub(super) fn promote_single_active(connections: &mut [ConnectorConnection], con
     }
 }
 
-pub(super) fn account_options_from_connections(
+pub(crate) fn account_options_from_connections(
     connections: &[ConnectorConnection],
     connector_id: &str,
     workspace_id: &str,
@@ -163,7 +163,7 @@ pub(super) fn accounts_for_connector(
     account_options_from_connections(&connections, connector_id, workspace_id)
 }
 
-pub(super) fn safe_account_projection(
+pub(crate) fn safe_account_projection(
     account: &ConnectorAccountSummary,
     connector_id: &str,
     workspace_id: &str,
@@ -178,7 +178,7 @@ pub(super) fn safe_account_projection(
     }
 }
 
-pub(super) fn derive_native_connection_id(
+pub(crate) fn derive_native_connection_id(
     workspace_id: &str,
     connector_id: &str,
     account_id: &str,

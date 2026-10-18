@@ -33,29 +33,31 @@ mod oauth_flow;
 mod refresh;
 mod secrets;
 #[cfg(test)]
-pub(crate) use accounts::accounts_for_connector;
+use accounts::accounts_for_connector;
+use accounts::promote_single_active;
 pub(crate) use accounts::{
-    account_options_from_connections, derive_native_connection_id, promote_single_active,
-    read_connections, safe_account_projection, write_connections, ConnectorConnection,
+    account_options_from_connections, derive_native_connection_id, read_connections,
+    safe_account_projection, write_connections, ConnectorConnection,
 };
 #[cfg(test)]
-pub(crate) use configuration::google_secret_with_store;
+use configuration::google_secret_with_store;
 pub(crate) use configuration::{
-    auth_broker_url, google_oauth_client_id, google_oauth_client_secret, provider_config,
-    provision_connector_configuration, resolve_broker_endpoints, BrokerEndpoints,
-    OAuthProviderConfig,
+    auth_broker_url, google_oauth_client_id, provision_connector_configuration,
+    resolve_broker_endpoints, BrokerEndpoints, OAuthProviderConfig,
 };
+use configuration::{google_oauth_client_secret, provider_config};
 #[cfg(test)]
-pub(crate) use oauth_flow::start_with_store;
-pub(crate) use oauth_flow::{
+use oauth_flow::start_with_store;
+use oauth_flow::{
     broker_sibling_endpoint, start_with_store_bound, token_exchange_rejection_message,
     HandoffResponse, OAuthErrorResponse, TokenResponse,
 };
-pub(crate) use refresh::{
+use refresh::{
     canonical_connection_for_refresh, canonical_credential_binding, commit_refresh_rejection,
     commit_refresh_success, refresh_authorization_context,
 };
-pub(crate) use secrets::{ConnectorSecretStore, NativeConnectorSecretStore};
+pub(crate) use secrets::ConnectorSecretStore;
+use secrets::NativeConnectorSecretStore;
 
 pub(crate) const OAUTH_AUTHORIZATION_WINDOW_SECONDS: u64 = 15 * 60;
 

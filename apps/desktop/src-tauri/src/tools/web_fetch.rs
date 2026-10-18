@@ -499,7 +499,7 @@ pub(crate) fn web_fetch_url_from_args(arguments: &serde_json::Value) -> Result<S
     Ok(url)
 }
 
-pub(super) async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
+pub(crate) async fn run_web_fetch_egress(url: &str) -> Result<ToolResult, String> {
     let initial =
         parse_and_validate_fetch_url(url).map_err(|e| format!("web-fetch blocked: {}", e))?;
 

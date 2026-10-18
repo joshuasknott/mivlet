@@ -9,10 +9,10 @@ use std::path::Path;
 
 use super::{require_string_argument, ToolResult};
 
-pub(super) const MAX_TOOL_OUTPUT_BYTES: usize = 1024 * 1024;
-pub(super) const MAX_TOOL_INPUT_BYTES: usize = 8 * 1024 * 1024;
+pub(crate) const MAX_TOOL_OUTPUT_BYTES: usize = 1024 * 1024;
+pub(crate) const MAX_TOOL_INPUT_BYTES: usize = 8 * 1024 * 1024;
 
-pub(super) fn bounded_output(bytes: &[u8], max_bytes: usize) -> String {
+pub(crate) fn bounded_output(bytes: &[u8], max_bytes: usize) -> String {
     if bytes.len() <= max_bytes {
         return String::from_utf8_lossy(bytes).into_owned();
     }
@@ -24,7 +24,7 @@ pub(super) fn bounded_output(bytes: &[u8], max_bytes: usize) -> String {
     )
 }
 
-pub(super) fn run_read_file(
+pub(crate) fn run_read_file(
     arguments: &serde_json::Value,
     workspace_root: &Path,
 ) -> Result<ToolResult, String> {
@@ -79,7 +79,7 @@ pub(super) fn run_read_file(
     })
 }
 
-pub(super) fn run_write_file(
+pub(crate) fn run_write_file(
     arguments: &serde_json::Value,
     workspace_root: &Path,
 ) -> Result<ToolResult, String> {
