@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use sha2::{Digest, Sha256};
 
-use super::{repos, timestamp, Store, StoreError, CURRENT_SCHEMA_VERSION, GLOBAL_STORE};
+use super::{repos, timestamp, Result, Store, StoreError, CURRENT_SCHEMA_VERSION, GLOBAL_STORE};
 
 fn document_key(path: &Path) -> std::result::Result<String, String> {
     path.file_name()

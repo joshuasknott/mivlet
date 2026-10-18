@@ -42,8 +42,8 @@ pub(crate) use documents::{
 };
 pub use documents::{
     read_document, read_private_workspace_document, read_workspace_document, try_global,
-    update_document, update_private_workspace_document, update_workspace_document, with_store,
-    write_document, write_private_workspace_document, write_workspace_document,
+    update_document, update_private_workspace_document, with_store, write_document,
+    write_private_workspace_document, write_workspace_document,
 };
 
 /// Filename of the durable database inside the Tauri app-data dir.

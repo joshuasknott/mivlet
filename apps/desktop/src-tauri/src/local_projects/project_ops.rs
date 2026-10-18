@@ -1,9 +1,10 @@
 use super::{
-    author_from_row, collab, execution_attempt, next_revision, project_from_row, repo, thread,
-    thread_is_owned, validate_id_store, validate_payload_store, AuthorizedCommandScope,
-    BindLocalProjectRunAuthorRequest, CreateLocalProjectRequest, LocalProject, LocalProjectPayload,
-    LocalProjectRow, LocalProjectRunAuthor, RunAuthorPayload, Store, StoreError,
-    UpdateLocalProjectRequest, MAX_NAME_CHARACTERS, MAX_PROJECTS,
+    author_from_row, execution_attempt, next_revision, project_from_row, repo, thread,
+    thread_is_owned, validate_id_store, validate_payload_store, ArchiveLocalProjectRequest,
+    AuthorizedCommandScope, BindLocalProjectRunAuthorRequest, CreateLocalProjectRequest,
+    LocalProject, LocalProjectPayload, LocalProjectRow, LocalProjectRunAuthor,
+    LocalProjectRunAuthorRow, RunAuthorPayload, Store, StoreError, UpdateLocalProjectRequest,
+    MAX_NAME_CHARACTERS, MAX_PROJECTS,
 };
 pub(super) fn create_at(
     tx: &rusqlite::Connection,

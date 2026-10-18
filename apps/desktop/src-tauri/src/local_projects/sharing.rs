@@ -3,9 +3,9 @@ use sha2::{Digest, Sha256};
 use super::{
     collab, next_revision, project_from_row, repo, thread_is_owned, validate_id_store,
     AddProjectShare, AddProjectShareRequest, AuthorizedCommandScope, Kind, LocalProject,
-    LocalProjectPayload, LocalProjectRow, ProjectShare, RemoveProjectShareRequest, Store,
-    StoreError, Work, MAX_REVISION_CHARACTERS, MAX_SHARES, MAX_SHARE_TEXT_CHARACTERS,
-    MAX_SHARE_TITLE_CHARACTERS,
+    LocalProjectPayload, LocalProjectRow, ProjectShare, ProjectShareOwner,
+    RemoveProjectShareRequest, Store, StoreError, Team, Work, MAX_NAME_CHARACTERS,
+    MAX_REVISION_CHARACTERS, MAX_SHARES, MAX_SHARE_TEXT_CHARACTERS, MAX_SHARE_TITLE_CHARACTERS,
 };
 pub(super) fn add_share_at(
     tx: &rusqlite::Connection,

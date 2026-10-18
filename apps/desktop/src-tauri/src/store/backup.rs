@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 
 use super::{
-    read_schema_version, repos, timestamp, Result, Store, StoreError, Vault, BACKUP_FORMAT,
+    read_schema_version, repos, timestamp, vault, Result, Store, StoreError, Vault, BACKUP_FORMAT,
     BACKUP_FORMAT_VERSION, BACKUP_MARKER_KEY, CURRENT_SCHEMA_VERSION, DB_FILENAME, GLOBAL_STORE,
     RESTORE_PENDING_FILENAME,
 };

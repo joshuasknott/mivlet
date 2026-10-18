@@ -16,12 +16,11 @@ use contracts::HostedExecutionCapabilityReceipt;
 pub use contracts::{
     CommitHostedBrowserActionRequest, CommitHostedBrowserNavigationRequest,
     CommitHostedProcessLaunchRequest, HostedBrowserActionDraft, HostedBrowserActionProposal,
-    HostedBrowserControl, HostedBrowserDownloadSnapshot, HostedBrowserNavigateDraft,
-    HostedBrowserNavigateProposal, HostedBrowserNavigationSnapshot, HostedBrowserSnapshot,
-    HostedBrowserTarget, HostedBrowserViewportSnapshot, HostedComputerProvisionReceipt,
-    HostedExecutionNodeSnapshot, HostedProcessDraft, HostedProcessLaunchProposal,
-    HostedProcessSnapshot, HostedProcessTarget, PreparedHostedBrowserAction,
-    PreparedHostedBrowserNavigation, PreparedHostedProcessLaunch,
+    HostedBrowserNavigateDraft, HostedBrowserNavigateProposal, HostedBrowserNavigationSnapshot,
+    HostedBrowserSnapshot, HostedBrowserTarget, HostedBrowserViewportSnapshot,
+    HostedComputerProvisionReceipt, HostedExecutionNodeSnapshot, HostedProcessDraft,
+    HostedProcessLaunchProposal, HostedProcessSnapshot, HostedProcessTarget,
+    PreparedHostedBrowserAction, PreparedHostedBrowserNavigation, PreparedHostedProcessLaunch,
 };
 #[cfg(test)]
 use live_view::{live_view_handle, live_view_handles, store_live_view};
@@ -34,7 +33,7 @@ pub(crate) use validation::normalize_public_https_url;
 use validation::{
     approval_for_browser, approval_for_browser_action, approval_for_process,
     browser_action_fingerprint, browser_proposal_fingerprint, normalize_browser_action_draft,
-    normalize_browser_draft, normalize_browser_target, normalize_cwd, normalize_draft, opaque_key,
+    normalize_browser_draft, normalize_browser_target, normalize_draft, opaque_key,
     proposal_fingerprint, valid_id, validate_browser_action_proposal, validate_browser_proposal,
     validate_browser_snapshot, validate_live_view_url, validate_node, validate_process_id,
     validate_process_snapshot, validate_proposal,
