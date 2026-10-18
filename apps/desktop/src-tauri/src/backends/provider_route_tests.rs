@@ -1,12 +1,19 @@
 //! Backend catalog and native route regression tests.
+use crate::backends::credentials::{scoped_credential_key, BackendCredentialStore, KeyringStore};
+use crate::backends::routes::{
+    account_native_provider_route_id, account_provider_connection_id, exact_model_pricing_evidence,
+    native_provider_route_boundary, native_provider_route_reason,
+    native_provider_route_reason_with_evidence, validate_native_provider_route_binding,
+    validate_persisted_native_provider_route_selection_for_policy,
+};
+
 #[test]
 #[ignore = "read-only inventory of this installation's real OS-stored direct API credentials"]
 fn live_visual_provider_connection_inventory() {
-    use super::BackendCredentialStore;
     let user = super::require_current_internal_user().unwrap();
     for provider in ["openai", "anthropic", "gemini", "xai", "deepseek", "custom"] {
-        let present = super::KeyringStore
-            .get(&super::scoped_credential_key(&user, provider))
+        let present = KeyringStore
+            .get(&scoped_credential_key(&user, provider))
             .expect("OS credential store is unavailable")
             .is_some();
         println!(
