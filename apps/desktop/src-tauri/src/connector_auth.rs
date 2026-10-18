@@ -92,7 +92,7 @@ pub(crate) struct StoredTokenSet {
     pub brokered: bool,
 }
 
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ConnectorConnection {
     pub connector_id: String,
@@ -1330,31 +1330,32 @@ pub(crate) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, 
 }
 
 fn normalize_active_accounts(connections: &mut [ConnectorConnection]) {
-    let mut connector_ids = connections
-        .iter()
-        .map(|connection| connection.connector_id.clone())
-        .collect::<Vec<_>>();
-    connector_ids.sort();
-    connector_ids.dedup();
-    for connector_id in connector_ids {
-        let matching = connections
-            .iter()
-            .enumerate()
-            .filter(|(_, connection)| connection.connector_id == connector_id)
-            .map(|(index, _)| index)
-            .collect::<Vec<_>>();
-        let active = matching
-            .iter()
-            .copied()
-            .filter(|index| connections[*index].is_active)
-            .collect::<Vec<_>>();
-        let selected = active
-            .first()
-            .copied()
-            .or_else(|| matching.first().copied());
-        for index in matching {
-            connections[index].is_active = Some(index) == selected;
+    let mut selected = BTreeMap::<String, usize>::new();
+    for (index, connection) in connections.iter().enumerate() {
+        let current = selected.get(&connection.connector_id).copied();
+        if let Some(preferred) = prefer_active_index(connections, current, index) {
+            selected.insert(connection.connector_id.clone(), preferred);
         }
+    }
+    for (index, connection) in connections.iter_mut().enumerate() {
+        connection.is_active = selected.get(&connection.connector_id) == Some(&index);
+    }
+}
+
+/// Keep the first record unless a later record is the first explicitly active
+/// one. This preserves legacy files while making the selection rule reusable
+/// for both normalization and targeted account switching.
+fn prefer_active_index(
+    connections: &[ConnectorConnection],
+    current: Option<usize>,
+    candidate: usize,
+) -> Option<usize> {
+    match current {
+        None => Some(candidate),
+        Some(index) if !connections[index].is_active && connections[candidate].is_active => {
+            Some(candidate)
+        }
+        Some(index) => Some(index),
     }
 }
 
@@ -1729,16 +1730,16 @@ fn commit_prepared_auth_state<G>(
 /// account is active (e.g. a legacy file where the field defaulted), promote
 /// the first one for the connector. Other connectors are untouched.
 fn promote_single_active(connections: &mut [ConnectorConnection], connector_id: &str) {
-    let has_active = connections
-        .iter()
-        .any(|connection| connection.connector_id == connector_id && connection.is_active);
-    if has_active {
-        return;
+    let mut selected = None;
+    for (index, connection) in connections.iter().enumerate() {
+        if connection.connector_id != connector_id {
+            continue;
+        }
+        selected = prefer_active_index(connections, selected, index);
     }
-    for connection in connections.iter_mut() {
+    for (index, connection) in connections.iter_mut().enumerate() {
         if connection.connector_id == connector_id {
-            connection.is_active = true;
-            break;
+            connection.is_active = Some(index) == selected;
         }
     }
 }
@@ -1959,7 +1960,7 @@ fn prepare_disconnect(
 }
 
 fn same_connection_snapshot(left: &[ConnectorConnection], right: &[ConnectorConnection]) -> bool {
-    serde_json::to_vec(left).ok() == serde_json::to_vec(right).ok()
+    left == right
 }
 
 fn commit_prepared_disconnect<G>(

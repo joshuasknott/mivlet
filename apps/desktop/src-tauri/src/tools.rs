@@ -16,7 +16,7 @@
 //!     `approval-required` and performs nothing.
 //!   - File paths are confined to the teammate's local-computer workspace (no
 //!     `..` escapes or absolute escapes). Process tools execute only inside the
-//!     agent's Docker/WSL computer and never through the user's host shell.
+//!     agent's scoped isolated computer and never through the user's host shell.
 //!   - Tool names are a closed set; anything else fails closed.
 
 use std::net::{IpAddr, Ipv6Addr};
@@ -547,19 +547,7 @@ pub(crate) fn validate_tool_approval_binding(
         .iter()
         .map(|value| truncate_characters(&normalize_spaces(value), 240))
         .collect::<std::collections::BTreeSet<_>>();
-    if matches!(
-        tool,
-        "create-spreadsheet"
-            | "create-document"
-            | "create-presentation"
-            | "create-pdf"
-            | "workspace-run"
-    ) || tool.starts_with("repository-")
-        || tool.starts_with("local-browser-")
-        || is_protected_secret_tool(tool)
-        || tool.starts_with("command-")
-        || tool == "workspace-start"
-    {
+    if tool_requires_argument_digest(tool) {
         let digest_entries = approved
             .iter()
             .filter(|value| value.starts_with(ARGUMENT_DIGEST_PREFIX))
@@ -579,6 +567,25 @@ pub(crate) fn validate_tool_approval_binding(
         ));
     }
     Ok(())
+}
+
+/// Tools whose approval must bind the complete argument object. Small
+/// human-readable previews remain useful for display, but repository,
+/// command, browser and secret operations also carry a canonical digest so a
+/// long or nested payload cannot be substituted after approval.
+fn tool_requires_argument_digest(tool: &str) -> bool {
+    matches!(
+        tool,
+        "create-spreadsheet"
+            | "create-document"
+            | "create-presentation"
+            | "create-pdf"
+            | "workspace-run"
+            | "workspace-start"
+    ) || tool.starts_with("repository-")
+        || tool.starts_with("local-browser-")
+        || tool.starts_with("command-")
+        || is_protected_secret_tool(tool)
 }
 
 fn approval_argument_previews(
