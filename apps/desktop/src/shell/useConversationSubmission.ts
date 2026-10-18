@@ -1,5 +1,4 @@
 import {
-  useCallback,
   type Dispatch,
   type MutableRefObject,
   type SetStateAction,
@@ -39,7 +38,7 @@ type SubmissionAppScope = {
 };
 
 /** Owns admission, fencing, staging and persistence for a composer send. */
-export function useConversationSubmission({
+export function createConversationSubmission({
   composer,
   runtime,
   service,
@@ -93,7 +92,7 @@ export function useConversationSubmission({
   ) => Promise<void>;
   scrollToLatest: () => void;
 }) {
-  return useCallback(async () => {
+  return async () => {
     const prompt = composerSubmissionText(composer.text, composer.attachments);
     if (!composer.ready || !prompt || submission.current || voice.isBusy)
       return;
@@ -242,30 +241,5 @@ export function useConversationSubmission({
       composer.endSubmission();
       setPending(false);
     }
-  }, [
-    appScope,
-    branchParentMessageId,
-    clearOutputRevision,
-    composer,
-    localComputer,
-    mentions,
-    onProjectUpdate,
-    owner,
-    project,
-    recipient,
-    replyTarget,
-    responder,
-    room,
-    runtime,
-    scrollToLatest,
-    service,
-    setBranchParentMessageId,
-    setError,
-    setPending,
-    stageOutputRevision,
-    submission,
-    submissionScope,
-    voice.isBusy,
-    workspaceMentions,
-  ]);
+  };
 }

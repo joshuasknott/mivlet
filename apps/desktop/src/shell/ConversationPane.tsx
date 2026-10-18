@@ -66,7 +66,7 @@ import {
   pendingConversationTurns,
   responseOutputId,
 } from "./conversation-pane-helpers";
-import { useConversationSubmission } from "./useConversationSubmission";
+import { createConversationSubmission } from "./useConversationSubmission";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -414,7 +414,7 @@ export function ConversationPane({
       setPending,
       setError,
     });
-  const send = useConversationSubmission({
+  const send = createConversationSubmission({
     composer,
     runtime,
     service,
