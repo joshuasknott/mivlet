@@ -7,7 +7,26 @@ served on the configured development URL; use built assets to avoid measuring
 Vite dependency compilation. Keep the renderer server warm and identical across
 comparisons. Do not substitute an old local binary for the tested commit.
 
+For an optimized measurement build, dispatch Full validation with
+`bundle_profile=true` and `native_release=true`. An optional full
+`baseline_commit` builds that ancestor before the requested head with the same
+dependency lockfiles and toolchain. The `native-release-<head>` artifact contains
+one directory per completed source commit, including the release executable,
+embedded production renderer and the native resource layout. Failed jobs retain
+completed builds for diagnosis. Before comparing, require `comparison.json` to
+have `complete: true` and the exact expected head and revision set, then verify
+every file against its receipt before launching. No development server is needed. These unsigned
+artifacts exercise release code without installing over the user's application;
+they do not establish signed-installer or installation-lifecycle acceptance.
+The profile workflow does not replace required PR checks or full validation.
+
 Close Mivlet normally before each run, then on Windows run:
+
+Keep the desktop unlocked. The observer starts the measured app with a normal,
+visible window; hiding it changes WebView activation and can invalidate startup
+observations. The sampler itself stays hidden. Discard a run that becomes
+unresponsive or never reaches the intended workspace, even if it initially
+exposed a titled native window.
 
 ```powershell
 node scripts/perf/native-observation.mjs --exe C:/path/to/mivlet-desktop.exe --duration 60 --output output/native-run.json
@@ -21,7 +40,9 @@ observation, including after a measurement error; close it normally before the
 next run. A failed/early-exit observation produces a failing exit code and a
 structured report, not a successful zero-memory measurement.
 
-The launch receipt records the executable SHA-256, PID and launch time.
+The launch receipt records the executable SHA-256, PID, launch time and explicit
+working directory (the observer's current directory). Use the same directory
+for both builds and ensure no Mivlet process is already running before launch.
 `firstResponsiveWindowMs` is the first sampled responsive native window titled
 Mivlet. It is **not** first paint, provider readiness or a usable workspace.
 Verify the visible native screen separately. Record which state was reached:

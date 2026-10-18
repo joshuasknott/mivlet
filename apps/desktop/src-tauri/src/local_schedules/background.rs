@@ -2,6 +2,7 @@
 //! Claim tokens stay in this process and are never stored in Work or context.
 use super::*;
 use crate::collaboration::models::Work;
+use crate::local_schedules::claim_due_after_capacity_matching;
 
 pub(crate) struct Claim {
     claim: LocalScheduleClaim,
@@ -227,6 +228,7 @@ impl Drop for Claim {
 mod tests {
     use super::super::tests::{at, daily_request, store_and_scope};
     use super::*;
+    use crate::local_schedules::claim_due_after_capacity_matching;
 
     #[test]
     fn native_claim_requires_the_frozen_attempt_and_cannot_be_replayed() {

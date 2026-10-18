@@ -8,7 +8,7 @@ import { supportsNativeComputerVision } from "./computer-vision";
 import { shapeOpenAiRequest } from "./openai-compat";
 import { validateReasoningEffort } from "./reasoning";
 
-const nativeCatalog = readFileSync(new URL("../../../../apps/desktop/src-tauri/src/backends.rs", import.meta.url), "utf8");
+const nativeCatalog = readFileSync(new URL("../../../../apps/desktop/src-tauri/src/backends/catalog.rs", import.meta.url), "utf8");
 const nativeProfiles = readFileSync(new URL("../../../../apps/desktop/src-tauri/src/native_api/providers.rs", import.meta.url), "utf8");
 
 describe.each(additionalNativeProviderCatalog)("$label direct API route", (entry) => {

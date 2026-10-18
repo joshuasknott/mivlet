@@ -145,6 +145,7 @@ mod tests {
     use super::super::tests::{at, daily_request, store_and_scope};
     use super::*;
     use crate::collaboration::models::{Work, WorkStatus};
+    use crate::local_schedules::{claim_due_after_capacity, claim_due_after_capacity_matching};
     use crate::store::repos::{collaboration, execution_attempt};
     const NOW: &str = "2026-09-07T12:00:00.000Z";
 
