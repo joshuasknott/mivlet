@@ -572,7 +572,6 @@ pub(super) fn build_provider(
 /// backend-type and capability vocabulary values. Panicking here (at first
 /// use) is correct: a bad catalog value is a programming error, not runtime
 /// data.
-
 pub(super) fn validate_catalog_vocabulary() {
     let mut ids = BTreeSet::new();
     for entry in CATALOG {
