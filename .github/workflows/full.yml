@@ -185,6 +185,16 @@ jobs:
                   (Get-FileHash apps/desktop/src-tauri/Cargo.lock -Algorithm SHA256).Hash -ne $cargoHash) {
                 throw 'A same-install native comparison requires matching dependency lockfiles.'
               }
+              # Generated runtimes must not retain files removed by the next revision.
+              # Only ignored resources inside this disposable checkout are removed;
+              # tracked manifests/notices, dependencies and Cargo caches stay intact.
+              $resourceRoot = [IO.Path]::GetFullPath((Join-Path $PWD 'apps/desktop/src-tauri/resources'))
+              $workspaceRoot = [IO.Path]::GetFullPath($env:GITHUB_WORKSPACE).TrimEnd('\') + '\'
+              if (-not $resourceRoot.StartsWith($workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                throw 'Generated resource cleanup escaped the checkout.'
+              }
+              git clean -fdX -- apps/desktop/src-tauri/resources
+              if ($LASTEXITCODE -ne 0) { throw 'Generated resource cleanup failed.' }
               pnpm tauri:build --ci --no-sign --no-bundle
               if ($LASTEXITCODE -ne 0) { throw 'Optimized native build failed.' }
               $destination = Join-Path 'output/native-release' $revision
