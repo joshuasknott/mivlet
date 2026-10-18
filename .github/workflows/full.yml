@@ -195,6 +195,12 @@ jobs:
               }
               git clean -fdX -- apps/desktop/src-tauri/resources
               if ($LASTEXITCODE -ne 0) { throw 'Generated resource cleanup failed.' }
+              pnpm --filter @mivlet/protocol build
+              if ($LASTEXITCODE -ne 0) { throw 'Native protocol dependency build failed.' }
+              pnpm --filter @mivlet/connectors build
+              if ($LASTEXITCODE -ne 0) { throw 'Native connector dependency build failed.' }
+              pnpm --filter @mivlet/knowledge build
+              if ($LASTEXITCODE -ne 0) { throw 'Native knowledge dependency build failed.' }
               pnpm tauri:build --ci --no-sign --no-bundle
               if ($LASTEXITCODE -ne 0) { throw 'Optimized native build failed.' }
               $destination = Join-Path 'output/native-release' $revision
