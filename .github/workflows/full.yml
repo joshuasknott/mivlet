@@ -178,6 +178,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw 'Baseline must be an ancestor of the requested checkout.' }
             $revisions = @($env:BASELINE_COMMIT, $finalCommit) | Select-Object -Unique
           }
+          $completed = @()
+          New-Item -ItemType Directory -Force 'output/native-release' | Out-Null
           try {
             foreach ($revision in $revisions) {
               git checkout --detach $revision
@@ -196,6 +198,16 @@ jobs:
               }
               git clean -fdX -- apps/desktop/src-tauri/resources
               if ($LASTEXITCODE -ne 0) { throw 'Generated resource cleanup failed.' }
+              foreach ($package in @('protocol', 'connectors', 'knowledge')) {
+                foreach ($generated in @("packages/$package/dist", "packages/$package/tsconfig.tsbuildinfo")) {
+                  $generatedPath = [IO.Path]::GetFullPath((Join-Path $PWD $generated))
+                  if (-not $generatedPath.StartsWith($workspaceRoot, [StringComparison]::OrdinalIgnoreCase)) {
+                    throw 'Generated package cleanup escaped the checkout.'
+                  }
+                  git clean -fdX -- $generated
+                  if ($LASTEXITCODE -ne 0) { throw 'Generated package cleanup failed.' }
+                }
+              }
               pnpm --filter @mivlet/protocol build
               if ($LASTEXITCODE -ne 0) { throw 'Native protocol dependency build failed.' }
               pnpm --filter @mivlet/connectors build
@@ -228,8 +240,12 @@ jobs:
                  profile = 'release'; command = 'pnpm tauri:build --ci --no-sign --no-bundle';
                  signed = $false; installer = $false; rust = (rustc --version); cargo = (cargo --version)
               } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 "$destination/receipt.json"
+              $completed += $revision
             }
           } finally {
+            @{ requestedHead = $finalCommit; requestedRevisions = @($revisions);
+               completedRevisions = @($completed); complete = ($completed.Count -eq @($revisions).Count)
+            } | ConvertTo-Json -Depth 3 | Set-Content -Encoding utf8 'output/native-release/comparison.json'
             git checkout --detach $finalCommit
             if ($LASTEXITCODE -ne 0) { throw 'Final checkout restoration failed.' }
           }
