@@ -133,7 +133,7 @@ export function useConnectorOperations({
           error instanceof Error
             ? error.message
             : `${connector.name} authorization is unavailable.`;
-        if (connectorScopeRef.current !== generation) throw new Error(message);
+        if (connectorScopeRef.current !== generation) return;
         setConnectorStatus(message);
         setLastAction(message);
         throw new Error(message);
@@ -167,7 +167,8 @@ export function useConnectorOperations({
         error instanceof Error
           ? error.message
           : `${connector.name} could not be disconnected.`;
-      if (connectorScopeRef.current === generation) setConnectorStatus(message);
+      if (connectorScopeRef.current !== generation) return;
+      setConnectorStatus(message);
       throw new Error(message);
     }
   };

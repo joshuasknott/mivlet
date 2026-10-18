@@ -36,6 +36,7 @@ function mount(scope: { current: number }) {
   const setConnectorManifests = vi.fn();
   const setConnectorAccounts = vi.fn();
   const setConnectorStatus = vi.fn();
+  const setLastAction = vi.fn();
   const hook = renderHook(() =>
     useConnectorOperations({
       connectorScopeRef: scope,
@@ -44,10 +45,16 @@ function mount(scope: { current: number }) {
       setConnectorAccounts,
       setConnectorStatus,
       activeWorkspaceScope: { workspaceId: "workspace-a" },
-      setLastAction: vi.fn(),
+      setLastAction,
     }),
   );
-  return { ...hook, setConnectorManifests, setConnectorAccounts, setConnectorStatus };
+  return {
+    ...hook,
+    setConnectorManifests,
+    setConnectorAccounts,
+    setConnectorStatus,
+    setLastAction,
+  };
 }
 
 beforeEach(() => {
@@ -132,5 +139,78 @@ describe("connector account operation scope fences", () => {
     });
     expect(setConnectorManifests).not.toHaveBeenCalled();
     expect(setConnectorStatus).not.toHaveBeenCalled();
+  });
+
+  it("ignores a connect error that completes after the workspace changes", async () => {
+    const scope = { current: 1 };
+    const pending = deferred<never>();
+    vi.mocked(connectorsRuntime.beginRuntimeConnectorOAuth).mockReturnValue(
+      pending.promise,
+    );
+    const { result, setConnectorStatus, setLastAction } = mount(scope);
+
+    let operation!: Promise<void>;
+    act(() => {
+      operation = result.current.connectConnector(connector);
+      scope.current = 2;
+      pending.reject(new Error("old workspace authorization failed"));
+    });
+    await act(async () => {
+      await operation;
+    });
+
+    expect(setConnectorStatus).toHaveBeenCalledTimes(1);
+    expect(setConnectorStatus).toHaveBeenCalledWith(
+      "Preparing Gmail authorization...",
+    );
+    expect(setLastAction).not.toHaveBeenCalled();
+  });
+
+  it("ignores a disconnect error that completes after the workspace changes", async () => {
+    const scope = { current: 1 };
+    const pending = deferred<never>();
+    vi.mocked(connectorsRuntime.clearRuntimeConnectorAuth).mockReturnValue(
+      pending.promise,
+    );
+    const { result, setConnectorStatus } = mount(scope);
+
+    let operation!: Promise<void>;
+    act(() => {
+      operation = result.current.disconnectConnector("gmail");
+      scope.current = 2;
+      pending.reject(new Error("old workspace disconnect failed"));
+    });
+    await act(async () => {
+      await operation;
+    });
+
+    expect(setConnectorStatus).not.toHaveBeenCalled();
+  });
+
+  it("keeps current connect errors rejected and visible", async () => {
+    const scope = { current: 1 };
+    vi.mocked(connectorsRuntime.beginRuntimeConnectorOAuth).mockRejectedValue(
+      new Error("authorization failed"),
+    );
+    const { result, setConnectorStatus, setLastAction } = mount(scope);
+
+    await expect(result.current.connectConnector(connector)).rejects.toThrow(
+      "authorization failed",
+    );
+    expect(setConnectorStatus).toHaveBeenLastCalledWith("authorization failed");
+    expect(setLastAction).toHaveBeenLastCalledWith("authorization failed");
+  });
+
+  it("keeps current disconnect errors rejected and visible", async () => {
+    const scope = { current: 1 };
+    vi.mocked(connectorsRuntime.clearRuntimeConnectorAuth).mockRejectedValue(
+      new Error("disconnect failed"),
+    );
+    const { result, setConnectorStatus } = mount(scope);
+
+    await expect(result.current.disconnectConnector("gmail")).rejects.toThrow(
+      "disconnect failed",
+    );
+    expect(setConnectorStatus).toHaveBeenLastCalledWith("disconnect failed");
   });
 });
