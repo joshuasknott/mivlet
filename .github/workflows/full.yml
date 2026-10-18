@@ -16,6 +16,10 @@ on:
         description: Also build an unsigned debug executable after renderer verification
         type: boolean
         default: false
+      native_release:
+        description: Also build optimized native measurement artifacts (and the requested ancestor)
+        type: boolean
+        default: false
   schedule:
     - cron: "17 3 * * *"
 
@@ -129,6 +133,93 @@ jobs:
           name: renderer-${{ github.sha }}
           path: apps/desktop/dist
           include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 7
+  native-release:
+    if: ${{ inputs.bundle_profile && inputs.native_release }}
+    needs: bundle-profile
+    runs-on: windows-latest
+    timeout-minutes: 90
+    env:
+      CARGO_BUILD_JOBS: 2
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.7
+          run_install: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          shared-key: mivlet-windows-release
+      - run: pnpm install --frozen-lockfile
+      - name: Build optimized executables with their native resources
+        shell: pwsh
+        env:
+          BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $finalCommit = $env:GITHUB_SHA
+          $lockHash = (Get-FileHash pnpm-lock.yaml -Algorithm SHA256).Hash
+          $cargoHash = (Get-FileHash apps/desktop/src-tauri/Cargo.lock -Algorithm SHA256).Hash
+          $revisions = @($finalCommit)
+          if ($env:BASELINE_COMMIT) {
+            if ($env:BASELINE_COMMIT -notmatch '^[0-9a-f]{40}$') { throw 'Expected a full lowercase baseline SHA.' }
+            git merge-base --is-ancestor $env:BASELINE_COMMIT $finalCommit
+            if ($LASTEXITCODE -ne 0) { throw 'Baseline must be an ancestor of the requested checkout.' }
+            $revisions = @($env:BASELINE_COMMIT, $finalCommit) | Select-Object -Unique
+          }
+          try {
+            foreach ($revision in $revisions) {
+              git checkout --detach $revision
+              if ($LASTEXITCODE -ne 0) { throw 'Native source checkout failed.' }
+              if ((Get-FileHash pnpm-lock.yaml -Algorithm SHA256).Hash -ne $lockHash -or
+                  (Get-FileHash apps/desktop/src-tauri/Cargo.lock -Algorithm SHA256).Hash -ne $cargoHash) {
+                throw 'A same-install native comparison requires matching dependency lockfiles.'
+              }
+              pnpm tauri:build --ci --no-sign --no-bundle
+              if ($LASTEXITCODE -ne 0) { throw 'Optimized native build failed.' }
+              $destination = Join-Path 'output/native-release' $revision
+              New-Item -ItemType Directory -Force "$destination/resources" | Out-Null
+              Copy-Item -LiteralPath apps/desktop/src-tauri/target/release/mivlet-desktop.exe -Destination "$destination/mivlet-desktop.exe"
+              # Match the resource layout declared in tauri.conf.json. Keep this
+              # measurement artifact self-contained without installing over a user's app.
+              $config = Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json
+              $expected = @('resources/cua-driver/**/*', 'resources/agent-host/**/*', 'resources/execution-runtime/**/*', 'resources/pdfjs-notices/**/*', 'resources/pdf-fonts/README.md')
+              if (Compare-Object $expected $config.bundle.resources) { throw 'Update native artifact staging for the changed bundle resources.' }
+              foreach ($directory in @('cua-driver', 'agent-host', 'execution-runtime', 'pdfjs-notices')) {
+                Copy-Item -LiteralPath "apps/desktop/src-tauri/resources/$directory" -Destination "$destination/resources/$directory" -Recurse
+              }
+              New-Item -ItemType Directory -Force "$destination/resources/pdf-fonts" | Out-Null
+              Copy-Item -LiteralPath apps/desktop/src-tauri/resources/pdf-fonts/README.md -Destination "$destination/resources/pdf-fonts/README.md"
+              $root = (Resolve-Path -LiteralPath $destination).Path
+              $files = @{}
+              Get-ChildItem -LiteralPath $root -Recurse -File | ForEach-Object {
+                $relative = [IO.Path]::GetRelativePath($root, $_.FullName).Replace('\', '/')
+                $files[$relative] = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              }
+              @{ commit = $revision; executableSha256 = $files['mivlet-desktop.exe']; files = $files;
+                 cargoLockSha256 = $cargoHash.ToLowerInvariant(); pnpmLockSha256 = $lockHash.ToLowerInvariant();
+                 profile = 'release'; command = 'pnpm tauri:build --ci --no-sign --no-bundle';
+                 signed = $false; installer = $false; rust = (rustc --version); cargo = (cargo --version)
+              } | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 "$destination/receipt.json"
+            }
+          } finally {
+            git checkout --detach $finalCommit
+            if ($LASTEXITCODE -ne 0) { throw 'Final checkout restoration failed.' }
+          }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-release-${{ github.sha }}
+          path: output/native-release
           if-no-files-found: error
           retention-days: 7
   native-preview:

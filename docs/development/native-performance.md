@@ -7,6 +7,17 @@ served on the configured development URL; use built assets to avoid measuring
 Vite dependency compilation. Keep the renderer server warm and identical across
 comparisons. Do not substitute an old local binary for the tested commit.
 
+For an optimized measurement build, dispatch Full validation with
+`bundle_profile=true` and `native_release=true`. An optional full
+`baseline_commit` builds that ancestor before the requested head with the same
+dependency lockfiles and toolchain. The `native-release-<head>` artifact contains
+one directory per source commit, including the release executable, embedded
+production renderer and the native resource layout. Verify every file against
+its receipt before launching. No development server is needed. These unsigned
+artifacts exercise release code without installing over the user's application;
+they do not establish signed-installer or installation-lifecycle acceptance.
+The profile workflow does not replace required PR checks or full validation.
+
 Close Mivlet normally before each run, then on Windows run:
 
 ```powershell
