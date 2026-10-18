@@ -388,6 +388,8 @@ pub(crate) fn run_bounded(
 
 mod matching;
 mod scanners;
+#[cfg(test)]
+use matching::reference;
 use matching::{compare_results, normalize_search_text, parse_cursor, tokenize, SearchCursor};
 use scanners::{
     requested_domains, scan_agents, scan_conversations, scan_decisions, scan_files, scan_projects,
