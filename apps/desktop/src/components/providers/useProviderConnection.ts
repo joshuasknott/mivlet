@@ -1,0 +1,213 @@
+import { useLayoutEffect, useRef, useState } from "react";
+import type { BackendVerifyResult } from "@mivlet/protocol";
+import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
+import { isProviderConnected } from "./provider-catalogue-data";
+import type {
+  ProviderConnectionMethod,
+  ProviderFamily,
+} from "./provider-catalogue-data";
+
+export interface ProviderConnectionActionsProps {
+  family: ProviderFamily;
+  connectedBackendIds: string[];
+  onClose: () => void;
+  onConnect: (
+    providerId: string,
+    secret: string,
+  ) => Promise<BackendVerifyResult>;
+  onCheckConnection?: (
+    providerId: string,
+  ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
+  onStartBrowserLogin?: (providerId: string) => Promise<BackendVerifyResult>;
+  onStatus?: (message: string) => void;
+}
+
+export function useProviderConnection({
+  family,
+  connectedBackendIds,
+  onClose,
+  onConnect,
+  onCheckConnection,
+  onStartBrowserLogin,
+  onStatus,
+}: ProviderConnectionActionsProps) {
+  const [selectedMethodId, setSelectedMethodId] = useState<string | null>(null);
+  const [pending, setPending] = useState(false);
+  const [localConnection, setLocalConnection] = useState<{
+    providerId: string;
+    state: "ready" | "configured" | "removed";
+  } | null>(null);
+  const [replacingCredential, setReplacingCredential] = useState(false);
+  const [confirmingRemoval, setConfirmingRemoval] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    message: string;
+    tone: string;
+  } | null>(null);
+  const [showKey, setShowKey] = useState(false);
+  const closeRef = useRef<HTMLButtonElement>(null);
+
+  const keyInputRef = useRef<HTMLInputElement>(null);
+  const customBaseUrlRef = useRef<HTMLInputElement>(null);
+  const customModelRef = useRef<HTMLInputElement>(null);
+  const customKeyRef = useRef<HTMLInputElement>(null);
+  const providerEndpointRef = useRef<HTMLInputElement>(null);
+  const selectedMethod: ProviderConnectionMethod | undefined =
+    family.methods.find((method) => method.id === selectedMethodId);
+
+  useLayoutEffect(() => {
+    closeRef.current?.focus();
+    setShowKey(false);
+  }, [selectedMethodId]);
+
+  const connect = async (
+    providerId: string,
+    secret: string,
+    clearSecret?: () => void,
+  ) => {
+    setPending(true);
+    setFeedback(null);
+    try {
+      const result = await onConnect(providerId, secret);
+      const copy = connectResultCopy(result.outcome, {
+        detail: result.message,
+      });
+      setFeedback({ message: copy.message, tone: copy.tone });
+      onStatus?.(copy.message);
+      if (result.outcome === "ready" || result.outcome === "configured") {
+        setLocalConnection({ providerId, state: result.outcome });
+        setReplacingCredential(false);
+      }
+      return result;
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not connect this provider.";
+      setFeedback({ message, tone: "danger" });
+      onStatus?.(message);
+      return null;
+    } finally {
+      clearSecret?.();
+      setPending(false);
+    }
+  };
+
+  const localState =
+    localConnection?.providerId === selectedMethod?.provider.id
+      ? localConnection?.state
+      : undefined;
+  const methodVerifiedHere = localState === "ready";
+  const methodConnected = Boolean(
+    selectedMethod &&
+    localState !== "removed" &&
+    (localState === "ready" ||
+      localState === "configured" ||
+      isProviderConnected(selectedMethod.provider, connectedBackendIds)),
+  );
+  const methodConnectionLabel = methodVerifiedHere
+    ? "Ready"
+    : selectedMethod?.provider.backendType === "native-api"
+      ? "Configured"
+      : "Connected";
+  const methodState = selectedMethod
+    ? stateViewFor(selectedMethod.provider.authState)
+    : null;
+
+  const checkConnection = async (providerId: string) => {
+    if (!onCheckConnection) return;
+    setPending(true);
+    setFeedback(null);
+    try {
+      const result = await onCheckConnection(providerId);
+      if (result?.outcome === "ready" || result?.outcome === "configured") {
+        setLocalConnection({ providerId, state: result.outcome });
+      } else if (result?.outcome === "auth-failed") {
+        setLocalConnection({ providerId, state: "removed" });
+      }
+      const copy = result
+        ? connectResultCopy(result.outcome, { detail: result.message })
+        : { message: "Connection state refreshed.", tone: "neutral" };
+      const message = copy.message;
+      setFeedback({ message, tone: copy.tone });
+      onStatus?.(message);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not refresh this connection.";
+      setFeedback({ message, tone: "danger" });
+      onStatus?.(message);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const startBrowserLogin = async (providerId: string) => {
+    if (!onStartBrowserLogin) return;
+    setPending(true);
+    setFeedback(null);
+    try {
+      const result = await onStartBrowserLogin(providerId);
+      if (result.outcome === "ready") {
+        setLocalConnection({ providerId, state: "ready" });
+      }
+      const copy = connectResultCopy(result.outcome, {
+        detail: result.message,
+      });
+      setFeedback({ message: copy.message, tone: copy.tone });
+      onStatus?.(copy.message);
+    } catch (error) {
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Browser sign-in could not be completed.";
+      setFeedback({ message, tone: "danger" });
+      onStatus?.(message);
+    } finally {
+      setPending(false);
+    }
+  };
+
+  const goBack = () => {
+    if (pending) {
+      onClose();
+      return;
+    }
+    if (selectedMethodId) {
+      setSelectedMethodId(null);
+      setReplacingCredential(false);
+      setConfirmingRemoval(false);
+      setFeedback(null);
+    } else onClose();
+  };
+  return {
+    selectedMethodId,
+    setSelectedMethodId,
+    pending,
+    setPending,
+    replacingCredential,
+    setReplacingCredential,
+    confirmingRemoval,
+    setConfirmingRemoval,
+    feedback,
+    setFeedback,
+    showKey,
+    setShowKey,
+    closeRef,
+    keyInputRef,
+    customBaseUrlRef,
+    customModelRef,
+    customKeyRef,
+    providerEndpointRef,
+    selectedMethod,
+    methodVerifiedHere,
+    methodConnected,
+    methodConnectionLabel,
+    methodState,
+    connect,
+    checkConnection,
+    startBrowserLogin,
+    goBack,
+    setLocalConnection,
+  };
+}

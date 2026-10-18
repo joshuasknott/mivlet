@@ -28,19 +28,15 @@ import { CONNECTOR_CONNECTIONS_CHANGED } from "../lib/connector-connections";
 import { listVerifiedConnectorStatuses as listRuntimeConnectorStatuses } from "../lib/load-connector-connections";
 import { useAccountWorkspace } from "./shell-runtime/useAccountWorkspace";
 import { useProviderConnections } from "./shell-runtime/useProviderConnections";
+import { useConnectorOperations } from "./shell-runtime/useConnectorOperations";
 import { useWorkspaceApprovals } from "./shell-runtime/useWorkspaceApprovals";
 import { useWorkspaceSnapshot } from "./shell-runtime/useWorkspaceSnapshot";
 
 import { connectors, knowledgeSources } from "../data/workspace";
 import {
-  beginRuntimeConnectorOAuth,
-  clearRuntimeConnectorAuth,
   listRuntimeConnectorAccounts,
   listRuntimeConnectorKnowledgeSources,
   listRuntimeConnectorSyncStates,
-  refreshRuntimeConnectorHealth,
-  switchRuntimeConnectorAccount,
-  syncRuntimeConnector,
 } from "../runtime/domains/connectors";
 
 import { MAX_IMPORTED_KNOWLEDGE_SOURCES } from "../lib/constants";
@@ -186,10 +182,24 @@ export function useShellRuntime(
     Record<string, ConnectorAccountOption[]>
   >({});
   const [connectorStatus, setConnectorStatus] = useState<string | null>(null);
-  const connectorOperations = useRef(new Map<string, Promise<void>>());
   const [connectorImportedSources, setConnectorImportedSources] = useState<
     KnowledgeSource[]
   >([]);
+  const {
+    connectConnector,
+    disconnectConnector,
+    refreshConnector,
+    loadConnectorAccounts,
+    switchConnectorAccount,
+  } = useConnectorOperations({
+    connectorScopeRef,
+    connectorManifests,
+    setConnectorManifests,
+    setConnectorAccounts,
+    setConnectorStatus,
+    activeWorkspaceScope,
+    setLastAction,
+  });
   const [managedMemoryRecords, setManagedMemoryRecords] = useState<
     MemoryRecord[]
   >(initialState.memoryRecords);
@@ -208,7 +218,11 @@ export function useShellRuntime(
     generation: number;
     pendingToken: number | null;
     nextToken: number;
-  }>({ generation: workspaceScopeGeneration, pendingToken: null, nextToken: 0 });
+  }>({
+    generation: workspaceScopeGeneration,
+    pendingToken: null,
+    nextToken: 0,
+  });
   useEffect(() => {
     firstAgentSetupAttemptRef.current = {
       generation: workspaceScopeGeneration,
@@ -383,7 +397,9 @@ export function useShellRuntime(
       setOnboardingVersion(recovered.onboardingVersion ?? 0);
       setSelectedModelId(recovered.selectedModelId);
       setHiddenModelIds(recovered.hiddenModelIds ?? []);
-      setSidebarPreferences(normalizeSidebarPreferences(recovered.sidebarPreferences));
+      setSidebarPreferences(
+        normalizeSidebarPreferences(recovered.sidebarPreferences),
+      );
       setPermissionMode(recovered.permissionMode);
       setPermissionLabel(
         isApprovalPresetLabel(recovered.permissionLabel)
@@ -629,202 +645,6 @@ export function useShellRuntime(
     setMemoryExportText,
   });
 
-  const replaceConnectorManifest = (manifest: ConnectorManifest) => {
-    setConnectorManifests((current) =>
-      current.map((connector) =>
-        connector.id === manifest.id ? manifest : connector,
-      ),
-    );
-  };
-
-  const connectConnector = (connector: ConnectorManifest): Promise<void> => {
-    const generation = connectorScopeRef.current;
-    const key = `${generation}:${connector.id}`;
-    const pending = connectorOperations.current.get(key);
-    if (pending) return pending;
-    const task = (async () => {
-      if (!isSupportedConnectorId(connector.id)) {
-        setConnectorStatus(
-          connector.id === "local-files"
-            ? "Local Files is already available."
-            : (connector.setupMessage ??
-                `${connector.name} is not in the first connector wave.`),
-        );
-        return;
-      }
-
-      setConnectorStatus(`Preparing ${connector.name} authorization...`);
-      try {
-        // Every OAuth connector runs the full loopback flow end-to-end. Public
-        // Google clients call Google directly; confidential connectors route
-        // exchange through the configured broker and fail closed if it is absent.
-        const result = await beginRuntimeConnectorOAuth({
-          connectorId: connector.id,
-          requestedScopes: connector.scopes?.length
-            ? connector.scopes.map((scope) => scope.id)
-            : undefined,
-        });
-        if (!result) {
-          const message = `${connector.name} connections require the installed desktop app.`;
-          setConnectorStatus(message);
-          setLastAction(message);
-          throw new Error(message);
-        }
-        // On a real connection, re-read the boundary so the manifest reflects the
-        // live account, granted scopes, and (after refresh) provider health.
-        if (result.status === "connected") {
-          if (connectorScopeRef.current !== generation) return;
-          const refreshed = await refreshRuntimeConnectorHealth(connector.id);
-          if (connectorScopeRef.current !== generation) return;
-          if (refreshed) {
-            replaceConnectorManifest(refreshed);
-          }
-          if (
-            !refreshed ||
-            refreshed.status !== "connected" ||
-            refreshed.health?.state !== "healthy"
-          ) {
-            throw new Error(
-              refreshed?.healthSummary ??
-                "Could not finish connecting. Try again.",
-            );
-          }
-          await loadConnectorAccounts(connector.id);
-        } else {
-          throw new Error(
-            result.message || "Sign-in did not finish. Try again.",
-          );
-        }
-        if (connectorScopeRef.current !== generation) return;
-        setConnectorStatus(result.message);
-        setLastAction(result.message);
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : `${connector.name} authorization is unavailable.`;
-        if (connectorScopeRef.current !== generation) throw new Error(message);
-        setConnectorStatus(message);
-        setLastAction(message);
-        throw new Error(message);
-      }
-    })().finally(() => {
-      connectorOperations.current.delete(key);
-    });
-    connectorOperations.current.set(key, task);
-    return task;
-  };
-
-  const disconnectConnector = async (connectorId: string) => {
-    const generation = connectorScopeRef.current;
-    const connector = connectorManifests.find(
-      (manifest) => manifest.id === connectorId,
-    );
-    if (!connector || !isSupportedConnectorId(connectorId)) {
-      return;
-    }
-
-    try {
-      const manifest = await clearRuntimeConnectorAuth(connectorId);
-      if (connectorScopeRef.current !== generation) return;
-      if (manifest) {
-        replaceConnectorManifest(manifest);
-        setConnectorStatus(`${connector.name} disconnected.`);
-      } else {
-        throw new Error(
-          `${connector.name} connections require the installed desktop app.`,
-        );
-      }
-    } catch (error) {
-      const message =
-        error instanceof Error
-          ? error.message
-          : `${connector.name} could not be disconnected.`;
-      if (connectorScopeRef.current === generation) setConnectorStatus(message);
-      throw new Error(message);
-    }
-  };
-
-  const loadConnectorAccounts = async (connectorId: string) => {
-    if (!isSupportedConnectorId(connectorId)) return;
-    try {
-      const accounts = await listRuntimeConnectorAccounts(connectorId);
-      if (accounts) {
-        setConnectorAccounts((current) => ({
-          ...current,
-          [connectorId]: accounts,
-        }));
-      }
-    } catch (error) {
-      setConnectorStatus(
-        error instanceof Error
-          ? error.message
-          : "Connected accounts are unavailable.",
-      );
-    }
-  };
-
-  const switchConnectorAccount = async (
-    connectorId: string,
-    connectionId: string,
-  ) => {
-    if (!isSupportedConnectorId(connectorId)) return;
-    try {
-      const manifest = await switchRuntimeConnectorAccount(
-        connectorId,
-        connectionId,
-      );
-      if (manifest) {
-        replaceConnectorManifest(manifest);
-        await loadConnectorAccounts(connectorId);
-        setConnectorStatus(
-          `Using ${manifest.account?.email ?? manifest.account?.displayName ?? "selected account"}.`,
-        );
-      }
-    } catch (error) {
-      setConnectorStatus(
-        error instanceof Error
-          ? error.message
-          : "The account could not be selected.",
-      );
-    }
-  };
-
-  const refreshConnector = async (connectorId: string) => {
-    const connector = connectorManifests.find(
-      (manifest) => manifest.id === connectorId,
-    );
-    if (!connector || !isSupportedConnectorId(connectorId)) {
-      return;
-    }
-
-    try {
-      const sync = await syncRuntimeConnector({
-        connectorId,
-        workspaceId: activeWorkspaceScope?.workspaceId ?? "",
-        trigger: "manual",
-      });
-      if (sync) {
-        replaceConnectorManifest({ ...connector, sync });
-        const outcome =
-          sync.phase === "succeeded"
-            ? "sync complete"
-            : (sync.failure?.message ?? `sync ${sync.phase}`);
-        setConnectorStatus(`${connector.name} ${outcome}.`);
-      } else {
-        setConnectorStatus(
-          `${connector.name} sync is unavailable in preview mode.`,
-        );
-      }
-    } catch (error) {
-      setConnectorStatus(
-        error instanceof Error
-          ? error.message
-          : `${connector.name} health is unavailable.`,
-      );
-    }
-  };
-
   // Account readiness is separate from the provider setup gate in the shell.
   const onboardingRequired =
     !(
@@ -892,7 +712,9 @@ export function useShellRuntime(
   }) => {
     const attempt = firstAgentSetupAttemptRef.current;
     if (attempt.generation !== workspaceScopeGeneration) {
-      throw new Error("The workspace changed before your first agent could be saved.");
+      throw new Error(
+        "The workspace changed before your first agent could be saved.",
+      );
     }
     if (attempt.pendingToken !== null) {
       throw new Error("Your first agent is still being saved.");
@@ -952,10 +774,13 @@ export function useShellRuntime(
       }
       if (
         firstAgentSetupAttemptRef.current !== attempt ||
-        firstAgentSetupAttemptRef.current.generation !== workspaceScopeGeneration ||
+        firstAgentSetupAttemptRef.current.generation !==
+          workspaceScopeGeneration ||
         firstAgentSetupAttemptRef.current.pendingToken !== token
       ) {
-        throw new Error("The workspace changed before your first agent could be saved.");
+        throw new Error(
+          "The workspace changed before your first agent could be saved.",
+        );
       }
       setAgents(nextShellState.agents ?? []);
       setActiveAgentId(original.id);
@@ -968,7 +793,10 @@ export function useShellRuntime(
 
   const createAgent = (input: Omit<MivletAgentProfile, "id" | "threadId">) => {
     // Keep identifier construction distinct from dynamic CSS class prefixes.
-    const id = ["agent", globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36)].join("-");
+    const id = [
+      "agent",
+      globalThis.crypto?.randomUUID?.() ?? Date.now().toString(36),
+    ].join("-");
     const created: MivletAgentProfile = {
       ...input,
       id,
