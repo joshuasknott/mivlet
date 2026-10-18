@@ -34,7 +34,9 @@ observation, including after a measurement error; close it normally before the
 next run. A failed/early-exit observation produces a failing exit code and a
 structured report, not a successful zero-memory measurement.
 
-The launch receipt records the executable SHA-256, PID and launch time.
+The launch receipt records the executable SHA-256, PID, launch time and explicit
+working directory (the observer's current directory). Use the same directory
+for both builds and ensure no Mivlet process is already running before launch.
 `firstResponsiveWindowMs` is the first sampled responsive native window titled
 Mivlet. It is **not** first paint, provider readiness or a usable workspace.
 Verify the visible native screen separately. Record which state was reached:

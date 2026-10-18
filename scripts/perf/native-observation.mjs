@@ -75,10 +75,11 @@ async function observe() {
   await mkdir(dirname(output), { recursive: true });
   const environment = { ...process.env };
   if (values["env-file"]) Object.assign(environment, parseEnv(await readFile(values["env-file"], "utf8")));
-  const launch = { executable, sha256 };
+  const launch = { executable, sha256, workingDirectory: process.cwd() };
   const sampler = spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-File",
     fileURLToPath(new URL("./native-samples.ps1", import.meta.url)),
     "-Executable", executable, "-DurationSeconds", String(duration),
+    "-WorkingDirectory", launch.workingDirectory,
   ], { env: environment, windowsHide: true, stdio: ["ignore", "pipe", "inherit"] });
   const completion = new Promise((accept) => {
     sampler.once("error", (error) => accept({ error: error.message }));
