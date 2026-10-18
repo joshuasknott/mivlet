@@ -66,6 +66,11 @@ pub(crate) fn resolve_broker_endpoints(
     })
 }
 
+/// Build a single broker OAuth route by extending the broker base path. The base
+/// path keeps any prefix (e.g. `/broker/`) so a route-mounted broker — including
+/// a Cloudflare Worker behind a path — resolves correctly with or without a
+/// trailing slash. The closed vocabulary of segments is enforced at the call
+/// sites; nothing here can invent a non-OAuth route.
 fn broker_route(
     broker: &Url,
     connector_id: &str,

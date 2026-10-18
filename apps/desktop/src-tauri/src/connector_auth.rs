@@ -166,21 +166,6 @@ fn now_epoch() -> u64 {
         .as_secs()
 }
 
-// Broker endpoint construction lives in `configuration`.
-
-/// Build a single broker OAuth route by extending the broker base path. The base
-/// path keeps any prefix (e.g. `/broker/`) so a route-mounted broker — including
-/// a Cloudflare Worker behind a path — resolves correctly with or without a
-/// trailing slash. The closed vocabulary of segments is enforced at the call
-/// sites; nothing here can invent a non-OAuth route.
-// Connector configuration is implemented in `configuration`.
-
-// Public client and broker configuration lives in `configuration`.
-
-// Provider-specific endpoint configuration lives in `configuration`.
-
-// Google client-secret provisioning lives in `configuration`.
-
 fn mark_refresh_rejected(
     connector_id: &str,
     account_id: &str,
