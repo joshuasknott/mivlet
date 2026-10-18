@@ -382,12 +382,11 @@ mod commands;
 mod validation;
 use civil_time::*;
 use commands::{
-    create_at, global_store, require_main_window, resolve_private_scope, set_status_at, update_at,
-    validate_dispatch_identity,
+    claim_due_after_capacity_matching, create_at, global_store, require_main_window,
+    resolve_private_scope, set_status_at, update_at, validate_dispatch_identity,
 };
 use validation::*;
 
-pub(super) use commands::claim_due_after_capacity_matching;
 #[cfg(test)]
 pub(crate) use commands::{bind_claim_to_pending_attempt, claim_due_after_capacity};
 pub(crate) use commands::{finish_bound_occurrence, renew_bound_occurrence_lease};
