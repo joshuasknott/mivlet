@@ -87,9 +87,23 @@ fn codex_candidates() -> Vec<PathBuf> {
 }
 
 pub(super) fn find_codex_executable() -> Option<PathBuf> {
+    // PATH entries may be relative (for example, `.`). Resolve the selected
+    // candidate while the parent process is still in its original directory;
+    // discovery callers may move Codex into an isolated child directory after
+    // this function returns.
+    let process_directory = env::current_dir().ok();
     codex_candidates()
         .into_iter()
         .find(|candidate| candidate.is_file())
+        .and_then(|candidate| resolve_candidate_path(candidate, process_directory.as_deref()))
+}
+
+fn resolve_candidate_path(candidate: PathBuf, process_directory: Option<&Path>) -> Option<PathBuf> {
+    if candidate.is_absolute() {
+        Some(candidate)
+    } else {
+        process_directory.map(|directory| directory.join(candidate))
+    }
 }
 
 pub(super) fn missing_codex_runtime_message() -> String {
@@ -112,4 +126,51 @@ pub(super) fn codex_command(path: &PathBuf) -> Result<Command, String> {
         .env_remove("CODEX_ACCESS_TOKEN")
         .args(["-c", "cli_auth_credentials_store=\"keyring\""]);
     Ok(command)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_candidate_path;
+    #[cfg(windows)]
+    use std::ffi::OsStr;
+    use std::{fs, path::PathBuf};
+
+    #[test]
+    fn relative_path_candidate_stays_bound_to_original_directory() {
+        let original_directory = tempfile::tempdir().expect("original directory");
+        let child_directory = tempfile::tempdir().expect("child directory");
+        #[cfg(windows)]
+        let relative_candidate = PathBuf::from("codex.cmd");
+        #[cfg(not(windows))]
+        let relative_candidate = PathBuf::from("codex");
+        let expected = original_directory.path().join(&relative_candidate);
+        fs::write(&expected, b"codex test target").expect("write candidate");
+
+        let resolved =
+            resolve_candidate_path(relative_candidate.clone(), Some(original_directory.path()));
+        let resolved = resolved.expect("relative candidate needs an original directory");
+
+        assert!(resolved.is_absolute());
+        assert_eq!(resolved, expected);
+        assert!(resolved.is_file());
+        assert!(!child_directory.path().join(relative_candidate).is_file());
+
+        let mut command = super::super::codex_executable_command(&resolved);
+        command.current_dir(child_directory.path());
+        #[cfg(windows)]
+        {
+            assert_eq!(command.get_program(), OsStr::new("cmd"));
+            assert_eq!(command.get_args().last(), Some(resolved.as_os_str()));
+        }
+        #[cfg(not(windows))]
+        {
+            assert_eq!(command.get_program(), resolved.as_os_str());
+            assert!(command.get_args().next().is_none());
+        }
+    }
+
+    #[test]
+    fn relative_path_candidate_is_rejected_without_original_directory() {
+        assert!(resolve_candidate_path(PathBuf::from("codex"), None).is_none());
+    }
 }

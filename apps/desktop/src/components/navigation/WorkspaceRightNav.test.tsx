@@ -164,7 +164,6 @@ describe("contextual workspace panel", () => {
         {...props}
         request={nextRequest}
         identity="workspace:other-chat"
-        scope="owner"
       />,
     );
     expect(screen.getByText("Previous document")).toBeVisible();
@@ -172,8 +171,7 @@ describe("contextual workspace panel", () => {
       <WorkspaceRightNav
         {...props}
         request={nextRequest}
-        identity="workspace:other-chat"
-        scope="chat"
+        identity="workspace:third-chat"
       />,
     );
     expect(screen.queryByText("Previous document")).toBeNull();

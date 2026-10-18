@@ -10,7 +10,6 @@ import { BookOpen } from "@phosphor-icons/react/dist/csr/BookOpen";
 import {
   memoryGroup,
   panelMemories,
-  type PanelScope,
 } from "./workspace-panel-data";
 export { memoryGroup } from "./workspace-panel-data";
 
@@ -29,13 +28,11 @@ type MemoryRuntime = Pick<
 export function WorkspaceMemories({
   room,
   runtime,
-  scope = "chat",
   sourceIds = [],
   onOpenSource,
 }: {
   room?: ConversationRoom;
   runtime: MemoryRuntime;
-  scope?: PanelScope;
   sourceIds?: readonly string[];
   onOpenSource?: (sourceId: string) => void;
 }) {
@@ -88,11 +85,7 @@ export function WorkspaceMemories({
       setPending(false);
     }
   };
-  const records = panelMemories(
-    runtime.managedMemoryRecords,
-    room,
-    scope,
-  ).filter(({ record }) =>
+  const records = panelMemories(runtime.managedMemoryRecords, room).filter(({ record }) =>
     (record.title + " " + record.value)
       .toLowerCase()
       .includes(query.trim().toLowerCase()),
@@ -183,12 +176,7 @@ export function WorkspaceMemories({
           <button
             type="button"
             aria-label="Add memory"
-            disabled={!room || pending || scope !== "chat"}
-            title={
-              scope === "owner"
-                ? "Switch to This chat to add a new memory."
-                : undefined
-            }
+            disabled={!room || pending}
             onClick={() => {
               setEditor({ title: "", value: "" });
               setError("");
@@ -274,12 +262,10 @@ export function WorkspaceMemories({
         </form>
       )}
       <MemoryCollection
-        key={"saved:" + query + ":" + scope}
-        label={scope === "chat" ? "This chat" : "Shared memory"}
-        title={scope === "chat" ? "Saved in this chat" : "Shared memory"}
-        entries={saved.filter(
-          (entry) => scope === "owner" || entry.group === "This chat",
-        )}
+        key={"saved:" + query}
+        label="This chat"
+        title="Saved in this chat"
+        entries={saved.filter((entry) => entry.group === "This chat")}
         pageSize={12}
         renderRecord={renderRecord}
       />
@@ -291,8 +277,7 @@ export function WorkspaceMemories({
         pageSize={3}
         renderRecord={renderRecord}
       />
-      {scope === "chat" &&
-        ["From this project", "From this agent", "Account-wide"].map(
+      {["From this project", "From this agent", "Account-wide"].map(
           (group) => {
             const entries = saved.filter((entry) => entry.group === group);
             return entries.length ? (

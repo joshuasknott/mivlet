@@ -25,7 +25,6 @@ import {
   type PanelPage,
   type RightPanelTab,
 } from "./right-panel-state";
-import type { PanelScope } from "./workspace-panel-data";
 import "./navigation.css";
 import "./right-panel.css";
 import "./right-panel-rail.css";
@@ -49,7 +48,6 @@ export function WorkspaceRightNav({
   context,
   title,
   identity = "workspace",
-  scope = "chat",
   open: requestedOpen,
   replaced = false,
   onOpen,
@@ -71,7 +69,6 @@ export function WorkspaceRightNav({
   context: NavContext;
   title?: string;
   identity?: string;
-  scope?: PanelScope;
   open: boolean;
   replaced?: boolean;
   onOpen?: () => void;
@@ -106,7 +103,7 @@ export function WorkspaceRightNav({
   const [visited, setVisited] = useState<ReadonlySet<PanelPage>>(
     () => new Set(["activity"]),
   );
-  const scopeKey = identity + ":" + scope;
+  const scopeKey = identity;
   const previous = useRef({
     identity,
     scopeKey,

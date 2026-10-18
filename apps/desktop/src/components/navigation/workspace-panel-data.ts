@@ -10,13 +10,6 @@ import { isLiveSource } from "@mivlet/knowledge";
 import { parseComputerArtifact } from "../../lib/computer-artifacts";
 import type { RightPanelTab } from "./right-panel-state";
 
-export type PanelScope = "chat" | "owner";
-export type PanelOwner = {
-  kind: "agent" | "project";
-  id: string;
-  name: string;
-};
-
 export function agentChatOwner(room: ConversationRoom): string | undefined {
   if (room.projectId || room.chat?.ownerKind === "project") return undefined;
   return room.chat?.ownerKind === "agent"
@@ -27,23 +20,11 @@ export function agentChatOwner(room: ConversationRoom): string | undefined {
           : undefined));
 }
 
-/** A broader browsing scope never changes context inheritance or access. */
 export function panelRooms(
   workspaceId: string,
   room: ConversationRoom | undefined,
-  rooms: ConversationRoom[],
-  owner: PanelOwner | undefined,
-  scope: PanelScope,
 ): ConversationRoom[] {
-  if (scope === "chat") return room?.workspaceId === workspaceId ? [room] : [];
-  if (!owner) return [];
-  return rooms.filter(
-    (candidate) =>
-      candidate.workspaceId === workspaceId &&
-      (owner.kind === "project"
-        ? candidate.projectId === owner.id
-        : agentChatOwner(candidate) === owner.id),
-  );
+  return room?.workspaceId === workspaceId ? [room] : [];
 }
 
 /** Include the effort's delegated assignments, but never a foreign workspace. */
@@ -99,16 +80,11 @@ export function memoryGroup(
 export function panelMemories(
   records: MemoryRecord[],
   room: ConversationRoom | undefined,
-  scope: PanelScope = "chat",
 ) {
   if (!room) return [];
   return records.flatMap((record) => {
     const group = memoryGroup(record, room);
-    return group &&
-      (scope === "chat" ||
-        group === (room.projectId ? "From this project" : "From this agent"))
-      ? [{ record, group }]
-      : [];
+    return group ? [{ record, group }] : [];
   });
 }
 

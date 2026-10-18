@@ -129,26 +129,6 @@ describe("conversation memories", () => {
     expect(screen.queryByText("Saved fact 0")).toBeNull();
   });
 
-  it("browses only the owner's shared memories without adding a chat memory into that scope", () => {
-    const value = runtime([
-      record(),
-      record({
-        id: "project-memory",
-        title: "Project style",
-        scope: { level: "project", projectId: "project" },
-      }),
-    ]);
-    render(
-      <WorkspaceMemories
-        room={{ ...room, projectId: "project" }}
-        runtime={value}
-        scope="owner"
-      />,
-    );
-    expect(screen.getByText("Project style")).toBeVisible();
-    expect(screen.queryByText("Decision")).toBeNull();
-    expect(screen.getByRole("button", { name: "Add memory" })).toBeDisabled();
-  });
   it("excludes sibling chats, unrelated agents, foreign workspaces and forgotten records", () => {
     for (const patch of [
       { scope: { level: "thread" as const, threadId: "sibling" } },
