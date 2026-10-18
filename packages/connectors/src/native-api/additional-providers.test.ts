@@ -9,7 +9,7 @@ import { shapeOpenAiRequest } from "./openai-compat";
 import { validateReasoningEffort } from "./reasoning";
 
 const nativeCatalog = readFileSync(new URL("../../../../apps/desktop/src-tauri/src/backends.rs", import.meta.url), "utf8");
-const nativeProfiles = readFileSync(new URL("../../../../apps/desktop/src-tauri/src/native_api.rs", import.meta.url), "utf8");
+const nativeProfiles = readFileSync(new URL("../../../../apps/desktop/src-tauri/src/native_api/providers.rs", import.meta.url), "utf8");
 
 describe.each(additionalNativeProviderCatalog)("$label direct API route", (entry) => {
   it("has reachable setup, runtime admission, and matching native model routes", () => {
