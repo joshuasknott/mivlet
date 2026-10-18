@@ -14,10 +14,6 @@ export {
   buildProviderFamilies,
   encodeCustomProviderSecret,
 } from "./provider-catalogue-data";
-export type {
-  ProviderConnectionMethodKind,
-  ProviderFamily,
-} from "./provider-catalogue-data";
 
 export interface ProviderCatalogueProps {
   onboarding?: boolean;

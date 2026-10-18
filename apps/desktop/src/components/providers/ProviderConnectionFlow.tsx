@@ -15,6 +15,7 @@ import { EyeSlash } from "@phosphor-icons/react/dist/csr/EyeSlash";
 import { LockKey } from "@phosphor-icons/react/dist/csr/LockKey";
 import type { BackendVerifyResult } from "@mivlet/protocol";
 import { ProviderIcon } from "../ProviderIcon";
+import { stateViewFor } from "../../lib/backend-state";
 import {
   additionalNativeProviderCatalog,
   providerEndpointSetup,
@@ -72,16 +73,36 @@ export function ProviderConnectionFlow({
   onStatus?: (message: string) => void;
 }) {
   const {
-    selectedMethodId, setSelectedMethodId,
-    pending, setPending,
-    replacingCredential, setReplacingCredential,
-    confirmingRemoval, setConfirmingRemoval,
-    feedback, setFeedback,
-    showKey, setShowKey,
-    closeRef, keyInputRef, customBaseUrlRef, customModelRef, customKeyRef, providerEndpointRef,
-    selectedMethod, methodVerifiedHere, methodConnected, methodConnectionLabel, methodState,
-    connect, checkConnection, startBrowserLogin, goBack,
-    setLocallyReady, setLocallyConfigured, setLocallyRemoved,
+    selectedMethodId,
+    setSelectedMethodId,
+    pending,
+    setPending,
+    replacingCredential,
+    setReplacingCredential,
+    confirmingRemoval,
+    setConfirmingRemoval,
+    feedback,
+    setFeedback,
+    showKey,
+    setShowKey,
+    closeRef,
+    keyInputRef,
+    customBaseUrlRef,
+    customModelRef,
+    customKeyRef,
+    providerEndpointRef,
+    selectedMethod,
+    methodVerifiedHere,
+    methodConnected,
+    methodConnectionLabel,
+    methodState,
+    connect,
+    checkConnection,
+    startBrowserLogin,
+    goBack,
+    setLocallyReady,
+    setLocallyConfigured,
+    setLocallyRemoved,
   } = useProviderConnection({
     family,
     connectedBackendIds,

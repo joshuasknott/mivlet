@@ -2,14 +2,19 @@ import { useLayoutEffect, useRef, useState } from "react";
 import type { BackendVerifyResult } from "@mivlet/protocol";
 import { connectResultCopy, stateViewFor } from "../../lib/backend-state";
 import { isProviderConnected } from "./provider-catalogue-data";
-import type { ProviderFamily } from "./provider-catalogue-data";
+import type { ProviderConnectionMethod, ProviderFamily } from "./provider-catalogue-data";
 
 export interface ProviderConnectionActionsProps {
   family: ProviderFamily;
   connectedBackendIds: string[];
   onClose: () => void;
-  onConnect: (providerId: string, secret: string) => Promise<BackendVerifyResult>;
-  onCheckConnection?: (providerId: string) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
+  onConnect: (
+    providerId: string,
+    secret: string,
+  ) => Promise<BackendVerifyResult>;
+  onCheckConnection?: (
+    providerId: string,
+  ) => BackendVerifyResult | void | Promise<BackendVerifyResult | void>;
   onStartBrowserLogin?: (providerId: string) => Promise<BackendVerifyResult>;
   onStatus?: (message: string) => void;
 }
@@ -44,7 +49,7 @@ export function useProviderConnection({
   const customModelRef = useRef<HTMLInputElement>(null);
   const customKeyRef = useRef<HTMLInputElement>(null);
   const providerEndpointRef = useRef<HTMLInputElement>(null);
-  const selectedMethod = family.methods.find(
+  const selectedMethod: ProviderConnectionMethod | undefined = family.methods.find(
     (method) => method.id === selectedMethodId,
   );
 
@@ -196,15 +201,35 @@ export function useProviderConnection({
     } else onClose();
   };
   return {
-    selectedMethodId, setSelectedMethodId,
-    pending, setPending,
-    replacingCredential, setReplacingCredential,
-    confirmingRemoval, setConfirmingRemoval,
-    feedback, setFeedback,
-    showKey, setShowKey,
-    closeRef, keyInputRef, customBaseUrlRef, customModelRef, customKeyRef, providerEndpointRef,
-    selectedMethod, methodVerifiedHere, methodConnected, methodConnectionLabel, methodState,
-    connect, checkConnection, startBrowserLogin, goBack,
-    setLocallyReady, setLocallyConfigured, setLocallyRemoved,
+    selectedMethodId,
+    setSelectedMethodId,
+    pending,
+    setPending,
+    replacingCredential,
+    setReplacingCredential,
+    confirmingRemoval,
+    setConfirmingRemoval,
+    feedback,
+    setFeedback,
+    showKey,
+    setShowKey,
+    closeRef,
+    keyInputRef,
+    customBaseUrlRef,
+    customModelRef,
+    customKeyRef,
+    providerEndpointRef,
+    selectedMethod,
+    methodVerifiedHere,
+    methodConnected,
+    methodConnectionLabel,
+    methodState,
+    connect,
+    checkConnection,
+    startBrowserLogin,
+    goBack,
+    setLocallyReady,
+    setLocallyConfigured,
+    setLocallyRemoved,
   };
 }

@@ -109,7 +109,7 @@ describe("connector account operation scope fences", () => {
 
   it("does not apply a stale connector sync or its status", async () => {
     const scope = { current: 1 };
-    const pending = deferred<unknown>();
+    const pending = deferred<Awaited<ReturnType<typeof connectorsRuntime.syncRuntimeConnector>>>();
     vi.mocked(connectorsRuntime.syncRuntimeConnector).mockReturnValue(
       pending.promise,
     );
@@ -119,7 +119,7 @@ describe("connector account operation scope fences", () => {
     act(() => {
       operation = result.current.refreshConnector("gmail");
       scope.current = 2;
-      pending.resolve({ phase: "succeeded" });
+      pending.resolve(null);
     });
     await act(async () => {
       await operation;

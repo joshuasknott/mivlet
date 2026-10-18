@@ -16,6 +16,7 @@ const fallback: MivletAgentProfile = {
   modelId: "",
   permissionLabel: "Ask Me",
   icon: "agent",
+  iconColor: "#24bb77",
   connectorIds: [],
   knowledgeSourceIds: [],
 };

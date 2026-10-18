@@ -74,17 +74,20 @@ test("embedded observation preserves exact SDK bytes and headers while replacing
 });
 test("replacing a receipt removes fields that disappear from the latest snapshot", async () => {
   const events = [];
-  const accounting = createUsageAccounting(parser, (event) => events.push(event));
+  const accounting = createUsageAccounting(parser, (event) =>
+    events.push(event),
+  );
   const wire =
-    frame(usage(10, 1, {
-      cachedInputTokens: 7,
-      cacheWriteTokens: 3,
-      reasoningTokens: 2,
-      costUsd: 0.4,
-      costEstimated: true,
-      costUnknown: false,
-    })) +
-    frame(usage(20, 2, { costUsd: 0.1, costUnknown: false }));
+    frame(
+      usage(10, 1, {
+        cachedInputTokens: 7,
+        cacheWriteTokens: 3,
+        reasoningTokens: 2,
+        costUsd: 0.4,
+        costEstimated: true,
+        costUnknown: false,
+      }),
+    ) + frame(usage(20, 2, { costUsd: 0.1, costUnknown: false }));
 
   await accounting.observe(new Response(wire)).text();
   assert.deepEqual(events.at(-1), {
@@ -118,13 +121,21 @@ test("distinct model calls accumulate once, retaining partial receipts before fa
 });
 test("cost flags remain cumulative across independent calls and repeated step ids stay idempotent", async () => {
   const events = [];
-  const accounting = createUsageAccounting(parser, (event) => events.push(event));
+  const accounting = createUsageAccounting(parser, (event) =>
+    events.push(event),
+  );
   await accounting
-    .observe(new Response(frame(usage(100, 10, {
-      costUsd: 0.25,
-      costEstimated: true,
-      costUnknown: false,
-    }))))
+    .observe(
+      new Response(
+        frame(
+          usage(100, 10, {
+            costUsd: 0.25,
+            costEstimated: true,
+            costUnknown: false,
+          }),
+        ),
+      ),
+    )
     .text();
   accounting.completeStep("step-1", { input: 999, output: 999 });
   accounting.completeStep("step-1", { input: 999, output: 999 });
@@ -187,13 +198,13 @@ test("revising independent finite costs to zero does not publish a floating nega
     if (events.length === 4) secondB.resolve();
   };
   const streamedAccounting = createUsageAccounting(parser, onUsage);
-  const consumeA = streamedAccounting.observe(
-    new Response(makeStream(0.7, 0, gateA)),
-  ).text();
+  const consumeA = streamedAccounting
+    .observe(new Response(makeStream(0.7, 0, gateA)))
+    .text();
   await firstA.promise;
-  const consumeB = streamedAccounting.observe(
-    new Response(makeStream(0.1, 0, gateB)),
-  ).text();
+  const consumeB = streamedAccounting
+    .observe(new Response(makeStream(0.1, 0, gateB)))
+    .text();
   await firstB.promise;
   gateA.resolve();
   await secondA.promise;
@@ -204,11 +215,67 @@ test("revising independent finite costs to zero does not publish a floating nega
   assert.equal(events.at(-1).costUsd, 0);
   assert.ok(events.every((event) => event.costUsd >= 0));
 });
+test("replacing the last nonzero receipt publishes an exact zero total", async () => {
+  const events = [];
+  const deferred = () => {
+    let resolve;
+    const promise = new Promise((done) => {
+      resolve = done;
+    });
+    return { promise, resolve };
+  };
+  const costs = [0.7, 0.1, 0.2, 0.3];
+  const gates = costs.map(() => deferred());
+  const firsts = costs.map(() => deferred());
+  const revisions = costs.map(() => deferred());
+  const makeStream = (initialCost, gate) =>
+    new ReadableStream({
+      async start(controller) {
+        controller.enqueue(
+          new TextEncoder().encode(
+            frame(usage(1, 1, { costUsd: initialCost, costUnknown: false })),
+          ),
+        );
+        await gate.promise;
+        controller.enqueue(
+          new TextEncoder().encode(
+            frame(usage(1, 1, { costUsd: 0, costUnknown: false })),
+          ),
+        );
+        controller.close();
+      },
+    });
+  const accounting = createUsageAccounting(parser, (event) => {
+    events.push(event);
+    const index = events.length - 1;
+    if (index < costs.length) firsts[index].resolve();
+    else revisions[index - costs.length].resolve();
+  });
+  const consumes = [];
+  for (let index = 0; index < costs.length; index += 1) {
+    consumes.push(
+      accounting
+        .observe(new Response(makeStream(costs[index], gates[index])))
+        .text(),
+    );
+    await firsts[index].promise;
+  }
+  for (let index = 0; index < costs.length; index += 1) {
+    gates[index].resolve();
+    await revisions[index].promise;
+  }
+  await Promise.all(consumes);
+  assert.equal(events.at(-1).costUsd, 0);
+});
 test("malformed negative costs remain observable instead of being normalized", async () => {
   const events = [];
-  const accounting = createUsageAccounting(parser, (event) => events.push(event));
+  const accounting = createUsageAccounting(parser, (event) =>
+    events.push(event),
+  );
   await accounting
-    .observe(new Response(frame(usage(1, 1, { costUsd: -1, costUnknown: false }))))
+    .observe(
+      new Response(frame(usage(1, 1, { costUsd: -1, costUnknown: false }))),
+    )
     .text();
   assert.equal(events.at(-1).costUsd, -1);
 });
@@ -216,10 +283,13 @@ test("replacing nonfinite or missing costs recovers the valid aggregate", async 
   for (const invalidCost of [NaN, Infinity, -Infinity, undefined]) {
     const events = [];
     const invalidParser = () => (line) => [
-      usage(1, 1, {
-        costUsd: line.includes("initial") ? invalidCost : 0,
-        costUnknown: false,
-      }),
+      {
+        type: "usage",
+        ...usage(1, 1, {
+          costUsd: line.includes("initial") ? invalidCost : 0,
+          costUnknown: false,
+        }),
+      },
     ];
     const accounting = createUsageAccounting(invalidParser, (event) =>
       events.push(event),
@@ -230,35 +300,48 @@ test("replacing nonfinite or missing costs recovers the valid aggregate", async 
 });
 test("usage aggregation reads each live snapshot a bounded number of times", async () => {
   let propertyReads = 0;
-  const instrumentedParser = () => () => [Object.defineProperties(
-    { type: "usage" },
-    Object.fromEntries([
-      ["inputTokens", 1],
-      ["outputTokens", 1],
-      ["costUsd", 0],
-      ["costUnknown", true],
-      ["cachedInputTokens", undefined],
-      ["cacheWriteTokens", undefined],
-      ["reasoningTokens", undefined],
-      ["costEstimated", undefined],
-    ].map(([key, value]) => [key, {
-      enumerable: true,
-      get() {
-        propertyReads += 1;
-        return value;
-      },
-    }])),
-  )];
+  const instrumentedParser = () => () => [
+    Object.defineProperties(
+      { type: "usage" },
+      Object.fromEntries(
+        [
+          ["inputTokens", 1],
+          ["outputTokens", 1],
+          ["costUsd", 0],
+          ["costUnknown", true],
+          ["cachedInputTokens", undefined],
+          ["cacheWriteTokens", undefined],
+          ["reasoningTokens", undefined],
+          ["costEstimated", undefined],
+        ].map(([key, value]) => [
+          key,
+          {
+            enumerable: true,
+            get() {
+              propertyReads += 1;
+              return value;
+            },
+          },
+        ]),
+      ),
+    ),
+  ];
   const events = [];
-  const accounting = createUsageAccounting(instrumentedParser, (event) => events.push(event));
+  const accounting = createUsageAccounting(instrumentedParser, (event) =>
+    events.push(event),
+  );
   const frames = 64;
-  const wire = Array.from({ length: frames }, () => "data: usage\n").join("");
-  await accounting.observe(new Response(wire)).text();
+  for (let index = 0; index < frames; index += 1) {
+    await accounting.observe(new Response("data: usage\n")).text();
+  }
 
   // Incremental aggregation reads only the current event's fields. A full
   // receipt rescan would grow with the number of prior frames and exceed this
   // linear bound by a wide margin.
-  assert.ok(propertyReads <= frames * 16, `unexpected snapshot reads: ${propertyReads}`);
+  assert.ok(
+    propertyReads <= frames * 16,
+    `unexpected snapshot reads: ${propertyReads}`,
+  );
   assert.equal(events.at(-1).inputTokens, frames);
 });
 test("SDK token fallback stays unpriced and malformed/oversized frames pass through unchanged", async () => {

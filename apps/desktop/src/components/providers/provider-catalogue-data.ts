@@ -2,10 +2,7 @@ import type { BackendProvider } from "@mivlet/protocol";
 import { enabledMivletProviders } from "../../lib/provider-availability";
 
 export type ProviderConnectionMethodKind =
-  | "api-key"
-  | "oauth-browser"
-  | "provider-cli"
-  | "custom";
+  "api-key" | "oauth-browser" | "provider-cli" | "custom";
 
 export interface ProviderConnectionMethod {
   id: string;

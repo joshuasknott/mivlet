@@ -66,7 +66,7 @@ import {
   pendingConversationTurns,
   responseOutputId,
 } from "./conversation-pane-helpers";
-import { createConversationSubmission } from "./useConversationSubmission";
+import { createConversationSubmission } from "./conversation-submission";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { CollaborationWorkItem } from "@mivlet/protocol";
-import { createConversationSubmission } from "./useConversationSubmission";
+import { createConversationSubmission } from "./conversation-submission";
 
 vi.mock("../lib/execution-attachments", () => ({
   prepareExecutionAttachments: vi.fn(),
@@ -137,7 +137,7 @@ describe("conversation submission lifecycle", () => {
       async (_attachments, _computer, _workspaceId, _agentId, isCurrent) => {
         submissionScope.current.responderId = "new-agent";
         expect(isCurrent()).toBe(false);
-        return { attachments: [] };
+        return { attachments: [], node: null };
       },
     );
 

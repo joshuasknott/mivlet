@@ -54,6 +54,12 @@ bounded retrieval/context through the existing native boundaries.
 `useConversationBranches` owns branch selection and submission guards;
 `useConversationOutputRequests` owns source-bound draft/revision staging and
 preserves a newer selection when an older submission completes.
+`conversation-submission.ts` keeps composer admission, attachment staging and
+request fences together. Connector operations in `useConnectorOperations`
+discard account and sync results after workspace transitions. The conversation
+feed delegates individual turns to `ConversationTurn`; artifact selection is a
+single pass over successful receipts. Provider catalogue data, connection state
+and connection forms live beside the catalogue in separate modules.
 `shell/TeammateWorkspace.tsx` remains the public shell entry (account, theme,
 and onboarding). `shell/ActiveWorkspace.tsx` owns live workspace composition
 and `WorkspaceExecution` service wiring. Conversation chrome and overlay
@@ -66,6 +72,11 @@ their shared `native-agent-test-harness.ts` supplies deterministic native transp
 The hook implementation lives in `hooks/native-agent/` behind the stable
 `hooks/useNativeAgent.ts` facade (`useNativeAgent`, `NativeAgentState`,
 `UseNativeAgentOptions`, `NativeAgentRunControl`).
+
+Native connector authentication separates account metadata, deployment
+configuration, OAuth flow, refresh and secret storage under `connector_auth/`.
+Tool approval policy, bounded file operations and SSRF-protected fetches live
+under `tools/`; their existing regression suites remain alongside those modules.
 
 Sidebar preferences are account-owned snapshot data. Only projects and agents
 can be pinned; recent activity determines the default order without showing

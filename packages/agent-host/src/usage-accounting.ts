@@ -16,22 +16,6 @@ const measured = (value: unknown) =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : undefined;
-type CostKind =
-  | "valid"
-  | "negative"
-  | "nan"
-  | "positive-infinity"
-  | "negative-infinity"
-  | "non-number";
-const costKind = (value: unknown): CostKind => {
-  if (typeof value !== "number") return "non-number";
-  if (Number.isNaN(value)) return "nan";
-  if (value === Infinity) return "positive-infinity";
-  if (value === -Infinity) return "negative-infinity";
-  if (value < 0) return "negative";
-  return "valid";
-};
-
 /** Observe the existing native response without buffering or changing SDK bytes. */
 export function createUsageAccounting(
   createParser: () => Parser,
@@ -46,7 +30,6 @@ export function createUsageAccounting(
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
-    negativeCostUsd: 0,
     cachedInputTokens: 0,
     cacheWriteTokens: 0,
     reasoningTokens: 0,
@@ -56,42 +39,20 @@ export function createUsageAccounting(
     estimatedCount: 0,
     unknownCostCount: 0,
     knownCount: 0,
-    invalidCostCount: 0,
     nonzeroCostCount: 0,
-    nanCostCount: 0,
-    positiveInfinityCostCount: 0,
-    negativeInfinityCostCount: 0,
-    nonNumericCostCount: 0,
+    negativeCostCount: 0,
+    nonfiniteCostCount: 0,
   };
 
   const adjustCost = (usage: Usage, direction: 1 | -1) => {
     const value = usage.costUsd;
-    switch (costKind(value)) {
-      case "valid":
-        totals.costUsd += direction * (value as number);
-        if (value !== 0) totals.nonzeroCostCount += direction;
-        break;
-      case "negative":
-        totals.negativeCostUsd += direction * (value as number);
-        totals.invalidCostCount += direction;
-        break;
-      case "nan":
-        totals.nanCostCount += direction;
-        totals.invalidCostCount += direction;
-        break;
-      case "positive-infinity":
-        totals.positiveInfinityCostCount += direction;
-        totals.invalidCostCount += direction;
-        break;
-      case "negative-infinity":
-        totals.negativeInfinityCostCount += direction;
-        totals.invalidCostCount += direction;
-        break;
-      case "non-number":
-        totals.nonNumericCostCount += direction;
-        totals.invalidCostCount += direction;
-        break;
+    if (!Number.isFinite(value)) {
+      totals.nonfiniteCostCount += direction;
+      return;
     }
+    totals.costUsd += direction * value;
+    if (value !== 0) totals.nonzeroCostCount += direction;
+    if (value < 0) totals.negativeCostCount += direction;
   };
 
   const removeUsage = (usage: Usage) => {
@@ -144,36 +105,42 @@ export function createUsageAccounting(
 
   const publish = () => {
     if (!totals.knownCount) return;
-    // A set of finite, nonnegative receipt costs cannot be negative. A tiny
-    // negative here is only subtraction order residue (for example,
-    // 0.7 + 0.1 - 0.7 - 0.1). When every current receipt is zero, either sign
-    // is residue and the exact aggregate is zero. Keep malformed provider
-    // values visible by applying this only when all current costs are valid.
-    const costUsd =
-      totals.invalidCostCount > 0
-        ? totals.nanCostCount > 0 ||
-            totals.nonNumericCostCount > 0 ||
-            (totals.positiveInfinityCostCount > 0 &&
-              totals.negativeInfinityCostCount > 0)
-          ? NaN
-          : totals.positiveInfinityCostCount > 0
-            ? Infinity
-            : totals.negativeInfinityCostCount > 0
-              ? -Infinity
-              : totals.costUsd + totals.negativeCostUsd
-        : totals.nonzeroCostCount === 0 || totals.costUsd < 0
-          ? 0
-          : totals.costUsd;
+    // Preserve the old reduction for malformed costs without making normal
+    // streaming updates scan all receipts. An overflowed finite sum must also
+    // be recomputed so replacing an extreme value can recover.
+    if (!Number.isFinite(totals.costUsd)) {
+      totals.costUsd = receipts.reduce((sum, receipt) => {
+        const value = receipt.usage?.costUsd ?? 0;
+        return Number.isFinite(value) ? sum + value : sum;
+      }, 0);
+    }
+    // Subtraction can leave a residue of either sign after every cost is zero.
+    if (totals.nonzeroCostCount === 0) totals.costUsd = 0;
+    const costUsd = totals.nonfiniteCostCount
+      ? receipts.reduce(
+          (sum, receipt) => sum + (receipt.usage ? receipt.usage.costUsd : 0),
+          0,
+        )
+      : totals.negativeCostCount === 0
+        ? Math.max(0, totals.costUsd)
+        : totals.costUsd;
     emit({
       type: "usage",
       inputTokens: totals.inputTokens,
       outputTokens: totals.outputTokens,
-      cachedInputTokens: totals.cachedInputCount ? totals.cachedInputTokens : undefined,
-      cacheWriteTokens: totals.cacheWriteCount ? totals.cacheWriteTokens : undefined,
-      reasoningTokens: totals.reasoningCount ? totals.reasoningTokens : undefined,
+      cachedInputTokens: totals.cachedInputCount
+        ? totals.cachedInputTokens
+        : undefined,
+      cacheWriteTokens: totals.cacheWriteCount
+        ? totals.cacheWriteTokens
+        : undefined,
+      reasoningTokens: totals.reasoningCount
+        ? totals.reasoningTokens
+        : undefined,
       costUsd,
       costEstimated: totals.estimatedCount ? true : undefined,
-      costUnknown: receipts.length - totals.knownCount + totals.unknownCostCount > 0,
+      costUnknown:
+        receipts.length - totals.knownCount + totals.unknownCostCount > 0,
     });
   };
   return {
