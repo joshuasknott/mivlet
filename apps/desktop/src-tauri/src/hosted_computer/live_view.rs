@@ -5,7 +5,7 @@ use chrono::Utc;
 use std::collections::HashMap;
 use std::sync::{Mutex, OnceLock};
 
-struct LiveViewHandle {
+pub(super) struct LiveViewHandle {
     url: String,
     expires_at: chrono::DateTime<Utc>,
 }
