@@ -254,6 +254,7 @@ jobs:
         with:
           name: native-release-${{ github.sha }}
           path: output/native-release
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7
   native-preview:
