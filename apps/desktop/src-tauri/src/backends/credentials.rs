@@ -155,7 +155,7 @@ pub(crate) fn remove_connected_provider(
 /// exposes a secret — it is only ever asked whether a credential *exists* or
 /// handed one to persist.
 pub(crate) struct CredentialStores {
-    internal_user_id: String,
+    pub(super) internal_user_id: String,
 }
 
 pub(super) fn scoped_credential_key(internal_user_id: &str, provider_id: &str) -> String {
