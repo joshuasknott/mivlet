@@ -413,6 +413,12 @@ pub(super) fn apply_v3_to_v4(conn: &Connection) -> Result<()> {
     Ok(())
 }
 
+/// Apply the v2→v3 audit_event extension, idempotently. The presence of the
+/// `category` column is the probe: if it already exists (fresh SCHEMA_V1
+/// database that was somehow marked v2, or a re-run after a partial apply), the
+/// step only ensures the indices exist. If the `audit_event` table is absent
+/// altogether (an artificial minimal schema in tests, never in production where
+/// SCHEMA_V1 always creates it), the step is a no-op.
 pub(super) fn apply_v2_to_v3(conn: &Connection) -> Result<()> {
     let table_exists: i64 = conn.query_row(
         "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='audit_event';",

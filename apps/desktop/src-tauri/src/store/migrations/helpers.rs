@@ -90,13 +90,6 @@ pub(super) fn table_has_column(conn: &Connection, table: &str, name: &str) -> Re
     Ok(false)
 }
 
-/// Apply the v2→v3 audit_event extension, idempotently. The presence of the
-/// `category` column is the probe: if it already exists (fresh SCHEMA_V1
-/// database that was somehow marked v2, or a re-run after a partial apply), the
-/// step only ensures the indices exist. If the `audit_event` table is absent
-/// altogether (an artificial minimal schema in tests, never in production where
-/// SCHEMA_V1 always creates it), the step is a no-op.
-
 pub(super) fn audit_event_has_column(conn: &Connection, name: &str) -> Result<bool> {
     use rusqlite::types::Value;
     let exists: i64 = conn.query_row(
