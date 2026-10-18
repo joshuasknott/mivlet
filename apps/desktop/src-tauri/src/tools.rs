@@ -26,22 +26,23 @@ mod approval_policy;
 mod browser_actions;
 mod files;
 mod web_fetch;
+#[cfg(test)]
+use approval_policy::{argument_digest, canonical_json};
 use approval_policy::{
-    argument_digest, canonical_json, is_computer_tool, is_protected_secret_tool,
-    require_computer_generation, routine_connector_read, validate_tool_name,
-    verify_execution_permit, verify_tool_authority,
+    is_computer_tool, is_protected_secret_tool, require_computer_generation,
+    routine_connector_read, validate_tool_name, verify_execution_permit, verify_tool_authority,
 };
 pub(crate) use approval_policy::{tool_policy, validate_tool_approval_binding};
 pub(crate) use files::{
     bounded_output, run_read_file, run_write_file, MAX_TOOL_INPUT_BYTES, MAX_TOOL_OUTPUT_BYTES,
 };
+#[cfg(test)]
 use web_fetch::format_web_page_source;
 pub(crate) use web_fetch::run_web_fetch_egress;
+#[cfg(test)]
+pub(crate) use web_fetch::WEB_FETCH_MAX_READABLE_CHARACTERS;
 pub(crate) use web_fetch::{
-    is_forbidden_ip, is_supported_response_type, is_unsafe_port, normalize_url_for_fingerprint,
-    parse_and_validate_fetch_url, web_fetch_url_from_args, WebFetchOutcome,
-    WEB_FETCH_MAX_BODY_BYTES, WEB_FETCH_MAX_READABLE_CHARACTERS, WEB_FETCH_MAX_REDIRECTS,
-    WEB_FETCH_TIMEOUT_SECS,
+    is_forbidden_ip, is_unsafe_port, normalize_url_for_fingerprint, web_fetch_url_from_args,
 };
 
 use crate::approvals::resolve_approval;
