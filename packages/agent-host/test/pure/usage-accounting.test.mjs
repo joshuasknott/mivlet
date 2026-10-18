@@ -212,6 +212,22 @@ test("malformed negative costs remain observable instead of being normalized", a
     .text();
   assert.equal(events.at(-1).costUsd, -1);
 });
+test("replacing nonfinite or missing costs recovers the valid aggregate", async () => {
+  for (const invalidCost of [NaN, Infinity, -Infinity, undefined]) {
+    const events = [];
+    const invalidParser = () => (line) => [
+      usage(1, 1, {
+        costUsd: line.includes("initial") ? invalidCost : 0,
+        costUnknown: false,
+      }),
+    ];
+    const accounting = createUsageAccounting(invalidParser, (event) =>
+      events.push(event),
+    );
+    await accounting.observe(new Response("initial\nrevised\n")).text();
+    assert.equal(events.at(-1).costUsd, 0);
+  }
+});
 test("usage aggregation reads each live snapshot a bounded number of times", async () => {
   let propertyReads = 0;
   const instrumentedParser = () => () => [Object.defineProperties(

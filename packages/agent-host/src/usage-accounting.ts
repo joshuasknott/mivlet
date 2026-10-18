@@ -16,8 +16,21 @@ const measured = (value: unknown) =>
   typeof value === "number" && Number.isSafeInteger(value) && value >= 0
     ? value
     : undefined;
-const validCost = (value: unknown) =>
-  typeof value === "number" && Number.isFinite(value) && value >= 0;
+type CostKind =
+  | "valid"
+  | "negative"
+  | "nan"
+  | "positive-infinity"
+  | "negative-infinity"
+  | "non-number";
+const costKind = (value: unknown): CostKind => {
+  if (typeof value !== "number") return "non-number";
+  if (Number.isNaN(value)) return "nan";
+  if (value === Infinity) return "positive-infinity";
+  if (value === -Infinity) return "negative-infinity";
+  if (value < 0) return "negative";
+  return "valid";
+};
 
 /** Observe the existing native response without buffering or changing SDK bytes. */
 export function createUsageAccounting(
@@ -33,6 +46,7 @@ export function createUsageAccounting(
     inputTokens: 0,
     outputTokens: 0,
     costUsd: 0,
+    negativeCostUsd: 0,
     cachedInputTokens: 0,
     cacheWriteTokens: 0,
     reasoningTokens: 0,
@@ -43,13 +57,47 @@ export function createUsageAccounting(
     unknownCostCount: 0,
     knownCount: 0,
     invalidCostCount: 0,
+    nonzeroCostCount: 0,
+    nanCostCount: 0,
+    positiveInfinityCostCount: 0,
+    negativeInfinityCostCount: 0,
+    nonNumericCostCount: 0,
+  };
+
+  const adjustCost = (usage: Usage, direction: 1 | -1) => {
+    const value = usage.costUsd;
+    switch (costKind(value)) {
+      case "valid":
+        totals.costUsd += direction * (value as number);
+        if (value !== 0) totals.nonzeroCostCount += direction;
+        break;
+      case "negative":
+        totals.negativeCostUsd += direction * (value as number);
+        totals.invalidCostCount += direction;
+        break;
+      case "nan":
+        totals.nanCostCount += direction;
+        totals.invalidCostCount += direction;
+        break;
+      case "positive-infinity":
+        totals.positiveInfinityCostCount += direction;
+        totals.invalidCostCount += direction;
+        break;
+      case "negative-infinity":
+        totals.negativeInfinityCostCount += direction;
+        totals.invalidCostCount += direction;
+        break;
+      case "non-number":
+        totals.nonNumericCostCount += direction;
+        totals.invalidCostCount += direction;
+        break;
+    }
   };
 
   const removeUsage = (usage: Usage) => {
     totals.inputTokens -= usage.inputTokens;
     totals.outputTokens -= usage.outputTokens;
-    totals.costUsd -= usage.costUsd;
-    if (!validCost(usage.costUsd)) totals.invalidCostCount -= 1;
+    adjustCost(usage, -1);
     if (usage.cachedInputTokens !== undefined) {
       totals.cachedInputTokens -= usage.cachedInputTokens;
       totals.cachedInputCount -= 1;
@@ -70,8 +118,7 @@ export function createUsageAccounting(
   const addUsage = (usage: Usage) => {
     totals.inputTokens += usage.inputTokens;
     totals.outputTokens += usage.outputTokens;
-    totals.costUsd += usage.costUsd;
-    if (!validCost(usage.costUsd)) totals.invalidCostCount += 1;
+    adjustCost(usage, 1);
     if (usage.cachedInputTokens !== undefined) {
       totals.cachedInputTokens += usage.cachedInputTokens;
       totals.cachedInputCount += 1;
@@ -99,12 +146,24 @@ export function createUsageAccounting(
     if (!totals.knownCount) return;
     // A set of finite, nonnegative receipt costs cannot be negative. A tiny
     // negative here is only subtraction order residue (for example,
-    // 0.7 + 0.1 - 0.7 - 0.1), so normalize it without hiding malformed
-    // provider values that should remain visible to the caller.
+    // 0.7 + 0.1 - 0.7 - 0.1). When every current receipt is zero, either sign
+    // is residue and the exact aggregate is zero. Keep malformed provider
+    // values visible by applying this only when all current costs are valid.
     const costUsd =
-      totals.invalidCostCount === 0 && totals.costUsd < 0
-        ? 0
-        : totals.costUsd;
+      totals.invalidCostCount > 0
+        ? totals.nanCostCount > 0 ||
+            totals.nonNumericCostCount > 0 ||
+            (totals.positiveInfinityCostCount > 0 &&
+              totals.negativeInfinityCostCount > 0)
+          ? NaN
+          : totals.positiveInfinityCostCount > 0
+            ? Infinity
+            : totals.negativeInfinityCostCount > 0
+              ? -Infinity
+              : totals.costUsd + totals.negativeCostUsd
+        : totals.nonzeroCostCount === 0 || totals.costUsd < 0
+          ? 0
+          : totals.costUsd;
     emit({
       type: "usage",
       inputTokens: totals.inputTokens,
