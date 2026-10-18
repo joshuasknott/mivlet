@@ -1,7 +1,7 @@
 //! Managed runtime protocol and redaction regression tests.
-use super::acp::{extract_acp_models, managed_approval_payload};
-use super::opencode::{parse_opencode_models, sse_frames};
-use super::runtime::parse_grok_models;
+use super::acp::{acp_approval_payload, extract_acp_models};
+use super::opencode::sse_frames;
+use super::runtime::{parse_grok_models, parse_opencode_models};
 use super::*;
 
 #[test]

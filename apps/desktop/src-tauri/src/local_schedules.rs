@@ -387,6 +387,7 @@ use commands::{
 };
 use validation::*;
 
+pub(super) use commands::claim_due_after_capacity_matching;
 #[cfg(test)]
 pub(crate) use commands::{bind_claim_to_pending_attempt, claim_due_after_capacity};
 pub(crate) use commands::{finish_bound_occurrence, renew_bound_occurrence_lease};
