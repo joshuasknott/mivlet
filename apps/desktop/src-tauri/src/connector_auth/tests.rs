@@ -4,7 +4,10 @@ use super::*;
 use crate::authorized_scope::{resolve, AuthorizedCommandScope, ScopeAccess};
 use crate::store::vault::{MasterKey, Vault};
 use crate::store::Store;
-use std::sync::{Arc, Mutex};
+use std::{
+    fs,
+    sync::{Arc, Mutex},
+};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpListener;
 

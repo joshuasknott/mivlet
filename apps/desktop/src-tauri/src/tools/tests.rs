@@ -434,9 +434,10 @@ fn computer_tools_require_an_explicit_representable_generation() {
 #[test]
 fn approval_canonicalization_matches_ecmascript_fixtures_without_integer_collisions() {
     use serde_json::Value;
-    let fixtures: Value = serde_json::from_str(include_str!(
-        "../../../../packages/connectors/src/native-api/approval-canonical-fixtures.json"
-    ))
+    let fixtures: Value = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../../packages/connectors/src/native-api/approval-canonical-fixtures.json"
+    )))
     .unwrap();
     for fixture in fixtures.as_array().unwrap() {
         let arguments: Value = serde_json::from_str(fixture["raw"].as_str().unwrap()).unwrap();
@@ -865,7 +866,7 @@ fn standing_session_or_rule_decision_cannot_authorize_execution() {
 
 #[test]
 fn execute_tool_call_checks_workspace_pause_before_permit_consume() {
-    let source = include_str!("tools.rs");
+    let source = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/tools.rs"));
     let start = source
         .find("pub async fn execute_tool_call")
         .expect("execute_tool_call");
