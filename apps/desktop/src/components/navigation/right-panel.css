@@ -5,27 +5,10 @@
   font-size: 14px;
   min-width: 0;
 }
-@media (min-width: 1101px) {
-  .teammates-workspace--history:has(> .right-panel:not([hidden])) {
-    grid-template-columns: 260px minmax(0, 1fr) 320px !important;
-  }
-  .teammates-workspace--history:has(
-    > .right-panel[data-expanded="true"]:not([hidden])
-  ) {
-    grid-template-columns: 260px minmax(0, 1fr) min(50vw, 680px) !important;
-  }
-}
-@media (min-width: 851px) and (max-width: 1100px) {
-  .teammates-workspace--history:has(> .right-panel:not([hidden])) {
-    grid-template-columns: 260px minmax(0, 1fr) 300px !important;
-  }
-}
 .right-panel__header {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
-  padding: 24px 20px 12px;
   flex-shrink: 0;
 }
 .right-panel__heading,
@@ -42,17 +25,7 @@
   white-space: nowrap;
   line-height: 1.5;
 }
-.right-panel__heading select {
-  max-width: 100%;
-  margin-top: 4px;
-  padding: 3px 18px 3px 6px;
-  border: 1px solid var(--team-border);
-  border-radius: 5px;
-  color: var(--ink-muted);
-  background: transparent;
-  font: inherit;
-  font-size: 12px;
-}
+
 :where([data-theme="dark"]) .right-panel__header h2 {
   white-space: normal;
   overflow-wrap: anywhere;
@@ -64,12 +37,11 @@
   gap: 1px;
   flex-shrink: 0;
 }
-.right-panel__controls > button,
-.right-panel__more > summary {
+.right-panel__controls > button {
   display: grid;
   place-items: center;
-  width: 30px;
-  min-height: 32px;
+  width: 44px;
+  min-height: 44px;
   padding: 0;
   border: 0;
   border-radius: 5px;
@@ -77,68 +49,18 @@
   color: var(--ink-muted);
   cursor: pointer;
 }
-.right-panel__controls > button:hover,
-.right-panel__more > summary:hover {
+.right-panel__controls > button:hover {
   background: var(--surface-hover);
   color: var(--ink);
-}
-.right-panel__more {
-  position: relative;
-}
-.right-panel__more > summary {
-  list-style: none;
-}
-.right-panel__more > summary::-webkit-details-marker {
-  display: none;
-}
-.right-panel__more > div {
-  position: absolute;
-  top: 36px;
-  right: 0;
-  min-width: 165px;
-  padding: 5px;
-  z-index: 3;
-  border: 1px solid var(--team-border);
-  border-radius: 8px;
-  background: var(--surface);
-  box-shadow: 0 6px 20px #0001;
-}
-.right-panel__more button {
-  display: block;
-  width: 100%;
-  padding: 10px;
-  border: 0;
-  border-radius: 4px;
-  background: transparent;
-  color: var(--ink);
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-}
-.right-panel__more button:hover {
-  background: var(--surface-hover);
 }
 .right-panel__sections {
   display: flex;
-  gap: 24px;
   flex-shrink: 0;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--team-border);
 }
 .right-panel__sections [role="tab"] {
-  padding: 12px 0 10px;
-  min-height: 44px;
-  border: 0;
-  border-bottom: 2px solid transparent;
-  background: transparent;
   color: var(--ink-muted);
   font: inherit;
   cursor: pointer;
-}
-.right-panel__sections [aria-selected="true"] {
-  color: var(--ink);
-  border-bottom-color: var(--tab-indicator);
-  font-weight: 550;
 }
 .right-panel__sections [role="tab"]:hover {
   color: var(--ink);
@@ -173,11 +95,6 @@
   overflow: auto;
   min-height: 0;
   padding: 20px;
-}
-.right-panel__library .settings-page__body {
-  padding: 0;
-  width: 100%;
-  max-width: none;
 }
 .right-panel__empty {
   margin: 32px 0;
@@ -328,18 +245,6 @@
   color: var(--ink-muted);
   font-size: 12px;
 }
-.workspace-library__heading button {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 7px;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
 .workspace-library__search {
   display: flex;
   align-items: center;
@@ -381,10 +286,6 @@
   background: transparent;
   color: var(--ink-muted);
   font: inherit;
-}
-.workspace-library__cards {
-  display: grid;
-  gap: 0;
 }
 .workspace-library__card {
   display: flex;
@@ -463,21 +364,6 @@
   border: 0;
   border-bottom: 1px solid var(--team-border);
   border-radius: 0;
-}
-.right-panel__file {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 10px 0;
-  min-height: 42px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  text-align: left;
-  font: inherit;
-  cursor: pointer;
-  overflow-wrap: anywhere;
 }
 .right-panel__content > .computer-inspector {
   position: static;
@@ -574,21 +460,10 @@
   background: white;
 }
 @media (pointer: coarse) {
-  .right-panel__controls > button,
-  .right-panel__more > summary {
-    min-width: 40px;
-    min-height: 44px;
-  }
   .right-panel__back,
   .workspace-panel__link,
-  .workspace-activity__action,
-  .workspace-library__heading button {
+  .workspace-activity__action {
     min-height: 44px;
-  }
-}
-@media (max-width: 1100px) {
-  .right-panel__expand {
-    display: none !important;
   }
 }
 @media (max-width: 850px) {

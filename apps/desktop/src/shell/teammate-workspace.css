@@ -4,6 +4,7 @@
   display: grid !important;
   grid-template-columns: 260px minmax(0, 1fr) !important;
   gap: 0;
+  grid-template-rows: minmax(0, 1fr);
   overflow: hidden;
 }
 .teammates-workspace--history {
@@ -11,7 +12,16 @@
 }
 .teammates-workspace,
 .teammates-workspace * {
-  scrollbar-color: color-mix(in srgb, var(--ink, #292724) 18%, transparent) transparent;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in srgb, var(--ink, #292724) 14%, transparent) transparent;
+}
+@supports selector(::-webkit-scrollbar) {
+  .teammates-workspace, .teammates-workspace * { scrollbar-width: auto; scrollbar-color: auto; }
+  .teammates-workspace ::-webkit-scrollbar { width: 8px; height: 8px; }
+  .teammates-workspace ::-webkit-scrollbar-track { background: transparent; }
+  .teammates-workspace ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--ink) 14%, transparent); border: 2px solid transparent; background-clip: padding-box; border-radius: 8px; }
+  .teammates-workspace ::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--ink) 28%, transparent); }
+  .teammates-workspace ::-webkit-scrollbar-button { display: none; width: 0; height: 0; }
 }
 .team-loading {
   display: grid;
@@ -108,10 +118,10 @@
 }
 .conversation-pane-composer {
   flex-shrink: 0;
-  max-width: 960px;
+  max-width: 860px;
   width: 100%;
   margin: 0 auto;
-  padding: 8px clamp(14px, 3vw, 42px) 14px;
+  padding: 8px clamp(16px, 3.5vw, 52px) 12px;
   position: relative;
 }
 .conversation-jump {
@@ -533,7 +543,7 @@
     padding-inline: 22px;
   }
   .conversation-pane-composer {
-    padding-inline: 20px;
+    padding-inline: 22px;
   }
 }
 @media (max-width: 850px) {
@@ -563,7 +573,7 @@
     background: var(--sidebar-surface);
   }
   .conversation-pane-composer {
-    padding: 8px 12px 12px;
+    padding: 8px 16px 12px;
   }
   .conversation-pane-messages {
     padding: 22px 16px;
@@ -649,22 +659,6 @@
 }
 .workspace-views {
   position: relative;
-}
-.workspace-history-toggle {
-  position: absolute;
-  top: 8px;
-  right: 10px;
-  z-index: 6;
-  border: 0;
-  background: transparent;
-  color: var(--ink-muted);
-  font-size: 22px;
-  width: 30px;
-  height: 30px;
-  border-radius: 6px;
-}
-.workspace-history-toggle:hover {
-  background: var(--surface-hover);
 }
 .teammates-workspace .agent-sidebar {
   padding-top: 6px;
@@ -827,51 +821,4 @@
 @container conversation-pane (max-width: 480px) {
   .team-conversation-header { gap: 8px; }
   .team-conversation-welcome h1 { font-size: 22px; }
-}
-/* Integrate desktop navigation with native window chrome. Interactive controls
-   sit above the drag region; panel backgrounds continue to the window edge. */
-@media (min-width: 851px) {
-  #root:has(.window-controls):has(.teammates-workspace) {
-    padding-top: 0;
-  }
-  #root:has(.window-controls):has(.teammates-workspace) .desktop-frame.teammates-workspace {
-    height: 100dvh;
-  }
-  #root:has(.teammates-workspace) .window-controls {
-    background: transparent;
-  }
-  #root:has(.window-controls) .teammates-workspace .agent-sidebar {
-    padding-top: 0;
-  }
-  #root:has(.window-controls) .agent-sidebar__topline {
-    height: 48px;
-    min-height: 48px;
-    padding-left: 0;
-  }
-  #root:has(.window-controls) .workspace-history-toggle {
-    position: fixed;
-    top: 5px;
-    right: 132px;
-    z-index: 1001;
-    width: 32px;
-    height: 32px;
-  }
-  #root:has(.window-controls) .team-conversation-header {
-    padding-block: 4px;
-  }
-  #root:has(.window-controls) .team-conversation-header button {
-    position: relative;
-    z-index: 1001;
-  }
-  #root:has(.window-controls) .teammates-workspace:not(.teammates-workspace--history) .team-conversation-header {
-    padding-right: 174px;
-  }
-  #root:has(.window-controls) .teammates-workspace > .workspace-context {
-    padding-top: var(--window-chrome-height);
-  }
-}
-
-.workspace-history-toggle:focus-visible {
-  outline: 2px solid var(--ink-muted);
-  outline-offset: -2px;
 }

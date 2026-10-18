@@ -155,7 +155,7 @@ export function WorkspaceActivity({
           <h3>Latest work</h3>
           <div className="workspace-activity__latest">
             <div className="workspace-activity__latest-heading">
-              <CheckCircle size={30} weight="fill" aria-hidden="true" />
+              <CheckCircle size={24} aria-hidden="true" />
               <div>
                 <strong>
                   {displayWorkspaceMentions(
@@ -188,7 +188,7 @@ export function WorkspaceActivity({
         >
           <h3>Recent activity</h3>
           <ol className="workspace-activity__timeline">
-            {completed.slice(0, 3).map((item) => (
+            {completed.slice(1, 4).map((item) => (
               <li key={item.id}>
                 <CheckCircle size={19} aria-hidden="true" />
                 <button

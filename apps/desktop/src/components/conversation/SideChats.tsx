@@ -6,6 +6,7 @@ import {
   partitionSideChats,
   type SideChatOwner,
 } from "../../lib/conversation-service";
+import "./side-chats-compact.css";
 
 function SideChatEditor({
   heading,
@@ -87,7 +88,7 @@ function SideChatEditor({
               placeholder="What is this separate conversation about?"
             />
           </label>
-          <SideChatContextNotice />
+          <SideChatContextNotice compact />
           {error ? <p role="alert">{error}</p> : null}
           <footer>
             <button type="button" disabled={pending} onClick={onClose}>
@@ -109,7 +110,6 @@ export interface SideChatListProps {
   ownerName: string;
   activeId?: string;
   busy?: boolean;
-  compact?: boolean;
   onOpen: (room: ConversationRoom) => void;
   /** Creates a new Side Chat with the given name. */
   onCreate: (title: string) => Promise<void>;
@@ -134,7 +134,6 @@ function OwnedSideChatList({
   ownerName,
   activeId,
   busy = false,
-  compact = false,
   onOpen,
   onCreate,
   onRename,
@@ -174,22 +173,18 @@ function OwnedSideChatList({
   return (
     <section className="side-chats" aria-label={`${ownerName} Side Chats`}>
       <header className="side-chats__header">
-        <div>
-          <h3>Side Chats</h3>
-          <small>
-            {label} · {ownerName}
-          </small>
-        </div>
+        <small>{label} · {ownerName}</small>
         <button
           type="button"
           className="side-chats__new"
+          aria-label="New Side Chat"
           disabled={busy}
           onClick={() => setEditor({ mode: "create" })}
         >
-          New Side Chat
+          New
         </button>
       </header>
-      <SideChatContextNotice compact={compact} />
+      <SideChatContextNotice compact />
       <input
         className="side-chats__search"
         type="search"
@@ -303,7 +298,7 @@ function OwnedSideChatList({
             ? "No Side Chats match this search."
             : view === "archived"
               ? "No archived Side Chats."
-              : `No Side Chats yet. Start one when this ${owner.kind === "project" ? "project" : "Agent"} needs a separate line of work.`}
+              : "No Side Chats yet."}
         </p>
       )}
       {error ? (

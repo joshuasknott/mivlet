@@ -51,13 +51,11 @@ describe("conversation Work controls", () => {
     expect(screen.queryByText("Request running")).toBeNull();
   });
 
-  it("stages a bounded goal for the next submission and exposes attributed status", () => {
+  it("does not render an idle outcome goal affordance or leave an empty controls gap", () => {
     const { onGoalDraftChange } = setup([]);
-    fireEvent.click(screen.getByRole("button", { name: "Add an outcome goal" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Outcome" }), { target: { value: "Portfolio ready" } });
-    fireEvent.change(screen.getByRole("textbox", { name: "Success criteria" }), { target: { value: "Keyboard and mobile checks pass" } });
-    fireEvent.click(screen.getByRole("button", { name: "Use for next request" }));
-    expect(onGoalDraftChange).toHaveBeenCalledWith({ objective: "Portfolio ready", successCriteria: "Keyboard and mobile checks pass", maxTurns: 6, maxTokens: 128000 });
+    expect(screen.queryByRole("button", { name: "Add an outcome goal" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Goal and queued requests" })).toBeNull();
+    expect(onGoalDraftChange).not.toHaveBeenCalled();
   });
 
   it("offers Codex live guidance and keeps other routes at the next safe turn", async () => {

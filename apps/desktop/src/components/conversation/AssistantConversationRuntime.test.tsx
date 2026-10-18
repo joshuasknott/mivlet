@@ -61,6 +61,9 @@ describe("assistant-ui conversation bridge", () => {
         <AssistantMessageActions messageId="answer-1" />
       </AssistantConversationRuntime>,
     );
+    expect(screen.getByRole("button", { name: "Copy message" })).toHaveAttribute("title", "Copy message");
+    expect(screen.getByRole("button", { name: "Edit message" })).toHaveAttribute("title", "Edit message");
+    expect(screen.getByRole("button", { name: "Regenerate response" })).toHaveAttribute("title", "Create another answer; previous actions remain in history");
     fireEvent.click(screen.getByRole("button", { name: "Edit message" }));
     fireEvent.click(screen.getByRole("button", { name: "Cancel edit" }));
     expect(screen.queryByRole("textbox")).not.toBeInTheDocument();

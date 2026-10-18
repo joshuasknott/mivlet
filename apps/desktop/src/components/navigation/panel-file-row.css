@@ -1,0 +1,81 @@
+.workspace-library__file-list {
+  display: grid;
+  gap: 2px;
+}
+
+.workspace-library__file-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 0;
+  border: 0;
+  border-bottom: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.workspace-library__file-row:hover:not(:disabled) {
+  background: transparent;
+  color: var(--ink);
+}
+
+.workspace-library__file-row:focus-visible {
+  outline: 2px solid var(--ink-soft);
+  outline-offset: -2px;
+}
+
+.workspace-library__file-row:disabled {
+  cursor: default;
+  opacity: 0.7;
+}
+
+.workspace-library__file-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 24px;
+  color: var(--ink-muted);
+}
+
+.workspace-library__file-row[data-format="pdf"] .workspace-library__file-icon {
+  color: var(--destructive);
+}
+
+.workspace-library__file-row[data-format="sheet"] .workspace-library__file-icon {
+  color: var(--positive);
+}
+
+.workspace-library__file-detail {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workspace-library__file-detail strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.workspace-library__file-detail small {
+  overflow-wrap: anywhere;
+  color: var(--ink-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (pointer: coarse) {
+  .workspace-library__file-row {
+    min-height: 44px;
+  }
+}

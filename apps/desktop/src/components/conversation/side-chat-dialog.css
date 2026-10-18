@@ -1,0 +1,89 @@
+.side-chat-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: #0005;
+}
+
+.side-chat-dialog {
+  width: min(520px, 100%);
+  max-height: calc(100dvh - 70px);
+  overflow: auto;
+  padding: 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 13px;
+  background: var(--surface);
+  color: var(--ink);
+  box-shadow: var(--shadow-1);
+}
+
+.side-chat-dialog > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.side-chat-dialog h2 { margin: 0; font-size: 18px; font-weight: 600; }
+.side-chat-dialog button {
+  min-height: 36px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 7px 12px;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.side-chat-dialog > header button {
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 0;
+  background: none;
+  color: var(--ink);
+  font: inherit;
+  font-size: 22px;
+  cursor: pointer;
+}
+.side-chat-dialog button:hover { background: var(--surface-hover); }
+.side-chat-dialog button:disabled { opacity: .55; cursor: default; }
+
+.side-chat-dialog form { display: grid; gap: 14px; }
+.side-chat-dialog label,
+.side-chat-dialog fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  font-size: 12px;
+}
+.side-chat-dialog legend { margin-bottom: 8px; color: var(--ink-muted); font-size: 12px; }
+.side-chat-dialog input:not([type="radio"]),
+.side-chat-dialog textarea {
+  min-height: 38px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 8px 11px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+}
+.side-chat-dialog textarea { resize: vertical; line-height: 1.6; }
+.side-chat-dialog__owner { margin: 0; color: var(--ink-muted); font-size: 12px; }
+.side-chat-dialog footer { display: flex; justify-content: flex-end; gap: 10px; }
+.side-chat-dialog :focus-visible { outline: 2px solid var(--ink-soft); outline-offset: 2px; }
+
+@media (max-width: 700px) {
+  .side-chat-dialog { padding: 18px; }
+}
+
+@media (pointer: coarse) {
+  .side-chat-dialog button { min-height: 44px; }
+}

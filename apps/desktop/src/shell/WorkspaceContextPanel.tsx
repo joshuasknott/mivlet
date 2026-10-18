@@ -87,11 +87,7 @@ export function WorkspaceContextPanel({
       ? { kind: "agent", id: agent.id, name: agent.name }
       : undefined;
   const identity = workspaceId + ":" + (room?.id ?? owner?.id ?? "empty");
-  const [browsing, setBrowsing] = useState<{
-    identity: string;
-    scope: PanelScope;
-  }>({ identity, scope: "chat" });
-  const scope = browsing.identity === identity ? browsing.scope : "chat";
+  const scope: PanelScope = "chat";
   const scopeKey = identity + ":" + scope;
   const rooms = panelRooms(
     workspaceId,
@@ -118,14 +114,9 @@ export function WorkspaceContextPanel({
     <WorkspaceRightNav
       onChatActiveChange={nav.setPanelFocused}
       context={navContext}
-      title={scope === "owner" ? owner?.name : room?.title}
+      title={room?.title ?? owner?.name}
       identity={identity}
       scope={scope}
-      ownerLabel={room ? owner?.name : undefined}
-      onScopeChange={(next) => {
-        nav.setComputer(null);
-        setBrowsing({ identity, scope: next });
-      }}
       open={!hidden && (nav.contextOpen || Boolean(nav.computer))}
       replaced={hidden}
       onOpen={() => { onReveal?.(); nav.setContextOpen(true); }}
@@ -304,7 +295,6 @@ export function WorkspaceContextPanel({
         navContext && navContext.kind !== "work" ? (
           <Suspense fallback={<p role="status">Loading Side Chats…</p>}>
             <SideChatList
-              compact
               key={navProject?.id ?? navAgent?.id}
               owner={
                 navContext.kind === "project"

@@ -20,6 +20,7 @@
 .sidebar-section--pinned { flex: 0 0 auto; max-height: max(154px, 30%); min-height: 70px; }
 .sidebar-section__header { display: flex; flex: 0 0 auto; align-items: center; justify-content: space-between; gap: 6px; min-height: 32px; padding-inline: 6px 2px; }
 .sidebar-section__heading { flex: 0 0 auto; min-height: 29px; padding: 5px 8px; margin: 0; color: var(--ink-muted); font-size: 12px; font-weight: 550; }
+.sidebar-section__title { display: flex; align-items: center; min-height: 30px; padding: 3px 2px; color: var(--ink-muted); font-size: 12px; font-weight: 550; }
 .sidebar-section__toggle { display: flex; align-items: center; gap: 6px; min-height: 30px; padding: 3px 2px; border: 0; border-radius: 5px; background: transparent; color: var(--ink-muted); font: inherit; font-size: 12px; font-weight: 550; }
 .sidebar-section__toggle:hover { color: var(--ink); }
 .sidebar-section__toggle[aria-expanded="false"] > svg { transform: rotate(-90deg); }
@@ -27,6 +28,7 @@
 .sidebar-section__header:hover .sidebar-section__actions,
 .sidebar-section__header:focus-within .sidebar-section__actions,
 .sidebar-section__actions:has([aria-expanded="true"]) { opacity: 1; pointer-events: auto; }
+.sidebar-section__actions--visible { opacity: 1; pointer-events: auto; }
 .sidebar-icon-button { display: grid; place-items: center; flex: 0 0 auto; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 5px; background: transparent; color: var(--ink-muted); }
 .sidebar-icon-button:hover, .sidebar-icon-button[aria-expanded="true"] { background: var(--surface-hover); color: var(--ink); }
 .sidebar-section__list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; }

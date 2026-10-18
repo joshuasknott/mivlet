@@ -487,9 +487,9 @@ button.local-computer-files__entry:disabled { opacity: .55; }
 
 
 /* Full-width writing area above a compact bottom toolbar. */
-.desktop-frame--agents .composer { display: flex; flex-direction: column; align-items: stretch; gap: 12px; min-height: 124px; padding: 16px 14px 10px; border-radius: 16px; border-color: var(--line-strong); }
+.desktop-frame--agents .composer { display: flex; flex-direction: column; align-items: stretch; gap: 8px; min-height: 100px; padding: 12px 14px 8px; border-radius: 16px; border-color: var(--line-strong); }
 .desktop-frame--agents .composer-field { align-self: stretch; }
-.desktop-frame--agents .composer-input { min-height: 40px; padding: 3px 2px; font-size: 15px; }
+.desktop-frame--agents .composer-input { min-height: 32px; padding: 3px 2px; font-size: 15px; }
 .desktop-frame--agents .composer-controls { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: auto; }
 .desktop-frame--agents .composer-control-group { display: flex; align-items: center; gap: 4px; }
 .desktop-frame--agents .composer-control-group--end { margin-left: auto; }

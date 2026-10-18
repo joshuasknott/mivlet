@@ -204,8 +204,6 @@ export function WorkspaceConversationChrome({
   createRoom,
   onNewConversation,
   onOpenMarketplace,
-  panelOpen,
-  onTogglePanel,
   onOpenSchedules,
   onSetSettingsTab,
   onOpenSettings,
@@ -222,8 +220,6 @@ export function WorkspaceConversationChrome({
   projects: ReturnType<typeof useLocalProjects>;
   profileName: string;
   marketplace: { id?: string } | null;
-  panelOpen: boolean;
-  onTogglePanel: () => void;
   indicators: Record<string, string>;
   tabMeta: {
     titles: Record<string, string>;
@@ -273,7 +269,6 @@ export function WorkspaceConversationChrome({
       className="workspace-views"
       aria-label="Conversation workspace"
     >
-      <button type="button" className="workspace-history-toggle" aria-label={panelOpen ? "Hide workspace panel" : "Show workspace panel"} title={panelOpen ? "Hide workspace panel" : "Show workspace panel"} aria-expanded={panelOpen} onClick={onTogglePanel}><svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true"><rect x="3" y="4.5" width="18" height="15" rx="1" /><path d="M9 4.5v15" /></svg></button>
       {nav.phone ? (
         <button
           type="button"

@@ -3,12 +3,12 @@ import { FilePdf } from "@phosphor-icons/react/dist/csr/FilePdf";
 import { FileXls } from "@phosphor-icons/react/dist/csr/FileXls";
 import { FileImage } from "@phosphor-icons/react/dist/csr/FileImage";
 import { FileCode } from "@phosphor-icons/react/dist/csr/FileCode";
-import { CaretRight } from "@phosphor-icons/react/dist/csr/CaretRight";
 import { attachmentPreview } from "../../lib/attachment-previews";
 import type { RightPanelTab } from "./right-panel-state";
 import type { PanelFile } from "./workspace-panel-data";
+import "./panel-file-row.css";
 
-/** Metadata cards never load file contents. Every format opens the same inspector. */
+/** Compact metadata rows never load file contents. Every format opens the same inspector. */
 export function PanelFileRow({
   file,
   workspaceId,
@@ -70,7 +70,7 @@ export function PanelFileRow({
   return (
     <button
       type="button"
-      className="workspace-library__card panel-file-card"
+      className="workspace-library__file-row"
       data-format={format}
       disabled={!target}
       aria-label={`${target ? "Open" : "Preview"} ${file.title}`}
@@ -80,20 +80,15 @@ export function PanelFileRow({
         if (target) onOpen(target);
       }}
     >
-      <span className="panel-file-card__icon">
+      <span className="workspace-library__file-icon">
         <Icon size={23} aria-hidden="true" />
       </span>
-      <span className="workspace-library__detail">
+      <span className="workspace-library__file-detail">
         <strong>{file.title}</strong>
         <small>
           {target ? file.detail : "Original not retained · Reattach to preview"}
         </small>
       </span>
-      <CaretRight
-        size={16}
-        className="panel-file-card__open"
-        aria-hidden="true"
-      />
     </button>
   );
 }

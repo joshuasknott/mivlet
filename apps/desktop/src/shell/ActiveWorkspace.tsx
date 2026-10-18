@@ -59,6 +59,7 @@ import {
   updateWorkspaceProject,
 } from "./workspace-actions";
 import { useWorkspaceNavigation } from "./useWorkspaceNavigation";
+import { WorkspaceMenuBar } from "./WorkspaceMenuBar";
 import type { ConversationDialogTarget } from "./WorkspaceConversationDialogs";
 
 /** Live execution workspace: service wiring plus composed chrome, overlays, and context panel. */
@@ -365,6 +366,11 @@ export function ActiveWorkspace({
   });
   return (
     <OpenWebPreview.Provider value={nav.openPanelWeb}>
+      <WorkspaceMenuBar canGoBack={nav.canGoBack} canGoForward={nav.canGoForward}
+        onBack={nav.goBack} onForward={nav.goForward} onNewConversation={newConversation}
+        onNewProject={() => setConversationDialog({ kind: "edit", draft: projectEditorDraft(nav.activeProfile) })}
+        onSettings={() => setSettings(true)} onSearch={() => setSearchOpen(true)}
+        onSingleView={() => nav.actLayout({ type: "single" })} theme={theme} onTheme={onTheme} />
       <main
         onPointerDownCapture={nav.onConversationPointerDown}
         className={`desktop-frame desktop-frame--agents desktop-frame--live-closed teammates-workspace${nav.contextOpen || nav.computer || agentEditor?.id || nav.projectDetailsId ? " teammates-workspace--history" : ""}`}
@@ -433,8 +439,6 @@ export function ActiveWorkspace({
           projects={projects}
           profileName={profileName}
           marketplace={marketplace}
-          panelOpen={nav.contextOpen || Boolean(nav.computer) || Boolean(agentEditor?.id) || Boolean(nav.projectDetailsId)}
-          onTogglePanel={() => { nav.setComputer(null); nav.setContextOpen(!(nav.contextOpen || nav.computer || agentEditor?.id || nav.projectDetailsId)); setAgentEditor(null); nav.setProjectDetailsId(null); }}
           onAgentSettings={(id) => { nav.setPanelFocused(false); nav.setProjectDetailsId(null); setAgentEditor({ id }); }}
           indicators={indicators}
           tabMeta={conversationTabMeta(

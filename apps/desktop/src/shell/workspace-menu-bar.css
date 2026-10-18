@@ -1,0 +1,9 @@
+.workspace-menu-bar { position: fixed; z-index: 1001; top: 0; left: 6px; height: var(--window-chrome-height, 36px); max-width: calc(100% - 138px); display: flex; align-items: center; gap: 1px; color: var(--ink-muted); }
+#root:not(:has(.window-controls)) .workspace-menu-bar { display: none; }
+.workspace-menu-bar > button { display: grid; place-items: center; min-width: 30px; height: 30px; padding: 0 6px; border: 0; border-radius: 4px; background: transparent; color: inherit; font-size: 12px; }
+.workspace-menu-bar > .workspace-menu-bar__menu { padding-inline: 9px; }
+.workspace-menu-bar > button:hover:not(:disabled) { color: var(--ink); background: var(--surface-hover); }
+.workspace-menu-bar > button:focus-visible { outline: 2px solid var(--ink-muted); outline-offset: -2px; }
+.workspace-menu-bar > button:disabled { opacity: .35; }
+@media (pointer: coarse) { .workspace-menu-bar > button { min-height: 44px; min-width: 44px; } }
+@media (max-width: 380px) { .workspace-menu-bar > .workspace-menu-bar__menu { padding-inline: 6px; } }

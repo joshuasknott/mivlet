@@ -1,5 +1,5 @@
 import { act, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { SearchFileDialog } from "./SearchFileDialog";
 import { previewRuntimeLocalComputerFile } from "../../runtime/domains/local-computer";
 
@@ -7,6 +7,10 @@ vi.mock("../../runtime/domains/local-computer", () => ({ previewRuntimeLocalComp
 vi.mock("../conversation/PdfPreview", () => ({ PdfPreview: ({ base64 }: { base64: string }) => <section aria-label="PDF pages">{base64}</section> }));
 const target = { type: "artifact" as const, workspaceId: "workspace", agentId: "agent", relativePath: "Attachments/budget.xlsx", title: "Budget" };
 describe("uploaded Office preview", () => {
+  beforeAll(async () => {
+    // Compile the real lazy renderer before measuring the UI assertions.
+    await import("../conversation/ArtifactPreview");
+  }, 30_000);
   it("inspects a retained image inside the existing panel without opening a second dialog", () => {
     const image = "data:image/png;base64,aGVsbG8=";
     render(<SearchFileDialog title="Uploaded image" imageDataUrl={image} embedded onClose={() => {}} />);

@@ -67,6 +67,9 @@ describe("workspace Library", () => {
       </QueryClientProvider>,
     );
     expect(screen.queryByRole("button", { name: /Result 124/ })).toBeNull();
+    expect(
+      screen.queryByRole("combobox", { name: "File collection" }),
+    ).toBeNull();
     expect(listRuntimeLocalComputerFiles).not.toHaveBeenCalled();
     fireEvent.change(screen.getByRole("searchbox"), {
       target: { value: "Result 124" },
@@ -92,6 +95,56 @@ describe("workspace Library", () => {
     expect(
       screen.getByRole("button", { name: "Open Result 124" }),
     ).toBeVisible();
+  });
+  it("only shows an origin filter when a collection has multiple origins", () => {
+    const created = {
+      id: "created",
+      title: "Draft.md",
+      detail: "Created here",
+      origin: "created" as const,
+      updatedAt: "2026-10-15",
+      tab: {
+        id: "created",
+        kind: "web" as const,
+        title: "Draft.md",
+        url: "https://example.com/draft",
+      },
+    };
+    const attached = {
+      ...created,
+      id: "attached",
+      title: "Reference.md",
+      detail: "Added to chat",
+      origin: "attached" as const,
+      tab: { ...created.tab, id: "attached", title: "Reference.md" },
+    };
+    const client = new QueryClient();
+    const view = render(
+      <QueryClientProvider client={client}>
+        <WorkspaceLibrary
+          workspaceId="workspace"
+          agents={agents}
+          files={[created]}
+          onOpen={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.queryByRole("combobox", { name: "File collection" }),
+    ).toBeNull();
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <WorkspaceLibrary
+          workspaceId="workspace"
+          agents={agents}
+          files={[created, attached]}
+          onOpen={vi.fn()}
+        />
+      </QueryClientProvider>,
+    );
+    expect(
+      screen.getByRole("combobox", { name: "File collection" }),
+    ).toHaveValue("all");
   });
   it("shows attachments only for the current workspace and chat", async () => {
     vi.mocked(listRuntimeLocalComputerFiles).mockResolvedValue({

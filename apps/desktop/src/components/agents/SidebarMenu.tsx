@@ -1,11 +1,13 @@
-import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { Check } from "@phosphor-icons/react/dist/csr/Check";
 
 /** Portalled to keep organization controls usable inside the scrolling lists. */
-export function SidebarMenu({ label, items }: {
+export function SidebarMenu({ label, items, triggerContent, triggerClassName }: {
   label: string;
+  triggerContent?: ReactNode;
+  triggerClassName?: string;
   items: { label: string; run: () => void; checked?: boolean; disabled?: boolean }[];
 }) {
   const [open, setOpen] = useState(false);
@@ -39,11 +41,11 @@ export function SidebarMenu({ label, items }: {
     };
   }, [open]);
   return <>
-    <button ref={trigger} type="button" className="sidebar-icon-button sidebar-more" aria-label={label}
+    <button ref={trigger} type="button" className={triggerClassName ?? "sidebar-icon-button sidebar-more"} aria-label={label}
       title={label} aria-haspopup="menu" aria-expanded={open} aria-controls={open ? id : undefined}
       onClick={() => setOpen(!open)} onKeyDown={(event) => {
         if (["ArrowDown", "ArrowUp"].includes(event.key)) { event.preventDefault(); setOpen(true); }
-      }}><DotsThree size={20} aria-hidden="true" /></button>
+      }}>{triggerContent ?? <DotsThree size={20} aria-hidden="true" />}</button>
     {open && createPortal(<div ref={menu} id={id} role="menu" aria-label={label}
       className="sidebar-menu" style={position} onKeyDown={(event) => {
         if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(true); }
