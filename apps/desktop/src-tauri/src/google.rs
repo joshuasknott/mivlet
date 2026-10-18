@@ -43,9 +43,10 @@ const CALENDAR_READONLY: &str = "https://www.googleapis.com/auth/calendar.events
 const CALENDAR_EVENTS: &str = "https://www.googleapis.com/auth/calendar.events";
 
 mod transport;
+pub(crate) use transport::cancel_google_request;
 use transport::{
-    api_url, cancel_google_call as cancel_google_call_impl, cancel_google_request, error,
-    has_any_scope, new_call_id, provider_error, require_scope, send_json, send_raw_json,
+    api_url, error, has_any_scope, new_call_id, provider_error, require_scope, send_json,
+    send_raw_json,
 };
 
 mod data;
@@ -54,12 +55,11 @@ use data::{
     strings,
 };
 
-/// Cancel one in-flight Google request through the stable Tauri command facade.
-/// The command stays declared in this parent module so `generate_handler!`
-/// keeps resolving the existing `google::cancel_google_call` wrapper path.
+/// Cooperatively cancel an in-flight Google read or mutation. Unknown or
+/// already-completed call ids are a no-op.
 #[tauri::command]
 pub fn cancel_google_call(call_id: String) -> bool {
-    cancel_google_call_impl(call_id)
+    cancel_google_request(&call_id)
 }
 
 pub(crate) async fn search(

@@ -218,15 +218,6 @@ pub(crate) fn cancel_google_request(call_id: &str) -> bool {
         .is_some_and(|sender| sender.send(true).is_ok())
 }
 
-/// Cooperative cancel for an in-flight Google read or mutation. The agent's
-/// Stop button invokes this with the call id of the request it wants to abort;
-/// the in-flight `send`/`backoff` then fails fast with a cancelled error and
-/// the mutation is abandoned (never duplicated). Unknown/already-completed ids
-/// are a no-op.
-pub(super) fn cancel_google_call(call_id: String) -> bool {
-    cancel_google_request(&call_id)
-}
-
 /// RAII handle for a registered cancel token. Creating it inserts the call id
 /// into the registry; dropping it (on every exit path, including early `?`
 /// returns and panics) removes the entry so a stale id can never leak. The

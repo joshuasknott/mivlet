@@ -256,7 +256,8 @@ Use `pnpm tauri:dev` for interactive desktop work. Its launcher owns the Vite
 server so account-driven native restarts cannot tear down the UI server. The
 server stays available after the native process exits; stop the development
 session with Ctrl+C when finished. A debug executable launched alone still
-requires that development server.
+requires that development server. For reproducible process-tree memory and
+native-window startup measurements, follow [native performance observation](native-performance.md).
 
 `verify:build` builds the embedded host before the test gate runs its actual
 Windows executable. That compile runs on Linux as part of `pnpm check`; it is
