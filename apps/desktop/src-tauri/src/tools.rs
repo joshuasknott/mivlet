@@ -30,6 +30,12 @@ use sha2::{Digest, Sha256};
 use url::Url;
 mod browser_actions;
 
+#[path = "tool_files.rs"]
+mod tool_files;
+pub(crate) use tool_files::{
+    bounded_output, run_read_file, run_write_file, MAX_TOOL_INPUT_BYTES, MAX_TOOL_OUTPUT_BYTES,
+};
+
 use crate::approvals::resolve_approval;
 use crate::connector_api;
 use crate::execution_approvals::verify_and_consume_execution_approval;
@@ -751,32 +757,6 @@ fn require_string_argument(args: &serde_json::Value, key: &str) -> Result<String
     }
 }
 
-/// Maximum bytes returned by `read-file` / `run-shell` stdout. Larger output
-/// is truncated with an explicit marker so a caller can never mistake a partial
-/// result for a complete one (mirrors native_api's MAX_STREAM_RESPONSE_BYTES
-/// philosophy, sized for tool output). 1 MiB is generous for source files and
-/// bounded enough to prevent runaway-buffer OOM.
-pub(crate) const MAX_TOOL_OUTPUT_BYTES: usize = 1024 * 1024;
-
-/// Maximum bytes accepted by `write-file` content. Bounds the on-disk write so
-/// a tool call cannot exhaust workspace storage in a single call.
-pub(crate) const MAX_TOOL_INPUT_BYTES: usize = 8 * 1024 * 1024;
-
-/// Truncate a byte buffer to `max_bytes`, appending a clear truncation marker so
-/// a partial result is never silently treated as complete. Returns the marker
-/// text appended to the (possibly-truncated) lossy-UTF-8 string.
-pub(crate) fn bounded_output(bytes: &[u8], max_bytes: usize) -> String {
-    if bytes.len() <= max_bytes {
-        return String::from_utf8_lossy(bytes).into_owned();
-    }
-    let head = &bytes[..max_bytes];
-    format!(
-        "{}\n\n[truncated: output exceeded {} bytes]",
-        String::from_utf8_lossy(head),
-        max_bytes
-    )
-}
-
 // ---------------------------------------------------------------------------
 // web-fetch SSRF / outbound policy (fail-closed). All checks before or at
 // egress; approval fingerprint binds the *normalized* URL; redirects and DNS
@@ -1071,88 +1051,6 @@ fn redact_for_error(raw: &str) -> String {
         // keep short actionable without secrets
         raw.chars().take(120).collect()
     }
-}
-
-pub(crate) fn run_read_file(
-    arguments: &serde_json::Value,
-    workspace_root: &Path,
-) -> Result<ToolResult, String> {
-    let path = require_string_argument(arguments, "path")?;
-    let confined = confine_path(&path, workspace_root)?;
-    let extension = confined
-        .extension()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
-    if matches!(extension.as_str(), "png" | "jpg" | "jpeg") {
-        let bytes = crate::local_computer::artifacts::read_bounded_limit(
-            workspace_root,
-            &confined,
-            4 * 1024 * 1024,
-        )?;
-        return Ok(ToolResult {
-            ok: true,
-            output: crate::local_computer::office_images::inspect(&bytes, &extension)?,
-        });
-    }
-    if crate::local_computer::office_inspection::is_office(&extension) || extension == "pdf" {
-        let file = std::fs::File::open(&confined).map_err(|_| format!("File not found: {path}"))?;
-        let mut bytes = Vec::new();
-        std::io::Read::read_to_end(
-            &mut std::io::Read::take(file, (MAX_TOOL_INPUT_BYTES + 1) as u64),
-            &mut bytes,
-        )
-        .map_err(|_| "Mivlet could not read the Office file.")?;
-        if bytes.len() > MAX_TOOL_INPUT_BYTES {
-            return Err("Office and PDF inspection support files up to 8 MB.".into());
-        }
-        return Ok(ToolResult {
-            ok: true,
-            output: if extension == "pdf" {
-                crate::local_computer::pdf_inspection::inspect(&bytes)?
-            } else {
-                crate::local_computer::office_inspection::inspect(&bytes, &extension)?
-            },
-        });
-    }
-    // Read raw bytes and bound the result so a very large file cannot OOM the
-    // process. Reading one extra byte lets us detect truncation precisely.
-    let mut file = std::fs::File::open(&confined).map_err(|_| format!("File not found: {path}"))?;
-    let mut buf = Vec::new();
-    std::io::Read::read_to_end(
-        &mut std::io::Read::take(&mut file, (MAX_TOOL_OUTPUT_BYTES + 1) as u64),
-        &mut buf,
-    )
-    .map_err(|err| err.to_string())?;
-    Ok(ToolResult {
-        ok: true,
-        output: bounded_output(&buf, MAX_TOOL_OUTPUT_BYTES),
-    })
-}
-
-pub(crate) fn run_write_file(
-    arguments: &serde_json::Value,
-    workspace_root: &Path,
-) -> Result<ToolResult, String> {
-    let path = require_string_argument(arguments, "path")?;
-    let content = require_string_argument(arguments, "content")?;
-    // Bound the input before touching disk.
-    if content.len() > MAX_TOOL_INPUT_BYTES {
-        return Err(format!(
-            "write-file content is too large ({} bytes; max {} bytes).",
-            content.len(),
-            MAX_TOOL_INPUT_BYTES
-        ));
-    }
-    let confined = confine_path(&path, workspace_root)?;
-    if let Some(parent) = confined.parent() {
-        std::fs::create_dir_all(parent).map_err(|err| err.to_string())?;
-    }
-    std::fs::write(&confined, &content).map_err(|err| err.to_string())?;
-    Ok(ToolResult {
-        ok: true,
-        output: format!("Wrote {} bytes to {path}.", content.len()),
-    })
 }
 
 #[derive(Debug, Serialize)]
