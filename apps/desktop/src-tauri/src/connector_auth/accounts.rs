@@ -3,8 +3,6 @@
 //! This module owns the non-secret connection list that predates the encrypted
 //! Connection repository. Credentials never live here: the list contains only
 //! provider account projections, scopes, status and the OS-store reference.
-//! The auth flow keeps this module as a narrow compatibility facade while the
-//! durable repository remains the authority for scoped selection.
 
 use std::{collections::BTreeMap, fs, path::Path};
 
@@ -16,7 +14,7 @@ use crate::models::{ConnectorAccountOption, ConnectorAccountSummary};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct ConnectorConnection {
+pub(super) struct ConnectorConnection {
     pub connector_id: String,
     pub account: ConnectorAccountSummary,
     pub status: String,
@@ -34,7 +32,7 @@ pub(crate) struct ConnectorConnection {
     pub is_active: bool,
 }
 
-pub(crate) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, String> {
+pub(super) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, String> {
     if let Some(connections) = crate::store::read_document(path)? {
         return Ok(connections);
     }
@@ -52,7 +50,7 @@ pub(crate) fn read_connections(path: &Path) -> Result<Vec<ConnectorConnection>, 
     Ok(connections)
 }
 
-pub(crate) fn write_connections(
+pub(super) fn write_connections(
     path: &Path,
     connections: &[ConnectorConnection],
 ) -> Result<(), String> {
@@ -80,10 +78,7 @@ fn normalize_active_accounts(connections: &mut [ConnectorConnection]) {
     }
 }
 
-/// Keep the first record unless a later record is the first explicitly active
-/// one. This preserves legacy files while making the selection rule reusable
-/// for normalization and targeted account switching.
-pub(crate) fn prefer_active_index(
+fn prefer_active_index(
     connections: &[ConnectorConnection],
     current: Option<usize>,
     candidate: usize,
@@ -97,7 +92,7 @@ pub(crate) fn prefer_active_index(
     }
 }
 
-pub(crate) fn promote_single_active(connections: &mut [ConnectorConnection], connector_id: &str) {
+pub(super) fn promote_single_active(connections: &mut [ConnectorConnection], connector_id: &str) {
     let mut selected = None;
     for (index, connection) in connections.iter().enumerate() {
         if connection.connector_id != connector_id {
@@ -112,10 +107,7 @@ pub(crate) fn promote_single_active(connections: &mut [ConnectorConnection], con
     }
 }
 
-/// All stored accounts for a connector (active first), so the UI can render
-/// an account switcher. Token secrets never leave the credential boundary;
-/// only the non-secret account summaries are returned.
-pub(crate) fn account_options_from_connections(
+pub(super) fn account_options_from_connections(
     connections: &[ConnectorConnection],
     connector_id: &str,
     workspace_id: &str,
@@ -124,7 +116,6 @@ pub(crate) fn account_options_from_connections(
         .iter()
         .filter(|connection| connection.connector_id == connector_id)
         .collect();
-    // Stable sort so the active account sorts to the front.
     matching.sort_by_key(|connection| !connection.is_active);
     matching
         .into_iter()
@@ -161,7 +152,7 @@ pub(crate) fn account_options_from_connections(
 }
 
 #[cfg(test)]
-pub(crate) fn accounts_for_connector(
+pub(super) fn accounts_for_connector(
     path: &Path,
     connector_id: &str,
     workspace_id: &str,
@@ -172,7 +163,7 @@ pub(crate) fn accounts_for_connector(
     account_options_from_connections(&connections, connector_id, workspace_id)
 }
 
-pub(crate) fn safe_account_projection(
+pub(super) fn safe_account_projection(
     account: &ConnectorAccountSummary,
     connector_id: &str,
     workspace_id: &str,
@@ -187,11 +178,7 @@ pub(crate) fn safe_account_projection(
     }
 }
 
-/// Derive the stable Mivlet identity used by both the compatibility runtime
-/// and the durable Connection migration. Keeping this in one native boundary
-/// prevents a storage backfill from minting identities the selector cannot
-/// later resolve.
-pub(crate) fn derive_native_connection_id(
+pub(super) fn derive_native_connection_id(
     workspace_id: &str,
     connector_id: &str,
     account_id: &str,

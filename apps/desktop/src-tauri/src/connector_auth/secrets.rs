@@ -1,18 +1,14 @@
 //! OS-backed credential storage for connector OAuth state and tokens.
-//!
-//! This adapter deliberately exposes only get/set/remove operations. OAuth
-//! orchestration remains in `connector_auth`; callers can substitute an
-//! in-memory implementation in unit tests without touching the real keyring.
 
 const KEYRING_SERVICE: &str = "com.fable.workspace.connectors";
 
-pub(crate) trait ConnectorSecretStore: Send + Sync {
+pub(super) trait ConnectorSecretStore: Send + Sync {
     fn get(&self, key: &str) -> Result<Option<String>, String>;
     fn set(&self, key: &str, secret: &str) -> Result<(), String>;
     fn remove(&self, key: &str) -> Result<(), String>;
 }
 
-pub(crate) struct NativeConnectorSecretStore;
+pub(super) struct NativeConnectorSecretStore;
 
 impl NativeConnectorSecretStore {
     fn entry(key: &str) -> Result<keyring::Entry, String> {
