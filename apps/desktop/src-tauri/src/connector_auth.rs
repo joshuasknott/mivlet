@@ -29,14 +29,16 @@ use crate::paths::connector_connections_path;
 
 #[path = "connector_accounts.rs"]
 mod connector_accounts;
+#[path = "connector_secrets.rs"]
+mod connector_secrets;
 #[cfg(test)]
 pub(crate) use connector_accounts::accounts_for_connector;
 pub(crate) use connector_accounts::{
     account_options_from_connections, derive_native_connection_id, promote_single_active,
     read_connections, safe_account_projection, write_connections, ConnectorConnection,
 };
+pub(crate) use connector_secrets::{ConnectorSecretStore, NativeConnectorSecretStore};
 
-const KEYRING_SERVICE: &str = "com.fable.workspace.connectors";
 pub(crate) const OAUTH_AUTHORIZATION_WINDOW_SECONDS: u64 = 15 * 60;
 
 #[derive(Clone, Debug)]
@@ -98,47 +100,6 @@ pub(crate) struct StoredTokenSet {
     pub handoff_endpoint: Option<String>,
     pub client_id: String,
     pub brokered: bool,
-}
-
-pub(crate) trait ConnectorSecretStore: Send + Sync {
-    fn get(&self, key: &str) -> Result<Option<String>, String>;
-    fn set(&self, key: &str, secret: &str) -> Result<(), String>;
-    fn remove(&self, key: &str) -> Result<(), String>;
-}
-
-struct NativeConnectorSecretStore;
-
-impl NativeConnectorSecretStore {
-    fn entry(key: &str) -> Result<keyring::Entry, String> {
-        keyring::Entry::new(
-            KEYRING_SERVICE,
-            &crate::account_session::credential_key(key)?,
-        )
-        .map_err(|_| "Mivlet could not open the OS secure store.".to_string())
-    }
-}
-
-impl ConnectorSecretStore for NativeConnectorSecretStore {
-    fn get(&self, key: &str) -> Result<Option<String>, String> {
-        match Self::entry(key)?.get_password() {
-            Ok(value) => Ok(Some(value)),
-            Err(keyring::Error::NoEntry) => Ok(None),
-            Err(_) => Err("Mivlet could not read connector credentials.".to_string()),
-        }
-    }
-
-    fn set(&self, key: &str, secret: &str) -> Result<(), String> {
-        Self::entry(key)?
-            .set_password(secret)
-            .map_err(|_| "Mivlet could not store connector credentials.".to_string())
-    }
-
-    fn remove(&self, key: &str) -> Result<(), String> {
-        match Self::entry(key)?.delete_credential() {
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
-            Err(_) => Err("Mivlet could not remove connector credentials.".to_string()),
-        }
-    }
 }
 
 fn command_error(
