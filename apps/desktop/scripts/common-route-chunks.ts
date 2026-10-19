@@ -43,6 +43,7 @@ export function commonRouteChunk(id: string): string | undefined {
     || /\/src\/components\/navigation\/WorkspaceMemories\.tsx$/.test(path)
     || /\/src\/components\/navigation\/workspace-memories\.css$/.test(path)
     || /\/src\/components\/conversation\/SideChats\.tsx$/.test(path)
+    || /\/src\/components\/conversation\/side-chats-compact\.css$/.test(path)
     || /\/src\/components\/search\/(?:SearchOverlay|SearchResults)\.tsx$/.test(path)
     || /\/src\/components\/search\/search\.css$/.test(path)
     || /\/src\/lib\/search\/(?:useWorkspaceSearch|results)\.ts$/.test(path)

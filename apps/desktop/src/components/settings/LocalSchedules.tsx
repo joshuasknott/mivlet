@@ -29,6 +29,10 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
   const [pending, setPending] = useState(false);
   const [status, setStatus] = useState("");
   const refresh = async () => { await queryClient.invalidateQueries({ queryKey }); };
+  const filterAgents = project ? runtime.agents.filter((agent) => project.participantIds.includes(agent.id)) : runtime.agents;
+  const effectiveFilterAgentId = filterAgents.some((agent) => agent.id === filterAgentId) ? filterAgentId : "";
+  const showAgentFilter = filterAgents.length > 1;
+  const visibleSchedules = schedules.data?.filter((schedule) => schedule.trigger.kind !== "event" && schedule.status !== "cancelled" && (!project || schedule.projectId === project.id) && (!effectiveFilterAgentId || schedule.agentId === effectiveFilterAgentId)) ?? [];
   const act = async (operation: () => Promise<unknown>, success: string) => {
     setPending(true);
     setStatus("");
@@ -37,36 +41,37 @@ function SchedulesWorkspace({ workspaceId, runtime, onOpenResult, initialAgentId
     finally { setPending(false); }
   };
   return <div className="settings-page__body schedule-list">
-    <div className="settings-section-heading"><p>Schedule a named agent. Keep Mivlet open, online and this PC awake. Missed recurring times merge into one run on reopening; review interrupted runs.</p></div>
-    {project ? <p>Tasks for <strong>{project.name}</strong>. Each result becomes a shared project conversation and a recorded work item.</p> : null}
-    <details className="schedule-limits"><summary>What scheduled runs can do</summary><p>Scheduled agents use chat's tools and approvals. Saved permissions cap access; reducing agent access also limits future runs. Approvals appear in Activity. Stop ends the task. Research-only runs use Codex web search.</p></details>
-    <div className="schedules-toolbar"><label className="settings-field"><span>Show schedules for</span><select aria-label="Filter schedules by agent" value={filterAgentId} onChange={(event) => { setFilterAgentId(event.target.value); setCreating(false); setEditing(null); }}><option value="">All agents</option>{runtime.agents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label>
+    <div className="schedule-list__intro">
+      <p className="schedule-list__description">Run a named agent on a schedule while Mivlet stays open.</p>
+      {project ? <p className="schedule-list__scope">Tasks for <strong>{project.name}</strong> become shared project conversations.</p> : null}
+      <details className="schedule-limits"><summary>Schedule limits</summary><p>Keep Mivlet and this PC awake. Saved permissions cap access; approvals appear in Activity. Missed recurring times merge into one run when you reopen Mivlet.</p></details>
+    </div>
+    <div className="schedules-toolbar">{showAgentFilter ? <label className="settings-field"><span>Agent</span><select aria-label="Filter schedules by agent" value={effectiveFilterAgentId} onChange={(event) => { setFilterAgentId(event.target.value); setCreating(false); setEditing(null); }}><option value="">All agents</option>{filterAgents.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select></label> : null}
     <button type="button" className="button button-primary" disabled={pending || schedules.isPending || !!schedules.error} onClick={() => { setEditing(null); setCreating(true); }}>New schedule</button></div>
     {schedules.isPending ? <p role="status">Loading schedules…</p> : null}
     {schedules.error ? <p role="alert">{errorText(schedules.error)}</p> : null}
-    {creating || editing ? <ScheduleEditor key={editing?.id ?? "new"} runtime={project ? { ...runtime, agents: runtime.agents.filter(agent => project.participantIds.includes(agent.id)) } : runtime} initialAgentId={filterAgentId} schedule={editing} pending={pending}
+    {creating || editing ? <ScheduleEditor key={editing?.id ?? "new"} runtime={project ? { ...runtime, agents: runtime.agents.filter(agent => project.participantIds.includes(agent.id)) } : runtime} initialAgentId={effectiveFilterAgentId} schedule={editing} pending={pending}
       onCancel={() => { setEditing(null); setCreating(false); }}
       onSave={(input) => void act(async () => {
         if (editing) await updateLocalSchedule({ ...input, projectId: editing.projectId, workspaceId, id: editing.id, expectedRevision: editing.revision });
         else await createLocalSchedule({ ...input, projectId: project?.id, workspaceId, id: crypto.randomUUID(), status: "enabled" });
         setEditing(null); setCreating(false);
       }, editing ? "Schedule updated." : "Schedule created.")} /> : null}
-    {schedules.data?.filter((schedule) => schedule.trigger.kind !== "event" && schedule.status !== "cancelled" && (!project || schedule.projectId === project.id) && (!filterAgentId || schedule.agentId === filterAgentId)).map((schedule) => <article className="profile-section" key={schedule.id}>
-      <strong>{runtime.agents.find((agent) => agent.id === schedule.agentId)?.name ?? "Unavailable agent"}</strong>
+    {visibleSchedules.map((schedule) => <article className="schedule-row" key={schedule.id}>
+      <div className="schedule-row__heading"><strong>{runtime.agents.find((agent) => agent.id === schedule.agentId)?.name ?? "Unavailable agent"}</strong><span className={`schedule-row__status schedule-row__status--${schedule.status}`}>{schedule.status === "paused" ? "Paused" : "Enabled"}</span></div>
       <p className="local-schedules__prompt">{schedule.prompt}</p>
-      <small>{describeTrigger(schedule.trigger)} · {schedule.timezone} · {schedule.status === "paused" ? "Paused" : schedule.nextRunAt ? `Next: ${new Date(schedule.nextRunAt).toLocaleString()}` : "No future run"}</small>
-      <small>{schedule.providerId} · {schedule.model} · Reasoning: {schedule.reasoningEffort ?? "provider default"}</small>
-      <small>{schedule.executionKind === "agent" ? "Agent workflow" : "Research only"}</small>
+      <p className="schedule-row__next"><span>{describeTrigger(schedule.trigger)}</span><span>{schedule.status === "paused" ? "Paused" : schedule.nextRunAt ? `Next: ${new Date(schedule.nextRunAt).toLocaleString()}` : "No future run"}</span><span>{schedule.timezone}</span></p>
+      <details className="schedule-row__details"><summary>Details</summary><small>{schedule.providerId} · {schedule.model} · Reasoning: {schedule.reasoningEffort ?? "provider default"}</small><small>{schedule.executionKind === "agent" ? "Agent workflow" : "Research only"}</small></details>
       <div className="profile-action-row">
         <button type="button" className="button button-secondary" disabled={pending} onClick={() => { setCreating(false); setEditing(schedule); }}>Edit</button>
         <button type="button" className="button button-secondary" disabled={pending} onClick={() => void act(() => setLocalScheduleStatus({ workspaceId, id: schedule.id, expectedRevision: schedule.revision, status: schedule.status === "paused" ? "enabled" : "paused" }), schedule.status === "paused" ? "Schedule resumed." : "Schedule paused.")}>{schedule.status === "paused" ? "Resume" : "Pause"}</button>
-        <button type="button" className="button button-secondary" disabled={pending} onClick={() => void act(() => setLocalScheduleStatus({ workspaceId, id: schedule.id, expectedRevision: schedule.revision, status: "cancelled" }), "Schedule cancelled.")}>Cancel schedule</button>
+        <button type="button" className="button button-secondary" disabled={pending} aria-label="Cancel schedule" onClick={() => void act(() => setLocalScheduleStatus({ workspaceId, id: schedule.id, expectedRevision: schedule.revision, status: "cancelled" }), "Schedule cancelled.")}>Cancel</button>
       </div>
       <ScheduleResults workspaceId={workspaceId} scheduleId={schedule.id} onOpenResult={onOpenResult ? (threadId) => onOpenResult(schedule.agentId, threadId) : undefined} />
     </article>)}
-    {schedules.data && !schedules.data.some((schedule) => schedule.status !== "cancelled" && (!project || schedule.projectId === project.id) && (!filterAgentId || schedule.agentId === filterAgentId)) ? <p>No schedules yet.</p> : null}
+    {schedules.data && !visibleSchedules.length ? <p className="schedule-list__empty">No schedules yet.</p> : null}
     {status ? <p role="status">{status}</p> : null}
-    {!project ? <EventAutomations runtime={runtime} workspaceId={workspaceId} schedules={schedules.data ?? []} initialAgentId={filterAgentId} onOpenResult={onOpenResult} /> : null}
+    {!project ? <EventAutomations runtime={runtime} workspaceId={workspaceId} schedules={schedules.data ?? []} initialAgentId={effectiveFilterAgentId} onOpenResult={onOpenResult} /> : null}
   </div>;
 }
 

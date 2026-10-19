@@ -91,6 +91,15 @@ describe("inline workspace navigation", () => {
     expect(onSearch).toHaveBeenCalledOnce();
   });
 
+  it("keeps the empty Projects state concise and leaves creation in the section action", () => {
+    render(<AgentSidebar {...props} projects={[]} />);
+    expect(screen.getByText("No projects yet")).toBeVisible();
+    expect(screen.queryByText("Keep related chats together.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Projects" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Organize projects" })).toBeNull();
+    expect(screen.getByRole("button", { name: "Create project" })).toBeVisible();
+  });
+
   it("shows Needs you only while actionable work remains and opens its exact target", () => {
     const item = { id: "waiting", conversationId: "chat-2", agentId: "agent-1", label: "Launch review", detail: "Agent 1 · Approval needed", kind: "approval" as const, count: 2 };
     const onOpenAttention = vi.fn();

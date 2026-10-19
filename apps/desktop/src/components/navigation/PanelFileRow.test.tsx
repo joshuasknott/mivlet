@@ -3,8 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { PanelFileRow } from "./PanelFileRow";
 import type { PanelFile } from "./workspace-panel-data";
 
-describe("file metadata cards", () => {
-  it("renders Markdown, PDF, images and spreadsheets as the same compact card and opens only the clicked file", () => {
+describe("file metadata rows", () => {
+  it("renders Markdown, PDF, images and spreadsheets as the same compact row and opens only the clicked file", () => {
     const open = vi.fn();
     const files = [
       "plan.md",
@@ -39,12 +39,12 @@ describe("file metadata cards", () => {
     expect(screen.queryByText(/Actual content/)).toBeNull();
     expect(screen.getAllByRole("button")).toHaveLength(4);
     for (const button of screen.getAllByRole("button"))
-      expect(button).toHaveClass("panel-file-card");
+      expect(button).toHaveClass("workspace-library__file-row");
     fireEvent.click(screen.getByRole("button", { name: "Open research.pdf" }));
     expect(open).toHaveBeenCalledExactlyOnceWith(files[1].tab);
   });
 
-  it("keeps unavailable attachments in the same card with a clear reattachment prerequisite", () => {
+  it("keeps unavailable attachments in the same row with a clear reattachment prerequisite", () => {
     const open = vi.fn();
     const file: PanelFile = {
       id: "missing",

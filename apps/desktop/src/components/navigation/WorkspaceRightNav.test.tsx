@@ -82,7 +82,7 @@ describe("contextual workspace panel", () => {
     window.removeEventListener("mivlet:mcp-app-panel-ready", ready);
     window.removeEventListener("mivlet:mcp-app-panel-closed", closed);
   });
-  it("starts with Activity, Files and Memory without the former utility menu", () => {
+  it("starts with the five direct rail tabs without the former utility menu", () => {
     render(
       <WorkspaceRightNav {...base()} activity={() => <p>Current work</p>} />,
     );
@@ -90,13 +90,15 @@ describe("contextual workspace panel", () => {
       "Activity",
       "Files",
       "Memory",
+      "Side Chat",
+      "Schedules",
     ]);
     expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
     expect(screen.getByText("Current work")).toBeVisible();
-    for (const name of ["Browser", "Side chat", "Schedules"])
+    for (const name of ["Browser", "More workspace options"])
       expect(screen.queryByRole("button", { name })).toBeNull();
   });
 
@@ -120,7 +122,7 @@ describe("contextual workspace panel", () => {
     view.rerender(<WorkspaceRightNav {...props} request={request} />);
     expect(screen.getByText("Document contents")).toBeVisible();
     expect(screen.getByRole("tablist")).toBeVisible();
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
     fireEvent.click(screen.getByRole("button", { name: "Back" }));
     expect(screen.getByRole("textbox")).toHaveValue("launch");
     expect(screen.getByRole("tab", { name: "Files" })).toHaveFocus();
@@ -141,7 +143,7 @@ describe("contextual workspace panel", () => {
     expect(screen.queryByText("Launch brief content")).toBeNull();
     expect(screen.getByText("Second content")).toBeVisible();
     expect(screen.getByRole("tablist")).toBeVisible();
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
   });
 
   it("never reopens a stale request on chat or scope changes", () => {
@@ -162,7 +164,6 @@ describe("contextual workspace panel", () => {
         {...props}
         request={nextRequest}
         identity="workspace:other-chat"
-        scope="owner"
       />,
     );
     expect(screen.getByText("Previous document")).toBeVisible();
@@ -170,8 +171,7 @@ describe("contextual workspace panel", () => {
       <WorkspaceRightNav
         {...props}
         request={nextRequest}
-        identity="workspace:other-chat"
-        scope="chat"
+        identity="workspace:third-chat"
       />,
     );
     expect(screen.queryByText("Previous document")).toBeNull();
@@ -179,7 +179,7 @@ describe("contextual workspace panel", () => {
 
   it("switches sections with arrow keys and Home/End", () => {
     render(
-      <WorkspaceRightNav {...base()} memories={<p>Saved preferences</p>} />,
+      <WorkspaceRightNav {...base()} schedules={<p>Saved schedules</p>} />,
     );
     fireEvent.keyDown(screen.getByRole("tab", { name: "Activity" }), {
       key: "ArrowRight",
@@ -188,34 +188,15 @@ describe("contextual workspace panel", () => {
     fireEvent.keyDown(screen.getByRole("tab", { name: "Files" }), {
       key: "End",
     });
-    expect(screen.getByText("Saved preferences")).toBeVisible();
-    expect(screen.getByRole("tab", { name: "Memory" })).toHaveFocus();
-    fireEvent.keyDown(screen.getByRole("tab", { name: "Memory" }), {
+    expect(screen.getByText("Saved schedules")).toBeVisible();
+    expect(screen.getByRole("tab", { name: "Schedules" })).toHaveFocus();
+    fireEvent.keyDown(screen.getByRole("tab", { name: "Schedules" }), {
       key: "Home",
     });
     expect(screen.getByRole("tab", { name: "Activity" })).toHaveFocus();
   });
 
-  it("browses the owning project only after an explicit scope selection", () => {
-    const change = vi.fn();
-    render(
-      <WorkspaceRightNav
-        {...base()}
-        ownerLabel="Portfolio"
-        onScopeChange={change}
-      />,
-    );
-    expect(screen.getByRole("combobox", { name: "Panel scope" })).toHaveValue(
-      "chat",
-    );
-    expect(change).not.toHaveBeenCalled();
-    fireEvent.change(screen.getByRole("combobox"), {
-      target: { value: "owner" },
-    });
-    expect(change).toHaveBeenCalledWith("owner");
-  });
-
-  it("keeps secondary schedules and conversations reachable through More", () => {
+  it("keeps Side Chat and Schedules reachable as direct rail tabs", () => {
     render(
       <WorkspaceRightNav
         {...base()}
@@ -223,19 +204,17 @@ describe("contextual workspace panel", () => {
         sideChats={<p>Saved conversations</p>}
       />,
     );
-    fireEvent.click(screen.getByLabelText("More workspace options"));
-    fireEvent.click(screen.getByRole("button", { name: "Schedules" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Schedules" }));
     expect(screen.getByText("Manage routines")).toBeVisible();
-    const selectedTab = screen.getByRole("tab", { name: "Activity" });
+    const selectedTab = screen.getByRole("tab", { name: "Schedules" });
     expect(
       document.getElementById(selectedTab.getAttribute("aria-controls")!),
     ).toBeVisible();
-    expect(screen.getByRole("tab", { name: "Activity" })).toHaveAttribute(
+    expect(screen.getByRole("tab", { name: "Schedules" })).toHaveAttribute(
       "aria-selected",
       "true",
     );
-    fireEvent.click(screen.getByLabelText("More workspace options"));
-    fireEvent.click(screen.getByRole("button", { name: "Conversations" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Side Chat" }));
     expect(screen.getByText("Saved conversations")).toBeVisible();
     expect(screen.queryByText("Manage routines")).not.toBeVisible();
   });
@@ -272,30 +251,22 @@ describe("contextual workspace panel", () => {
     expect(props.onChatActiveChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("collapses only the content and keeps the three rail controls visible without losing the inspector", () => {
+  it("closes from the header X while preserving the rail", () => {
     const props = {
       ...base(),
       request,
       renderTab: () => <p>Saved document</p>,
     };
     const view = render(<WorkspaceRightNav {...props} />);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Close workspace panel" }),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Close workspace panel" }));
     expect(props.onClose).toHaveBeenCalledOnce();
     view.rerender(<WorkspaceRightNav {...props} open={false} />);
     expect(screen.getByText("Saved document")).not.toBeVisible();
     expect(screen.getByRole("tablist")).toBeVisible();
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
-    fireEvent.click(
-      screen.getByRole("button", { name: "Open workspace panel" }),
-    );
-    expect(props.onOpen).toHaveBeenCalledOnce();
-    view.rerender(<WorkspaceRightNav {...props} />);
-    expect(screen.getByText("Saved document")).toBeVisible();
+    expect(screen.getAllByRole("tab")).toHaveLength(5);
   });
 
-  it("opens a collapsed collection from the rail and collapses the selected page on a second click", () => {
+  it("opens a collapsed collection from the rail and keeps the selected page open on repeat clicks", () => {
     const props = {
       ...base(),
       library: <input aria-label="Retained file search" />,
@@ -308,10 +279,8 @@ describe("contextual workspace panel", () => {
       target: { value: "brief" },
     });
     fireEvent.click(screen.getByRole("tab", { name: "Files" }));
-    expect(props.onClose).toHaveBeenCalledOnce();
-    view.rerender(<WorkspaceRightNav {...props} open={false} />);
-    fireEvent.click(screen.getByRole("tab", { name: "Files" }));
-    view.rerender(<WorkspaceRightNav {...props} />);
+    expect(props.onClose).not.toHaveBeenCalled();
+    expect(props.onOpen).toHaveBeenCalledTimes(2);
     expect(screen.getByRole("textbox")).toHaveValue("brief");
   });
 

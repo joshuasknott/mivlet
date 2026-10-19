@@ -53,7 +53,8 @@ export function WorkspaceLibrary({
   files?: PanelFile[];
 }) {
   const [query, setQuery] = useState("");
-  const [origin, setOrigin] = useState("all");
+  type FileOrigin = PanelFile["origin"];
+  const [origin, setOrigin] = useState<FileOrigin | "all">("all");
   const [page, setPage] = useState(0);
   const [workingPage, setWorkingPage] = useState(0);
   const region = useRef<HTMLElement>(null);
@@ -104,9 +105,18 @@ export function WorkspaceLibrary({
     })),
   ];
   const search = query.trim().toLowerCase();
+  const origins = [...new Set(files.map((file) => file.origin))];
+  const showOriginFilter = origins.length > 1;
+  const activeOrigin =
+    showOriginFilter && origin !== "all" && origins.includes(origin)
+      ? origin
+      : "all";
+  useEffect(() => {
+    if (!showOriginFilter && origin !== "all") setOrigin("all");
+  }, [origin, showOriginFilter]);
   const filtered = files.filter(
     (file) =>
-      (origin === "all" || file.origin === origin) &&
+      (activeOrigin === "all" || file.origin === activeOrigin) &&
       (file.title + " " + file.detail).toLowerCase().includes(search),
   );
   const listing = useWorkspaceLocalFiles(
@@ -133,9 +143,6 @@ export function WorkspaceLibrary({
   return (
     <section ref={region} className="workspace-library" aria-label="Files">
       <div className="panel-collection__controls">
-        <header className="workspace-library__heading">
-          <h2>Files</h2>
-        </header>
         <div className="workspace-library__toolbar">
           <label className="workspace-library__search">
             <MagnifyingGlass size={17} aria-hidden="true" />
@@ -155,27 +162,27 @@ export function WorkspaceLibrary({
         </div>
         {files.length > 0 && (
           <div className="workspace-library__filters">
-            <select
-              aria-label="File collection"
-              value={origin}
-              onChange={(event) => {
-                setOrigin(event.target.value);
-                setPage(0);
-                setWorkingPage(0);
-              }}
-            >
-              <option value="all">All files</option>
-              <option value="created">Created here</option>
-              <option value="attached">Added to chat</option>
-              <option value="shared">Shared with agent</option>
-            </select>
+            {showOriginFilter ? <select
+                aria-label="File collection"
+                value={activeOrigin}
+                onChange={(event) => {
+                  setOrigin(event.target.value as FileOrigin | "all");
+                  setPage(0);
+                  setWorkingPage(0);
+                }}
+              >
+                <option value="all">All files</option>
+                {origins.includes("created") ? <option value="created">Created here</option> : null}
+                {origins.includes("attached") ? <option value="attached">Added to chat</option> : null}
+                {origins.includes("shared") ? <option value="shared">Shared with agent</option> : null}
+              </select> : <span>{origins[0] === "created" ? "Created here" : origins[0] === "attached" ? "Added to chat" : "Shared with agent"}</span>}
             <span>
               {filtered.length} {filtered.length === 1 ? "file" : "files"}
             </span>
           </div>
         )}
       </div>
-      <div className="workspace-library__cards">
+      <div className="workspace-library__file-list">
         {filtered
           .slice(currentPage * pageSize, (currentPage + 1) * pageSize)
           .map((file) => (
@@ -226,7 +233,7 @@ export function WorkspaceLibrary({
                   {result.error}
                 </p>
               ))}
-            <div className="workspace-library__cards">
+            <div className="workspace-library__file-list">
               {visibleWorkingFiles
                 .slice(
                   currentWorkingPage * pageSize,

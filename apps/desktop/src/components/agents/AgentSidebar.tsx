@@ -222,12 +222,12 @@ export function AgentSidebar({
         <h2 className="sidebar-section__heading">Pinned</h2>
         <div className="sidebar-section__list">{pinned.filter(matches).map((entity) => row(entity, pinned, true))}</div>
       </section>}
-      <SidebarSection title="Projects" collapsed={!search && settings.projectsCollapsed} onToggle={() => update({ projectsCollapsed: !settings.projectsCollapsed })}
+      <SidebarSection title="Projects" empty={!projects.length} collapsed={!search && settings.projectsCollapsed} onToggle={() => update({ projectsCollapsed: !settings.projectsCollapsed })}
         sort={settings.projectSort} onSort={(sort) => update({ projectSort: sort,
           ...(sort === "manual" && !settings.projectOrder.length ? { projectOrder: orderedProjects.map((item) => item.id) } : {}) })}
         onCreate={onCreateProject}>
         {projectEntities.filter(matches).map((entity) => row(entity, projectEntities))}
-        {!projects.length && <p className="sidebar-section__empty">Projects keep related chats together.</p>}
+        {!projects.length && <p className="sidebar-section__empty">No projects yet</p>}
       </SidebarSection>
       <SidebarSection title="Agents" collapsed={!search && settings.agentsCollapsed} onToggle={() => update({ agentsCollapsed: !settings.agentsCollapsed })}
         sort={settings.agentSort} onSort={(sort) => update({ agentSort: sort,

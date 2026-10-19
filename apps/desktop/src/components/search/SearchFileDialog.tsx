@@ -3,6 +3,7 @@ import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import { previewRuntimeLocalComputerFile } from "../../runtime/domains/local-computer";
 import type { SearchNavigationTarget } from "../../lib/search/navigation";
 import type { LocalComputerFilePreview } from "@mivlet/protocol";
+import "../conversation/side-chat-dialog.css";
 const OfficePreview = lazy(() => import("../conversation/ArtifactPreview").then(module => ({ default: module.OfficePreview })));
 const PdfPreview = lazy(() => import("../conversation/PdfPreview").then(module => ({ default: module.PdfPreview })));
 

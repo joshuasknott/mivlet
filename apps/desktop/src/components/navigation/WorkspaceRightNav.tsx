@@ -12,14 +12,12 @@ import type {
   MivletAgentProfile,
 } from "@mivlet/protocol";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
-import { ArrowsOutSimple } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple";
-import { ArrowsInSimple } from "@phosphor-icons/react/dist/csr/ArrowsInSimple";
-import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
+import { ChatsCircle } from "@phosphor-icons/react/dist/csr/ChatsCircle";
+import { CalendarBlank } from "@phosphor-icons/react/dist/csr/CalendarBlank";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
 import { BookOpen } from "@phosphor-icons/react/dist/csr/BookOpen";
-import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import {
@@ -27,7 +25,6 @@ import {
   type PanelPage,
   type RightPanelTab,
 } from "./right-panel-state";
-import type { PanelScope } from "./workspace-panel-data";
 import "./navigation.css";
 import "./right-panel.css";
 import "./right-panel-rail.css";
@@ -42,6 +39,8 @@ const sections = [
   { id: "activity", label: "Activity", icon: Clock },
   { id: "files", label: "Files", icon: FileText },
   { id: "memory", label: "Memory", icon: BookOpen },
+  { id: "chats", label: "Side Chat", icon: ChatsCircle },
+  { id: "schedules", label: "Schedules", icon: CalendarBlank },
 ] as const;
 
 /** One content inspector; closing it returns to the preserved collection. */
@@ -49,9 +48,6 @@ export function WorkspaceRightNav({
   context,
   title,
   identity = "workspace",
-  scope = "chat",
-  ownerLabel,
-  onScopeChange,
   open: requestedOpen,
   replaced = false,
   onOpen,
@@ -73,9 +69,6 @@ export function WorkspaceRightNav({
   context: NavContext;
   title?: string;
   identity?: string;
-  scope?: PanelScope;
-  ownerLabel?: string;
-  onScopeChange?: (scope: PanelScope) => void;
   open: boolean;
   replaced?: boolean;
   onOpen?: () => void;
@@ -96,7 +89,6 @@ export function WorkspaceRightNav({
 }) {
   const open = requestedOpen && !replaced;
   const panel = useRef<HTMLElement>(null);
-  const more = useRef<HTMLDetailsElement>(null);
   const compact = useMediaQuery("(max-width: 850px)");
   useModalFocusTrap({
     active: open && compact,
@@ -108,11 +100,10 @@ export function WorkspaceRightNav({
     page: "activity",
     content: null,
   });
-  const [expanded, setExpanded] = useState(false);
   const [visited, setVisited] = useState<ReadonlySet<PanelPage>>(
     () => new Set(["activity"]),
   );
-  const scopeKey = identity + ":" + scope;
+  const scopeKey = identity;
   const previous = useRef({
     identity,
     scopeKey,
@@ -134,7 +125,6 @@ export function WorkspaceRightNav({
     setVisited((current) => new Set([...current, page]));
     dispatch({ type: "select", page });
     onOpen?.();
-    if (more.current) more.current.open = false;
   };
   const lastHistory = useRef<string | null>(null);
   useEffect(() => {
@@ -147,9 +137,13 @@ export function WorkspaceRightNav({
   const selected =
     state.content?.scopeKey === scopeKey ? state.content.tab : undefined;
   const inspecting = Boolean(selected || computerAgentId);
-  const activeSection = ["history", "chats", "schedules"].includes(state.page)
+  const activeSection = ["history"].includes(state.page)
     ? "activity"
     : state.page;
+  const closePanel = () => {
+    onClose();
+    document.getElementById(prefix + "-" + activeSection)?.focus();
+  };
   const closeContent = () => {
     onCloseComputer?.();
     dispatch({ type: "close" });
@@ -233,7 +227,7 @@ export function WorkspaceRightNav({
     files: "Files",
     memory: "Memory",
     history: "Work history",
-    chats: "Conversations",
+    chats: "Side Chat",
     schedules: "Schedules",
   }[state.page];
   const pages: { id: PanelPage; content: ReactNode }[] = [
@@ -279,7 +273,7 @@ export function WorkspaceRightNav({
     },
     {
       id: "chats",
-      content: <div className="right-panel__library">{sideChats}</div>,
+      content: <div className="right-panel__library">{sideChats ?? <p className="right-panel__empty">Choose an agent or project to start a side chat.</p>}</div>,
     },
     {
       id: "schedules",
@@ -290,7 +284,6 @@ export function WorkspaceRightNav({
     <aside
       ref={panel}
       className="workspace-context right-panel"
-      data-expanded={expanded}
       data-open={open}
       aria-label="Workspace panel"
       aria-description={title || contextName}
@@ -317,35 +310,15 @@ export function WorkspaceRightNav({
           ) : (
             <div className="right-panel__heading">
               <h2>{heading}</h2>
-              {onScopeChange && ownerLabel ? (
-                <select
-                  aria-label="Panel scope"
-                  value={scope}
-                  onChange={(event) =>
-                    onScopeChange(event.target.value as PanelScope)
-                  }
-                >
-                  <option value="chat">This chat</option>
-                  <option value="owner">All in {ownerLabel}</option>
-                </select>
-              ) : null}
             </div>
           )}
           <div className="right-panel__controls">
             <button
               type="button"
-              className="right-panel__expand"
-              aria-label={
-                expanded ? "Reduce workspace panel" : "Expand workspace panel"
-              }
-              aria-pressed={expanded}
-              onClick={() => setExpanded((value) => !value)}
+              aria-label="Close workspace panel"
+              onClick={closePanel}
             >
-              {expanded ? (
-                <ArrowsInSimple size={18} aria-hidden="true" />
-              ) : (
-                <ArrowsOutSimple size={18} aria-hidden="true" />
-              )}
+              <X size={18} aria-hidden="true" />
             </button>
           </div>
         </header>
@@ -382,20 +355,6 @@ export function WorkspaceRightNav({
         </div>
       </div>
       <nav className="right-panel__rail" aria-label="Workspace tools">
-        <button
-          type="button"
-          className="right-panel__rail-toggle"
-          aria-label={open ? "Close workspace panel" : "Open workspace panel"}
-          aria-expanded={open}
-          aria-controls={prefix + "-content"}
-          onClick={open ? onClose : onOpen}
-        >
-          {open ? (
-            <X size={18} aria-hidden="true" />
-          ) : (
-            <CaretLeft size={18} aria-hidden="true" />
-          )}
-        </button>
         <div
           className="right-panel__sections"
           role="tablist"
@@ -418,10 +377,7 @@ export function WorkspaceRightNav({
                     (activeSection === section.id ? state.page : section.id)
               }
               tabIndex={activeSection === section.id ? 0 : -1}
-              onClick={() => {
-                if (open && state.page === section.id && !inspecting) onClose();
-                else navigate(section.id);
-              }}
+              onClick={() => navigate(section.id)}
               onKeyDown={(event) => {
                 const next = ["ArrowDown", "ArrowRight"].includes(event.key)
                   ? (index + 1) % sections.length
@@ -447,35 +403,6 @@ export function WorkspaceRightNav({
             </button>
           ))}
         </div>
-        {sideChats || schedules ? (
-          <details
-            ref={more}
-            className="right-panel__more"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.currentTarget.open = false;
-                event.currentTarget.querySelector("summary")?.focus();
-                event.stopPropagation();
-              }
-            }}
-          >
-            <summary aria-label="More workspace options">
-              <DotsThree size={22} aria-hidden="true" />
-            </summary>
-            <div>
-              {sideChats ? (
-                <button type="button" onClick={() => navigate("chats")}>
-                  Conversations
-                </button>
-              ) : null}
-              {schedules ? (
-                <button type="button" onClick={() => navigate("schedules")}>
-                  Schedules
-                </button>
-              ) : null}
-            </div>
-          </details>
-        ) : null}
       </nav>
     </aside>
   );

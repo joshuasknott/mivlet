@@ -67,40 +67,11 @@ const project = {
 } as LocalProject;
 
 describe("panel browsing boundaries", () => {
-  it("defaults to the exact chat and broadens only to the exact owning project", () => {
+  it("limits panel rooms to the exact current chat and workspace", () => {
     const current = room("chat", { projectId: "project" });
-    const sibling = room("sibling", { projectId: "project" });
-    const others = [
-      room("private"),
-      room("other", { projectId: "other" }),
-      room("foreign", { projectId: "project", workspaceId: "foreign" }),
-    ];
-    const owner = {
-      kind: "project" as const,
-      id: "project",
-      name: "Portfolio",
-    };
-    expect(
-      panelRooms(
-        "workspace",
-        current,
-        [current, sibling, ...others],
-        owner,
-        "chat",
-      ),
-    ).toEqual([current]);
-    expect(
-      panelRooms(
-        "workspace",
-        current,
-        [current, sibling, ...others],
-        owner,
-        "owner",
-      ),
-    ).toEqual([current, sibling]);
-    expect(panelRooms("foreign", current, [current], owner, "chat")).toEqual(
-      [],
-    );
+    expect(panelRooms("workspace", current)).toEqual([current]);
+    expect(panelRooms("foreign", current)).toEqual([]);
+    expect(panelRooms("workspace", undefined)).toEqual([]);
   });
 
   it("does not confuse an agent's project participation with private agent chats", () => {
@@ -113,16 +84,6 @@ describe("panel browsing boundaries", () => {
       facilitatorId: "theo",
       participants: [{ agentId: "theo", name: "Theo" }],
     });
-    const owner = { kind: "agent" as const, id: "mira", name: "Mira" };
-    expect(
-      panelRooms(
-        "workspace",
-        current,
-        [current, sibling, projectChat, otherAgent],
-        owner,
-        "owner",
-      ),
-    ).toEqual([current, sibling]);
     expect(agentChatOwner(projectChat)).toBeUndefined();
     expect(
       agentChatOwner(
@@ -159,7 +120,7 @@ describe("panel browsing boundaries", () => {
     ).toEqual([]);
   });
 
-  it("owner memory browsing excludes chat-specific and unrelated shared records", () => {
+  it("includes only memories inherited by the current chat", () => {
     const records = [
       memory("chat", { level: "thread", threadId: "chat" }),
       memory("project", { level: "project", projectId: "project" }),
@@ -177,18 +138,7 @@ describe("panel browsing boundaries", () => {
         ({ record }) => record.id,
       ),
     ).toEqual(["chat", "project"]);
-    expect(
-      panelMemories(
-        records,
-        room("chat", { projectId: "project" }),
-        "owner",
-      ).map(({ record }) => record.id),
-    ).toEqual(["project"]);
-    expect(
-      panelMemories(records, room("chat"), "owner").map(
-        ({ record }) => record.id,
-      ),
-    ).toEqual(["agent"]);
+    expect(panelMemories(records, undefined)).toEqual([]);
   });
 
   it("indexes immutable published outputs once and never guesses version relationships from names", () => {

@@ -327,21 +327,6 @@ pub(crate) fn usage_probe() -> Result<(Value, Value), String> {
 }
 
 fn codex_executable_command(path: &PathBuf) -> Command {
-    #[cfg(windows)]
-    {
-        if path
-            .extension()
-            .and_then(|ext| ext.to_str())
-            .map(|ext| ext.eq_ignore_ascii_case("cmd"))
-            .unwrap_or(false)
-        {
-            use std::os::windows::process::CommandExt;
-            let mut command = Command::new("cmd");
-            command.creation_flags(0x0800_0000);
-            command.arg("/D").arg("/C").arg(path);
-            return command;
-        }
-    }
     let mut command = Command::new(path);
     #[cfg(windows)]
     {
@@ -441,7 +426,7 @@ pub fn start_codex_app_server_turn(
     let mut command = codex_command(&path)?;
     command.current_dir(&runtime_dir).args([
         "-c",
-        "forced_login_method=\"chatgpt\"",
+        "forced_login_method='chatgpt'",
         "-c",
         "features.shell_tool=false",
         "-c",

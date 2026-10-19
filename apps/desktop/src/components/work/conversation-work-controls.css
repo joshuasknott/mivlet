@@ -7,7 +7,6 @@
 .conversation-goal-name { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .conversation-work-controls small { display: block; margin-top: 3px; color: var(--ink-muted); font-size: var(--text-12); }
 .conversation-work-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; min-width: 0; }
-.conversation-work-controls .conversation-goal-add { justify-self: start; color: var(--ink-muted); background: transparent; border-color: transparent; padding-left: 0; }
 .conversation-queue-label { margin: 0 0 8px; font-size: var(--text-12); color: var(--ink-muted); }
 .conversation-work-queue ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .conversation-work-queue li { display: flex; align-items: center; gap: 10px; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-2); padding: 7px; }

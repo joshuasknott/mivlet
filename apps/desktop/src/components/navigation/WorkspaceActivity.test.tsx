@@ -55,11 +55,10 @@ describe("bounded Activity summary", () => {
     expect(
       screen.getByRole("region", { name: "Latest completed work" }),
     ).toBeVisible();
-    expect(
-      screen
-        .getByRole("region", { name: "Recent activity" })
-        .querySelectorAll("li"),
-    ).toHaveLength(3);
+    const recent = screen.getByRole("region", { name: "Recent activity" });
+    expect(recent.querySelectorAll("li")).toHaveLength(3);
+    expect(recent.textContent).not.toContain("Task done-0");
+    expect(recent.textContent).toContain("Task done-1");
     expect(screen.queryByText("Task done-149")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "View result" }));
     expect(input.onInspect).toHaveBeenCalledWith("done-0");

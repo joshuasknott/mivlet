@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { LinkSimple } from "@phosphor-icons/react/dist/csr/LinkSimple";
 import { ShieldCheck } from "@phosphor-icons/react/dist/csr/ShieldCheck";
-import { Copy } from "@phosphor-icons/react/dist/csr/Copy";
+import { CopySimple } from "@phosphor-icons/react/dist/csr/CopySimple";
 import { StopCircle } from "@phosphor-icons/react/dist/csr/StopCircle";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
 import type {
@@ -147,7 +147,7 @@ export function McpServerSettings({
                   )
                 }
               >
-                <Copy size={18} aria-hidden="true" />
+                <CopySimple size={18} aria-hidden="true" />
                 Copy URL
               </button>
               <button

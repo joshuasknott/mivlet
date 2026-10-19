@@ -12,17 +12,20 @@ vi.mock("../../runtime/domains/local-schedules", () => ({
 }));
 
 const schedule: LocalSchedule = { id: "schedule", agentId: "agent", providerId: "codex", model: "original", prompt: "Research rainfall", timezone: "Europe/London", trigger: { kind: "daily", localTime: "09:00" }, status: "enabled", revision: 4, promptRevision: 2, createdAt: "2026-09-07T12:00:00Z", updatedAt: "2026-09-07T12:00:00Z" };
-function runtime(): SettingsRuntime {
+function runtime(includeSecondAgent = false): SettingsRuntime {
+  const agents = [{ id: "agent", name: "Researcher", modelId: "codex::new-model", permissionLabel: "Ask Me" }];
+  if (includeSecondAgent) agents.push({ id: "other", name: "Writer", modelId: "codex::new-model", permissionLabel: "Ask Me" });
   return {
     accountWorkspaceStatus: { activeWorkspace: { localWorkspaceId: "workspace" } },
-    agents: [{ id: "agent", name: "Researcher", modelId: "codex::new-model", permissionLabel: "Ask Me" }],
+    agents,
     allModelOptions: ["original", "new-model"].map((modelId) => ({ id: `codex::${modelId}`, modelId, providerId: "codex", available: true })),
     backendProviders: [{ id: "codex", label: "ChatGPT", backendType: "codex-app-server", authState: "connected", capabilities: ["streaming", "tool-requests", "approvals"] }],
   } as unknown as SettingsRuntime;
 }
 function mount(value = runtime(), initialAgentId?: string) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={client}><LocalSchedules runtime={value} initialAgentId={initialAgentId} /></QueryClientProvider>);
+  const view = render(<QueryClientProvider client={client}><LocalSchedules runtime={value} initialAgentId={initialAgentId} /></QueryClientProvider>);
+  return { ...view, client };
 }
 beforeEach(() => {
   vi.clearAllMocks();
@@ -40,6 +43,7 @@ describe("Local schedules", () => {
     value.allModelOptions = [{ id: "openai::model", modelId: "model", providerId: "openai", available: true }] as SettingsRuntime["allModelOptions"];
     value.backendProviders = [{ id: "openai", label: "OpenAI", backendType: "native-api", authState: "connected", capabilities: ["streaming", "tool-requests", "approvals"] }] as SettingsRuntime["backendProviders"];
     mount(value, "agent");
+    expect(screen.queryByRole("combobox", { name: "Filter schedules by agent" })).toBeNull();
     await waitFor(() => expect(screen.getByRole("button", { name: "New schedule" })).toBeEnabled());
     fireEvent.click(screen.getByRole("button", { name: "New schedule" }));
     expect(screen.getByLabelText("Workflow")).toHaveValue("agent");
@@ -66,14 +70,25 @@ describe("Local schedules", () => {
   });
   it("opens on the current agent, prefills new schedules, and can show every agent", async () => {
     vi.mocked(listLocalSchedules).mockResolvedValue([schedule, { ...schedule, id: "other", agentId: "other", prompt: "Another agent's research" }]);
-    mount(runtime(), "agent");
+    mount(runtime(true), "agent");
     expect(await screen.findByText("Research rainfall")).toBeVisible();
     expect(screen.queryByText("Another agent's research")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "New schedule" }));
-    expect(screen.getByLabelText("Agent")).toHaveValue("agent");
+    const agentSelect = screen.getAllByRole("combobox").find((element) => !element.getAttribute("aria-label"));
+    expect(agentSelect).toHaveValue("agent");
     fireEvent.click(screen.getByRole("button", { name: "Close" }));
     fireEvent.change(screen.getByRole("combobox", { name: "Filter schedules by agent" }), { target: { value: "" } });
     expect(screen.getByText("Another agent's research")).toBeVisible();
+  });
+  it("drops a stale agent filter when the available agents change", async () => {
+    const value = runtime(true);
+    vi.mocked(listLocalSchedules).mockResolvedValue([schedule, { ...schedule, id: "other", agentId: "other", prompt: "Another agent's research" }]);
+    const view = mount(value, "other");
+    expect(await screen.findByText("Another agent's research")).toBeVisible();
+    const reduced = runtime();
+    view.rerender(<QueryClientProvider client={view.client}><LocalSchedules runtime={reduced} initialAgentId="other" /></QueryClientProvider>);
+    expect(screen.queryByRole("combobox", { name: "Filter schedules by agent" })).toBeNull();
+    expect(screen.getByText("Research rainfall")).toBeVisible();
   });
   it("creates against the chosen agent route and keeps a rejected draft editable", async () => {
     vi.mocked(createLocalSchedule).mockRejectedValueOnce(new Error("The schedule changed. Refresh and try again."));

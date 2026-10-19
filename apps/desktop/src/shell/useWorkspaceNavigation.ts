@@ -26,6 +26,9 @@ export interface ConversationOriginNavigation {
   sourceRevisionId?: string;
 }
 
+const CONVERSATION_HISTORY_LIMIT = 100;
+type ConversationHistory = { entries: string[]; index: number };
+
 /** Owns view layout and navigation only. Closing or restoring a view never owns execution. */
 export function useWorkspaceNavigation(options: {
   runtime: ShellRuntime;
@@ -44,7 +47,7 @@ export function useWorkspaceNavigation(options: {
   const narrow = useMediaQuery("(max-width: 850px)");
   const phone = useMediaQuery("(max-width: 700px)");
   // One contextual right panel replaces history, details and computer panels.
-  const [contextOpen, setContextOpen] = useState(!narrow);
+  const [contextOpen, setContextOpen] = useState(false);
   const [projectDetailsId, setProjectDetailsId] = useState<string | null>(null);
   const [panelFocused, setPanelFocused] = useState(false);
   const [panelRequest, setPanelRequestState] = useState<RightPanelTab | null>(null);
@@ -57,6 +60,9 @@ export function useWorkspaceNavigation(options: {
   const [computer, setComputer] = useState<string | null>(null);
   const [conversationOrigin, setConversationOrigin] =
     useState<ConversationOriginNavigation | null>(null);
+  const [conversationHistory, setConversationHistory] =
+    useState<ConversationHistory>({ entries: [], index: -1 });
+  const lastFocusedConversation = useRef<string | null>(null);
   useEffect(() => {
     const openMcpAppPanel = (event: Event) => {
       const detail = (event as CustomEvent<unknown>).detail;
@@ -167,6 +173,24 @@ export function useWorkspaceNavigation(options: {
     }
     setLayout(saved);
   }, [state.loading]);
+  const focusedConversationId = activeView?.kind === "conversation"
+    ? activeView.conversationId
+    : undefined;
+  const focusedViewId = activeView?.kind === "conversation"
+    ? activeView.id
+    : undefined;
+  useEffect(() => {
+    if (!restored.current || !focusedConversationId) return;
+    if (lastFocusedConversation.current === focusedConversationId) return;
+    lastFocusedConversation.current = focusedConversationId;
+    setConversationHistory((current) => {
+      if (current.index >= 0 && current.entries[current.index] === focusedConversationId)
+        return current;
+      const branch = current.entries.slice(0, current.index + 1);
+      const entries = [...branch, focusedConversationId].slice(-CONVERSATION_HISTORY_LIMIT);
+      return { entries, index: entries.length - 1 };
+    });
+  }, [focusedConversationId, focusedViewId]);
   useEffect(() => {
     if (!restored.current) return;
     const timer = setTimeout(
@@ -186,6 +210,7 @@ export function useWorkspaceNavigation(options: {
   const navigate = (
     id: string,
     origin?: Pick<OutputSource, "branchId" | "messageId" | "sourceRevisionId">,
+    historyIndex?: number,
   ) => {
     if (
       !service.getSnapshot().data.conversations.some((room) => room.id === id)
@@ -196,6 +221,13 @@ export function useWorkspaceNavigation(options: {
         ),
       );
       return;
+    }
+    if (historyIndex !== undefined) {
+      setConversationHistory((current) =>
+        current.index === historyIndex
+          ? current
+          : { ...current, index: historyIndex },
+      );
     }
     setConversationOrigin(
       origin
@@ -225,6 +257,29 @@ export function useWorkspaceNavigation(options: {
     id: string,
     origin: Pick<OutputSource, "branchId" | "messageId" | "sourceRevisionId">,
   ) => navigate(id, origin);
+  const availableConversationIds = new Set(
+    state.data.conversations.map((room) => room.id),
+  );
+  const historyTarget = (direction: -1 | 1) => {
+    let index = conversationHistory.index + direction;
+    while (index >= 0 && index < conversationHistory.entries.length) {
+      const conversationId = conversationHistory.entries[index];
+      if (availableConversationIds.has(conversationId))
+        return { conversationId, index };
+      index += direction;
+    }
+    return null;
+  };
+  const goBack = () => {
+    const target = historyTarget(-1);
+    if (!target) return;
+    navigate(target.conversationId, undefined, target.index);
+  };
+  const goForward = () => {
+    const target = historyTarget(1);
+    if (!target) return;
+    navigate(target.conversationId, undefined, target.index);
+  };
   useEffect(() => {
     const key = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
@@ -356,6 +411,10 @@ export function useWorkspaceNavigation(options: {
     actLayout,
     open,
     openConversation,
+    goBack,
+    goForward,
+    canGoBack: historyTarget(-1) !== null,
+    canGoForward: historyTarget(1) !== null,
     onConversationPointerDown,
     selectNavWork,
     openPanelWeb,

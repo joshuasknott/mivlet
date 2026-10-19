@@ -60,6 +60,8 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
   const pageIndex = Math.min(page, Math.max(0, Math.ceil(queue.length / 6) - 1));
   const live = Boolean(active?.status === "running" && active.modelOptionId.startsWith("codex::") && !active.executionOwner);
   const lastLive = active?.liveSteering?.at(-1);
+  const hasControls = Boolean(goal || goalForm || queue.length || cloudTasks.length || active || error);
+  if (!hasControls) return null;
   return <section className="conversation-work-controls" aria-label="Goal and queued requests">
     {goal ? <div className="conversation-goal-row">
       <Target size={20} aria-hidden="true" />
@@ -76,7 +78,7 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
         <button type="button" aria-expanded={details} onClick={() => setDetails(!details)}><ListBullets size={16} aria-hidden="true" />Details</button>
         {canStartGoal ? <button type="button" disabled={busy} aria-expanded={goalForm} onClick={() => { setObjective(""); setCriteria(""); setGoalForm(true); }}>New goal for next request</button> : null}
       </div>
-    </div> : <button className="conversation-goal-add" type="button" disabled={busy} onClick={() => setGoalForm(!goalForm)} aria-expanded={goalForm}><Target size={16} aria-hidden="true" />Add an outcome goal</button>}
+    </div> : null}
     {details && goal ? <div className="conversation-work-detail">
       <p>{goal.successCriteria}</p>
       {goalWork && !goalDraft ? <><p>{goalWork.turnCount}/{goalWork.maxTurns} turns · {goalWork.tokenUsage.toLocaleString()}/{goalWork.maxTokens.toLocaleString()} reported tokens. Pause takes effect after the current turn.</p>
