@@ -65,7 +65,11 @@ pub(super) fn codex_candidates_from(
                 .map(|entry| entry.path().join("codex.exe"))
                 .filter(|candidate| candidate.is_file())
                 .collect::<Vec<_>>();
-            desktop_candidates.sort_by_key(|candidate| std::cmp::Reverse(modified_time(candidate)));
+            desktop_candidates.sort_by(|left, right| {
+                modified_time(right)
+                    .cmp(&modified_time(left))
+                    .then_with(|| left.cmp(right))
+            });
             for candidate in desktop_candidates {
                 push_unique_candidate(&mut candidates, &mut seen, candidate);
             }
@@ -94,15 +98,16 @@ pub(super) fn find_codex_executable() -> Option<PathBuf> {
     let process_directory = env::current_dir().ok();
     codex_candidates()
         .into_iter()
-        .find(|candidate| candidate.is_file())
-        .and_then(|candidate| resolve_candidate_path(candidate, process_directory.as_deref()))
+        .filter(|candidate| candidate.is_file())
+        .find_map(|candidate| resolve_candidate_path(candidate, process_directory.as_deref()))
 }
 
 fn resolve_candidate_path(candidate: PathBuf, process_directory: Option<&Path>) -> Option<PathBuf> {
     if candidate.is_absolute() {
         Some(candidate)
     } else {
-        process_directory.map(|directory| directory.join(candidate))
+        let resolved = process_directory?.join(candidate);
+        resolved.is_absolute().then_some(resolved)
     }
 }
 
@@ -131,8 +136,6 @@ pub(super) fn codex_command(path: &PathBuf) -> Result<Command, String> {
 #[cfg(test)]
 mod tests {
     use super::resolve_candidate_path;
-    #[cfg(windows)]
-    use std::ffi::OsStr;
     use std::{fs, path::PathBuf};
 
     #[test]
@@ -159,8 +162,8 @@ mod tests {
         command.current_dir(child_directory.path());
         #[cfg(windows)]
         {
-            assert_eq!(command.get_program(), OsStr::new("cmd"));
-            assert_eq!(command.get_args().last(), Some(resolved.as_os_str()));
+            assert_eq!(command.get_program(), resolved.as_os_str());
+            assert!(command.get_args().next().is_none());
         }
         #[cfg(not(windows))]
         {
@@ -169,8 +172,25 @@ mod tests {
         }
     }
 
+    #[cfg(windows)]
+    #[test]
+    fn cmd_candidates_with_shell_metacharacters_stay_as_the_executable_path() {
+        let path = PathBuf::from(r"C:\mivlet & provider\codex.cmd");
+        let command = super::super::codex_executable_command(&path);
+
+        assert_eq!(command.get_program(), path.as_os_str());
+        assert!(command.get_args().next().is_none());
+    }
+
     #[test]
     fn relative_path_candidate_is_rejected_without_original_directory() {
         assert!(resolve_candidate_path(PathBuf::from("codex"), None).is_none());
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn drive_relative_candidate_is_rejected_instead_of_rebinding() {
+        let directory = std::env::current_dir().expect("current directory");
+        assert!(resolve_candidate_path(PathBuf::from(r"C:codex.cmd"), Some(&directory)).is_none());
     }
 }
