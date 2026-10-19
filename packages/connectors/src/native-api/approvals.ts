@@ -12,6 +12,7 @@
 import type { ApprovalRequest } from "@mivlet/protocol";
 import { lookupTool } from "./tools";
 import { isProtectedSecretTool } from "./protected-secret-tools";
+import { isWorkspaceManagementTool } from "./workspace-management-tools";
 
 const ARGUMENT_DIGEST_PREFIX = "Arguments SHA-256: ";
 const SHA256_CONSTANTS = new Uint32Array([
@@ -173,7 +174,7 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || toolName.startsWith("local-browser-") || isProtectedSecretTool(toolName)) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || toolName.startsWith("local-browser-") || isProtectedSecretTool(toolName) || (isWorkspaceManagementTool(toolName) && toolName !== "workspace-inspect")) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 

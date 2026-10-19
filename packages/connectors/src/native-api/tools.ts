@@ -19,6 +19,12 @@ import { WORKSPACE_TOOLS } from "./workspace-tools";
 import { COMMAND_TOOLS } from "./command-tools";
 import { COLLABORATION_TOOLS, isCollaborationTool } from "./collaboration-tools";
 export { collaborationToolSpecs, isCollaborationTool } from "./collaboration-tools";
+import { WORKSPACE_MANAGEMENT_TOOLS } from "./workspace-management-tools";
+export {
+  WORKSPACE_MANAGEMENT_TOOLS,
+  isWorkspaceManagementTool,
+  workspaceManagementToolSpecs,
+} from "./workspace-management-tools";
 
 const textParameter = { type: "string" };
 const imageParameters = {
@@ -78,6 +84,7 @@ const TOOL_DEFINITIONS: BackendTool[] = [
   ...Object.values(WORKSPACE_TOOLS),
   ...Object.values(COMMAND_TOOLS),
   ...Object.values(COLLABORATION_TOOLS),
+  ...Object.values(WORKSPACE_MANAGEMENT_TOOLS),
   ...Object.values(OFFICE_TOOLS),
   ...Object.values(PDF_TOOLS),
   {
