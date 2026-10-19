@@ -81,14 +81,8 @@ pub struct ArtifactPreview {
     pub(crate) text: Option<String>,
     pub(crate) image_data_url: Option<String>,
     pub(crate) pdf_base64: Option<String>,
-    office: Option<super::super::office_preview::OfficePreview>,
+    pub(super) office: Option<super::super::office_preview::OfficePreview>,
     pub(crate) truncated: bool,
-}
-
-impl ArtifactPreview {
-    pub(crate) fn has_office_preview(&self) -> bool {
-        self.office.is_some()
-    }
 }
 
 pub(crate) fn preview_bytes(artifact: &LocalComputerArtifact, bytes: &[u8]) -> ArtifactPreview {
