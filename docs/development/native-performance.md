@@ -82,6 +82,13 @@ creation offers a native retry/close dialog; retry starts a fresh process and
 repeats normal account admission. No workspace workers start after a creation
 failure, and an existing workspace is never automatically reloaded or replayed.
 
+A later fatal exit of the main renderer or WebView browser closes the pinned
+account session and stops its workers before offering restart or close. Failures
+during setup wait until worker registration finishes so cleanup cannot race a
+late worker start. Subframe, GPU and utility failures or an unresponsive renderer
+do not trigger this global teardown. Restart is explicit and repeats normal
+account admission; it does not automatically replay agent actions.
+
 The pinned `webview2-com` patch pumps COM callbacks and window messages, detects
 disconnected completion channels, and bounds only waits within that startup
 scope. Other operations retain their existing timeout policy. Its source and

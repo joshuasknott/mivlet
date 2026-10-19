@@ -172,8 +172,8 @@ pub fn run() {
                 app.manage(local_schedules::events::EventIngress::new());
                 local_schedules::events::start_maintenance();
             }
+            startup::finish_setup(&handle);
             account_session::start_watchdog(handle);
-            startup::record("setup_complete");
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -181,10 +181,8 @@ pub fn run() {
                 return;
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                use std::sync::atomic::{AtomicBool, Ordering};
-                static CLOSING: AtomicBool = AtomicBool::new(false);
                 api.prevent_close();
-                if CLOSING.swap(true, Ordering::AcqRel) {
+                if !account_session::begin_close() {
                     return;
                 }
                 let app = window.app_handle().clone();

@@ -1,6 +1,8 @@
-//! Recover a failed native window before opening any account or starting workers.
+//! Recover native window failures without replaying workspace effects.
 //! The renderer configuration and all normal account admission checks are retained.
 
+#[cfg(any(windows, test))]
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
 use tauri::Manager;
@@ -15,6 +17,79 @@ pub(crate) fn record(stage: &'static str) {
 
 fn retry_requested(result: rfd::MessageDialogResult) -> bool {
     result == rfd::MessageDialogResult::Yes
+}
+
+#[cfg(any(windows, test))]
+#[derive(Default)]
+struct RecoveryState(AtomicU8);
+
+#[cfg(any(windows, test))]
+impl RecoveryState {
+    const READY: u8 = 1;
+    const FAILED: u8 = 2;
+    const RECOVERING: u8 = 4;
+
+    fn signal(&self, event: u8) -> bool {
+        let state = self.0.fetch_or(event, Ordering::AcqRel) | event;
+        state & (Self::READY | Self::FAILED) == (Self::READY | Self::FAILED)
+            && self.0.fetch_or(Self::RECOVERING, Ordering::AcqRel) & Self::RECOVERING == 0
+    }
+}
+
+#[cfg(windows)]
+static RECOVERY: RecoveryState = RecoveryState(AtomicU8::new(0));
+
+pub(crate) fn finish_setup(app: &tauri::AppHandle) {
+    record("setup_complete");
+    #[cfg(windows)]
+    if RECOVERY.signal(RecoveryState::READY) {
+        recover_lost_renderer(app.clone());
+    }
+    #[cfg(not(windows))]
+    let _ = app;
+}
+
+#[cfg(windows)]
+fn recover_lost_renderer(app: tauri::AppHandle) {
+    // A failure during setup is queued until every worker has been registered.
+    // Otherwise teardown could finish before setup starts another worker.
+    tauri::async_runtime::spawn(async move {
+        if !crate::account_session::close_session(&app).await {
+            return;
+        }
+        record("renderer_recovery");
+        // Never show a blocking dialog inside a WebView2 COM callback. The
+        // session is closed before asking, so no agent work can continue unseen.
+        let result = tauri::async_runtime::spawn_blocking(|| {
+            rfd::MessageDialog::new()
+                .set_level(rfd::MessageLevel::Error)
+                .set_title("Mivlet's window stopped working")
+                .set_description(
+                    "The window closed unexpectedly. Windows may be short of memory. \
+                     Current agent activity has been stopped.\n\nStart Mivlet again?",
+                )
+                .set_buttons(rfd::MessageButtons::YesNo)
+                .show()
+        })
+        .await;
+        if result.is_ok_and(retry_requested) {
+            app.request_restart();
+        } else {
+            app.exit(1);
+        }
+    });
+}
+
+#[cfg(windows)]
+fn requires_recovery(
+    kind: webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_PROCESS_FAILED_KIND,
+) -> bool {
+    use webview2_com::Microsoft::Web::WebView2::Win32::*;
+    matches!(
+        kind,
+        COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED
+            | COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
+    )
 }
 
 pub(crate) fn create_main_window(app: &tauri::App) -> bool {
@@ -74,21 +149,23 @@ pub(crate) fn create_main_window(app: &tauri::App) -> bool {
 #[cfg(windows)]
 fn observe_process_failure(window: &tauri::WebviewWindow) {
     use webview2_com::ProcessFailedEventHandler;
+    let app = window.app_handle().clone();
     if window
-        .with_webview(|webview| {
+        .with_webview(move |webview| {
             let Ok(core) = (unsafe { webview.controller().CoreWebView2() }) else {
                 record("process_observer_unavailable");
                 return;
             };
-            let handler = ProcessFailedEventHandler::create(Box::new(|_, args| {
+            let handler = ProcessFailedEventHandler::create(Box::new(move |_, args| {
                 if let Some(args) = args {
                     let mut kind = Default::default();
                     if unsafe { args.ProcessFailedKind(&mut kind) }.is_ok() {
                         eprintln!("[mivlet-startup] process_failed {}", kind.0);
+                        if requires_recovery(kind) && RECOVERY.signal(RecoveryState::FAILED) {
+                            recover_lost_renderer(app.clone());
+                        }
                     }
                 }
-                // An existing workspace may own in-flight effects. Never reload it
-                // or restart an agent automatically in response to renderer failure.
                 Ok(())
             }));
             let mut token = 0;
@@ -105,6 +182,71 @@ fn observe_process_failure(window: &tauri::WebviewWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn failure_during_setup_waits_for_registered_workers_and_dispatches_once() {
+        let state = RecoveryState::default();
+        assert!(!state.signal(RecoveryState::FAILED));
+        assert!(!state.signal(RecoveryState::FAILED));
+        assert!(state.signal(RecoveryState::READY));
+        assert!(!state.signal(RecoveryState::READY));
+        assert!(!state.signal(RecoveryState::FAILED));
+    }
+
+    #[test]
+    fn a_later_failure_also_dispatches_once() {
+        let state = RecoveryState::default();
+        assert!(!state.signal(RecoveryState::READY));
+        assert!(state.signal(RecoveryState::FAILED));
+        assert!(!state.signal(RecoveryState::FAILED));
+    }
+
+    #[test]
+    fn concurrent_setup_and_failures_dispatch_one_recovery() {
+        let state = RecoveryState::default();
+        std::thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|index| {
+                    let state = &state;
+                    scope.spawn(move || {
+                        state.signal(if index == 0 {
+                            RecoveryState::READY
+                        } else {
+                            RecoveryState::FAILED
+                        })
+                    })
+                })
+                .collect();
+            assert_eq!(
+                handles
+                    .into_iter()
+                    .map(|handle| handle.join().unwrap())
+                    .filter(|dispatched| *dispatched)
+                    .count(),
+                1
+            );
+        });
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn only_loss_of_the_main_renderer_or_browser_requires_recovery() {
+        use webview2_com::Microsoft::Web::WebView2::Win32::*;
+        assert!(requires_recovery(
+            COREWEBVIEW2_PROCESS_FAILED_KIND_BROWSER_PROCESS_EXITED
+        ));
+        assert!(requires_recovery(
+            COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_EXITED
+        ));
+        for kind in [
+            COREWEBVIEW2_PROCESS_FAILED_KIND_FRAME_RENDER_PROCESS_EXITED,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_RENDER_PROCESS_UNRESPONSIVE,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_GPU_PROCESS_EXITED,
+            COREWEBVIEW2_PROCESS_FAILED_KIND_UTILITY_PROCESS_EXITED,
+        ] {
+            assert!(!requires_recovery(kind));
+        }
+    }
 
     #[test]
     fn recovery_requires_an_explicit_retry_and_dismissal_closes() {

@@ -4,6 +4,8 @@ This directory vendors `webview2-com` 0.38.2 from the pinned crates.io source
 used by Mivlet's Windows build. The README and source files are retained from
 upstream, except the changes below. The MIT license is copied from upstream
 revision `b74dc5e2b394044bea5191052868ce7a106c202c`.
+One trailing space in the upstream README is removed for the repository's
+whitespace check.
 
 The local code change is limited to `wait_with_pump`, its scoped deadline and tests:
 

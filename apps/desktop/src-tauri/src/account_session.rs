@@ -168,9 +168,23 @@ pub(crate) fn is_restarting() -> bool {
     CLOSING.load(Ordering::Acquire)
 }
 
+/// Claim teardown synchronously, including a normal window close, so recovery
+/// cannot open a retry dialog while another path is already exiting.
+pub(crate) fn begin_close() -> bool {
+    !CLOSING.swap(true, Ordering::AcqRel)
+}
+
 pub(crate) async fn restart(app: tauri::AppHandle) {
-    if CLOSING.swap(true, Ordering::AcqRel) {
-        return;
+    if close_session(&app).await {
+        app.restart();
+    }
+}
+
+/// End the pinned session before either an identity restart or recovery from a
+/// lost renderer. Returns false when another teardown already owns the process.
+pub(crate) async fn close_session(app: &tauri::AppHandle) -> bool {
+    if !begin_close() {
+        return false;
     }
     crate::background_worker::revoke().await;
     if let Some(ingress) = app.try_state::<crate::local_schedules::events::EventIngress>() {
@@ -201,10 +215,10 @@ pub(crate) async fn restart(app: tauri::AppHandle) {
             // Do not activate another account if durable suspension failed.
             eprintln!("Account schedule suspension failed: {error}");
             app.exit(1);
-            return;
+            return false;
         }
     }
-    app.restart();
+    true
 }
 
 #[tauri::command]
