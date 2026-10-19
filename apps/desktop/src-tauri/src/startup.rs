@@ -44,9 +44,80 @@ pub(crate) fn finish_setup(app: &tauri::AppHandle) {
     #[cfg(windows)]
     if RECOVERY.signal(RecoveryState::READY) {
         recover_lost_renderer(app.clone());
+    } else {
+        watch_renderer_mount(app.clone());
     }
     #[cfg(not(windows))]
     let _ = app;
+}
+
+#[cfg(any(windows, test))]
+async fn await_renderer_mount<F, P>(
+    timeout: std::time::Duration,
+    interval: std::time::Duration,
+    mut probe: F,
+) -> bool
+where
+    F: FnMut() -> P,
+    P: std::future::Future<Output = bool>,
+{
+    tokio::time::timeout(timeout, async {
+        loop {
+            if probe().await {
+                return;
+            }
+            tokio::time::sleep(interval).await;
+        }
+    })
+    .await
+    .is_ok()
+}
+
+#[cfg(windows)]
+fn watch_renderer_mount(app: tauri::AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        let mounted = await_renderer_mount(
+            std::time::Duration::from_secs(60),
+            std::time::Duration::from_secs(1),
+            || async {
+                if crate::account_session::is_restarting() {
+                    return true;
+                }
+                let Some(window) = app.get_webview_window("main") else {
+                    return false;
+                };
+                let (sender, mut receiver) = tokio::sync::mpsc::channel(1);
+                // Observe only a boolean from the main React root. No content,
+                // credentials, account state or provider readiness is inspected.
+                // Only one evaluation is outstanding; the outer timeout also
+                // bounds a renderer that never calls its completion callback.
+                if window
+                    .eval_with_callback(
+                        "Boolean(document.getElementById('root')?.firstElementChild)",
+                        move |result| {
+                            let _ = sender.try_send(result == "true");
+                        },
+                    )
+                    .is_err()
+                {
+                    return false;
+                }
+                receiver.recv().await == Some(true)
+            },
+        )
+        .await;
+        if crate::account_session::is_restarting() {
+            return;
+        }
+        if mounted {
+            record("renderer_mounted");
+        } else {
+            record("renderer_mount_timeout");
+            if RECOVERY.signal(RecoveryState::FAILED) {
+                recover_lost_renderer(app);
+            }
+        }
+    });
 }
 
 #[cfg(windows)]
@@ -65,7 +136,7 @@ fn recover_lost_renderer(app: tauri::AppHandle) {
                 .set_level(rfd::MessageLevel::Error)
                 .set_title("Mivlet's window stopped working")
                 .set_description(
-                    "The window closed unexpectedly. Windows may be short of memory. \
+                    "The window could not start or stopped working. Windows may be short of memory. \
                      Current agent activity has been stopped.\n\nStart Mivlet again?",
                 )
                 .set_buttons(rfd::MessageButtons::YesNo)
@@ -182,6 +253,52 @@ fn observe_process_failure(window: &tauri::WebviewWindow) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn mount_probe_retries_until_react_has_rendered() {
+        let mut attempts = 0;
+        assert!(
+            await_renderer_mount(
+                std::time::Duration::from_secs(1),
+                std::time::Duration::from_millis(1),
+                || {
+                    attempts += 1;
+                    std::future::ready(attempts == 3)
+                },
+            )
+            .await
+        );
+        assert_eq!(attempts, 3);
+    }
+
+    #[tokio::test]
+    async fn empty_renderer_is_bounded_without_a_process_failure_event() {
+        assert!(
+            !await_renderer_mount(
+                std::time::Duration::from_millis(10),
+                std::time::Duration::from_millis(1),
+                || std::future::ready(false),
+            )
+            .await
+        );
+    }
+
+    #[tokio::test]
+    async fn missing_eval_callback_is_bounded_without_queueing_more_probes() {
+        let mut attempts = 0;
+        assert!(
+            !await_renderer_mount(
+                std::time::Duration::from_millis(10),
+                std::time::Duration::from_millis(1),
+                || {
+                    attempts += 1;
+                    std::future::pending::<bool>()
+                },
+            )
+            .await
+        );
+        assert_eq!(attempts, 1);
+    }
 
     #[test]
     fn failure_during_setup_waits_for_registered_workers_and_dispatches_once() {

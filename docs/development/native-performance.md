@@ -89,6 +89,14 @@ late worker start. Subframe, GPU and utility failures or an unresponsive rendere
 do not trigger this global teardown. Restart is explicit and repeats normal
 account admission; it does not automatically replay agent actions.
 
+After native setup, a separate 60-second deadline verifies that the main React
+root has rendered an element. A blank renderer or a missing script-evaluation
+callback takes the same orderly recovery path even without a crash event. The
+probe reads only a boolean, keeps at most one evaluation outstanding and stops
+once the app mounts. Mounting is not provider or workspace readiness; a slow
+provider does not trigger renderer recovery, and an already mounted workspace is
+not restarted merely for becoming unresponsive.
+
 The pinned `webview2-com` patch pumps COM callbacks and window messages, detects
 disconnected completion channels, and bounds only waits within that startup
 scope. Other operations retain their existing timeout policy. Its source and
