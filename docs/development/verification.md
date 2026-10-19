@@ -222,6 +222,11 @@ For Rust changes, use the affected tests plus:
 
 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
 
+Changes to the pinned WebView2 wait also require
+`cargo test --manifest-path vendor/webview2-com/Cargo.toml --lib --locked --target-dir apps/desktop/src-tauri/target`
+on Windows. Test the native startup failure dialog separately from successful
+workspace startup, and retain invalid or obstructed performance observations.
+
 UI changes need browser/native inspection of affected flows and relevant viewport sizes. Packaging, native Windows control, authentication, deployment, and live smoke tests are separate evidence. Wrangler dry-runs establish packaging and bindings only. Report skipped checks and missing prerequisites without describing them as passes.
 
 Native command lifecycle checks use the same prepared, verified Windows runtime

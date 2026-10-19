@@ -76,6 +76,7 @@ mod provider_usage;
 mod search;
 mod secret_redaction;
 mod snapshot;
+mod startup;
 mod store;
 pub mod tools;
 mod user_images;
@@ -127,6 +128,11 @@ pub fn run() {
         .manage(mcp_server::Server::default())
         .manage(mcp_server::PhoneRelay::default())
         .setup(|app| {
+            // Own creation errors before any account work is admitted. Tauri's
+            // automatic window creation otherwise panics outside this callback.
+            if !startup::create_main_window(app) {
+                return Ok(());
+            }
             let handle = app.handle().clone();
             if account_session::initialize(&handle)? {
                 // MCP App resources use a random loopback HTTP origin rather
@@ -167,6 +173,7 @@ pub fn run() {
                 local_schedules::events::start_maintenance();
             }
             account_session::start_watchdog(handle);
+            startup::record("setup_complete");
             Ok(())
         })
         .on_window_event(|window, event| {

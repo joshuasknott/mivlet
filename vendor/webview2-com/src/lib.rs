@@ -203,7 +203,9 @@ mod tests {
     impl ComGuard {
         fn new() -> Self {
             unsafe {
-                let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+                CoInitializeEx(None, COINIT_APARTMENTTHREADED)
+                    .ok()
+                    .expect("test thread must initialize a COM apartment");
             }
             Self
         }
@@ -300,5 +302,72 @@ mod tests {
         unsafe {
             assert!(!WindowsAndMessaging::PeekMessageA(&mut msg, None, 0, 0, PM_REMOVE).as_bool());
         }
+    }
+
+    #[test]
+    fn a_busy_message_queue_leaves_time_for_the_deadline_check() {
+        let _com = ComGuard::new();
+        let mut msg = MSG::default();
+        unsafe {
+            // Make the thread message queue before posting into it.
+            let _ = WindowsAndMessaging::PeekMessageA(&mut msg, None, 0, 0, PM_REMOVE);
+            for _ in 0..128 {
+                WindowsAndMessaging::PostThreadMessageA(
+                    GetCurrentThreadId(),
+                    WindowsAndMessaging::WM_APP + 2,
+                    windows::Win32::Foundation::WPARAM(0),
+                    windows::Win32::Foundation::LPARAM(0),
+                )
+                .unwrap();
+            }
+        }
+        pump_pending_messages().unwrap();
+        let mut remaining = 0;
+        unsafe {
+            while WindowsAndMessaging::PeekMessageA(&mut msg, None, 0, 0, PM_REMOVE).as_bool() {
+                remaining += 1;
+            }
+        }
+        assert_eq!(remaining, 64);
+    }
+
+    #[test]
+    fn completion_can_remain_bound_to_the_current_apartment() {
+        let _com = ComGuard::new();
+        let (tx, rx) = mpsc::channel();
+        let value = Rc::new(42);
+        tx.send(value.clone()).unwrap();
+        let _deadline = scoped_wait_deadline(Duration::from_secs(1));
+        assert!(Rc::ptr_eq(&wait_with_pump(rx).unwrap(), &value));
+    }
+
+    #[test]
+    fn quit_arriving_during_a_com_wait_is_preserved() {
+        let _com = ComGuard::new();
+        let mut msg = MSG::default();
+        let _ = unsafe { WindowsAndMessaging::PeekMessageA(&mut msg, None, 0, 0, PM_REMOVE) };
+        let thread = unsafe { GetCurrentThreadId() };
+        let (_tx, rx) = mpsc::channel::<()>();
+        let sender = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(10));
+            unsafe {
+                WindowsAndMessaging::PostThreadMessageA(
+                    thread,
+                    WM_QUIT,
+                    windows::Win32::Foundation::WPARAM(42),
+                    windows::Win32::Foundation::LPARAM(0),
+                )
+                .unwrap();
+            }
+        });
+        let _deadline = scoped_wait_deadline(Duration::from_secs(1));
+        let result = wait_with_pump(rx);
+        sender.join().unwrap();
+        assert!(matches!(result, Err(Error::TaskCanceled)), "{result:?}");
+        unsafe {
+            assert!(WindowsAndMessaging::PeekMessageA(&mut msg, None, 0, 0, PM_REMOVE).as_bool());
+        }
+        assert_eq!(msg.message, WM_QUIT);
+        assert_eq!(msg.wParam.0, 42);
     }
 }
