@@ -211,14 +211,6 @@
 .workspace-empty h1 {
   margin: 0;
 }
-[data-theme="dark"] .workspace-empty > .button--primary {
-  background: var(--conversation-action-surface);
-  color: var(--conversation-action-ink);
-  border: 1px solid var(--conversation-action-line);
-}
-[data-theme="dark"] .workspace-empty > .button--primary:hover {
-  background: var(--conversation-action-hover);
-}
 .workspace-error,
 .workspace-schedule-status {
   display: flex;

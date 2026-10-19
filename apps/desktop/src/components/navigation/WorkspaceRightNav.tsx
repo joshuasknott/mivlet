@@ -12,7 +12,7 @@ import type {
   MivletAgentProfile,
 } from "@mivlet/protocol";
 import { ArrowLeft } from "@phosphor-icons/react/dist/csr/ArrowLeft";
-import { ChatCircle } from "@phosphor-icons/react/dist/csr/ChatCircle";
+import { ChatsCircle } from "@phosphor-icons/react/dist/csr/ChatsCircle";
 import { CalendarBlank } from "@phosphor-icons/react/dist/csr/CalendarBlank";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
@@ -39,7 +39,7 @@ const sections = [
   { id: "activity", label: "Activity", icon: Clock },
   { id: "files", label: "Files", icon: FileText },
   { id: "memory", label: "Memory", icon: BookOpen },
-  { id: "chats", label: "Side Chat", icon: ChatCircle },
+  { id: "chats", label: "Side Chat", icon: ChatsCircle },
   { id: "schedules", label: "Schedules", icon: CalendarBlank },
 ] as const;
 

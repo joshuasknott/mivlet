@@ -10,10 +10,6 @@
     min-height: 100dvh;
   }
 
-  .integration-panel-search {
-    grid-template-columns: 1fr;
-  }
-
   .settings-modal {
     grid-template-columns: 188px minmax(0, 1fr);
     width: min(100%, 900px);

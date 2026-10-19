@@ -489,7 +489,6 @@
 .integration-panel-detail__status {
   color: var(--ink-muted);
   border-radius: var(--radius-pill);
-  font-size: var(--text-11);
   font-weight: 500;
   white-space: nowrap;
 }
@@ -497,8 +496,6 @@
 .integration-panel-detail__status--syncing,
 .integration-panel-detail__status--needs-auth {
   color: var(--ink-soft);
-  background: var(--accent-subtle);
-  border-color: var(--line);
 }
 
 .integration-panel-detail__body {
@@ -551,9 +548,9 @@
   cursor: pointer;
 }
 .plugin-catalogue-back:hover, .integration-panel-detail__text-action:hover { color: var(--ink); }
-.integration-panel-detail__intro, .integration-panel-detail__notice { margin: 0; font-size: var(--text-13); line-height: 1.55; overflow-wrap: anywhere; }
+.integration-panel-detail__intro { overflow-wrap: anywhere; }
+.integration-panel-detail__notice { margin: 0; font-size: var(--text-13); line-height: 1.55; overflow-wrap: anywhere; }
 .integration-panel-detail__notice[role="alert"] { color: var(--danger, #b34b35); }
-.integration-panel-detail__account select { max-width: 100%; min-height: 40px; }
 .integration-panel-detail__actions button:disabled { cursor: default; opacity: .55; }
 .plugin-catalogue-back:focus-visible, .integration-panel-detail button:focus-visible, .integration-panel-detail summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
 
