@@ -426,7 +426,7 @@ pub fn start_codex_app_server_turn(
     let mut command = codex_command(&path)?;
     command.current_dir(&runtime_dir).args([
         "-c",
-        "forced_login_method=\"chatgpt\"",
+        "forced_login_method='chatgpt'",
         "-c",
         "features.shell_tool=false",
         "-c",

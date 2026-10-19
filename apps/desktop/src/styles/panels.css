@@ -367,14 +367,7 @@
 }
 
 .integration-panel-card__logo-container {
-  display: grid;
-  place-items: center;
-  width: 34px;
-  height: 34px;
-  border-radius: var(--radius-2);
-  background: var(--line);
   color: var(--ink-muted);
-  flex-shrink: 0;
 }
 
 .integration-panel-icon-svg {
@@ -385,30 +378,14 @@
 /* Brand specific styling (static, no hover effects) */
 .integration-panel-card__logo-container--github {
   color: #181717;
-  background: rgba(24, 23, 23, 0.07);
 }
 
 .integration-panel-card__logo-container--vercel {
   color: #000000;
-  background: var(--line);
-}
-
-.integration-panel-card__logo-container--google-drive {
-  background: rgba(52, 168, 83, 0.07);
 }
 
 .integration-panel-card__logo-container--notion {
   color: #000000;
-  background: var(--line);
-}
-
-
-.integration-panel-card__logo-container--google-calendar {
-  background: rgba(66, 133, 244, 0.07);
-}
-
-.integration-panel-card__logo-container--linear {
-  background: rgba(94, 106, 210, 0.07);
 }
 
 /* ---------- Shared page loading / error states ---------- */
@@ -452,7 +429,6 @@
 
 .integration-panel-detail {
   display: grid;
-  border: 0;
 }
 
 .integration-panel-detail-modal {
@@ -494,7 +470,6 @@
 
 .integration-panel-detail__header {
   display: grid;
-  padding-right: 36px;
 }
 
 .integration-panel-detail__header h2 {
@@ -512,34 +487,11 @@
 }
 
 .integration-panel-detail__status {
-  padding: 5px 9px;
   color: var(--ink-muted);
-  background: var(--caution-subtle);
-  border: 1px solid var(--caution-subtle);
   border-radius: var(--radius-pill);
   font-size: var(--text-11);
   font-weight: 500;
   white-space: nowrap;
-}
-
-.integration-panel-detail__status--connected {
-  background: var(--positive-subtle);
-  border-color: var(--line);
-}
-
-.integration-panel-detail__status--expired,
-.integration-panel-detail__status--unavailable,
-.integration-panel-detail__status--permission-limited {
-  color: var(--ink-muted);
-  background: var(--caution-subtle);
-  border-color: var(--line);
-}
-
-.integration-panel-detail__status--revoked,
-.integration-panel-detail__status--failed {
-  color: var(--ink-muted);
-  background: var(--destructive-subtle);
-  border-color: var(--line);
 }
 
 .integration-panel-detail__status--syncing,
@@ -562,20 +514,6 @@
   color: var(--ink-muted);
   font-size: var(--text-12);
   font-weight: 500;
-}
-
-.integration-panel-detail__body ul {
-  display: grid;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.integration-panel-detail__body li {
-  color: var(--ink);
-  font-size: var(--text-13);
-  line-height: 1.35;
 }
 
 .integration-panel-detail__actions {

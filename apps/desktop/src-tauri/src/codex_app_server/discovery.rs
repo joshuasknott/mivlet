@@ -65,10 +65,11 @@ pub(super) fn codex_candidates_from(
                 .map(|entry| entry.path().join("codex.exe"))
                 .filter(|candidate| candidate.is_file())
                 .collect::<Vec<_>>();
-            desktop_candidates.sort_by(|left, right| {
-                modified_time(right)
-                    .cmp(&modified_time(left))
-                    .then_with(|| left.cmp(right))
+            desktop_candidates.sort_by_cached_key(|candidate| {
+                (
+                    std::cmp::Reverse(modified_time(candidate)),
+                    candidate.clone(),
+                )
             });
             for candidate in desktop_candidates {
                 push_unique_candidate(&mut candidates, &mut seen, candidate);
@@ -124,12 +125,14 @@ pub(super) fn codex_command(path: &PathBuf) -> Result<Command, String> {
     std::fs::create_dir_all(&profile)
         .map_err(|_| "Could not prepare this account's Codex profile.")?;
     let mut command = codex_executable_command(path);
+    // TOML literal strings survive the additional argument parsing in npm's
+    // Windows .cmd shim while retaining the same value for direct executables.
     command
         .env("CODEX_HOME", profile)
         .env_remove("OPENAI_API_KEY")
         .env_remove("CODEX_API_KEY")
         .env_remove("CODEX_ACCESS_TOKEN")
-        .args(["-c", "cli_auth_credentials_store=\"keyring\""]);
+        .args(["-c", "cli_auth_credentials_store='keyring'"]);
     Ok(command)
 }
 
@@ -160,26 +163,53 @@ mod tests {
 
         let mut command = super::super::codex_executable_command(&resolved);
         command.current_dir(child_directory.path());
-        #[cfg(windows)]
-        {
-            assert_eq!(command.get_program(), resolved.as_os_str());
-            assert!(command.get_args().next().is_none());
-        }
-        #[cfg(not(windows))]
-        {
-            assert_eq!(command.get_program(), resolved.as_os_str());
-            assert!(command.get_args().next().is_none());
-        }
+        assert_eq!(command.get_program(), resolved.as_os_str());
+        assert!(command.get_args().next().is_none());
     }
 
     #[cfg(windows)]
     #[test]
-    fn cmd_candidates_with_shell_metacharacters_stay_as_the_executable_path() {
-        let path = PathBuf::from(r"C:\mivlet & provider\codex.cmd");
-        let command = super::super::codex_executable_command(&path);
+    fn cmd_candidate_executes_from_another_directory_with_shell_sensitive_inputs() {
+        let root = tempfile::tempdir().expect("temporary root");
+        let script_directory = root.path().join("mivlet & provider");
+        let child_directory = root.path().join("different working directory");
+        fs::create_dir_all(&script_directory).expect("script directory");
+        fs::create_dir_all(&child_directory).expect("child directory");
+        fs::write(child_directory.join("cwd-marker.txt"), b"marker").expect("cwd marker");
+        let script = script_directory.join("codex.cmd");
+        fs::write(
+            &script,
+            "@echo off\r\n\
+if not \"%~1\"==\"literal & value\" exit /b 11\r\n\
+if not \"%~2\"==\"%%NAME%%\" exit /b 12\r\n\
+if not \"%~3\"==\"spaced value\" exit /b 13\r\n\
+if not \"%~4\"==\"-c\" exit /b 14\r\n\
+if not exist \"cwd-marker.txt\" exit /b 15\r\n\
+> \"%~dp0embedded-argument.txt\" echo(%~5\r\n\
+exit /b 0\r\n",
+        )
+        .expect("write script");
 
-        assert_eq!(command.get_program(), path.as_os_str());
-        assert!(command.get_args().next().is_none());
+        let mut command = super::super::codex_executable_command(&script);
+        command
+            .current_dir(&child_directory)
+            .env("NAME", "must-not-expand")
+            .args([
+                "literal & value",
+                "%NAME%",
+                "spaced value",
+                "-c",
+                "cli_auth_credentials_store='keyring'",
+            ]);
+        let status = command.status().expect("run temporary cmd candidate");
+
+        assert!(status.success(), "temporary cmd exited with {status}");
+        let embedded_argument = fs::read_to_string(script_directory.join("embedded-argument.txt"))
+            .expect("read embedded argument");
+        assert_eq!(
+            embedded_argument.trim(),
+            "cli_auth_credentials_store='keyring'"
+        );
     }
 
     #[test]

@@ -147,7 +147,7 @@ mod tests {
         let mut command = Command::new("codex");
         command
             .env("CODEX_HOME", "account-owned-profile")
-            .args(["-c", "cli_auth_credentials_store=\"keyring\""]);
+            .args(["-c", "cli_auth_credentials_store='keyring'"]);
         configure_discovery(&mut command, directory.path());
         assert_eq!(command.get_current_dir(), Some(directory.path()));
         assert!(command.get_envs().any(|(key, value)| key == "CODEX_HOME"
@@ -156,7 +156,7 @@ mod tests {
             .get_args()
             .map(|arg| arg.to_str().unwrap())
             .collect();
-        assert!(args.contains(&"cli_auth_credentials_store=\"keyring\""));
+        assert!(args.contains(&"cli_auth_credentials_store='keyring'"));
         assert!(args.contains(&"mcp_servers={}"));
         assert!(args.contains(&"project_doc_max_bytes=0"));
         assert!(args.ends_with(&["app-server", "--stdio"]));

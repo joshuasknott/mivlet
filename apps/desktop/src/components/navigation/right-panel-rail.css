@@ -125,9 +125,6 @@
 .right-panel .workspace-library__heading {
   margin-bottom: 12px;
 }
-.right-panel .workspace-library__heading:has(> h2:only-child) {
-  display: none;
-}
 .panel-collection__controls {
   position: sticky;
   top: -22px;

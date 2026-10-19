@@ -103,10 +103,6 @@
   line-height: 1.65;
   font-size: 13px;
 }
-.right-panel__empty p {
-  margin: 12px 0 6px;
-  color: var(--ink);
-}
 .right-panel :is(button, summary, select):focus-visible {
   outline: 2px solid var(--ink-soft);
   outline-offset: 3px;
@@ -232,13 +228,6 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 18px;
-}
-.workspace-library__heading h2 {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 550;
-  letter-spacing: -0.2px;
 }
 .workspace-library__heading p {
   margin: 5px 0 0;

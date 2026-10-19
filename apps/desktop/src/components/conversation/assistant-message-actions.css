@@ -9,6 +9,7 @@
 .assistant-message-tools button { min-height: 36px; border: 0; border-radius: 6px; padding: 6px 10px; background: transparent; color: var(--ink-muted); font: inherit; font-size: 12px; cursor: pointer; }
 .assistant-message-action { position: relative; display: grid; place-items: center; width: 36px; min-width: 36px; padding: 6px !important; }
 .assistant-message-action__tooltip { position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 2; width: max-content; max-width: 220px; padding: 5px 8px; border-radius: 6px; color: var(--surface); background: var(--ink); box-shadow: var(--shadow-2); font-size: 11px; line-height: 1.3; opacity: 0; pointer-events: none; transform: translateY(3px); transition: opacity 120ms ease, transform 120ms ease; }
+.conversation-response .assistant-message-action__tooltip { right: auto; left: 0; }
 .assistant-message-action:hover .assistant-message-action__tooltip,
 .assistant-message-action:focus-visible .assistant-message-action__tooltip { opacity: 1; transform: translateY(0); }
 .assistant-message-tools button:hover { background: var(--surface-hover); color: var(--ink); }

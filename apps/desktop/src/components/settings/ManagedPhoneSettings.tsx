@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { DeviceMobile } from "@phosphor-icons/react/dist/csr/DeviceMobile";
-import { Copy } from "@phosphor-icons/react/dist/csr/Copy";
+import { CopySimple } from "@phosphor-icons/react/dist/csr/CopySimple";
 import type { PhoneRelayConnectRequest, PhoneRelayDisconnectRequest, PhoneRelayStatus } from "@mivlet/protocol";
 import { connectPhoneRelay, disconnectPhoneRelay, getPhoneRelayStatus } from "../../runtime/domains/phone-relay";
 import { getActiveRuntimeDataScope } from "../../runtime-scope";
@@ -111,7 +111,7 @@ export function ManagedPhoneSettings({ workspaceId, api = nativeApi }: { workspa
       {phoneUrl && <button type="button" className="button button-secondary" disabled={Boolean(busy)} onClick={() => {
         if (!current()) return;
         void navigator.clipboard.writeText(phoneUrl).then(() => { if (current()) setNotice("Phone link copied. Open it on your phone, then approve access here."); }, () => { if (current()) setNotice("Copy the phone link from the field above."); });
-      }}><Copy size={18} aria-hidden="true" />Copy phone link</button>}
+      }}><CopySimple size={18} aria-hidden="true" />Copy phone link</button>}
       {exactConnection && <button type="button" className="button button-secondary" disabled={Boolean(busy) || Boolean(error) || uncertain} onClick={() => void change("Disconnecting…", () => api.disconnect(exactConnection))}>{busy === "Disconnecting…" ? busy : "Disconnect phone"}</button>}
       <button type="button" className="button button-secondary" disabled={Boolean(busy) || !current()} onClick={() => { setNotice(""); void read(); }}>Check phone status</button>
     </div>
