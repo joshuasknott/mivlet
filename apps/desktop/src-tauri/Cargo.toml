@@ -121,3 +121,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Pipes",
     "Win32_System_Diagnostics_ToolHelp",
 ] }
+
+[patch.crates-io]
+# Pinned upstream source with a scoped, COM-aware startup wait. See PATCH_NOTES.md.
+webview2-com = { path = "../../../vendor/webview2-com" }

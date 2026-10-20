@@ -76,6 +76,7 @@ mod provider_usage;
 mod search;
 mod secret_redaction;
 mod snapshot;
+mod startup;
 mod store;
 pub mod tools;
 mod user_images;
@@ -127,6 +128,11 @@ pub fn run() {
         .manage(mcp_server::Server::default())
         .manage(mcp_server::PhoneRelay::default())
         .setup(|app| {
+            // Own creation errors before any account work is admitted. Tauri's
+            // automatic window creation otherwise panics outside this callback.
+            if !startup::create_main_window(app) {
+                return Ok(());
+            }
             let handle = app.handle().clone();
             if account_session::initialize(&handle)? {
                 // MCP App resources use a random loopback HTTP origin rather
@@ -166,6 +172,7 @@ pub fn run() {
                 app.manage(local_schedules::events::EventIngress::new());
                 local_schedules::events::start_maintenance();
             }
+            startup::finish_setup(&handle);
             account_session::start_watchdog(handle);
             Ok(())
         })
@@ -174,10 +181,8 @@ pub fn run() {
                 return;
             }
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                use std::sync::atomic::{AtomicBool, Ordering};
-                static CLOSING: AtomicBool = AtomicBool::new(false);
                 api.prevent_close();
-                if CLOSING.swap(true, Ordering::AcqRel) {
+                if !account_session::begin_close() {
                     return;
                 }
                 let app = window.app_handle().clone();

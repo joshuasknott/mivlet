@@ -28,6 +28,11 @@ observations. The sampler itself stays hidden. Discard a run that becomes
 unresponsive or never reaches the intended workspace, even if it initially
 exposed a titled native window.
 
+Keep Mivlet unobscured while recording workspace readiness. A missing
+accessibility tree under another foreground window is an invalid observation,
+not evidence of an app hang. Retain failed and obstructed runs with their reason;
+do not replace their missing readiness time with zero or silently exclude them.
+
 ```powershell
 node scripts/perf/native-observation.mjs --exe C:/path/to/mivlet-desktop.exe --duration 60 --output output/native-run.json
 ```
@@ -68,6 +73,44 @@ Run `node --test scripts/perf/native-observation.test.mjs` for process attributi
 and statistics regressions. The same suite is included in `pnpm perf:test` and
 the full validation gate. These deterministic tests do not replace a real native
 observation.
+
+## Window startup recovery
+
+The configured main window is created explicitly before account initialization.
+Its WebView2 completion waits share a 60-second deadline. A failed or timed-out
+creation offers a native retry/close dialog; retry starts a fresh process and
+repeats normal account admission. No workspace workers start after a creation
+failure, and an existing workspace is never automatically reloaded or replayed.
+
+A later fatal exit of the main renderer or WebView browser closes the pinned
+account session and stops its workers before offering restart or close. Failures
+during setup wait until worker registration finishes so cleanup cannot race a
+late worker start. Subframe, GPU and utility failures or an unresponsive renderer
+do not trigger this global teardown. Restart is explicit and repeats normal
+account admission; it does not automatically replay agent actions.
+
+After native setup, a separate 60-second deadline verifies that the main React
+root has rendered an element. A blank renderer or a missing script-evaluation
+callback takes the same orderly recovery path even without a crash event. The
+probe reads only a boolean, keeps at most one evaluation outstanding and stops
+once the app mounts. Mounting is not provider or workspace readiness; a slow
+provider does not trigger renderer recovery, and an already mounted workspace is
+not restarted merely for becoming unresponsive.
+
+The pinned `webview2-com` patch pumps COM callbacks and window messages, detects
+disconnected completion channels, and bounds only waits within that startup
+scope. Other operations retain their existing timeout policy. Its source and
+review notes are in `vendor/webview2-com/PATCH_NOTES.md`; Windows CI runs the patch's
+own wait regressions in addition to Mivlet's native suite.
+
+`[mivlet-startup]` stderr records contain only fixed stage names, elapsed
+milliseconds and WebView2 process-failure kinds. They exclude URLs, account
+identifiers and underlying error strings. `page_finished` means navigation
+completed; it does not establish account, provider or workspace readiness.
+The earlier low-memory blank launches are consistent with a pre-setup WebView
+creation stall, but do not establish whether memory pressure or COM callback
+delivery was its cause. A bounded failure path is distinct from proving that
+Windows can create a renderer with insufficient memory.
 
 ## Codex discovery memory
 

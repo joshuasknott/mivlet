@@ -29,6 +29,10 @@ test('unknown code paths fail toward validation', () => {
   assert.equal(affected(['new-package/index.ts']).code, true);
 });
 
+test('the patched WebView wait always receives Windows validation', () => {
+  assert.deepEqual(affected(['vendor/webview2-com/src/lib.rs']), { code: true, native: true });
+});
+
 test('moving native code into docs still checks the deleted native path', () => {
   const directory = mkdtempSync(join(tmpdir(), 'mivlet-ci-paths-'));
   const git = (...args) => execFileSync('git', args, { cwd: directory, encoding: 'utf8' }).trim();
