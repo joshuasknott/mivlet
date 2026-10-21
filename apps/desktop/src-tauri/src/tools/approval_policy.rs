@@ -53,6 +53,11 @@ pub(crate) fn tool_policy(tool: &str) -> Option<(&'static str, &'static str)> {
         "repository-write" | "repository-commit" => Some(("full-access", "high")),
         "repository-run" | "repository-start" | "repository-publish" | "workspace-run"
         | "workspace-start" => Some(("full-access", "critical")),
+        "workspace-inspect" => Some(("read-only", "low")),
+        "agent-create" | "agent-update" | "project-create" | "project-team-update" => {
+            Some(("full-access", "high"))
+        }
+        "agent-delete" => Some(("full-access", "critical")),
         "repository-recover" => Some(("full-access", "high")),
         "read-file" => Some(("read-only", "low")),
         "write-file" => Some(("full-access", "high")),
@@ -303,6 +308,12 @@ pub(super) fn tool_requires_argument_digest(tool: &str) -> bool {
             | "create-pdf"
             | "workspace-run"
             | "workspace-start"
+            | "workspace-inspect"
+            | "agent-create"
+            | "agent-update"
+            | "agent-delete"
+            | "project-create"
+            | "project-team-update"
     ) || tool.starts_with("repository-")
         || tool.starts_with("local-browser-")
         || tool.starts_with("command-")
@@ -348,6 +359,19 @@ pub(super) fn argument_digest(arguments: &serde_json::Value) -> Result<String, S
         "{ARGUMENT_DIGEST_PREFIX}{}",
         hex::encode(Sha256::digest(canonical_json(arguments)?.as_bytes()))
     ))
+}
+
+/// Stable idempotency fingerprint for a native tool name and its parsed
+/// arguments. The canonical JSON form makes equivalent whitespace/order
+/// representations replay the same receipt while binding the registered tool.
+pub(crate) fn tool_arguments_fingerprint(
+    tool: &str,
+    arguments: &serde_json::Value,
+) -> Result<String, String> {
+    let canonical = canonical_json(arguments)?;
+    Ok(hex::encode(Sha256::digest(
+        format!("{tool}:{canonical}").as_bytes(),
+    )))
 }
 
 pub(super) fn canonical_json(value: &serde_json::Value) -> Result<String, String> {

@@ -53,17 +53,13 @@ export interface ConversationFeedProps {
   onOpenConnector?: (connectorId: string) => void;
   /** Places an interactive response revision or selected passage in the composer. */
   onDraftResponse?: (text: string) => void;
+  /** Opens a fresh, owner-bound Side Chat with a selected response draft. */
+  onAskSideChat?: (draft: string, authorId: string) => void | Promise<void>;
   onDraftPreview?: (text: string, source: PreviewFeedbackSource) => void;
   /** Saves a deliberately selected response passage through the native memory boundary. */
   onSaveMemory?: (title: string, value: string) => Promise<void>;
   /** Opens a confirmed decision at its durable conversation source. */
   onOpenDecision?: (fact: ProjectFact) => void;
-  onPinResponse?: (
-    text: string,
-    source: { messageId?: string; sourceRevisionId?: string },
-    runId: string,
-    agentId: string,
-  ) => Promise<void>;
   /** Routes MCP App resource/tool requests into the existing approval UI. */
   appGeneration?: number;
   isMcpRunCurrent?: (runId: string) => boolean;

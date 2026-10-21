@@ -1,4 +1,4 @@
-import type { RuntimeSnapshot } from "@mivlet/protocol";
+import type { MivletAgentProfile, RuntimeSnapshot, WorkspaceManageRequest } from "@mivlet/protocol";
 import type { RefObject } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -13,6 +13,8 @@ import {
   saveRuntimeSnapshot,
 } from "../../runtime/domains/workspace";
 import { defaultShellState } from "./defaults";
+import { manageWorkspace } from "../../runtime/domains/workspace-management";
+import { reconcileWorkspaceAgents } from "../../lib/workspace-agent-reconciliation";
 
 /** Owns snapshot hydration, failure recovery, and the identity-bound trailing writer. */
 export function useWorkspaceSnapshot(options: {
@@ -22,6 +24,7 @@ export function useWorkspaceSnapshot(options: {
   activeWorkspaceScope: { workspaceId: string } | null;
   onReset: () => void;
   onHydrate: (state: PersistedShellState) => void;
+  onAgentsChanged: (agents: MivletAgentProfile[], revision: number, activeAgentId: string) => void;
   setLastAction: (message: string) => void;
 }) {
   const {
@@ -51,20 +54,53 @@ export function useWorkspaceSnapshot(options: {
   const snapshotTimerRef = useRef<number | null>(null);
   const pendingSnapshotRef = useRef<{
     identity: string;
+    generation: number;
     workspaceId: string;
     snapshot: RuntimeSnapshot;
   } | null>(null);
   const snapshotWrites = useRef<Promise<unknown>>(Promise.resolve());
+  const agentRevision = useRef(shellState.agentRevision ?? 0);
+  const scopeIsCurrent = (
+    identity: string,
+    workspaceId: string,
+    generation: number,
+  ) =>
+    Boolean(
+      identity &&
+        workspaceIdentityRef.current === identity &&
+        hydratedWorkspaceRef.current === identity &&
+        callbacks.current.activeWorkspaceScope?.workspaceId === workspaceId &&
+        callbacks.current.workspaceScopeGeneration === generation,
+    );
+  const saveSnapshotForScope = async (
+    snapshot: RuntimeSnapshot,
+    workspaceId: string,
+    identity: string,
+    generation: number,
+  ) => {
+    if (!scopeIsCurrent(identity, workspaceId, generation))
+      throw new Error("The workspace changed before its settings could be saved.");
+    const result = await saveRuntimeSnapshot(snapshot, workspaceId);
+    if (!scopeIsCurrent(identity, workspaceId, generation))
+      throw new Error("The workspace changed before its settings could be saved.");
+    return result;
+  };
   const writeSnapshot = (snapshot: RuntimeSnapshot, workspaceId: string) => {
     const identity = workspaceIdentityRef.current;
+    const generation = workspaceScopeGeneration;
     const next = snapshotWrites.current
       .catch(() => undefined)
       .then(() => {
-        if (!identity || workspaceIdentityRef.current !== identity)
+        if (!identity || !scopeIsCurrent(identity, workspaceId, generation))
           throw new Error(
             "The workspace changed before its settings could be saved.",
           );
-        return saveRuntimeSnapshot(snapshot, workspaceId);
+        // A timer queued before a native roster change must not save its old
+        // roster with a new revision. Read the reconciled current state instead.
+        const nextSnapshot = (snapshot.agentRevision ?? 0) === agentRevision.current
+          ? snapshot
+          : shellStateToRuntimeSnapshot(shellStateRef.current);
+        return saveSnapshotForScope(nextSnapshot, workspaceId, identity, generation);
       });
     snapshotWrites.current = next;
     return next;
@@ -72,11 +108,12 @@ export function useWorkspaceSnapshot(options: {
   const flushSnapshot = async (state?: PersistedShellState) => {
     const identity = workspaceIdentityRef.current;
     const workspaceId = activeWorkspaceScope?.workspaceId;
+    const generation = workspaceScopeGeneration;
     if (
       !runtimeSnapshotReady ||
       !workspaceId ||
       !identity ||
-      hydratedWorkspaceRef.current !== identity
+      !scopeIsCurrent(identity, workspaceId, generation)
     )
       throw new Error("Wait for workspace settings to load.");
     if (snapshotTimerRef.current !== null)
@@ -92,10 +129,80 @@ export function useWorkspaceSnapshot(options: {
     if (
       workspaceIdentityRef.current !== identity ||
       hydratedWorkspaceRef.current !== identity ||
-      callbacks.current.activeWorkspaceScope?.workspaceId !== workspaceId
+      callbacks.current.activeWorkspaceScope?.workspaceId !== workspaceId ||
+      callbacks.current.workspaceScopeGeneration !== generation
     ) {
       throw new Error("The workspace changed before its settings could be saved.");
     }
+  };
+
+  const manageWorkspaceFromChat = (request: Omit<WorkspaceManageRequest, "workspaceId" | "expectedAgentRevision">) => {
+    const identity = workspaceIdentityRef.current;
+    const workspaceId = activeWorkspaceScope?.workspaceId;
+    const generation = workspaceScopeGeneration;
+    const assertCurrent = () => {
+      if (!runtimeSnapshotReady || !identity || !workspaceId
+        || workspaceIdentityRef.current !== identity || hydratedWorkspaceRef.current !== identity
+        || callbacks.current.activeWorkspaceScope?.workspaceId !== workspaceId
+        || callbacks.current.workspaceScopeGeneration !== generation) {
+        throw new Error("The workspace changed before its settings could be saved.");
+      }
+    };
+    const cancelPendingWrite = () => {
+      if (snapshotTimerRef.current !== null) window.clearTimeout(snapshotTimerRef.current);
+      snapshotTimerRef.current = null;
+      pendingSnapshotRef.current = null;
+    };
+    const next = snapshotWrites.current.catch(() => undefined).then(async () => {
+      assertCurrent();
+      cancelPendingWrite();
+      const before = shellStateRef.current;
+      await saveSnapshotForScope(
+        shellStateToRuntimeSnapshot(before),
+        workspaceId!,
+        identity!,
+        generation,
+      );
+      assertCurrent();
+      const result = await manageWorkspace({ ...request, workspaceId: workspaceId!, expectedAgentRevision: agentRevision.current });
+      assertCurrent();
+      const current = shellStateRef.current;
+      const merged = reconcileWorkspaceAgents(before.agents ?? [], current.agents ?? [], result.agents);
+      const activeAgentId = merged.agents.some(agent => agent.id === current.activeAgentId)
+        ? current.activeAgentId!
+        : merged.agents.find(agent => agent.id === result.activeAgentId)?.id ?? merged.agents[0]?.id;
+      if (!activeAgentId) throw new Error("The workspace action returned no usable agent. Reload the workspace.");
+      agentRevision.current = result.agentRevision;
+      const state = { ...current, agents: merged.agents, agentRevision: result.agentRevision, activeAgentId };
+      // Update the ref before React renders, so an already queued flush sees
+      // the saved roster and settings changes made while the tool was running.
+      shellStateRef.current = state;
+      cancelPendingWrite();
+      if (JSON.stringify(current.agents) !== JSON.stringify(merged.agents)
+        || current.agentRevision !== result.agentRevision || current.activeAgentId !== activeAgentId) {
+        callbacks.current.onAgentsChanged(merged.agents, result.agentRevision, activeAgentId);
+      }
+      if (merged.conflict) setLastAction("The saved chat change overlapped an agent settings edit. Review that agent's current settings.");
+      else if (result.receipt.operation !== "inspect") setLastAction(result.receipt.summary);
+      // Preserve unrelated changes made while native execution was in flight.
+      // A failed trailing save must not misreport an already committed tool as
+      // failed or encourage the model to repeat its effect.
+      try {
+        await saveSnapshotForScope(
+          shellStateToRuntimeSnapshot(state),
+          workspaceId!,
+          identity!,
+          generation,
+        );
+      } catch {
+        assertCurrent();
+        setLastAction("The chat change was saved. Some simultaneous settings could not be saved; reload before editing them again.");
+      }
+      assertCurrent();
+      return result;
+    });
+    snapshotWrites.current = next;
+    return next;
   };
 
   useEffect(() => {
@@ -138,6 +245,7 @@ export function useWorkspaceSnapshot(options: {
     }
     const pending = {
       identity,
+      generation: workspaceScopeGeneration,
       workspaceId: activeWorkspaceScope.workspaceId,
       snapshot: shellStateToRuntimeSnapshot(shellState),
     };
@@ -147,7 +255,8 @@ export function useWorkspaceSnapshot(options: {
       pendingSnapshotRef.current = null;
       if (
         workspaceIdentityRef.current !== pending.identity ||
-        hydratedWorkspaceRef.current !== pending.identity
+        hydratedWorkspaceRef.current !== pending.identity ||
+        callbacks.current.workspaceScopeGeneration !== pending.generation
       )
         return;
       void writeSnapshot(pending.snapshot, pending.workspaceId).catch(
@@ -173,7 +282,8 @@ export function useWorkspaceSnapshot(options: {
         if (
           pending &&
           workspaceIdentityRef.current === pending.identity &&
-          hydratedWorkspaceRef.current === pending.identity
+          hydratedWorkspaceRef.current === pending.identity &&
+          callbacks.current.workspaceScopeGeneration === pending.generation
         ) {
           void writeSnapshot(pending.snapshot, pending.workspaceId).catch(
             () => undefined,
@@ -196,6 +306,7 @@ export function useWorkspaceSnapshot(options: {
     // Fast Refresh may replay effects while preserving the live gate and run.
     // A completed hydration of this exact owner/workspace needs no replay.
     const hydrationIdentity = workspaceIdentityRef.current;
+    const hydrationGeneration = workspaceScopeGeneration;
     if (hasTauriRuntime() && hydrationIdentity === null) return;
     if (
       hydrationIdentity !== null &&
@@ -213,11 +324,16 @@ export function useWorkspaceSnapshot(options: {
     setRuntimeSnapshotError(null);
     void loadRuntimeSnapshot(activeWorkspaceScope.workspaceId)
       .then((snapshot: RuntimeSnapshot | null) => {
-        if (!active || workspaceIdentityRef.current !== hydrationIdentity) {
+        if (
+          !active ||
+          workspaceIdentityRef.current !== hydrationIdentity ||
+          callbacks.current.workspaceScopeGeneration !== hydrationGeneration
+        ) {
           return;
         }
         hydratedWorkspaceRef.current = hydrationIdentity;
         setRuntimeSnapshotReady(true);
+        agentRevision.current = snapshot?.agentRevision ?? 0;
         if (!snapshot) return;
 
         const recovered = shellStateFromRuntimeSnapshot(
@@ -228,7 +344,11 @@ export function useWorkspaceSnapshot(options: {
         setLastAction("Recovered workspace from local runtime");
       })
       .catch((error) => {
-        if (active && workspaceIdentityRef.current === hydrationIdentity) {
+        if (
+          active &&
+          workspaceIdentityRef.current === hydrationIdentity &&
+          callbacks.current.workspaceScopeGeneration === hydrationGeneration
+        ) {
           hydratedWorkspaceRef.current = null;
           snapshotLoadFailedRef.current = true;
           setRuntimeSnapshotReady(false);
@@ -249,6 +369,7 @@ export function useWorkspaceSnapshot(options: {
   // Called synchronously by the account owner before replacing its identity.
   const invalidate = () => {
     hydratedWorkspaceRef.current = null;
+    agentRevision.current = 0;
     if (snapshotTimerRef.current !== null)
       window.clearTimeout(snapshotTimerRef.current);
     snapshotTimerRef.current = null;
@@ -260,6 +381,7 @@ export function useWorkspaceSnapshot(options: {
       runtimeSnapshotReady,
       runtimeSnapshotError,
       flushSnapshot,
+      manageWorkspaceFromChat,
     },
     invalidate,
     shouldReload: () => snapshotLoadFailedRef.current,

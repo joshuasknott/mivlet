@@ -117,6 +117,19 @@ describe("native stream text presentation", () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it("keeps workspace inspection streaming without recording a pending approval", async () => {
+    const h = harness();
+    await consumeNativeAgentEvents(stream([
+      { type: "tool-call", callId: "inspect", tool: "workspace-inspect", arguments: "{}",
+        approval: { id: "inspect", action: "workspace-inspect", mode: "read-only", riskLevel: "low" } as never },
+      { type: "tool-result", callId: "inspect", ok: true, output: "Inspected" },
+      { type: "done", finishReason: "stop" },
+    ]), h.session);
+    expect(h.updates.some(state => state.status === "awaiting-approval")).toBe(false);
+    expect(h.record.mock.calls.map(([entry]) => entry.kind)).not.toContain("approval-request");
+    expect(h.session.persistence.current?.pendingApprovalIds).toEqual([]);
+  });
+
   it("flushes text before approvals and preserves text/tool/text order without waiting for the timer", async () => {
     const h = harness();
     const onToolCall = vi.fn(() => expect(h.state().transcript).toBe("Before"));

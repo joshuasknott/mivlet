@@ -135,7 +135,7 @@ export function useExecutionController({
 
   const queueToolApproval = useCallback(
     (event: Parameters<typeof runtime.recordBackendToolCall>[0]) => {
-      if (isCollaborationTool(event.tool)) return;
+      if (isCollaborationTool(event.tool) || event.tool === "workspace-inspect") return;
       if (
         ["connector-call", "connector-action"].includes(
           event.approval.action.split(/\s+/)[0],

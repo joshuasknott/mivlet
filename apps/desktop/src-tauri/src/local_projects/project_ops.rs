@@ -1,17 +1,18 @@
 use super::{
-    author_from_row, execution_attempt, next_revision, project_from_row, repo, thread,
+    author_from_row, collab, execution_attempt, next_revision, project_from_row, repo, thread,
     thread_is_owned, validate_id_store, validate_payload_store, ArchiveLocalProjectRequest,
-    AuthorizedCommandScope, BindLocalProjectRunAuthorRequest, CreateLocalProjectRequest,
-    LocalProject, LocalProjectPayload, LocalProjectRow, LocalProjectRunAuthor,
-    LocalProjectRunAuthorRow, RunAuthorPayload, Store, StoreError, UpdateLocalProjectRequest,
-    MAX_NAME_CHARACTERS, MAX_PROJECTS,
+    AuthorizedCommandScope, BindLocalProjectRunAuthorRequest, ChatBinding, Conversation,
+    CreateLocalProjectRequest, Kind, LocalProject, LocalProjectPayload, LocalProjectRow,
+    LocalProjectRunAuthorRow, MivletAgentProfile, Participant, RunAuthorPayload, Store, StoreError,
+    Team, UpdateLocalProjectRequest, MAX_ID_CHARACTERS, MAX_NAME_CHARACTERS, MAX_PROJECTS,
 };
-pub(super) fn create_at(
+pub(crate) fn create_at(
     tx: &rusqlite::Connection,
     store: &Store,
     scope: &AuthorizedCommandScope,
     request: CreateLocalProjectRequest,
     now: &str,
+    profiles: Option<&[MivletAgentProfile]>,
 ) -> crate::store::Result<LocalProject> {
     validate_id_store(&request.id, "Project")?;
     validate_id_store(&request.thread_id, "Project thread")?;
@@ -23,6 +24,7 @@ pub(super) fn create_at(
         request.knowledge_source_ids,
         Vec::new(),
     )?;
+    let project_name = payload.name.clone();
     let count: i64 = tx.query_row(
         "SELECT COUNT(*) FROM local_project WHERE workspace_id=?1 AND owner_subject=?2",
         rusqlite::params![scope.private.workspace_id(), scope.private.owner_subject()],
@@ -33,6 +35,68 @@ pub(super) fn create_at(
             "This workspace has reached its local project limit.".into(),
         ));
     }
+    let team = match request.participant_ids.as_ref() {
+        None => {
+            if request.lead_agent_id.is_some() {
+                return Err(StoreError::Invalid(
+                    "A project lead requires an initial project team.".into(),
+                ));
+            }
+            None
+        }
+        Some(participant_ids) => {
+            if participant_ids.is_empty()
+                || participant_ids.len() > 8
+                || participant_ids
+                    .iter()
+                    .any(|id| id.is_empty() || id.len() > MAX_ID_CHARACTERS)
+            {
+                return Err(StoreError::Invalid(
+                    "A project team needs one to eight valid agents.".into(),
+                ));
+            }
+            let mut seen = std::collections::HashSet::new();
+            let mut members = Vec::with_capacity(participant_ids.len());
+            for agent_id in participant_ids {
+                if !seen.insert(agent_id) {
+                    return Err(StoreError::Invalid(
+                        "A project team cannot contain the same agent twice.".into(),
+                    ));
+                }
+                if !agent_id
+                    .chars()
+                    .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '.' | '_' | ':' | '-'))
+                {
+                    return Err(StoreError::Invalid(
+                        "A project team contains an invalid agent id.".into(),
+                    ));
+                }
+                let name = profiles
+                    .and_then(|profiles| profiles.iter().find(|profile| profile.id == *agent_id))
+                    .ok_or_else(|| {
+                        StoreError::Invalid(
+                            "A project team contains an agent that is unavailable in this workspace."
+                                .into(),
+                        )
+                    })?
+                    .name
+                    .clone();
+                members.push(Participant {
+                    agent_id: agent_id.clone(),
+                    name,
+                });
+            }
+            if let Some(lead) = request.lead_agent_id.as_deref() {
+                if !participant_ids.iter().any(|id| id == lead) {
+                    return Err(StoreError::Invalid(
+                        "The project lead must be one of its participants.".into(),
+                    ));
+                }
+            }
+            Some((members, request.lead_agent_id.clone()))
+        }
+    };
+
     thread::create(
         tx,
         store,
@@ -75,6 +139,55 @@ pub(super) fn create_at(
             .map_err(|_| StoreError::Invalid("The project could not be encoded.".into()))?,
     };
     repo::insert_project(tx, store, &scope.private, &row)?;
+    if let Some((members, lead_agent_id)) = team {
+        let team = Team {
+            project_id: row.id.clone(),
+            lead_agent_id: lead_agent_id.clone(),
+            participant_ids: members
+                .iter()
+                .map(|member| member.agent_id.clone())
+                .collect(),
+            revision: 1,
+        };
+        collab::put(
+            tx,
+            store,
+            &scope.private,
+            Kind::Team,
+            &team.project_id,
+            None,
+            Some(&team.project_id),
+            &team,
+        )?;
+        collab::put(
+            tx,
+            store,
+            &scope.private,
+            Kind::Conversation,
+            &row.thread_id,
+            Some(&row.thread_id),
+            Some(&row.id),
+            &Conversation {
+                archived: false,
+                chat: Some(ChatBinding {
+                    role: "main".into(),
+                    owner_kind: "project".into(),
+                    owner_id: row.id.clone(),
+                }),
+                id: row.thread_id.clone(),
+                workspace_id: scope.data.workspace_id().into(),
+                kind: "group".into(),
+                title: project_name,
+                project_id: Some(row.id.clone()),
+                facilitator_id: lead_agent_id,
+                participants: members,
+                revision: 1,
+                generation: 1,
+                created_at: now.into(),
+                updated_at: now.into(),
+            },
+        )?;
+    }
     project_from_row(scope, row)
 }
 

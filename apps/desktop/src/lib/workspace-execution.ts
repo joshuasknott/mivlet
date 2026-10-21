@@ -49,87 +49,25 @@ export const restrictedPermission = (
 export function composerAttachmentRefs(
   attachments: readonly ComposerAttachment[],
 ): WorkAttachment[] {
-  return attachments.map((attachment) => {
+  return attachments.map((attachment): WorkAttachment => {
     if (attachment.durableRef) return attachment.durableRef;
-    if (attachment.workspaceFile)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.workspaceFile.mimeType,
-        sizeBytes: attachment.sizeBytes,
-        availability: "workspace-file",
-        relativePath: attachment.workspaceFile.relativePath,
-        sha256: attachment.workspaceFile.sha256,
-      };
-    if (attachment.sourceId)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.type,
-        sizeBytes: attachment.sizeBytes,
-        availability: "knowledge-context",
-        sourceId: attachment.sourceId,
-      };
-    if (attachment.imageInput)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.type,
-        sizeBytes: attachment.sizeBytes,
-        availability: "image-input",
-      };
+    const file = attachment.workspaceFile;
     return {
       id: attachment.id,
       name: attachment.name,
-      mimeType: attachment.type,
+      mimeType: file ? file.mimeType : attachment.type,
       sizeBytes: attachment.sizeBytes,
-      availability: "transient",
+      ...(file
+        ? { availability: "workspace-file", relativePath: file.relativePath, sha256: file.sha256 }
+        : attachment.sourceId
+          ? { availability: "knowledge-context", sourceId: attachment.sourceId }
+          : { availability: attachment.imageInput ? "image-input" : "transient" }),
     };
   });
 }
 
 /** Final staged references recorded at dispatch for durable recovery. */
-export function stagedAttachmentRefs(
-  attachments: readonly ComposerAttachment[],
-): WorkAttachment[] {
-  return attachments.map((attachment) => {
-    if (attachment.durableRef) return attachment.durableRef;
-    if (attachment.workspaceFile)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.workspaceFile.mimeType,
-        sizeBytes: attachment.sizeBytes,
-        availability: "workspace-file",
-        relativePath: attachment.workspaceFile.relativePath,
-        sha256: attachment.workspaceFile.sha256,
-      };
-    if (attachment.sourceId)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.type,
-        sizeBytes: attachment.sizeBytes,
-        availability: "knowledge-context",
-        sourceId: attachment.sourceId,
-      };
-    if (attachment.imageInput)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.type,
-        sizeBytes: attachment.sizeBytes,
-        availability: "image-input",
-      };
-    return {
-      id: attachment.id,
-      name: attachment.name,
-      mimeType: attachment.type,
-      sizeBytes: attachment.sizeBytes,
-      availability: "transient",
-    };
-  });
-}
+export const stagedAttachmentRefs = composerAttachmentRefs;
 
 export interface ExecutionSession {
   key: string;
@@ -279,10 +217,7 @@ export class WorkspaceExecution {
     await schedule.bind(attemptId);
   }
   canSchedule(agentId: string, providerId: string) {
-    const active = this.state.data.work.filter(
-      (work) =>
-        work.status === "running" || work.status === "awaiting-approval",
-    );
+    const active = this.executingWork();
     const occupied = [
       ...new Map(
         [...active, ...this.state.sessions.map((session) => session.work)].map(
@@ -397,8 +332,12 @@ export class WorkspaceExecution {
       text,
     });
   }
-  liveSteer(id: string, expectedGeneration: number, text: string) {
-    return this.command({ action: "live-steer-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
+  /** Keep the conversation-only steering transaction outside the startup graph. */
+  steerQueued(id: string, expectedGeneration: number) {
+    return this.serial(async () => {
+      const { steerQueued } = await import("../shell/ConversationPane-steering");
+      return steerQueued(this.workspaceId, this.transport, snapshot => this.accept(snapshot), id, expectedGeneration);
+    });
   }
   async submit(
     conversationId: string,

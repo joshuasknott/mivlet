@@ -37,13 +37,19 @@ describe("inline workspace navigation", () => {
     render(<AgentSidebar {...props} onPreferencesChange={onPreferencesChange}
       projectActivity={new Map([[projects[2].id, 100]])} conversations={[{ id: "chat", title: "Project chat", kind: "group", projectId: projects[0].id }]} />);
     fireEvent.click(screen.getByRole("button", { name: "Organize Project 0" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Pin"]);
     fireEvent.click(screen.getByRole("menuitem", { name: "Pin" }));
     expect(rows("Pinned")).toEqual(["project:project-0"]);
+    fireEvent.click(screen.getByRole("button", { name: "Organize Project 0" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Unpin"]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     fireEvent.click(screen.getByRole("button", { name: "Organize projects" }));
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Manual order" }));
     expect(rows("Projects").slice(0, 2)).toEqual(["project:project-2", "project:project-1"]);
     fireEvent.click(screen.getByRole("button", { name: "Organize Project 1" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Move up" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual(["Pin"]);
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Project 1" }), { key: "ArrowUp", altKey: true });
     expect(rows("Projects").slice(0, 2)).toEqual(["project:project-1", "project:project-2"]);
     fireEvent.click(screen.getByRole("button", { name: "Organize projects" }));
     fireEvent.click(screen.getByRole("menuitemradio", { name: "Most recent" }));

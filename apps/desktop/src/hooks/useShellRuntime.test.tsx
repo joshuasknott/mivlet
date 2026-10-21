@@ -3,6 +3,8 @@ import type { PropsWithChildren } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as runtime0 from "../runtime/domains/account";
 import * as memoryRuntime from "../runtime/domains/memory";
+import * as folderRuntime from "../runtime/domains/project-source-folders";
+import { importLocalTextFile } from "@mivlet/connectors/local-files";
 import { MivletQueryProvider } from "../lib/query-client";
 import { STORAGE_KEY } from "../lib/constants";
 import { defaultShellState } from "./shell-runtime/defaults";
@@ -14,6 +16,24 @@ function wrapper({ children }: PropsWithChildren) {
 }
 
 describe("conversation shell runtime", () => {
+  it("hydrates folder sources without pinning them globally", async () => {
+    const source = { ...importLocalTextFile({ name: "project.md", content: "Project notes", sizeBytes: 13 }), pinned: false };
+    vi.spyOn(memoryRuntime, "loadRuntimeImportedKnowledgeSources").mockResolvedValue([source]);
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.workspaceKnowledgeSources.some((entry) => entry.id === source.id)).toBe(true));
+    expect(result.current.pinnedSourceIds).not.toContain(source.id);
+  });
+
+  it("makes imported folder sources available to the project without pinning unrelated chats", async () => {
+    const source = { ...importLocalTextFile({ name: "project.md", content: "Project notes", sizeBytes: 13 }), pinned: false };
+    vi.spyOn(folderRuntime, "importProjectSourceFolder").mockResolvedValue({ id: "folder-research", name: "Research", sources: [source], skippedCount: 0 });
+    const { result } = renderHook(() => useShellRuntime(), { wrapper });
+    await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));
+    await act(async () => { await result.current.importProjectSourceFolder(); });
+    expect(result.current.workspaceKnowledgeSources.some((entry) => entry.id === source.id)).toBe(true);
+    expect(result.current.pinnedSourceIds).not.toContain(source.id);
+  });
+
   it("requires a fresh MCP App proposal instead of offering unsupported approval modification", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
     await waitFor(() => expect(result.current.accountWorkspaceStatus.state).toBe("ready"));

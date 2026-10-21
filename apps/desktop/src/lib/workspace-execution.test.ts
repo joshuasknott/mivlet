@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type {
   BackendProvider,
+  CollaborationCommand,
   CollaborationSnapshot,
   CollaborationWorkItem,
   MivletAgentProfile,
@@ -777,5 +778,147 @@ describe("workspace execution (deterministic fixtures, no live provider)", () =>
     const service = { dispose: vi.fn(async () => {}) };
     await enqueueWorkspaceDispose(Promise.reject(new Error("prior")), service);
     expect(service.dispose).toHaveBeenCalledOnce();
+  });
+
+  function queuedSteeringFixture(options: {
+    delivery?: "accepted" | "rejected" | "pending" | "uncertain";
+    failDelivery?: boolean;
+    failHold?: boolean;
+    failStopOnce?: boolean;
+    missingReceipt?: boolean;
+    targetGenerationRace?: boolean;
+    sourcePatch?: Partial<CollaborationWorkItem>;
+    targetPatch?: Partial<CollaborationWorkItem>;
+  } = {}) {
+    const source = fixtureWork("queued-source", "a", {
+      conversationId: "conversation-steering",
+      queue: { held: false, order: 1 },
+      userRequest: "Ship the release notes",
+      prompt: "Ship the release notes",
+      ...options.sourcePatch,
+    });
+    const target = fixtureWork("foreground-target", "a", {
+      conversationId: "conversation-steering",
+      status: "running",
+      modelOptionId: "codex::model",
+      currentRunId: "foreground-run",
+      generation: 7,
+      ...options.targetPatch,
+    });
+    let data: CollaborationSnapshot = {
+      conversations: [],
+      authors: [],
+      teams: [],
+      facts: [],
+      work: [source, target],
+      layout: null,
+    };
+    let stopAttempts = 0;
+    const command = vi.fn(async (_workspace: string, input: CollaborationCommand) => {
+      if (input.action === "set-work-held") {
+        if (options.failHold) throw new Error("native hold failed");
+        data = { ...data, work: data.work.map((work) => work.id === input.id ? { ...work, generation: work.generation + 1, queue: { ...(work.queue ?? { order: 1 }), held: input.held } } : work) };
+        if (options.targetGenerationRace) {
+          data = { ...data, work: data.work.map((work) => work.id === "foreground-target" ? { ...work, generation: work.generation + 1 } : work) };
+        }
+      } else if (input.action === "live-steer-work") {
+        if (options.failDelivery) throw new Error("native delivery failed");
+        const currentTarget = data.work.find((work) => work.id === input.id);
+        if (currentTarget?.generation !== input.expectedGeneration) throw new Error("target generation changed");
+        if (options.missingReceipt) return data;
+        data = { ...data, work: data.work.map((work) => work.id === input.id ? { ...work, liveSteering: [{ id: input.eventId, text: input.text, runId: work.currentRunId ?? "foreground-run", delivery: options.delivery ?? "accepted", createdAt: "2026-10-19T00:00:00Z" }] } : work) };
+      } else if (input.action === "stop-work") {
+        stopAttempts += 1;
+        if (options.failStopOnce && stopAttempts === 1) throw new Error("native stop failed");
+        data = { ...data, work: data.work.map((work) => work.id === input.id ? { ...work, status: "cancelled", generation: work.generation + 1 } : work) };
+      }
+      return data;
+    });
+    return {
+      service: new WorkspaceExecution("fixture", { load: async () => data, command }),
+      command,
+      snapshot: () => data,
+    };
+  }
+
+  it("holds a queued text request, delivers it once to the exact Codex turn, then removes it", async () => {
+    const { service, command, snapshot } = queuedSteeringFixture();
+    await expect(service.steerQueued("queued-source", 1)).resolves.toMatchObject({ work: expect.arrayContaining([expect.objectContaining({ id: "queued-source", status: "cancelled" })]) });
+    expect(command.mock.calls.map(([, input]) => input)).toEqual([
+      { action: "set-work-held", id: "queued-source", expectedGeneration: 1, held: true },
+      { action: "live-steer-work", id: "foreground-target", expectedGeneration: 7, eventId: "queued-steer:queued-source", text: "Ship the release notes" },
+      { action: "stop-work", id: "queued-source", expectedGeneration: 2 },
+    ]);
+    expect(snapshot().work.find((work) => work.id === "queued-source")?.status).toBe("cancelled");
+  });
+
+  it.each(["rejected", "pending", "uncertain"] as const)("keeps the source held for a %s live-steering receipt", async (delivery) => {
+    const { service, command, snapshot } = queuedSteeringFixture({ delivery });
+    await expect(service.steerQueued("queued-source", 1)).rejects.toThrow(`Live guidance delivery was ${delivery}`);
+    expect(command.mock.calls.map(([, input]) => input.action)).toEqual(["set-work-held", "live-steer-work"]);
+    expect(snapshot().work.find((work) => work.id === "queued-source")?.queue?.held).toBe(true);
+    await expect(service.steerQueued("queued-source", 2)).rejects.toThrow(`delivery is ${delivery}`);
+    expect(command.mock.calls.map(([, input]) => input.action)).toEqual(["set-work-held", "live-steer-work"]);
+  });
+
+  it("keeps the source held when native live delivery fails", async () => {
+    const { service, command, snapshot } = queuedSteeringFixture({ failDelivery: true });
+    await expect(service.steerQueued("queued-source", 1)).rejects.toThrow("native delivery failed");
+    expect(command.mock.calls.map(([, input]) => input.action)).toEqual(["set-work-held", "live-steer-work"]);
+    expect(snapshot().work.find((work) => work.id === "queued-source")?.queue?.held).toBe(true);
+  });
+
+  it("keeps the held source when the target generation changes before delivery", async () => {
+    const { service, command, snapshot } = queuedSteeringFixture({ targetGenerationRace: true });
+    await expect(service.steerQueued("queued-source", 1)).rejects.toThrow("target generation changed");
+    expect(command.mock.calls.map(([, input]) => input.action)).toEqual(["set-work-held", "live-steer-work"]);
+    expect(snapshot().work.find((work) => work.id === "queued-source")?.queue?.held).toBe(true);
+  });
+
+  it("does not deliver or remove when the native hold fails", async () => {
+    const { service, command, snapshot } = queuedSteeringFixture({ failHold: true });
+    await expect(service.steerQueued("queued-source", 1)).rejects.toThrow("native hold failed");
+    expect(command.mock.calls.map(([, input]) => input.action)).toEqual(["set-work-held"]);
+    expect(snapshot().work.find((work) => work.id === "queued-source")?.queue?.held).toBe(false);
+  });
+
+  it("keeps the source held when the live command returns no receipt", async () => {
+    const { service, command, snapshot } = queuedSteeringFixture({ missingReceipt: true });
+    await expect(service.steerQueued("queued-source", 1)).rejects.toThrow("delivery is unclear");
+    expect(command.mock.calls.map(([, input]) => input.action)).toEqual(["set-work-held", "live-steer-work"]);
+    expect(snapshot().work.find((work) => work.id === "queued-source")?.queue?.held).toBe(true);
+    await expect(service.steerQueued("queued-source", 2)).rejects.toThrow("already held without a delivery receipt");
+    expect(command.mock.calls.map(([, input]) => input.action)).toEqual(["set-work-held", "live-steer-work"]);
+  });
+
+  it("rejects a stale queue generation before changing or delivering anything", async () => {
+    const { service, command } = queuedSteeringFixture();
+    await expect(service.steerQueued("queued-source", 2)).rejects.toThrow("changed");
+    expect(command).not.toHaveBeenCalled();
+  });
+
+  it("guards attachments, outcome goals, and a missing foreground target", async () => {
+    const cases: Array<[string, Partial<CollaborationWorkItem>, string]> = [
+      ["attachments", { attachments: [{ id: "file", name: "brief.txt", mimeType: "text/plain", sizeBytes: 4, availability: "transient" }] }, "without attachments"],
+      ["outcome goal", { outcomeGoal: { objective: "Ship", successCriteria: "Published", status: "active" } }, "outcome goal"],
+    ];
+    for (const [, sourcePatch, expected] of cases) {
+      const { service, command } = queuedSteeringFixture({ sourcePatch });
+      await expect(service.steerQueued("queued-source", 1)).rejects.toThrow(expected);
+      expect(command).not.toHaveBeenCalled();
+    }
+    const missingTarget = queuedSteeringFixture({ targetPatch: { status: "completed", currentRunId: undefined } });
+    await expect(missingTarget.service.steerQueued("queued-source", 1)).rejects.toThrow("matching foreground Codex turn");
+    expect(missingTarget.command).not.toHaveBeenCalled();
+  });
+
+  it("retries accepted removal without replaying live delivery after stop fails", async () => {
+    const { service, command } = queuedSteeringFixture({ failStopOnce: true });
+    await expect(service.steerQueued("queued-source", 1)).rejects.toThrow("native stop failed");
+    await expect(service.steerQueued("queued-source", 2)).resolves.toMatchObject({ work: expect.arrayContaining([expect.objectContaining({ id: "queued-source", status: "cancelled" })]) });
+    expect(command.mock.calls.map(([, input]) => input.action)).toEqual([
+      "set-work-held", "live-steer-work", "stop-work", "stop-work",
+    ]);
+    expect(command.mock.calls.filter(([, input]) => input.action === "live-steer-work")).toHaveLength(1);
   });
 });

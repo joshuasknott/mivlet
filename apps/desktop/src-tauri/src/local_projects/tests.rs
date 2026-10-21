@@ -60,7 +60,83 @@ fn create_request() -> CreateLocalProjectRequest {
         name: "Launch room".into(),
         instructions: "Keep claims sourced.".into(),
         knowledge_source_ids: vec!["source-1".into()],
+        participant_ids: None,
+        lead_agent_id: None,
     }
+}
+
+fn team_profiles() -> Vec<MivletAgentProfile> {
+    serde_json::from_value(serde_json::json!([
+        {"id":"agent-a","name":"Alpha","instructions":"","modelId":"openai::alpha","icon":"agent","permissionLabel":"Ask Me"},
+        {"id":"agent-b","name":"Beta","instructions":"","modelId":"openai::beta","icon":"agent","permissionLabel":"Ask Me"}
+    ]))
+    .unwrap()
+}
+
+#[test]
+fn rejects_invalid_initial_team_before_persisting_project_or_thread() {
+    let (store, scope) = store_and_scope();
+    let mut request = create_request();
+    request.knowledge_source_ids = vec![];
+    request.participant_ids = Some(vec!["agent-a".into(), "agent-a".into()]);
+    let result = store.transaction(|tx| {
+        create_at(
+            tx,
+            &store,
+            &scope,
+            request,
+            "2026-09-07T12:00:00Z",
+            Some(&team_profiles()),
+        )
+    });
+    assert!(result.is_err());
+    store
+        .with_conn(|tx| {
+            assert!(repo::get_project(tx, &store, &scope.private, "project-1")?.is_none());
+            assert!(!thread_is_owned(tx, &scope, "project-thread-1")?);
+            Ok(())
+        })
+        .unwrap();
+}
+
+#[test]
+fn creates_selected_initial_team_and_main_project_conversation_atomically() {
+    let (store, scope) = store_and_scope();
+    let mut request = create_request();
+    request.knowledge_source_ids = vec![];
+    request.participant_ids = Some(vec!["agent-a".into(), "agent-b".into()]);
+    request.lead_agent_id = Some("agent-b".into());
+    store
+        .transaction(|tx| {
+            create_at(
+                tx,
+                &store,
+                &scope,
+                request,
+                "2026-09-07T12:00:00Z",
+                Some(&team_profiles()),
+            )
+        })
+        .unwrap();
+    store
+        .with_conn(|tx| {
+            let team: Team = collab::get(tx, &store, &scope.private, Kind::Team, "project-1")?
+                .expect("the initial team should be committed with the project");
+            assert_eq!(team.participant_ids, vec!["agent-a", "agent-b"]);
+            assert_eq!(team.lead_agent_id.as_deref(), Some("agent-b"));
+            let room: Conversation = collab::get(
+                tx,
+                &store,
+                &scope.private,
+                Kind::Conversation,
+                "project-thread-1",
+            )?
+            .expect("the project main conversation should be committed with the team");
+            assert_eq!(room.project_id.as_deref(), Some("project-1"));
+            assert_eq!(room.participants[1].name, "Beta");
+            Ok(())
+        })
+        .unwrap();
 }
 
 #[test]
@@ -68,7 +144,16 @@ fn creates_encrypted_private_project_with_an_owned_source_and_thread() {
     let (store, scope) = store_and_scope();
     source(&store, &scope, "source-1");
     let project = store
-        .transaction(|tx| create_at(tx, &store, &scope, create_request(), "2026-09-07T12:00:00Z"))
+        .transaction(|tx| {
+            create_at(
+                tx,
+                &store,
+                &scope,
+                create_request(),
+                "2026-09-07T12:00:00Z",
+                None,
+            )
+        })
         .unwrap();
     assert_eq!(project.name, "Launch room");
     assert_eq!(project.knowledge_source_ids, vec!["source-1"]);
@@ -92,7 +177,16 @@ fn rejects_foreign_or_stale_sources_and_exact_revision_conflicts() {
     let (store, scope) = store_and_scope();
     source(&store, &scope, "source-1");
     store
-        .transaction(|tx| create_at(tx, &store, &scope, create_request(), "2026-09-07T12:00:00Z"))
+        .transaction(|tx| {
+            create_at(
+                tx,
+                &store,
+                &scope,
+                create_request(),
+                "2026-09-07T12:00:00Z",
+                None,
+            )
+        })
         .unwrap();
     let updated = store
         .transaction(|tx| {
@@ -136,7 +230,7 @@ fn rejects_foreign_or_stale_sources_and_exact_revision_conflicts() {
     foreign.thread_id = "thread-foreign-source".into();
     foreign.knowledge_source_ids = vec!["missing-or-foreign".into()];
     assert!(store
-        .transaction(|tx| create_at(tx, &store, &scope, foreign, "now"))
+        .transaction(|tx| create_at(tx, &store, &scope, foreign, "now", None))
         .is_err());
 }
 
@@ -145,7 +239,16 @@ fn binds_exact_queued_run_author_once_and_archive_blocks_new_work() {
     let (store, scope) = store_and_scope();
     source(&store, &scope, "source-1");
     let project = store
-        .transaction(|tx| create_at(tx, &store, &scope, create_request(), "2026-09-07T12:00:00Z"))
+        .transaction(|tx| {
+            create_at(
+                tx,
+                &store,
+                &scope,
+                create_request(),
+                "2026-09-07T12:00:00Z",
+                None,
+            )
+        })
         .unwrap();
     store
         .transaction(|tx| {
@@ -329,7 +432,16 @@ fn shares_record_recipient_ownership_and_snapshot_or_reference_semantics() {
     let (store, scope) = store_and_scope();
     source(&store, &scope, "source-1");
     let project = store
-        .transaction(|tx| create_at(tx, &store, &scope, create_request(), "2026-09-07T12:00:00Z"))
+        .transaction(|tx| {
+            create_at(
+                tx,
+                &store,
+                &scope,
+                create_request(),
+                "2026-09-07T12:00:00Z",
+                None,
+            )
+        })
         .unwrap();
     store
         .transaction(|tx| {

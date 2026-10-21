@@ -68,6 +68,9 @@ export interface CreateLocalProjectInput {
   name: string;
   instructions: string;
   knowledgeSourceIds: string[];
+  /** Optional initial project team, created atomically with the project. */
+  participantIds?: string[];
+  leadAgentId?: string;
 }
 
 export interface UpdateLocalProjectInput {

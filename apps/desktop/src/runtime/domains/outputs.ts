@@ -95,33 +95,6 @@ export async function ensureRuntimeOutput(
   return created;
 }
 
-/** Save a bounded response excerpt as a durable, pinned output bookmark. */
-export async function saveRuntimeResponseAsPinnedOutput(
-  input: Omit<NewOutputInput, "format" | "mimeType" | "author" | "reason"> & {
-    format?: Extract<NewOutputInput["format"], "text" | "markdown">;
-  },
-  expectedWorkspaceId?: string,
-): Promise<RuntimeOutput> {
-  const output = await ensureRuntimeOutput(
-    {
-      ...input,
-      format: input.format ?? "markdown",
-      mimeType: input.format === "text" ? "text/plain" : "text/markdown",
-      author: "system",
-      reason: "generated",
-    },
-    expectedWorkspaceId,
-  );
-  if (output.pinned) return output;
-  return setRuntimeOutputPinned(
-    output.id,
-    true,
-    output.source,
-    expectedWorkspaceId,
-    output.currentRevisionId,
-  );
-}
-
 export async function appendRuntimeOutputRevision(
   input: AppendOutputRevisionInput,
   expectedWorkspaceId?: string,

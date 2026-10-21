@@ -47,6 +47,15 @@ gates execution. Future synchronization must not replace local authority implici
 
 ## Isolation rules
 
+Project creation can import source folders through the native folder picker.
+Selection imports a bounded snapshot of supported text documents into the
+member's encrypted knowledge library; the project stores the selected source
+IDs. These imports stay unpinned outside the project. They do not retain a live
+folder mount. Removing a folder from the draft excludes its sources from the
+project without deleting existing library knowledge. The picker and final write
+remain bound to the same account, and a full library rejects the import without
+evicting other sources.
+
 1. Every user-owned query starts with an explicit validated workspace.
 2. A project scope is accepted only when that project belongs to the same
    workspace.
@@ -68,6 +77,33 @@ participants or placing a private conversation into a project requires explicit
 history sharing. Confirmed corrections invalidate related active work. Native
 work generations and immutable author records fence provider callbacks. See the
 [coordination decision](../adr/2026-09-12-teammates-conversations-projects.md).
+
+## Chat workspace management
+
+Tool-capable desktop chat routes expose `workspace-inspect`, `agent-create`,
+`agent-update`, `agent-delete`, `project-create`, and `project-team-update`.
+They use the existing approval interface and workspace views. Read Only exposes
+inspection only. Hosted, scheduled, and externally scoped assignments cannot
+administer the local workspace. Creating a project or agent does not start work.
+
+Agent edits cover name, instructions, and model configuration copied from an
+existing agent. New agents default to Ask Me and inherit only the selected
+model, reasoning effort, and fast-mode preference. Credentials, grants, private
+history, connections, and knowledge selections are never copied. Deletion keeps
+saved history and authorship; active work, schedules, and sole project membership
+must be resolved first. The executing agent cannot delete itself.
+Reassign a designated project lead before deleting that agent.
+
+Native mutations bind the exact work generation, run, tool call, approval, and
+argument digest. Roster writes, team changes, and their receipts commit in one
+encrypted-store transaction. `agentRevision` prevents delayed renderer snapshots
+from overwriting a chat roster change. Team changes use their own expected
+revision and require explicit history sharing when adding participants. Saved
+receipts support retry without repeating an effect; only public profile and
+project summaries return to the model.
+Approvals are consumed before the write transaction to avoid nested store locks.
+A failed operation has no committed effect and requires a fresh approval; an
+already committed call returns its saved receipt without consuming another permit.
 
 ## Repository guidance
 

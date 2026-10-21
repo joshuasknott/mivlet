@@ -114,7 +114,6 @@ describe("retained conversation rendering", () => {
       requireAuthor: true,
       onDraftResponse: (text: string) => drafted(tick, text),
       onSaveMemory: async () => undefined,
-      onPinResponse: async () => undefined,
       onMcpAppResourceRegister: async () => null,
       onMcpAppResourceRelease: async () => undefined,
       isMcpRunCurrent: () => true,

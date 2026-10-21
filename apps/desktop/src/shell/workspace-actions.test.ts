@@ -98,13 +98,14 @@ describe("workspace room actions", () => {
     expect(open).toHaveBeenCalledWith(id, true);
   });
 
-  it("creates a project room by saving the project then updating its team", async () => {
+  it("creates a project room with its team in one native transaction", async () => {
     const created = {
       id: "project-11111111-1111-4111-8111-111111111111",
       name: "Launch",
     };
     localProjects.createLocalProject.mockResolvedValue(created);
     const setProjects = vi.fn();
+    const saveDraft = vi.fn(async () => undefined);
     const service = serviceStub([], [
       { projectId: created.id, revision: 3 },
     ]);
@@ -115,7 +116,7 @@ describe("workspace room actions", () => {
         workspaceId: "ws",
         projects: { projects: [], setProjects },
         open: vi.fn(),
-        saveDraft: vi.fn(async () => undefined),
+        saveDraft,
       },
       {
         kind: "project",
@@ -124,7 +125,10 @@ describe("workspace room actions", () => {
         participantIds: ["mira"],
         facilitatorId: "mira",
         shareHistory: false,
+        knowledgeSourceIds: ["source-1"],
       },
+      undefined,
+      "seed",
     );
     expect(localProjects.createLocalProject).toHaveBeenCalledWith({
       workspaceId: "ws",
@@ -132,17 +136,50 @@ describe("workspace room actions", () => {
       threadId: id,
       name: "Launch",
       instructions: "Ship it.",
-      knowledgeSourceIds: [],
-    });
-    expect(service.command).toHaveBeenCalledWith({
-      action: "update-team",
-      projectId: created.id,
-      expectedRevision: 3,
+      knowledgeSourceIds: ["source-1"],
       participantIds: ["mira"],
       leadAgentId: "mira",
-      shareHistory: true,
     });
+    expect(service.refresh).toHaveBeenCalled();
+    expect(service.command).not.toHaveBeenCalled();
     expect(setProjects).toHaveBeenCalled();
+    expect(saveDraft).toHaveBeenCalledWith(id, "mira", "seed", created.id);
+  });
+
+  it("does not publish or open a project when native creation rejects", async () => {
+    const error = new Error("The selected team is unavailable.");
+    localProjects.createLocalProject.mockRejectedValue(error);
+    const setProjects = vi.fn();
+    const open = vi.fn();
+    const saveDraft = vi.fn(async () => undefined);
+    const service = serviceStub();
+
+    await expect(
+      createWorkspaceRoom(
+        {
+          runtime: runtimeStub(),
+          service,
+          workspaceId: "ws",
+          projects: { projects: [], setProjects },
+          open,
+          saveDraft,
+        },
+        {
+          kind: "project",
+          title: "Launch",
+          instructions: "Ship it.",
+          participantIds: ["missing-agent"],
+          facilitatorId: "missing-agent",
+          shareHistory: false,
+        },
+      ),
+    ).rejects.toBe(error);
+
+    expect(setProjects).not.toHaveBeenCalled();
+    expect(service.refresh).not.toHaveBeenCalled();
+    expect(service.command).not.toHaveBeenCalled();
+    expect(saveDraft).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
   });
 
   it("opens an existing main chat unless a new conversation is requested", async () => {

@@ -12,14 +12,6 @@
   background: var(--surface);
 }
 
-.workspace::before {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  background: transparent;
-  content: "";
-}
-
 kbd {
   display: inline-flex;
   align-items: center;
@@ -118,10 +110,6 @@ kbd {
 
 .theme-toggle__button--active svg {
   color: var(--brand-copper);
-}
-
-.desktop-frame[data-theme="dark"] .workspace {
-  background: var(--surface);
 }
 
 /* Brand tones only affect monochrome marks (github/vercel/notion). Multi-color

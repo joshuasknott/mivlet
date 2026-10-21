@@ -25,6 +25,7 @@ use crate::paths::{
     imported_knowledge_path, normalize_spaces, runtime_snapshot_path, truncate_characters,
 };
 use crate::store::repos::scope::{DataScope, PrivateDataScope};
+use crate::store::{Store, StoreError};
 
 pub(crate) fn canonicalize_private_source(
     mut source: LocalFileImport,
@@ -51,6 +52,85 @@ fn data_scope(
 ) -> Result<DataScope, String> {
     let workspace_id = workspace_id.ok_or_else(|| "Workspace id is required.".to_string())?;
     DataScope::new(workspace_id, project_id).map_err(|error| error.to_string())
+}
+
+fn read_snapshot_document_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    store: &Store,
+    path: &Path,
+    scope: &DataScope,
+) -> Result<Option<RuntimeSnapshot>, StoreError> {
+    crate::store::read_document_in_transaction(tx, store, path, scope)
+        .map_err(StoreError::Invalid)?
+        .map(normalize_runtime_snapshot)
+        .transpose()
+        .map_err(StoreError::Invalid)
+}
+
+fn write_snapshot_document_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    store: &Store,
+    path: &Path,
+    scope: &DataScope,
+    snapshot: &RuntimeSnapshot,
+) -> Result<(), StoreError> {
+    crate::store::write_document_in_transaction(tx, store, path, scope, snapshot)
+        .map_err(StoreError::Invalid)
+}
+
+fn save_snapshot_document_in_transaction(
+    tx: &rusqlite::Transaction<'_>,
+    store: &Store,
+    path: &Path,
+    scope: &DataScope,
+    normalized: &RuntimeSnapshot,
+) -> Result<(), StoreError> {
+    let current = read_snapshot_document_in_transaction(tx, store, path, scope)?;
+    if let Some(current) = current {
+        if current.agent_revision != normalized.agent_revision {
+            return Err(StoreError::Invalid(format!(
+                "The agent roster changed (expected revision {}, current {}). Reload the workspace before saving.",
+                normalized.agent_revision, current.agent_revision
+            )));
+        }
+    } else if normalized.agent_revision != 0 {
+        return Err(StoreError::Invalid(
+            "The initial agent snapshot must use revision zero.".into(),
+        ));
+    }
+    write_snapshot_document_in_transaction(tx, store, path, scope, normalized)
+}
+
+/// Read the workspace runtime snapshot using a caller-owned transaction. This
+/// is used by native chat mutations so the roster CAS, collaboration rows,
+/// and idempotency receipt commit as one unit.
+pub(crate) fn load_runtime_snapshot_in_transaction(
+    app: &tauri::AppHandle,
+    tx: &rusqlite::Transaction<'_>,
+    workspace_id: &str,
+) -> Result<Option<RuntimeSnapshot>, StoreError> {
+    let path = runtime_snapshot_path(app).map_err(StoreError::Invalid)?;
+    let scope = data_scope(Some(workspace_id.to_string()), None).map_err(StoreError::Invalid)?;
+    let store = crate::store::try_global().ok_or_else(|| {
+        StoreError::Invalid("Mivlet's encrypted store is unavailable.".to_string())
+    })?;
+    read_snapshot_document_in_transaction(tx, store, &path, &scope)
+}
+
+/// Write the workspace runtime snapshot using a caller-owned transaction.
+pub(crate) fn save_runtime_snapshot_in_transaction(
+    app: &tauri::AppHandle,
+    tx: &rusqlite::Transaction<'_>,
+    workspace_id: &str,
+    snapshot: &RuntimeSnapshot,
+) -> Result<(), StoreError> {
+    let path = runtime_snapshot_path(app).map_err(StoreError::Invalid)?;
+    let scope = data_scope(Some(workspace_id.to_string()), None).map_err(StoreError::Invalid)?;
+    let normalized = normalize_runtime_snapshot(snapshot.clone()).map_err(StoreError::Invalid)?;
+    let store = crate::store::try_global().ok_or_else(|| {
+        StoreError::Invalid("Mivlet's encrypted store is unavailable.".to_string())
+    })?;
+    write_snapshot_document_in_transaction(tx, store, &path, &scope, &normalized)
 }
 
 #[tauri::command]
@@ -546,6 +626,7 @@ pub(crate) fn normalize_runtime_snapshot(
         dismissed_approval_ids: normalize_snapshot_id_list(snapshot.dismissed_approval_ids),
         approval_rules,
         agents,
+        agent_revision: snapshot.agent_revision,
         active_agent_id,
         sidebar_preferences: snapshot
             .sidebar_preferences
@@ -722,22 +803,6 @@ fn normalize_runtime_agents(
     Ok(normalized)
 }
 
-pub(crate) fn write_runtime_snapshot(
-    path: &Path,
-    snapshot: RuntimeSnapshot,
-) -> Result<RuntimeSnapshot, String> {
-    let normalized = normalize_runtime_snapshot(snapshot)?;
-    if crate::store::write_document(path, &normalized)? {
-        return Ok(normalized);
-    }
-    let encoded = serde_json::to_string_pretty(&normalized)
-        .map_err(|_| "Mivlet could not encode runtime snapshot.".to_string())?;
-
-    fs::write(path, encoded).map_err(|_| "Mivlet could not save runtime snapshot.".to_string())?;
-
-    Ok(normalized)
-}
-
 #[tauri::command]
 pub fn list_imported_knowledge_sources(
     app: tauri::AppHandle,
@@ -829,16 +894,38 @@ pub fn save_runtime_snapshot(
     let path = runtime_snapshot_path(&app)?;
     let scope = data_scope(workspace_id, project_id)?;
     let normalized = normalize_runtime_snapshot(snapshot)?;
-    if crate::store::write_workspace_document(&path, &scope, &normalized)? {
+    if let Some(store) = crate::store::try_global() {
+        store
+            .transaction(|tx| {
+                save_snapshot_document_in_transaction(tx, store, &path, &scope, &normalized)
+            })
+            .map_err(|error| error.to_string())?;
         return Ok(normalized);
     }
-    write_runtime_snapshot(&path, normalized)
+    crate::store::update_document(&path, |current: Option<RuntimeSnapshot>| {
+        if let Some(current) = current {
+            let current = normalize_runtime_snapshot(current)?;
+            if current.agent_revision != normalized.agent_revision {
+                return Err(format!(
+                    "The agent roster changed (expected revision {}, current {}). Reload the workspace before saving.",
+                    normalized.agent_revision, current.agent_revision
+                ));
+            }
+        } else if normalized.agent_revision != 0 {
+            return Err("The initial agent snapshot must use revision zero.".into());
+        }
+        Ok((Some(normalized.clone()), ()))
+    })?;
+    Ok(normalized)
 }
+
+#[cfg(test)]
+#[path = "snapshot/roster_tests.rs"]
+mod roster_tests;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
     #[test]
     fn sidebar_preferences_roundtrip_and_never_pin_chats() {
         let snapshot: RuntimeSnapshot = serde_json::from_value(serde_json::json!({

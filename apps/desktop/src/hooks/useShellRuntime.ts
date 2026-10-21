@@ -49,6 +49,7 @@ import {
   loadRuntimeImportedKnowledgeSources,
   loadRuntimeMemoryState,
 } from "../runtime/domains/memory";
+import { importProjectSourceFolder } from "../runtime/domains/project-source-folders";
 
 import { isMivletProviderEnabled } from "../lib/provider-availability";
 import { isSupportedConnectorId } from "./shell-runtime/backend-normalization";
@@ -137,6 +138,7 @@ export function useShellRuntime(
       initialState.agents?.[0]?.id ??
       "chief-of-staff",
   );
+  const [agentRevision, setAgentRevision] = useState(initialState.agentRevision ?? 0);
   const [pinnedSourceIds, setPinnedSourceIds] = useState<string[]>(
     initialState.pinnedSourceIds,
   );
@@ -295,6 +297,7 @@ export function useShellRuntime(
       dismissedApprovalIds,
       approvalRules,
       agents,
+      agentRevision,
       activeAgentId,
       pinnedSourceIds,
       importedKnowledgeSources,
@@ -315,6 +318,7 @@ export function useShellRuntime(
       approvalAudit,
       approvalRules,
       agents,
+      agentRevision,
       activeAgentId,
       connectedBackendIds,
       onboardingDismissed,
@@ -341,11 +345,20 @@ export function useShellRuntime(
     workspaceScopeGeneration,
     activeWorkspaceScope,
     setLastAction,
+    onAgentsChanged: (nextAgents, revision, selectedAgentId) => {
+      setAgents(nextAgents);
+      setAgentRevision(revision);
+      setActiveAgentId(selectedAgentId);
+      if (!nextAgents.some(agent => agent.id === activeItem) && agents.some(agent => agent.id === activeItem)) {
+        setActiveItem(selectedAgentId);
+      }
+    },
     onReset: () => {
       setActiveItem(defaultShellState.activeItem);
       setSidebarPreferences(normalizeSidebarPreferences(undefined));
 
       setAgents(defaultShellState.agents ?? []);
+      setAgentRevision(0);
       setActiveAgentId(defaultShellState.activeAgentId ?? "chief-of-staff");
       setOnboardingDismissed(false);
       setOnboardingVersion(FIRST_AGENT_ONBOARDING_VERSION);
@@ -362,6 +375,7 @@ export function useShellRuntime(
       setMemoryExportText("");
     },
     onHydrate: (recovered) => {
+      setAgentRevision(recovered.agentRevision ?? 0);
       approvals.hydrate(recovered);
       setActiveItem(recovered.activeItem);
 
@@ -423,7 +437,7 @@ export function useShellRuntime(
       setImportedKnowledgeSources(sources);
       setPinnedSourceIds((current) =>
         Array.from(
-          new Set([...current, ...sources.map((source) => source.id)]),
+          new Set([...current, ...sources.filter((source) => source.pinned).map((source) => source.id)]),
         ),
       );
     });
@@ -890,6 +904,22 @@ export function useShellRuntime(
     workspaceKnowledgeSources,
     importKnowledgeFile: (file: File, decodedContent?: string) =>
       importLocalKnowledgeFile(file, file.name, undefined, decodedContent),
+    importProjectSourceFolder: async () => {
+      const generation = connectorScopeRef.current;
+      const workspaceId = activeWorkspaceScope?.workspaceId;
+      if (!workspaceId) throw new Error("Open a workspace before adding source folders.");
+      const folder = await importProjectSourceFolder(workspaceId);
+      if (connectorScopeRef.current !== generation)
+        throw new Error("The workspace changed while adding this folder. Choose it again.");
+      if (folder) {
+        const importedIds = new Set(folder.sources.map((source) => source.id));
+        setImportedKnowledgeSources((current) => [
+          ...folder.sources,
+          ...current.filter((source) => !importedIds.has(source.id)),
+        ]);
+      }
+      return folder;
+    },
     pinnedSourceIds,
     managedMemoryRecords,
     memoryDisabled,

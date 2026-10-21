@@ -47,6 +47,7 @@ function WorkspaceConversationView({
   onProviders,
   onProjectUpdate,
   onDraftReady,
+  onOpenSideChat,
   onNew,
   origin,
   onOriginConsumed,
@@ -72,6 +73,7 @@ function WorkspaceConversationView({
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
   ) => Promise<void>;
   onDraftReady: (append: (text: string) => void) => void;
+  onOpenSideChat: (conversationId: string) => void;
   onNew: (draft?: string) => Promise<string | void>;
   origin?: ConversationOriginNavigation | null;
   onOriginConsumed?: () => void;
@@ -98,6 +100,7 @@ function WorkspaceConversationView({
         onProviders={onProviders}
         onProjectUpdate={onProjectUpdate}
         onDraftReady={onDraftReady}
+        onOpenSideChat={onOpenSideChat}
         onNew={onNew}
         origin={origin}
         onOriginConsumed={onOriginConsumed}
@@ -169,6 +172,7 @@ export function buildConversationRenderer(input: {
       onDraftReady={(append) => {
         if (active) input.appendDraft.current = append;
       }}
+      onOpenSideChat={input.nav.openPanelChat}
       onNew={async (text) => {
         const continued = continueConversationDraft(room, project?.id, text);
         return input.createRoom(
