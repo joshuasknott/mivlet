@@ -252,8 +252,8 @@ fn validate_bounds(
     let bottom = u32::try_from(y)
         .ok()
         .and_then(|top| top.checked_add(height));
-    if right.map_or(true, |right| right > inner_width)
-        || bottom.map_or(true, |bottom| bottom > inner_height)
+    if right.is_none_or(|right| right > inner_width)
+        || bottom.is_none_or(|bottom| bottom > inner_height)
     {
         return Err("Instabox desktop viewer must remain inside the main window.".into());
     }

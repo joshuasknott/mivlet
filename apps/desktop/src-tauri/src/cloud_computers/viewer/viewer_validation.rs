@@ -87,7 +87,7 @@ pub(super) fn validate_machine_id(machine_id: &str) -> Result<(), String> {
         || !machine_id.starts_with("m_")
         || !machine_id[2..]
             .bytes()
-            .all(|byte| (b'a'..=b'z').contains(&byte) || (b'2'..=b'7').contains(&byte))
+            .all(|byte| byte.is_ascii_lowercase() || (b'2'..=b'7').contains(&byte))
     {
         return Err("Instabox machine identity is invalid.".into());
     }

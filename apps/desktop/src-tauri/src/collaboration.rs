@@ -133,7 +133,7 @@ pub(crate) fn validate_local_tool_route(
                 None,
                 ScopeAccess::Read,
             )?;
-            let item = repo::get::<Work>(conn, &store, &scope.private, Kind::Work, work_id)?
+            let item = repo::get::<Work>(conn, store, &scope.private, Kind::Work, work_id)?
                 .ok_or_else(|| invalid("The native Work binding is unavailable."))?;
             if item.workspace_id != workspace_id
                 || item.agent_id != agent_id
