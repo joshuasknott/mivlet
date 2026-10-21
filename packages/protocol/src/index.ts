@@ -1063,12 +1063,18 @@ export interface MivletAgentProfile {
   /** Structured, reviewable work learned from conversation. */
   learnedTasks?: MivletLearnedTask[];
   permissionLabel: ApprovalPresetLabel;
+  /** Selected execution computer for future runs. Omitted legacy profiles use This PC. */
+  computer?: import("./domains/cloud-computer.js").AgentComputerPreference;
+  /** Set only when persisted computer metadata was explicitly malformed. Such profiles fail closed. */
+  computerPreferenceError?: "invalid";
   threadId?: string;
   /** Local conversation references for this teammate, including earlier chats. */
   threadIds?: string[];
 }
 
 export type { McpClientAccess, McpServerConfig, McpConsentRequest, McpClientGrant, McpConsentDecision, McpServerStatus } from "./domains/mcp-server";
+export type { AgentComputerPreference } from "./domains/cloud-computer.js";
+export { DEFAULT_AGENT_COMPUTER, normalizeAgentComputerPreference, cloneAgentComputerPreference, isAgentComputerPreference } from "./domains/cloud-computer.js";
 export type * from "./domains/provider-usage";
 export type { ProviderContinuationInput, ProviderContinuationMessage, ProviderContinuation } from "./domains/provider-continuation";
 export * from "./domains/hosted-tasks.js";

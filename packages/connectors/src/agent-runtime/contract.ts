@@ -87,7 +87,9 @@ export interface AgentBackend {
  */
 export interface BackendDeps {
   /** Native embedded SDK host. Missing executable fails at this boundary, never by falling back. */
-  createEmbeddedRuntime?: (provider: BackendProvider) => EmbeddedRuntimeHandle | null;
+  createEmbeddedRuntime?: (
+    provider: BackendProvider,
+  ) => EmbeddedRuntimeHandle | null;
   /**
    * Build the HTTP/SSE transport for a connected native-API backend, or null
    * when there is no egress path (browser preview, tests). The callbacks let
@@ -121,16 +123,25 @@ export interface BackendDeps {
   discoverModels?: (providerId: string) => Promise<ModelDiscoveryResult | null>;
 }
 
-export type EmbeddedRuntimeEvent = BackendAgentEvent | {
-  type: "tool-request";
-  callId: string;
-  tool: string;
-  arguments: string;
-  approvalId?: string;
-} | { type: "retrying" };
+export type EmbeddedRuntimeEvent =
+  | BackendAgentEvent
+  | {
+      type: "tool-request";
+      callId: string;
+      tool: string;
+      arguments: string;
+      approvalId?: string;
+    }
+  | { type: "retrying" };
 
 export interface EmbeddedRuntimeHandle {
-  run(request: AgentTurnRequest, options: Omit<AgentTurnOptions, "execute" | "authorize" | "shouldCancel" | "onRetry">): AsyncIterable<EmbeddedRuntimeEvent>;
+  run(
+    request: AgentTurnRequest,
+    options: Omit<
+      AgentTurnOptions,
+      "execute" | "authorize" | "shouldCancel" | "onRetry"
+    >,
+  ): AsyncIterable<EmbeddedRuntimeEvent>;
   reply(callId: string, ok: boolean, output: string): Promise<void>;
   cancel(): Promise<void>;
 }
@@ -176,7 +187,12 @@ export interface CodexThreadRef {
 
 export type CodexAppServerEvent =
   | { type: "text-delta"; text: string }
-  | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
+  | {
+      type: "reasoning-summary";
+      text: string;
+      itemId: string;
+      summaryIndex: number;
+    }
   | {
       type: "provider-tool";
       callId: string;
@@ -214,7 +230,12 @@ export interface CodexTurnRequest {
   request: AgentTurnRequest;
   options: Pick<
     AgentTurnOptions,
-    "contextPrefix" | "permissionMode" | "attemptId" | "computer"
+    | "contextPrefix"
+    | "permissionMode"
+    | "attemptId"
+    | "computer"
+    | "workId"
+    | "workGeneration"
   >;
 }
 
@@ -260,14 +281,16 @@ export interface ManagedRuntimeHandlers {
   onRequestStarted: (requestId: string) => void;
 }
 
-export type ManagedRuntimeEvent = CodexAppServerEvent | {
-  type: "tool-request";
-  requestId: string;
-  callId: string;
-  approvalId: string;
-  tool: string;
-  arguments: string;
-};
+export type ManagedRuntimeEvent =
+  | CodexAppServerEvent
+  | {
+      type: "tool-request";
+      requestId: string;
+      callId: string;
+      approvalId: string;
+      tool: string;
+      arguments: string;
+    };
 
 /**
  * Supervised provider-owned execution process. ACP, Claude stdio, and OpenCode
@@ -283,7 +306,10 @@ export interface ManagedRuntimeHandle {
     >,
   ): AsyncIterable<ManagedRuntimeEvent>;
   respondApproval(requestId: string, approved: boolean): Promise<void>;
-  respondTool?(requestId: string, result: { callId: string; ok: boolean; output: string }): Promise<void>;
+  respondTool?(
+    requestId: string,
+    result: { callId: string; ok: boolean; output: string },
+  ): Promise<void>;
   cancel(): Promise<void>;
   shutdown(): Promise<void>;
   listModels?(): Promise<ModelDiscoveryResult>;

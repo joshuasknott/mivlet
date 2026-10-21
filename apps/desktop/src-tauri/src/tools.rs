@@ -76,6 +76,17 @@ pub struct ToolExecutionRequest {
     pub workspace_id: Option<String>,
     #[serde(default)]
     pub agent_id: Option<String>,
+    /// Durable Work identity; native routing derives the selected computer
+    /// from this Work instead of trusting renderer preference hints.
+    #[serde(default)]
+    pub work_id: Option<String>,
+    #[serde(default)]
+    pub work_generation: Option<u32>,
+    /// Narrow legacy/manual route used by the user-facing repository checkpoint
+    /// panel. Native code still verifies the saved agent preference and the
+    /// current local computer generation; this is never a renderer authority.
+    #[serde(default)]
+    pub manual_local_authority: bool,
     /// Native generation observed before approval; never inferred at execution.
     #[serde(default)]
     pub computer_generation: Option<u64>,
@@ -521,6 +532,45 @@ async fn execute_native_tool(
             None,
         );
         return Err(error);
+    }
+    if is_computer_tool(&tool) {
+        let workspace = request.workspace_id.as_deref().unwrap_or_default();
+        let agent = request.agent_id.as_deref().unwrap_or_default();
+        let route = if request.manual_local_authority && tool.starts_with("repository-checkpoint-")
+        {
+            local_computers.validate_manual_local_route(workspace, agent)
+                .and_then(|()| {
+                    local_computers.validate_viewer_generation(
+                        workspace,
+                        agent,
+                        request.computer_generation.ok_or(
+                            "Manual checkpoint actions require the current local computer generation.",
+                        )?,
+                    )
+                })
+        } else {
+            crate::collaboration::validate_local_tool_route(
+                workspace,
+                agent,
+                request.work_id.as_deref(),
+                request.work_generation,
+            )
+        };
+        if let Err(error) = route {
+            audit_tool_outcome(
+                ToolOutcomeAudit {
+                    tool: &tool,
+                    request_id: &request_id,
+                    mode,
+                    risk,
+                    status: "blocked",
+                    error_code: "computer-route",
+                    message: &error,
+                },
+                None,
+            );
+            return Err(error);
+        }
     }
     let authority = if provider_binding_checked {
         verify_execution_permit(&execution_approvals_path(&app)?, &request)

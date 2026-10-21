@@ -69,8 +69,15 @@ describe("AgentBackend Conformance Tests", () => {
     const submit = vi.spyOn(handle, "submitTurn");
     const provider = mockCodexProvider({ models: [{ id: "gpt-5", label: "Reasoner", available: true, fastMode: { serviceTier: "priority" } }] });
     await collectEvents(createCodexBackend(provider, mockCodexDeps(handle))?.run(
-      { ...baseRequest, serviceTier: "priority", reasoningEffort: "high" }, { execute: async () => "" }));
+      { ...baseRequest, serviceTier: "priority", reasoningEffort: "high" }, {
+        execute: async () => "",
+        workId: "work-codex-test",
+        workGeneration: 7
+      }));
     expect(submit).toHaveBeenCalledWith(expect.objectContaining({ request: expect.objectContaining({ serviceTier: "priority", reasoningEffort: "high" }) }));
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({
+      options: expect.objectContaining({ workId: "work-codex-test", workGeneration: 7 })
+    }));
     const unsupported = new MockCodexAppServer({ events: [] });
     const events = await collectEvents(createCodexBackend(mockCodexProvider(), mockCodexDeps(unsupported))?.run(
       { ...baseRequest, serviceTier: "fast" }, { execute: async () => "" }));

@@ -708,6 +708,8 @@ fn normalize_runtime_agents(
             connector_ids: normalize_snapshot_id_list(agent.connector_ids),
             knowledge_source_ids: normalize_snapshot_id_list(agent.knowledge_source_ids),
             permission_label,
+            computer: agent.computer,
+            computer_preference_error: agent.computer_preference_error,
             thread_id: agent
                 .thread_id
                 .map(|value| {

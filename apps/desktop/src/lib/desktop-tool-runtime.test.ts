@@ -39,6 +39,40 @@ describe("computer authority across approvals", () => {
     expect(queueApproval).not.toHaveBeenCalled();
     expect(runtime.executeTool).not.toHaveBeenCalled();
   });
+  it("never falls back to This PC when Instabox is selected", async () => {
+    runtime.executeTool.mockClear();
+    const queueApproval = vi.fn();
+    const execute = createDesktopToolExecutor(
+      { waitForDecision: async () => "granted" },
+      {
+        computerPreference: { kind: "instabox", machineId: "machine-a", connectionRevision: 2 },
+        localComputer: computer(),
+        queueApproval,
+      },
+    );
+    await expect(execute(approval(), args)).rejects.toThrow("will not use This PC");
+    expect(queueApproval).not.toHaveBeenCalled();
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
+  it("does not use the local artifact source for an Instabox connector upload", async () => {
+    const uploadArgs = JSON.stringify({
+      connectorId: "google-drive",
+      action: "google-drive.upload-artifact",
+      payload: { fileId: "artifact-1" },
+    });
+    const execute = createDesktopToolExecutor(
+      { waitForDecision: async () => "granted" },
+      {
+        computerPreference: { kind: "instabox", machineId: "machine-a", connectionRevision: 2 },
+        localComputer: computer(),
+        queueApproval: vi.fn(),
+      },
+    );
+    await expect(
+      execute(buildToolApproval("Mivlet", "connector-action", uploadArgs), uploadArgs),
+    ).rejects.toThrow("will not read or upload an artifact from This PC");
+    expect(runtime.executeTool).not.toHaveBeenCalled();
+  });
   it("rejects approval granted after takeover and return without replaying the action", async () => {
     runtime.executeTool.mockClear();
     const current = computer();

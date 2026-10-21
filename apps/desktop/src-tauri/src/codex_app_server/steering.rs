@@ -220,6 +220,8 @@ mod tests {
                 stdin: stdin.clone(),
                 child: child.clone(),
                 computer: None,
+                work_id: None,
+                work_generation: None,
                 supports_images: false,
                 approval_kinds: Arc::new(Mutex::new(HashMap::new())),
                 image_delivery_stopped: Arc::new(Mutex::new(false)),

@@ -1,0 +1,23 @@
+.computers-settings { min-width: 0; }
+.computers-settings .settings-preference-row { flex-wrap: wrap; }
+.settings-page .computers-settings .settings-disclosure { margin: 0; padding: 4px 0; }
+.settings-page .computers-settings .settings-disclosure summary { min-height: 44px; }
+.computers-settings__identity { flex: 1 1 160px; min-width: 0; overflow-wrap: anywhere; }
+.computers-settings button, .cloud-computer-panel button { min-height: 40px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.computers-settings button:hover, .cloud-computer-panel button:hover { background: var(--surface-hover); }
+.computers-settings button:disabled, .cloud-computer-panel button:disabled { opacity: .55; cursor: default; }
+.computers-settings :is(button, input, select):focus-visible, .cloud-computer-panel button:focus-visible { outline: 2px solid var(--settings-accent, var(--ink)); outline-offset: 3px; }
+.computers-settings__note { color: var(--ink-muted); font-size: 12px; line-height: 1.6; margin: 14px 0; }
+.computers-settings__actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.computers-settings__form, .computers-settings__form form { display: grid; gap: 12px; padding-block: 12px; min-width: 0; }
+.computers-settings__form input:not([type="checkbox"]), .computers-settings__form select { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.computers-settings__form p { line-height: 1.6; margin: 0; }
+.computers-settings__confirmation { display: flex; align-items: center; gap: 10px; min-height: 44px; }
+.cloud-computer-panel { padding: 20px; display: flex; flex-direction: column; gap: 16px; overflow: auto; min-width: 0; height: 100%; }
+.cloud-computer-panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.cloud-computer-panel h2 { margin: 0; font-size: 14px; }
+.cloud-computer-panel p { margin: 0; line-height: 1.6; overflow-wrap: anywhere; }
+.cloud-computer-panel small { color: var(--ink-muted); line-height: 1.6; }
+.cloud-computer-panel__viewer { min-height: 240px; flex: 1 0 240px; border: 1px solid var(--line-strong); border-radius: 8px; display: grid; place-items: center; padding: 0; overflow: hidden; background: var(--surface); }
+.cloud-computer-panel__viewer p { padding: 20px; text-align: center; color: var(--ink-muted); }
+@media (max-width: 850px) { .computers-settings button, .cloud-computer-panel button { min-height: 44px; } }

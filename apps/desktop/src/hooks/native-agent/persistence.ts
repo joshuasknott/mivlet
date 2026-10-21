@@ -60,6 +60,7 @@ export function buildQueuedAttempt(input: {
   parentAttemptId?: string;
   contextReceipt: ExecutionContextReceipt;
   providerRoute?: ProviderRouteExecutionBinding;
+  computerPreference?: import("@mivlet/protocol").AgentComputerPreference;
   createdAt: string;
 }): ExecutionAttempt {
   return {
@@ -73,6 +74,7 @@ export function buildQueuedAttempt(input: {
     parentAttemptId: input.parentAttemptId,
     contextReceipt: input.contextReceipt,
     ...(input.providerRoute ? { providerRoute: input.providerRoute } : {}),
+    ...(input.computerPreference ? { computer: { ...input.computerPreference } } : {}),
     turn: 0,
     pendingApprovalIds: [],
     recoverable: true,

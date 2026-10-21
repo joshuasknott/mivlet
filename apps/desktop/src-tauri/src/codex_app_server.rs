@@ -145,6 +145,8 @@ struct CodexTurnOptions {
     context_prefix: Option<String>,
     permission_mode: Option<String>,
     run_id: Option<String>,
+    work_id: Option<String>,
+    work_generation: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Eq)]
@@ -186,6 +188,8 @@ struct ActiveCodexRun {
     stdin: Arc<Mutex<ChildStdin>>,
     child: Arc<Mutex<crate::provider_process::SupervisedChild>>,
     computer: Option<CodexComputerScope>,
+    work_id: Option<String>,
+    work_generation: Option<u32>,
     supports_images: bool,
     approval_kinds: Arc<Mutex<HashMap<String, PendingApproval>>>,
     image_delivery_stopped: Arc<Mutex<bool>>,
@@ -196,6 +200,10 @@ enum ApprovalKind {
     Command,
     FileChange,
     DynamicTool,
+}
+
+fn requires_local_codex_route(kind: ApprovalKind, accepts: bool) -> bool {
+    accepts && matches!(kind, ApprovalKind::Command | ApprovalKind::FileChange)
 }
 
 struct PendingApproval {
@@ -485,6 +493,8 @@ pub fn start_codex_app_server_turn(
                 stdin: Arc::clone(&stdin),
                 child: Arc::clone(&child),
                 computer: request.options.computer.clone(),
+                work_id: request.options.work_id.clone(),
+                work_generation: request.options.work_generation,
                 supports_images,
                 approval_kinds: Arc::clone(&approval_kinds),
                 image_delivery_stopped: image_delivery.stopped.clone(),
@@ -934,12 +944,49 @@ pub fn respond_codex_app_server_approval(
     let run = runs
         .get(&request.request_id)
         .ok_or_else(|| "Codex app-server run is no longer active.".to_string())?;
-    let mut pending = run
+    let mut approvals = run
         .approval_kinds
         .lock()
-        .map_err(|_| "Codex approval state is unavailable.")?
+        .map_err(|_| "Codex approval state is unavailable.")?;
+    let pending = approvals
+        .get(&request.approval_request_id)
+        .ok_or("The native Codex tool response was already consumed or is unknown.")?;
+    if pending.call_id != request.result.call_id {
+        return Err("The native Codex tool response did not match its pending call.".into());
+    }
+    let route_error = if requires_local_codex_route(pending.kind, request.result.ok) {
+        match run.computer.as_ref() {
+            Some(computer) => crate::collaboration::validate_local_tool_route(
+                &computer.workspace_id,
+                &computer.agent_id,
+                run.work_id.as_deref(),
+                run.work_generation,
+            )
+            .err(),
+            None => Some(
+                "Codex command and file approvals require an admitted local computer scope."
+                    .to_string(),
+            ),
+        }
+    } else {
+        None
+    };
+    let mut pending = approvals
         .remove(&request.approval_request_id)
         .ok_or("The native Codex tool response was already consumed or is unknown.")?;
+    drop(approvals);
+    if let Some(error) = route_error {
+        let decline = json!({
+            "id": approval_rpc_id(&request.approval_request_id),
+            "result": { "decision": "decline" }
+        });
+        return match write_json_line(&run.stdin, &decline) {
+            Ok(()) => Err(error),
+            Err(delivery_error) => Err(format!(
+                "{error} The native Codex decline could not be sent: {delivery_error}"
+            )),
+        };
+    }
     let mut delivery = None;
     let response = match pending.kind {
         ApprovalKind::Command | ApprovalKind::FileChange => json!({

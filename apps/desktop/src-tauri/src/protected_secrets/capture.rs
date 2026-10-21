@@ -3,12 +3,12 @@
 use super::{custody::Secret, Failure, RequestInput};
 
 #[cfg(not(windows))]
-pub(super) fn prompt(_: &RequestInput, _: &dyn Fn() -> bool) -> Result<Option<Secret>, Failure> {
+pub(crate) fn prompt(_: &RequestInput, _: &dyn Fn() -> bool) -> Result<Option<Secret>, Failure> {
     Err(Failure::Capture)
 }
 
 #[cfg(windows)]
-pub(super) fn prompt(
+pub(crate) fn prompt(
     input: &RequestInput,
     current: &dyn Fn() -> bool,
 ) -> Result<Option<Secret>, Failure> {

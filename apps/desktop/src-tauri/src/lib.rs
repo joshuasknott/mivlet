@@ -21,6 +21,7 @@ mod background_worker;
 mod capability_grants;
 mod capability_registry;
 mod clerk_identity;
+mod cloud_computers;
 mod codex_app_server;
 mod codex_images;
 mod collaboration;
@@ -407,6 +408,18 @@ pub fn run() {
             account_workspace::account_workspace_reconcile,
             account_workspace::account_workspace_clear_session,
             hosted_computer::hosted_computer_status,
+            cloud_computers::cloud_computer_status,
+            cloud_computers::cloud_computer_connect,
+            cloud_computers::cloud_computer_select,
+            cloud_computers::cloud_computer_create,
+            cloud_computers::cloud_computer_pause,
+            cloud_computers::cloud_computer_resume,
+            cloud_computers::cloud_computer_disconnect,
+            cloud_computers::cloud_computer_reconcile,
+            cloud_computers::viewer::cloud_computer_viewer_open,
+            cloud_computers::viewer::cloud_computer_viewer_close,
+            cloud_computers::viewer::cloud_computer_viewer_resize,
+            cloud_computers::viewer::cloud_computer_viewer_status,
             hosted_tasks::hosted_text_prepare,
             hosted_tasks::hosted_task_prepare_public_web,
             hosted_tasks::hosted_task_prepare_coding,

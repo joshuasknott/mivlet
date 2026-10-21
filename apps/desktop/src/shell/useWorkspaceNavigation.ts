@@ -57,7 +57,17 @@ export function useWorkspaceNavigation(options: {
   }, []);
   const [navWorkId, setNavWorkId] = useState<string | null>(null);
   const [mobileNavigation, setMobileNavigation] = useState(false);
-  const [computer, setComputer] = useState<string | null>(null);
+  const [computer, setComputerState] = useState<string | null>(null);
+  const [cloudComputer, setCloudComputer] = useState(false);
+  const setComputer = useCallback((agentId: string | null) => {
+    setCloudComputer(false);
+    setComputerState(agentId);
+  }, []);
+  const openCloudComputer = useCallback((agentId: string) => {
+    setCloudComputer(true);
+    setComputerState(agentId);
+    setContextOpen(true);
+  }, []);
   const [conversationOrigin, setConversationOrigin] =
     useState<ConversationOriginNavigation | null>(null);
   const [conversationHistory, setConversationHistory] =
@@ -396,6 +406,8 @@ export function useWorkspaceNavigation(options: {
     mobileNavigation,
     setMobileNavigation,
     computer,
+    cloudComputer,
+    openCloudComputer,
     setComputer,
     conversationOrigin,
     clearConversationOrigin,

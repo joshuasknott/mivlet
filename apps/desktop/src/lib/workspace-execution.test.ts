@@ -138,6 +138,16 @@ describe("native background custody", () => {
     service.admit(agents, models, [provider], "full-access");
     expect(service.getSnapshot().sessions.map(session => session.work.id)).toEqual(["first"]);
   });
+  it("binds the durable Work computer and does not retarget an admitted session", async () => {
+    const selected = { kind: "instabox" as const, machineId: "machine-a", connectionRevision: 3 };
+    const work = fixtureWork("cloud", "a", { computer: selected });
+    const { service } = fixture([work]);
+    await service.refresh();
+    service.admit(agents, models, [provider], "full-access");
+    expect(service.getSnapshot().sessions[0]?.computer).toEqual(selected);
+    work.computer = { kind: "local" };
+    expect(service.getSnapshot().sessions[0]?.computer).toEqual(selected);
+  });
   it("submits a goal atomically with its original request and exact attachment references", async () => {
     const { service, command } = fixture([]);
     const goal = { objective: "Finish report", successCriteria: "Citations checked", maxTurns: 4, maxTokens: 32000 };

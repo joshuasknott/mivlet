@@ -163,7 +163,9 @@ export function createCodexBackend(
             contextPrefix: options.contextPrefix,
             permissionMode: options.permissionMode,
             attemptId: options.attemptId,
-            computer: options.computer
+            computer: options.computer,
+            workId: options.workId,
+            workGeneration: options.workGeneration
           }
         });
         yield* mapCodexEvents(liveHandle, thread.threadId, codexEvents, options, capabilities, request.tools);

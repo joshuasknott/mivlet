@@ -7,7 +7,9 @@ import type {
   PermissionMode,
   WorkAttachment,
   OutcomeGoalInput,
+  AgentComputerPreference,
 } from "@mivlet/protocol";
+import { cloneAgentComputerPreference } from "@mivlet/protocol";
 import type { NativeAgentState } from "../hooks/useNativeAgent";
 import type { ComposerAttachment } from "./types";
 import {
@@ -31,8 +33,17 @@ export const activeWork = (work: CollaborationWorkItem) =>
   ["queued", "running", "waiting", "awaiting-approval"].includes(work.status);
 /** Shared originals may be staged deliberately for a recipient; a different
  * agent's receipt and saved path never become that recipient's authority. */
-export function assignmentAttachments(work: CollaborationWorkItem, attachments: readonly ComposerAttachment[]): ComposerAttachment[] {
-  return work.parentId ? attachments.map(attachment => ({ ...attachment, workspaceFile: undefined, durableRef: undefined })) : [...attachments];
+export function assignmentAttachments(
+  work: CollaborationWorkItem,
+  attachments: readonly ComposerAttachment[],
+): ComposerAttachment[] {
+  return work.parentId
+    ? attachments.map((attachment) => ({
+        ...attachment,
+        workspaceFile: undefined,
+        durableRef: undefined,
+      }))
+    : [...attachments];
 }
 const workKey = (work: CollaborationWorkItem) =>
   `${work.id}:${work.generation}:${work.runIds.length}`;
@@ -135,6 +146,8 @@ export interface ExecutionSession {
   key: string;
   work: CollaborationWorkItem;
   profile: MivletAgentProfile;
+  /** Immutable computer preference captured when this Work is admitted. */
+  computer: AgentComputerPreference;
   model: ProviderModelOption;
   permissionMode: PermissionMode;
   attachments: ComposerAttachment[];
@@ -398,7 +411,13 @@ export class WorkspaceExecution {
     });
   }
   liveSteer(id: string, expectedGeneration: number, text: string) {
-    return this.command({ action: "live-steer-work", id, expectedGeneration, eventId: crypto.randomUUID(), text });
+    return this.command({
+      action: "live-steer-work",
+      id,
+      expectedGeneration,
+      eventId: crypto.randomUUID(),
+      text,
+    });
   }
   async submit(
     conversationId: string,
@@ -540,18 +559,23 @@ export class WorkspaceExecution {
             ? { reasoningEffort: work.schedule.reasoningEffort }
             : {}),
         },
+        // Work admission owns the route. Legacy rows without a captured choice
+        // are local by default; do not read a mutable profile here.
+        computer: cloneAgentComputerPreference(work.computer),
         model,
         permissionMode: restrictedPermission(
           permissionMode,
           work.permissionMode,
           permissionModeFor(profile.permissionLabel),
         ),
-        attachments: assignmentAttachments(work,
+        attachments: assignmentAttachments(
+          work,
           this.attachments.get(work.id) ??
-          (work.parentId
-            ? this.effortAttachments.get(work.rootId)
-            : undefined) ??
-          []),
+            (work.parentId
+              ? this.effortAttachments.get(work.rootId)
+              : undefined) ??
+            [],
+        ),
         cancelled: false,
         started: false,
         approvalIds: new Set(),
@@ -617,9 +641,11 @@ export class WorkspaceExecution {
   async loadHistory(conversationId: string, force = false): Promise<void> {
     if (this.reads.has(conversationId)) return this.reads.get(conversationId);
     if (!force && Object.hasOwn(this.state.histories, conversationId)) return;
-    const read = (typeof loadDesktopConversationPage === "function"
-      ? loadDesktopConversationPage(conversationId, { limit: 80 })
-      : loadDesktopConversation(conversationId))
+    const read = (
+      typeof loadDesktopConversationPage === "function"
+        ? loadDesktopConversationPage(conversationId, { limit: 80 })
+        : loadDesktopConversation(conversationId)
+    )
       .then((history) => {
         if (history && history.thread.id !== conversationId)
           throw new Error("Conversation history scope mismatch.");
@@ -653,7 +679,7 @@ export class WorkspaceExecution {
               olderCursor:
                 current.hasOlderMessages === false
                   ? current.olderCursor
-                  : current.olderCursor ?? history.olderCursor,
+                  : (current.olderCursor ?? history.olderCursor),
               hasOlderMessages:
                 current.hasOlderMessages ?? Boolean(history.hasOlderMessages),
               // The native page owns the complete branch-head set. A forced
@@ -676,63 +702,69 @@ export class WorkspaceExecution {
     const current = this.state.histories[conversationId];
     if (!current?.hasOlderMessages || !current.olderCursor) return false;
     const beforeSequence = Number(current.olderCursor);
-    if (!Number.isSafeInteger(beforeSequence) || beforeSequence <= 0) return false;
-    const read = (typeof loadDesktopConversationPage === "function"
-      ? loadDesktopConversationPage(conversationId, {
-          limit: 80,
-          beforeSequence,
-        })
-      : Promise.resolve(null));
-    const pending = read.then(async (older) => {
-      if (!older || this.disposed) return false;
-      if (older.thread.id !== conversationId)
-        throw new Error("Conversation history scope mismatch.");
-      if (
-        older.messages.some(
-          (view) =>
-            view.message.threadId !== conversationId ||
-            view.currentRevision.threadId !== conversationId,
+    if (!Number.isSafeInteger(beforeSequence) || beforeSequence <= 0)
+      return false;
+    const read =
+      typeof loadDesktopConversationPage === "function"
+        ? loadDesktopConversationPage(conversationId, {
+            limit: 80,
+            beforeSequence,
+          })
+        : Promise.resolve(null);
+    const pending = read
+      .then(async (older) => {
+        if (!older || this.disposed) return false;
+        if (older.thread.id !== conversationId)
+          throw new Error("Conversation history scope mismatch.");
+        if (
+          older.messages.some(
+            (view) =>
+              view.message.threadId !== conversationId ||
+              view.currentRevision.threadId !== conversationId,
+          )
         )
-      )
-        throw new Error("Conversation response contains a message outside its thread.");
-      if (
-        older.hasOlderMessages &&
-        (!older.olderCursor || Number(older.olderCursor) >= beforeSequence)
-      )
-        return false;
-      // A page can resolve after a streaming checkpoint or branch refresh.
-      // Merge into the newest canonical snapshot and retain its thread head;
-      // the page's thread metadata is only a read-time cursor companion.
-      const latest = this.state.histories[conversationId];
-      if (!latest || latest.thread.id !== conversationId) return false;
-      if (latest.olderCursor !== current.olderCursor) return false;
-      const byId = new Map(
-        [...older.messages, ...latest.messages].map((view) => [
-          String(view.message.id),
-          view,
-        ]),
-      );
-      const messages = [...byId.values()].sort(
-        (left, right) => left.message.sequence - right.message.sequence,
-      );
-      if (this.disposed) return false;
-      this.emit({
-        histories: {
-          ...this.state.histories,
-          [conversationId]: {
-            thread: latest.thread,
-            messages,
-            olderCursor: older.olderCursor,
-            hasOlderMessages: older.hasOlderMessages,
-            // Branch-head metadata is complete for the conversation, not for
-            // the page window. Keep a newer refresh authoritative when an
-            // older request resolves after it.
-            branchHeads: latest.branchHeads ?? older.branchHeads,
+          throw new Error(
+            "Conversation response contains a message outside its thread.",
+          );
+        if (
+          older.hasOlderMessages &&
+          (!older.olderCursor || Number(older.olderCursor) >= beforeSequence)
+        )
+          return false;
+        // A page can resolve after a streaming checkpoint or branch refresh.
+        // Merge into the newest canonical snapshot and retain its thread head;
+        // the page's thread metadata is only a read-time cursor companion.
+        const latest = this.state.histories[conversationId];
+        if (!latest || latest.thread.id !== conversationId) return false;
+        if (latest.olderCursor !== current.olderCursor) return false;
+        const byId = new Map(
+          [...older.messages, ...latest.messages].map((view) => [
+            String(view.message.id),
+            view,
+          ]),
+        );
+        const messages = [...byId.values()].sort(
+          (left, right) => left.message.sequence - right.message.sequence,
+        );
+        if (this.disposed) return false;
+        this.emit({
+          histories: {
+            ...this.state.histories,
+            [conversationId]: {
+              thread: latest.thread,
+              messages,
+              olderCursor: older.olderCursor,
+              hasOlderMessages: older.hasOlderMessages,
+              // Branch-head metadata is complete for the conversation, not for
+              // the page window. Keep a newer refresh authoritative when an
+              // older request resolves after it.
+              branchHeads: latest.branchHeads ?? older.branchHeads,
+            },
           },
-        },
-      });
-      return true;
-    }).finally(() => this.olderReads.delete(conversationId));
+        });
+        return true;
+      })
+      .finally(() => this.olderReads.delete(conversationId));
     this.olderReads.set(conversationId, pending);
     return pending;
   }
@@ -782,10 +814,12 @@ export class WorkspaceExecution {
     return this.closing;
   }
   private async closeOwnedExecution() {
-    const targets = this.executingWork().filter((work) => !work.executionOwner).map((work) => ({
-      id: work.id,
-      expectedGeneration: work.generation,
-    }));
+    const targets = this.executingWork()
+      .filter((work) => !work.executionOwner)
+      .map((work) => ({
+        id: work.id,
+        expectedGeneration: work.generation,
+      }));
     for (const { id } of targets) this.stopping.add(id);
     for (const session of this.state.sessions) session.cancelled = true;
     const nativeStop = (async () => {

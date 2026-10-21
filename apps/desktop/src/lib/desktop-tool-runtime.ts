@@ -57,6 +57,7 @@ export function createDesktopToolExecutor(
   return async (sourceApproval, args) => {
     let approval = sourceApproval;
     const toolName = approval.action.split(/\s+/)[0];
+    const selectedComputer = options.computerPreference ?? { kind: "local" as const };
     const parsed = safeParseArgs(args);
     const checkProviderCall = async () => {
       if (options.shouldCancel?.()) throw new Error("This task was cancelled.");
@@ -75,13 +76,18 @@ export function createDesktopToolExecutor(
       const connectorId = typeof parsed.connectorId === "string" ? parsed.connectorId : "";
       const action = typeof parsed.action === "string" ? parsed.action : "";
       const payload = parsed.payload;
+      if (selectedComputer.kind === "instabox" && action === "google-drive.upload-artifact") {
+        throw new Error(
+          `Cloud · Instabox is selected for machine ${selectedComputer.machineId}, but remote artifact transfer is not ready. Mivlet will not read or upload an artifact from This PC or another cloud computer as a fallback.`,
+        );
+      }
       const accessCurrent = () => !options.shouldCancel?.() && (options.connectorAccessCurrent
         ? options.connectorAccessCurrent(connectorId) : options.connectorIds?.includes(connectorId));
       if (!options.workspaceId || !accessCurrent()) throw new Error("Select or mention this connected app first.");
       if (!action || !payload || typeof payload !== "object" || Array.isArray(payload)
         || Object.values(payload).some(value => typeof value !== "string")) throw new Error("Supply an action and a payload of string values.");
       const uploadSource = action === "google-drive.upload-artifact"
-        ? { ...(options.localComputerCurrent?.() ?? options.localComputer) } : undefined;
+        ? { ...(options.localComputerCurrent?.() ?? options.localComputer), workId: options.workId, workGeneration: options.workGeneration } : undefined;
       const checkUploadSource = () => {
         if (uploadSource && (!computerAuthorityCurrent(uploadSource, options.localComputerCurrent?.() ?? options.localComputer)
           || uploadSource.workspaceId !== options.workspaceId || !uploadSource.agentId)) {
@@ -118,6 +124,16 @@ export function createDesktopToolExecutor(
       return runOfficialConnector(gate, toolName, parsed, options, checkProviderCall);
     }
     if (
+      selectedComputer.kind === "instabox" &&
+      (toolName === "cloud-browser"
+        || toolName === "cloud-browser-action"
+        || parsed.location === "hosted")
+    ) {
+      throw new Error(
+        `Cloud · Instabox is selected for machine ${selectedComputer.machineId}, but its remote computer route is not ready. Connect the machine and retry; Mivlet will not use This PC or another cloud computer as a fallback.`,
+      );
+    }
+    if (
       (toolName === "cloud-browser"
         || toolName === "cloud-browser-action")
       && !options.hostedComputer?.ready
@@ -126,6 +142,22 @@ export function createDesktopToolExecutor(
     }
     const hostedShellRequested = parsed.location === "hosted";
     const computerTool = isLocalComputerTool(toolName, args);
+    // An Instabox preference is an explicit routing decision. Until the native
+    // Instabox adapter admits this exact machine and owns the matching remote
+    // tool, refuse every computer effect here. In particular, do not let the
+    // existing local computer or Cloudflare hosted route become a fallback.
+    if (
+      selectedComputer.kind === "instabox" &&
+      (computerTool ||
+        toolName === "run-shell" ||
+        toolName === "cloud-browser" ||
+        toolName === "cloud-browser-action" ||
+        hostedShellRequested)
+    ) {
+      throw new Error(
+        `Cloud · Instabox is selected for machine ${selectedComputer.machineId}, but its remote computer route is not ready. Connect the machine and retry; Mivlet will not use This PC or another cloud computer as a fallback.`,
+      );
+    }
     if (computerTool && !(options.localComputerCurrent?.() ?? options.localComputer)?.ready) {
       if (options.shouldCancel?.()) throw new Error("This task was cancelled.");
       await options.prepareLocalComputer?.(toolName);
@@ -461,6 +493,8 @@ async function runOnDesktop(
     approval: resolution,
     workspaceId: options.localComputer?.workspaceId ?? options.workspaceId,
     agentId: options.localComputer?.agentId,
+    workId: options.workId,
+    workGeneration: options.workGeneration,
     computerGeneration,
     mcpSessionId
   });

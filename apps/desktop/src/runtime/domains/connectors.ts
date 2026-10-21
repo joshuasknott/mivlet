@@ -180,7 +180,12 @@ export async function prepareRuntimeConnectorToolAction(
   connectorId: string,
   action: string,
   payload: Record<string, string>,
-  artifactSource?: { agentId: string; generation: number },
+  artifactSource?: {
+    agentId: string;
+    generation: number;
+    workId?: string;
+    workGeneration?: number;
+  },
 ) {
   return invokeNative<{
     action: ConnectorActionRequest;

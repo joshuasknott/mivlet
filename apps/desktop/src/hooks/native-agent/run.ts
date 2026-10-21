@@ -64,8 +64,7 @@ export interface NativeAgentRunHost {
   >;
   modelsRef: MutableRefObject<BackendModel[]>;
   createDurableRunWriterRef: MutableRefObject<
-    | ((threadId: string, attemptId: string) => DurableRunWriter)
-    | undefined
+    ((threadId: string, attemptId: string) => DurableRunWriter) | undefined
   >;
 }
 
@@ -105,7 +104,11 @@ export async function runNativeAgentTurn(
     }));
     return;
   }
-  setState((current) => ({ ...current, lastError: null, contextFailure: undefined }));
+  setState((current) => ({
+    ...current,
+    lastError: null,
+    contextFailure: undefined,
+  }));
   if (!backend) {
     setState((current) => ({
       ...current,
@@ -153,10 +156,7 @@ export async function runNativeAgentTurn(
   const isCurrentThread = () => threadIdRef.current === requestThreadId;
   let history: AgentTurnRequest["messages"] = [];
   let historyEntries: Awaited<
-    Extract<
-      Awaited<ReturnType<typeof loadContinuationHistory>>,
-      { ok: true }
-    >
+    Extract<Awaited<ReturnType<typeof loadContinuationHistory>>, { ok: true }>
   >["historyEntries"] = [];
   if (requestThreadId && loadConversationRef.current) {
     const loaded = await loadContinuationHistory({
@@ -220,11 +220,7 @@ export async function runNativeAgentTurn(
     setState((current) => ({
       ...current,
       lastError: plan.message,
-      contextFailure: contextFailureState(
-        plan,
-        request,
-        requestContextScope,
-      ),
+      contextFailure: contextFailureState(plan, request, requestContextScope),
       status: "failed",
       currentAttemptId: null,
     }));
@@ -280,9 +276,7 @@ export async function runNativeAgentTurn(
     contextFailure: undefined,
     status: "queued",
     recoverableAttempts: parentAttemptId
-      ? current.recoverableAttempts.filter(
-          (run) => run.id !== parentAttemptId,
-        )
+      ? current.recoverableAttempts.filter((run) => run.id !== parentAttemptId)
       : current.recoverableAttempts,
     currentAttemptId: attemptId,
     contextReceipts: {
@@ -304,13 +298,13 @@ export async function runNativeAgentTurn(
     parentAttemptId,
     contextReceipt: prepared.receipt,
     providerRoute,
+    computerPreference: control?.computerPreference,
     createdAt,
   });
   persistence.current = persisted;
   activePersistenceRef.current = persistence;
   const durableWriter = requestThreadId
-    ? (createDurableRunWriterRef.current?.(requestThreadId, attemptId) ??
-      null)
+    ? (createDurableRunWriterRef.current?.(requestThreadId, attemptId) ?? null)
     : null;
   persistence.setWriter(durableWriter);
   try {
@@ -529,9 +523,7 @@ export async function runNativeAgentTurn(
       execute: createComputerTaskExecutor(
         executeRef.current ??
           (async () => {
-            throw new Error(
-              "Tool execution pending approval in the shell.",
-            );
+            throw new Error("Tool execution pending approval in the shell.");
           }),
         (activity) => setState((current) => ({ ...current, activity })),
       ),
@@ -542,6 +534,8 @@ export async function runNativeAgentTurn(
       maxTurns: control?.maxTurns,
       attemptId,
       computer: options.computer,
+      workId: control?.workId,
+      workGeneration: control?.workGeneration,
       onRetry: () => {
         if (!session.persisted || persistence.stopped) return;
         session.persisted = {

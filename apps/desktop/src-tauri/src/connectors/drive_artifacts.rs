@@ -19,6 +19,10 @@ const DRIVE: &str = "google-drive";
 pub(crate) struct ArtifactSource {
     pub agent_id: String,
     pub generation: u64,
+    #[serde(default)]
+    pub work_id: Option<String>,
+    #[serde(default)]
+    pub work_generation: Option<u32>,
 }
 
 fn failure(message: &str) -> ConnectorCommandError {
@@ -64,6 +68,13 @@ pub(super) fn prepare(
     let source = source.ok_or_else(|| {
         failure("A saved agent's current computer is required for a deliverable upload.")
     })?;
+    crate::collaboration::validate_local_tool_route(
+        workspace,
+        &source.agent_id,
+        source.work_id.as_deref(),
+        source.work_generation,
+    )
+    .map_err(|e| failure(&e))?;
     computers
         .validate_target(workspace, &source.agent_id)
         .map_err(|e| failure(&e))?;

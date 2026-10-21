@@ -1,4 +1,5 @@
 import { Stack } from "@phosphor-icons/react/dist/csr/Stack";
+import { Desktop } from "@phosphor-icons/react/dist/csr/Desktop";
 import { useRef, type ReactNode } from "react";
 import { X } from "@phosphor-icons/react/dist/csr/X";
 import { Gear } from "@phosphor-icons/react/dist/csr/Gear";
@@ -24,7 +25,7 @@ export function SettingsModal({ activeTab, onSelectTab, onClose, children }: {
           {tabs.map((tab) => <button key={tab.id} ref={tab.id === activeTab ? activeTabRef : undefined} type="button"
             className={`settings-modal__tab${activeTab === tab.id ? " settings-modal__tab--active" : ""}`}
             aria-current={activeTab === tab.id ? "page" : undefined} onClick={() => onSelectTab(tab.id)}>
-            {tab.id === "general" ? <Gear size={18} aria-hidden="true" /> : tab.id === "providers" ? <PlugsConnected size={18} aria-hidden="true" /> : tab.id === "models" ? <Stack size={18} aria-hidden="true" /> : <ShieldCheck size={18} aria-hidden="true" />}
+            {tab.id === "general" ? <Gear size={18} aria-hidden="true" /> : tab.id === "providers" ? <PlugsConnected size={18} aria-hidden="true" /> : tab.id === "models" ? <Stack size={18} aria-hidden="true" /> : tab.id === "computers" ? <Desktop size={18} aria-hidden="true" /> : <ShieldCheck size={18} aria-hidden="true" />}
             {tab.label}</button>)}
         </nav>
       </aside>

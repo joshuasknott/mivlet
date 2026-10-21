@@ -109,6 +109,8 @@ export interface WorkAttachment {
   sha256?: string;
 }
 export interface CollaborationWorkItem {
+  /** Computer preference captured when this Work was created; absent only on legacy Work. */
+  computer?: import("./cloud-computer.js").AgentComputerPreference;
   repositoryBinding?: import("./coding").RepositoryWorkBinding;
   queue?: WorkQueue;
   outcomeGoal?: OutcomeGoal;

@@ -195,6 +195,8 @@ export interface ExecutionAttempt {
   contextReceipt?: ExecutionContextReceipt;
   /** Exact portable provider route selected before native provider egress. */
   providerRoute?: ProviderRouteExecutionBinding;
+  /** Computer preference captured with this attempt; never retarget on retry. */
+  computer?: import("./cloud-computer.js").AgentComputerPreference;
   turn: number;
   usage?: {
     inputTokens: number;
@@ -246,10 +248,7 @@ export type ProviderDriverKind =
   | "native-api";
 
 export type ProviderSetupKind =
-  | "browser"
-  | "provider-cli"
-  | "api-key"
-  | "custom";
+  "browser" | "provider-cli" | "api-key" | "custom";
 
 export interface ProviderSetup {
   kind: ProviderSetupKind;
@@ -578,6 +577,9 @@ export interface NativeCompletionRequest {
   providerRoute?: ProviderRouteExecutionBinding;
   /** Native screenshot session scope. Pixels never enter this request. */
   computer?: { workspaceId: string; agentId: string };
+  /** Durable Work binding captured when this attempt was admitted. */
+  workId?: string;
+  workGeneration?: number;
 }
 
 /** Workspace-fenced route authority carried unchanged from selection to egress. */
@@ -594,7 +596,12 @@ export interface ProviderRouteExecutionBinding {
  */
 export type BackendAgentEvent =
   | { type: "text-delta"; text: string }
-  | { type: "reasoning-summary"; text: string; itemId: string; summaryIndex: number }
+  | {
+      type: "reasoning-summary";
+      text: string;
+      itemId: string;
+      summaryIndex: number;
+    }
   | {
       /** Provider-owned read activity that never enters Mivlet's approval/execution gate. */
       type: "provider-tool";
@@ -692,6 +699,9 @@ export interface AgentTurnOptions {
   attemptId?: string;
   /** Exact local computer scope; native authority validates it independently. */
   computer?: { workspaceId: string; agentId: string };
+  /** Durable Work binding captured when this attempt was admitted. */
+  workId?: string;
+  workGeneration?: number;
   /** Max turns before the backend stops (safety). */
   maxTurns?: number;
   /** Maximum accepted tool calls across the whole run. */

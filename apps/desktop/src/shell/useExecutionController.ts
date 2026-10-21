@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
-import type { LocalComputerSnapshot } from "@mivlet/protocol";
+import type {
+  AgentComputerPreference,
+  LocalComputerSnapshot,
+} from "@mivlet/protocol";
 import { useHostedBrowserController } from "../hooks/useHostedBrowserController";
 import { useHostedComputer } from "../hooks/useHostedComputer";
 import { useLocalComputer } from "../hooks/useLocalComputer";
@@ -31,6 +34,9 @@ export function useExecutionController({
   threadId,
   executionAgentId,
   executionProviderId,
+  executionComputer,
+  executionWorkId,
+  executionWorkGeneration,
 }: {
   runtime: import("../hooks/useShellRuntime").ShellRuntime;
   approvalGate: import("@mivlet/connectors/native-api/tool-executor").ToolApprovalGate;
@@ -42,6 +48,10 @@ export function useExecutionController({
   threadId?: string;
   executionAgentId?: string;
   executionProviderId?: string;
+  /** Immutable computer choice captured by WorkspaceExecution admission. */
+  executionComputer?: AgentComputerPreference;
+  executionWorkId?: string;
+  executionWorkGeneration?: number;
 }) {
   const executionActivityRef = useRef<
     (approvalId: string, tool: string) => void
@@ -61,6 +71,14 @@ export function useExecutionController({
   const activeAgentId = runtime.agents.find(
     (profile) => profile.id === requestedAgentId,
   )?.id;
+  // WorkspaceExecution stores the immutable route on admission. If an older
+  // session has no captured value, local is the only safe legacy default.
+  const computerPreference: AgentComputerPreference = executionComputer
+    ? executionComputer.kind === "instabox"
+      ? { ...executionComputer }
+      : { kind: "local" }
+    : { kind: "local" };
+  const usesLocalComputer = computerPreference.kind === "local";
   const connectorAccessRef = useRef({
     workspaceId: activeWorkspaceId,
     agentId: activeAgentId,
@@ -94,7 +112,9 @@ export function useExecutionController({
       ),
     ),
   };
-  const hostedScope = resolveHostedComputerScope(runtime.accountWorkspaceStatus);
+  const hostedScope = resolveHostedComputerScope(
+    runtime.accountWorkspaceStatus,
+  );
   const hostedWorkspaceId = hostedScope?.workspaceId ?? null;
   const activeHostedDeviceId = hostedScope?.deviceId ?? null;
 
@@ -110,7 +130,7 @@ export function useExecutionController({
     generation: number;
   } | null>(null);
   localComputerRef.current =
-    activeWorkspaceId && activeAgentId
+    usesLocalComputer && activeWorkspaceId && activeAgentId
       ? {
           workspaceId: activeWorkspaceId,
           agentId: activeAgentId,
@@ -164,6 +184,9 @@ export function useExecutionController({
   const executor = useMemo(
     () =>
       createDesktopToolExecutor(approvalGate, {
+        computerPreference,
+        workId: executionWorkId,
+        workGeneration: executionWorkGeneration,
         connectorIds: connectorAccessRef.current.ids,
         connectorAccessCurrent: (connectorId) =>
           connectorAccessRef.current.workspaceId === activeWorkspaceId &&
@@ -219,7 +242,7 @@ export function useExecutionController({
           ),
         onExecuting: (approval, tool) =>
           executionActivityRef.current(approval.id, tool),
-        ...(activeWorkspaceId && activeAgentId
+        ...(usesLocalComputer && activeWorkspaceId && activeAgentId
           ? {
               localComputer: {
                 workspaceId: activeWorkspaceId,
@@ -266,6 +289,10 @@ export function useExecutionController({
       hostedComputer.node?.status,
       hostedComputer.node?.keepAlive,
       queueToolApproval,
+      computerPreference,
+      usesLocalComputer,
+      executionWorkId,
+      executionWorkGeneration,
     ],
   );
 
@@ -274,7 +301,7 @@ export function useExecutionController({
   }, [approvalGate, runtime.clearBackendToolApprovals]);
   const agent = useNativeAgent({
     computer:
-      activeWorkspaceId && activeAgentId
+      usesLocalComputer && activeWorkspaceId && activeAgentId
         ? { workspaceId: activeWorkspaceId, agentId: activeAgentId }
         : undefined,
     contextOwner: runtime.accountWorkspaceStatus.activeContextOwner,
@@ -350,7 +377,7 @@ export function useExecutionController({
       cancelRequestedRef.current = false;
     },
     beginConnectorTurn: async () => {
-      const computer = await localComputer.refresh();
+      const computer = usesLocalComputer ? await localComputer.refresh() : null;
       computerTurnRef.current = computer
         ? {
             workspaceId: computer.workspaceId,
