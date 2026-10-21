@@ -3,8 +3,9 @@ use super::{
     thread_is_owned, validate_id_store, validate_payload_store, ArchiveLocalProjectRequest,
     AuthorizedCommandScope, BindLocalProjectRunAuthorRequest, ChatBinding, Conversation,
     CreateLocalProjectRequest, Kind, LocalProject, LocalProjectPayload, LocalProjectRow,
-    LocalProjectRunAuthorRow, MivletAgentProfile, Participant, RunAuthorPayload, Store, StoreError,
-    Team, UpdateLocalProjectRequest, MAX_ID_CHARACTERS, MAX_NAME_CHARACTERS, MAX_PROJECTS,
+    LocalProjectRunAuthor, LocalProjectRunAuthorRow, MivletAgentProfile, Participant,
+    RunAuthorPayload, Store, StoreError, Team, UpdateLocalProjectRequest, MAX_ID_CHARACTERS,
+    MAX_NAME_CHARACTERS, MAX_PROJECTS,
 };
 pub(crate) fn create_at(
     tx: &rusqlite::Connection,
