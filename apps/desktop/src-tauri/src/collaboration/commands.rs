@@ -530,7 +530,9 @@ pub(super) fn apply(ctx: &Context<'_>, command: Command) -> Result<()> {
         } => {
             let item = ctx.item(&id)?;
             if let Some(expected) = expected_generation {
-                if item.generation != expected || !item.status.executing() {
+                if item.generation != expected
+                    || (!item.status.executing() && item.status != WorkStatus::Queued)
+                {
                     return Ok(());
                 }
             }

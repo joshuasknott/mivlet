@@ -821,6 +821,61 @@ fn generation_fenced_stop_work_is_a_noop_after_remount_recovery() {
 }
 
 #[test]
+fn generation_fenced_stop_work_cancels_exact_queued_request() {
+    fixture(&store(), |ctx| {
+        group(ctx, "group")?;
+        work::start(
+            ctx,
+            "queued".into(),
+            "group".into(),
+            "lead".into(),
+            "Later request".into(),
+            false,
+            None,
+            None,
+        )?;
+        assert_eq!(ctx.item("queued")?.status, WorkStatus::Queued);
+        assert_eq!(ctx.item("queued")?.generation, 1);
+
+        // A stale queued caller must remain fenced just like an executing one.
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "queued".into(),
+                expected_generation: Some(0),
+            },
+        )?;
+        assert_eq!(ctx.item("queued")?.status, WorkStatus::Queued);
+        assert_eq!(ctx.item("queued")?.generation, 1);
+
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "queued".into(),
+                expected_generation: Some(1),
+            },
+        )?;
+        let cancelled = ctx.item("queued")?;
+        assert_eq!(cancelled.status, WorkStatus::Cancelled);
+        assert_eq!(cancelled.generation, 2);
+
+        // The consumed generation cannot cancel or mutate the terminal item
+        // if a late retry arrives after the queued request was removed.
+        commands::apply(
+            ctx,
+            Command::StopWork {
+                id: "queued".into(),
+                expected_generation: Some(1),
+            },
+        )?;
+        let still_cancelled = ctx.item("queued")?;
+        assert_eq!(still_cancelled.status, WorkStatus::Cancelled);
+        assert_eq!(still_cancelled.generation, 2);
+        Ok(())
+    });
+}
+
+#[test]
 fn generation_fenced_stop_work_does_not_cancel_a_continued_assignment() {
     let store = store();
     fixture(&store, |ctx| {
