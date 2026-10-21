@@ -39,7 +39,9 @@ export function commonRouteChunk(id: string): string | undefined {
   // inactive views. Do not include hosted-computer helpers: execution also owns
   // them. History, artifact preview and CopyButton have conversation accounting.
   if (/\/src\/shell\/ComputerInspector\.tsx$/.test(path)
-    || /\/src\/components\/agents\/(?:LiveWorkRail|NativeComputerPanel)\.tsx$/.test(path)
+    || /\/src\/components\/agents\/(?:LiveWorkRail|NativeComputerPanel|CloudComputerPanel|AgentComputerChoice)\.tsx$/.test(path)
+    || /\/src\/hooks\/(?:useCloudComputer|useCloudViewer)\.ts$/.test(path)
+    || /\/src\/runtime\/domains\/cloud-computers\.ts$/.test(path)
     || /\/src\/components\/navigation\/WorkspaceMemories\.tsx$/.test(path)
     || /\/src\/components\/navigation\/workspace-memories\.css$/.test(path)
     || /\/src\/components\/conversation\/SideChats\.tsx$/.test(path)
