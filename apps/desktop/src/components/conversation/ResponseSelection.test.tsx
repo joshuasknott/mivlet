@@ -7,6 +7,7 @@ import {
   waitFor,
   within,
 } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import {
   afterAll,
   afterEach,
@@ -263,6 +264,75 @@ describe("response contextual actions", () => {
     expect(screen.queryByRole("toolbar")).toBeNull();
     expect(content).toHaveFocus();
     expect(window.getSelection()?.isCollapsed).toBe(true);
+  });
+
+  it("keeps the portal actions in tab order before the following response control", async () => {
+    const user = userEvent.setup();
+    mocks.invoke.mockResolvedValue({
+      sourceRevision: "revision-1",
+      reference: "Verified source revision-1",
+      selection: "Selected passage.",
+    });
+    const props = {
+      text: "Selected passage.",
+      workspaceId: "workspace",
+      conversationId: "chat",
+      runId: "run",
+      agentId: "agent",
+      responseRevisionId: "revision-1",
+      streaming: false,
+      onDraft: vi.fn(),
+      onAskSideChat: vi.fn().mockResolvedValue(undefined),
+      onSaveMemory: vi.fn().mockResolvedValue(undefined),
+      children: <span>Selected passage.</span>,
+    };
+    render(
+      <>
+        <button type="button">Previous response control</button>
+        <ResponseSelection {...props} />
+        <button type="button" style={{ display: "none" }}>
+          Hidden response control
+        </button>
+        <button type="button">Following response control</button>
+      </>,
+    );
+    const content = screen.getByLabelText(
+      "Response content; select a passage for actions",
+    );
+    await user.tab();
+    await user.tab();
+    expect(content).toHaveFocus();
+    const range = document.createRange();
+    range.selectNodeContents(content.firstElementChild!);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.pointerUp(content);
+    await screen.findByRole("toolbar", { name: "Selected response actions" });
+    expect(content).toHaveFocus();
+
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Add to chat" })).toHaveFocus();
+    await user.tab();
+    expect(
+      screen.getByRole("button", { name: "Ask in side chat" }),
+    ).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Add to memory" })).toHaveFocus();
+    await user.tab();
+    expect(
+      screen.getByRole("button", { name: "Following response control" }),
+    ).toHaveFocus();
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
+  it("returns to response content when reverse tabbing from the first action", async () => {
+    const user = userEvent.setup();
+    const { content } = setup();
+    const quote = screen.getByRole("button", { name: "Add to chat" });
+    act(() => quote.focus());
+
+    await user.tab({ shift: true });
+    expect(content).toHaveFocus();
   });
 
   it("dismisses cleared selections and outside clicks", () => {

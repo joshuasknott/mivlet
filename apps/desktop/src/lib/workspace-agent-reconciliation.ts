@@ -22,8 +22,10 @@ export function reconcileWorkspaceAgents(
     }
     if (!current) {
       if (!equal(base, native)) {
+        // The renderer deletion is a real concurrent roster edit. Keep it
+        // when native also changed this profile; otherwise a late native
+        // response would resurrect an agent the user already removed.
         conflict = true;
-        agents.push(native);
       }
       continue;
     }

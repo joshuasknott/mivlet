@@ -11,6 +11,74 @@ import { conversationUi } from "../../runtime/domains/conversation-ui";
 import { selectedSourcePassage } from "../../lib/response-selection";
 import "./response-selection.css";
 
+const focusableSelector = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "summary",
+  '[contenteditable="true"]',
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+function isFocusable(candidate: HTMLElement) {
+  if (
+    candidate.hidden ||
+    candidate.getAttribute("aria-hidden") === "true" ||
+    candidate.closest('[hidden], [aria-hidden="true"], [inert]') ||
+    candidate.matches(":disabled") ||
+    candidate.tabIndex < 0
+  ) {
+    return false;
+  }
+
+  for (
+    let element: HTMLElement | null = candidate;
+    element;
+    element = element.parentElement
+  ) {
+    const style = window.getComputedStyle(element);
+    if (
+      style.display === "none" ||
+      style.visibility === "hidden" ||
+      style.visibility === "collapse"
+    ) {
+      return false;
+    }
+  }
+
+  let disclosure = candidate.closest("details:not([open])");
+  while (disclosure) {
+    const summary = Array.from(disclosure.children).find(
+      (child) => child.tagName === "SUMMARY",
+    );
+    if (!summary?.contains(candidate)) return false;
+    disclosure =
+      disclosure.parentElement?.closest("details:not([open])") ?? null;
+  }
+  return true;
+}
+
+function nextFocusableAfter(
+  root: HTMLElement | null,
+  excluded: HTMLElement | null,
+) {
+  if (!root) return null;
+  return (
+    [...document.querySelectorAll<HTMLElement>(focusableSelector)].find(
+      (candidate) =>
+        !excluded?.contains(candidate) &&
+        isFocusable(candidate) &&
+        !root.contains(candidate) &&
+        Boolean(
+          root.compareDocumentPosition(candidate) &
+          Node.DOCUMENT_POSITION_FOLLOWING,
+        ),
+    ) ?? null
+  );
+}
+
 export function ResponseSelection({
   children,
   text,
@@ -217,6 +285,17 @@ export function ResponseSelection({
         aria-label="Response content; select a passage for actions"
         onPointerUp={inspect}
         onKeyUp={inspect}
+        onKeyDown={(event) => {
+          if (event.key !== "Tab" || !selected || !anchor) return;
+          const buttons = [
+            ...(toolbar.current?.querySelectorAll<HTMLButtonElement>(
+              "button:not(:disabled)",
+            ) ?? []),
+          ];
+          if (!buttons.length || event.shiftKey) return;
+          event.preventDefault();
+          buttons[0]?.focus();
+        }}
       >
         {children}
       </div>
@@ -231,6 +310,30 @@ export function ResponseSelection({
               style={position}
               onPointerDown={(event) => event.preventDefault()}
               onKeyDown={(event) => {
+                if (event.key === "Tab") {
+                  const buttons = [
+                    ...(toolbar.current?.querySelectorAll<HTMLButtonElement>(
+                      "button:not(:disabled)",
+                    ) ?? []),
+                  ];
+                  const index = buttons.indexOf(
+                    document.activeElement as HTMLButtonElement,
+                  );
+                  if (event.shiftKey && index === 0) {
+                    event.preventDefault();
+                    content.current?.focus();
+                  } else if (!event.shiftKey && index === buttons.length - 1) {
+                    const next = nextFocusableAfter(
+                      content.current?.parentElement ?? null,
+                      toolbar.current,
+                    );
+                    if (next) {
+                      event.preventDefault();
+                      next.focus();
+                    }
+                  }
+                  return;
+                }
                 if (
                   !["ArrowLeft", "ArrowRight", "Home", "End"].includes(
                     event.key,

@@ -92,4 +92,26 @@ describe("chat workspace snapshot writes", () => {
     expect(result.current.state.agents).toHaveLength(1);
     expect(api.save).toHaveBeenCalledTimes(1);
   });
+
+  it("preserves a local deletion when a late native response updates that agent", async () => {
+    let finish!: (result: WorkspaceManageResponse) => void;
+    api.manage.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    const { result } = renderHook(useHarness);
+    await waitFor(() => expect(result.current.runtimeSnapshotReady).toBe(true));
+    let mutation!: ReturnType<typeof result.current.manageWorkspaceFromChat>;
+    act(() => { mutation = result.current.manageWorkspaceFromChat(request); });
+    await waitFor(() => expect(api.manage).toHaveBeenCalled());
+    act(() => result.current.setState(current => ({
+      ...current,
+      agents: current.agents.filter(agent => agent.id !== lead.id),
+    })));
+    await act(async () => {
+      finish({
+        ...response(),
+        agents: [{ ...lead, instructions: "Native update" }, response().agents[1]],
+      });
+      await mutation;
+    });
+    expect(result.current.state.agents.map(agent => agent.id)).toEqual(["researcher"]);
+  });
 });

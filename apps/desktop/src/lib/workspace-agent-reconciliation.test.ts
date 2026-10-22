@@ -35,6 +35,16 @@ describe("workspace agent reconciliation", () => {
       .toEqual({ conflict: false, agents: [agent("new")] });
   });
 
+  it("does not resurrect a locally deleted agent when native also updates it", () => {
+    const retired = agent("retired");
+    const survivor = agent("survivor");
+    expect(reconcileWorkspaceAgents(
+      [retired, survivor],
+      [survivor],
+      [{ ...retired, instructions: "Native update" }, survivor],
+    )).toEqual({ conflict: true, agents: [survivor] });
+  });
+
   it("keeps a surviving agent when simultaneous deletions would empty the workspace", () => {
     const first = agent("first");
     const second = agent("second");
