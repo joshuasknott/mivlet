@@ -23,10 +23,13 @@ the minimum was corrected, and its browser prerequisite now appears on activatio
 The last inspected page had no browser console errors. No new motion was added.
 
 Live video, stream revocation, native child positioning/keyboard accessibility,
-and account transitions remain unaccepted. Native computer automation was not
-available in this environment; the browser app stopped at provider onboarding.
-The current native capture blocker is recorded instead of substituting the
-component fixture as native proof. Takeover is intentionally absent because the
+and account transitions remain unaccepted. Native computer automation recovered
+on 22 October, including after a fresh session reset. The actual native window
+was inspected and closed successfully; existing account configuration reached
+provider onboarding in the isolated test profile. Synthetic native dialog/vault
+acceptance also passed, including corrected Instabox-specific consent text.
+The [acceptance record](docs/architecture/instabox-computers.md#acceptance-attempt-on-22-october-2026)
+distinguishes those checks from authenticated native viewing. Takeover is absent because the
 implemented stream is view-only. Agent execution/files remain unavailable until
 a verified restricted remote runtime exists. This change must remain a draft.
 

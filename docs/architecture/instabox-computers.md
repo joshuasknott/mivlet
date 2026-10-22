@@ -12,6 +12,9 @@ the existing protected native Windows dialog with local computer input/capture
 fencing. The renderer never receives the key. Native custody is separate from
 model-provider credentials; the encrypted local store contains only connection,
 selection and operation metadata. There is no browser key-entry fallback.
+The dialog identifies Instabox, its API recipient and Windows protected storage;
+it does not reuse the webhook secret's one-use reference or ten-minute expiry
+notice. The key is saved only after account, usage and machine-list validation.
 
 Account validation is read-only. Machine creation is a separate explicit action
 and uses the standard Linux template without copying local files, provider
@@ -25,6 +28,30 @@ processes; it is not process termination. Disconnect removes Mivlet's key and
 preserves the remote machine, files and recovery evidence. It is not deletion or
 provider-side key revocation. Revoke a key through Instabox to invalidate other
 copies of that key.
+
+## Setup for the implemented features
+
+1. Run the native Windows build with Mivlet's public account configuration, sign
+   in, and connect a usable AI provider to enter the workspace. An Instabox key
+   does not replace the Mivlet account or model-provider connection.
+2. Use an activated user-owned Instabox account with the quota and template/spec
+   entitlements needed for the intended machine. Current account responses are
+   authoritative; this draft does not establish free capacity or paid access.
+3. Create an API key from Profile → API keys in the
+   [Instabox account dashboard](https://api.instabox.sh/). The implemented calls
+   need `machines:write`, which includes `machines:read`; no machine-delete or
+   image scopes are required. See the [integration guide](https://instabox.sh/docs/integrate)
+   and [current schema](https://api.instabox.sh/v1/openapi.json).
+4. In Settings → Computers, connect using the protected native dialog, then
+   select an existing computer or explicitly create one. Mivlet creates Linux
+   machines using `agent-browser`; it does not copy local credentials or files.
+   For viewing, both the machine and its desktop must already be running. Start
+   the desktop through Instabox first; this draft does not install/start that
+   service. See the [desktop guide](https://instabox.sh/docs/desktop).
+
+This enables the implemented lifecycle and view-only paths for live acceptance.
+Remote agent commands, desktop input and file transfer require the restricted
+runtime described below; additional account setup alone cannot enable them.
 
 ## Agent boundary
 
@@ -127,12 +154,31 @@ The public OpenAPI was refreshed on this date. Its link-expiry and machine-wide
 revocation semantics informed the shutdown checks; a schema read is not evidence
 of an authenticated provider response or successful stream termination.
 
-Windows Computer Use also failed before initialization with
+The first Windows Computer Use attempt failed before initialization with
 `failed to write kernel assets: The system cannot find the path specified.
-(os error 3)`, including after resetting its JavaScript session. Consequently,
-protected native entry, actual child-view placement/accessibility and guest IPC
-isolation were not observed interactively in this attempt. This tool failure is
-distinct from a defect demonstrated in the application.
+(os error 3)`, including after resetting its JavaScript session. A later attempt
+on the same date initialized successfully, including after a fresh reset, and
+inspected and closed the actual native Mivlet window. No tool installation or
+configuration was changed; the original cause remains unconfirmed.
+
+The account-free native dialog and Windows credential-store acceptance tests
+passed with synthetic material. The dialog test covers twelve scenarios,
+including Instabox-specific wording, validation/save, decline and Stop, plus
+masked input, capture-exclusion flags, control bounds, Enter/Escape/close,
+stale-save rejection and expiry. Vault round-trip cleanup confirmed the synthetic
+entry was absent afterward. These tests found and corrected webhook wording in
+the Instabox dialog and an outdated nonsecret validation-message assertion.
+They do not validate a real key, provider rejection or the authenticated UI path.
+All 1,243 native library tests also passed; 22 opt-in tests were ignored in that
+run, with the two protected-entry/vault tests run explicitly as described above.
+
+The hash-verified unsigned debug build and production renderer from `f29170c1`
+supplied the native window smoke evidence. With the existing public Mivlet
+account configuration, an isolated app/WebView profile reached AI provider
+setup. The corrected dialog was verified through the newly compiled native
+test executable, separately from that earlier app artifact. Actual child-view
+placement/accessibility and guest IPC isolation still need authenticated live
+viewer acceptance.
 
 Once a suitable account and native inspection are available, acceptance must
 cover cancel/invalid key entry, select/create, pause/resume, uncertain lifecycle

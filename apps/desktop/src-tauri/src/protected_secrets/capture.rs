@@ -184,10 +184,16 @@ pub(crate) fn prompt(
                 child
             };
         let content_width = width - 48;
+        let instabox = input.consumer == "instabox-computer-connection"
+            && input.purpose == "connect-instabox-account";
         let heading = make("STATIC", &input.label, 0, 20, 18, content_width, 26, 10);
         let reason = make(
             "STATIC",
-            &format!("Agent's reason: {}", input.reason),
+            &format!(
+                "{}: {}",
+                if instabox { "Reason" } else { "Agent's reason" },
+                input.reason
+            ),
             0,
             20,
             48,
@@ -201,6 +207,8 @@ pub(crate) fn prompt(
             "STATIC",
             &if cloud {
                 format!("Cloud-only connection: {}\r\nUse: one-call text tasks, without tools or local files", input.target_id)
+            } else if instabox {
+                "For: your Instabox account\r\nUse: computer management and view-only desktop access".to_owned()
             } else {
                 format!(
                     "For webhook: {}\r\nUse: verify incoming HMAC-SHA256 signatures",
@@ -218,6 +226,8 @@ pub(crate) fn prompt(
             "STATIC",
             if cloud {
                 "Sent directly over HTTPS, encrypted in cloud custody for 30 days or until revoked. Never saved in chat or WebView state. Provider billing applies."
+            } else if instabox {
+                "Saved in Windows protected storage; sent only to api.instabox.sh. Never in chat, WebView state or workspace files. Checking creates no computer."
             } else {
                 "Only Mivlet's native webhook verifier receives this value. Your agent receives a one-use reference. It expires in 10 minutes."
             },
@@ -232,6 +242,8 @@ pub(crate) fn prompt(
             "STATIC",
             if cloud {
                 "&Separate cloud API key"
+            } else if instabox {
+                "&Instabox API key"
             } else {
                 "&Signing secret"
             },
