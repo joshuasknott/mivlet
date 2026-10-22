@@ -284,7 +284,13 @@ describe("response contextual actions", () => {
       onDraft: vi.fn(),
       onAskSideChat: vi.fn().mockResolvedValue(undefined),
       onSaveMemory: vi.fn().mockResolvedValue(undefined),
-      children: <span>Selected passage.</span>,
+      children: (
+        <>
+          <a href="/source">Reference link</a>
+          <button type="button">Copy code</button>
+          <span>Selected passage.</span>
+        </>
+      ),
     };
     render(
       <>
@@ -303,13 +309,17 @@ describe("response contextual actions", () => {
     await user.tab();
     expect(content).toHaveFocus();
     const range = document.createRange();
-    range.selectNodeContents(content.firstElementChild!);
+    range.selectNodeContents(content.querySelector("span")!);
     window.getSelection()!.removeAllRanges();
     window.getSelection()!.addRange(range);
     fireEvent.pointerUp(content);
     await screen.findByRole("toolbar", { name: "Selected response actions" });
     expect(content).toHaveFocus();
 
+    await user.tab();
+    expect(screen.getByRole("link", { name: "Reference link" })).toHaveFocus();
+    await user.tab();
+    expect(screen.getByRole("button", { name: "Copy code" })).toHaveFocus();
     await user.tab();
     expect(screen.getByRole("button", { name: "Add to chat" })).toHaveFocus();
     await user.tab();
@@ -333,6 +343,45 @@ describe("response contextual actions", () => {
 
     await user.tab({ shift: true });
     expect(content).toHaveFocus();
+  });
+
+  it("returns to the last focusable response descendant on reverse tab", async () => {
+    const user = userEvent.setup();
+    render(
+      <ResponseSelection
+        text="Selected passage."
+        workspaceId="workspace"
+        conversationId="chat"
+        runId="run"
+        agentId="agent"
+        responseRevisionId="revision-1"
+        streaming={false}
+        onDraft={vi.fn()}
+        onAskSideChat={vi.fn().mockResolvedValue(undefined)}
+        onSaveMemory={vi.fn().mockResolvedValue(undefined)}
+      >
+        <>
+          <a href="/source">Reference link</a>
+          <button type="button">Copy code</button>
+          <span>Selected passage.</span>
+        </>
+      </ResponseSelection>,
+    );
+    const content = screen.getByLabelText(
+      "Response content; select a passage for actions",
+    );
+    content.focus();
+    const range = document.createRange();
+    range.selectNodeContents(content.querySelector("span")!);
+    window.getSelection()!.removeAllRanges();
+    window.getSelection()!.addRange(range);
+    fireEvent.pointerUp(content);
+    await screen.findByRole("toolbar", { name: "Selected response actions" });
+    const quote = screen.getByRole("button", { name: "Add to chat" });
+    act(() => quote.focus());
+
+    await user.tab({ shift: true });
+    expect(screen.getByRole("button", { name: "Copy code" })).toHaveFocus();
   });
 
   it("dismisses cleared selections and outside clicks", () => {

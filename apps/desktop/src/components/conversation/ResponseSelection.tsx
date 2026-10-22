@@ -60,6 +60,14 @@ function isFocusable(candidate: HTMLElement) {
   return true;
 }
 
+function focusableDescendants(root: HTMLElement | null) {
+  return root
+    ? [...root.querySelectorAll<HTMLElement>(focusableSelector)].filter(
+        isFocusable,
+      )
+    : [];
+}
+
 function nextFocusableAfter(
   root: HTMLElement | null,
   excluded: HTMLElement | null,
@@ -154,7 +162,11 @@ export function ResponseSelection({
       !content.current?.contains(selection.anchorNode) ||
       !content.current.contains(selection.focusNode)
     ) {
-      if (!toolbar.current?.contains(document.activeElement)) dismiss();
+      if (
+        !toolbar.current?.contains(document.activeElement) &&
+        !content.current?.contains(document.activeElement)
+      )
+        dismiss();
       return;
     }
     const quote = selection.toString().trim();
@@ -287,6 +299,12 @@ export function ResponseSelection({
         onKeyUp={inspect}
         onKeyDown={(event) => {
           if (event.key !== "Tab" || !selected || !anchor) return;
+          const descendants = focusableDescendants(content.current);
+          const active = document.activeElement;
+          if (
+            active !== (descendants[descendants.length - 1] ?? content.current)
+          )
+            return;
           const buttons = [
             ...(toolbar.current?.querySelectorAll<HTMLButtonElement>(
               "button:not(:disabled)",
@@ -321,7 +339,10 @@ export function ResponseSelection({
                   );
                   if (event.shiftKey && index === 0) {
                     event.preventDefault();
-                    content.current?.focus();
+                    const descendants = focusableDescendants(content.current);
+                    (
+                      descendants[descendants.length - 1] ?? content.current
+                    )?.focus();
                   } else if (!event.shiftKey && index === buttons.length - 1) {
                     const next = nextFocusableAfter(
                       content.current?.parentElement ?? null,
