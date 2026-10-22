@@ -11,13 +11,12 @@ export function ComputersSettings({ workspaceId, agentId, onOpenComputer }: {
 }) {
   const { status, pending, error, refresh, act } = useCloudComputer(workspaceId);
   const [machineId, setMachineId] = useState("");
-  const [creating, setCreating] = useState(false);
   const [name, setName] = useState("Mivlet computer");
-  const [confirmed, setConfirmed] = useState(false);
   const machine = status?.connected ? status.machine : null;
   const quotaFull = status?.usage?.machineLimit != null && status.usage.machineCount != null &&
     status.usage.machineCount >= status.usage.machineLimit;
   const blocked = pending || Boolean(status?.pendingAction);
+  const creationBlocked = blocked || quotaFull || Boolean(status?.error);
   return <div className="settings-stack computers-settings">
     <p className="settings-intro">Choose where your agents work.</p>
     <section className="settings-group__surface" aria-label="This PC">
@@ -35,15 +34,26 @@ export function ComputersSettings({ workspaceId, agentId, onOpenComputer }: {
         </span>
         {!status?.connected ? <button type="button" disabled={pending || !agentId || !status} onClick={() => agentId && void act({ kind: "connect", agentId })}>Connect Instabox</button> : null}
         {machine ? <div className="computers-settings__actions">
-          {onOpenComputer ? <button type="button" disabled={pending} onClick={onOpenComputer}>Open computer</button> : null}
+          {onOpenComputer ? <button type="button" disabled={blocked} onClick={onOpenComputer}>Open computer</button> : null}
           <button type="button" disabled={blocked || !["running", "suspended", "paused", "stopped"].includes(machine.status)} onClick={() => void act({ kind: machine.status === "running" ? "pause" : "resume", machineId: machine.id })}>{machine.status === "running" ? "Pause" : machine.status === "stopped" ? "Start" : "Resume"}</button>
           <button type="button" disabled={pending} onClick={() => void act({ kind: "disconnect" })}>Disconnect</button>
         </div> : null}
       </div>
       {!status?.connected ? <p className="computers-settings__note">Enter your API key in a protected Windows window. Checking it does not create a machine.</p> : <>
         <p className="computers-settings__note">Disconnect keeps your machine and files. Pause preserves remote processes.</p>
-        <details className="settings-disclosure" open={!machine || undefined}>
-          <summary>Choose a machine</summary>
+        {!machine ? <>
+          <form className="computers-settings__form" onSubmit={event => { event.preventDefault(); if (!creationBlocked && name.trim()) void act({ kind: "create", name: name.trim() }); }}>
+            <strong>Create a computer</strong>
+            <label htmlFor="instabox-name">Machine name</label>
+            <input id="instabox-name" required maxLength={80} value={name} disabled={creationBlocked} onChange={event => setName(event.target.value)} />
+            <p>Creates one Linux computer and starts its desktop under your Instabox plan and charges. No Mivlet provider keys, workspace files, or Instabox Vault secrets are copied.</p>
+            {status.usage?.machineCount != null && status.usage.machineLimit != null ? <small>{status.usage.machineCount} of {status.usage.machineLimit} machine slots used.</small> : <small>Instabox checks your account allowance before creation.</small>}
+            <button type="submit" disabled={creationBlocked || !name.trim()}>Create computer</button>
+          </form>
+          {quotaFull ? <p className="computers-settings__note">Your account has no free machine slots. Select an existing machine or manage your allowance in Instabox.</p> : null}
+        </> : null}
+        <details className="settings-disclosure">
+          <summary>Use an existing machine</summary>
           <div className="computers-settings__form">
             {status.machines.length ? <>
               <label htmlFor="instabox-machine">Existing machine</label>
@@ -53,16 +63,6 @@ export function ComputersSettings({ workspaceId, agentId, onOpenComputer }: {
               </select>
               <button type="button" disabled={blocked || !machineId} onClick={() => void act({ kind: "select", machineId })}>Use this machine</button>
             </> : <p>No machines found in your account.</p>}
-            {status.usage?.machineCount != null && status.usage.machineLimit != null ? <small>{status.usage.machineCount} of {status.usage.machineLimit} machine slots used.</small> : <small>Instabox checks your account allowance before creation.</small>}
-            <button type="button" disabled={blocked || quotaFull} aria-expanded={creating} onClick={() => setCreating(!creating)}>Create a machine…</button>
-            {quotaFull ? <p>Your account has no free machine slots. Select an existing machine or manage your allowance in Instabox.</p> : null}
-            {creating ? <form onSubmit={event => { event.preventDefault(); if (confirmed) void act({ kind: "create", name: name.trim() }); }}>
-              <label htmlFor="instabox-name">Machine name</label>
-              <input id="instabox-name" required maxLength={80} value={name} disabled={blocked} onChange={event => setName(event.target.value)} />
-              <p>Creates one Linux computer under your Instabox plan and its charges. No Mivlet provider keys, workspace files, or Instabox Vault secrets are copied.</p>
-              <label className="computers-settings__confirmation"><input type="checkbox" checked={confirmed} disabled={blocked} onChange={event => setConfirmed(event.target.checked)} />Create this machine in my own account.</label>
-              <button type="submit" disabled={blocked || !confirmed || !name.trim() || quotaFull}>Create computer</button>
-            </form> : null}
           </div>
         </details>
         <div className="computers-settings__actions">
@@ -76,7 +76,7 @@ export function ComputersSettings({ workspaceId, agentId, onOpenComputer }: {
         </details>
       </>}
     </section>
-    {status?.pendingAction ? <p role="status">{status.pendingAction} is awaiting confirmation. Check its result before another machine change.</p> : null}
+    {status?.pendingAction ? <p role="status">This computer change is not confirmed yet. Check its result before another machine change.</p> : null}
     {pending ? <p role="status">Checking your computer…</p> : null}
     {error || status?.error ? <p role="alert">{error || status?.error}</p> : null}
     <div className="computers-settings__actions"><button type="button" disabled={pending} onClick={() => void (status?.pendingAction ? act({ kind: "reconcile" }) : refresh())}>{status?.pendingAction ? "Check operation result" : "Refresh"}</button></div>

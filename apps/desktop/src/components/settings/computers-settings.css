@@ -9,10 +9,9 @@
 .computers-settings :is(button, input, select):focus-visible, .cloud-computer-panel button:focus-visible { outline: 2px solid var(--settings-accent, var(--ink)); outline-offset: 3px; }
 .computers-settings__note { color: var(--ink-muted); font-size: 12px; line-height: 1.6; margin: 14px 0; }
 .computers-settings__actions { display: flex; flex-wrap: wrap; gap: 8px; }
-.computers-settings__form, .computers-settings__form form { display: grid; gap: 12px; padding-block: 12px; min-width: 0; }
-.computers-settings__form input:not([type="checkbox"]), .computers-settings__form select { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
+.computers-settings__form { display: grid; gap: 12px; padding-block: 12px; min-width: 0; }
+.computers-settings__form input, .computers-settings__form select { width: 100%; min-height: 40px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: 8px; background: var(--surface); color: var(--ink); font: inherit; }
 .computers-settings__form p { line-height: 1.6; margin: 0; }
-.computers-settings__confirmation { display: flex; align-items: center; gap: 10px; min-height: 44px; }
 .cloud-computer-panel { padding: 20px; display: flex; flex-direction: column; gap: 16px; overflow: auto; min-width: 0; height: 100%; }
 .cloud-computer-panel header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .cloud-computer-panel h2 { margin: 0; font-size: 14px; }

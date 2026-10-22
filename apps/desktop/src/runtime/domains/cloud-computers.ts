@@ -1,4 +1,5 @@
 import { activeDataScope, hasTauriRuntime, invoke } from "../bridge";
+import { toRuntimeError } from "../errors";
 
 interface CloudMachine {
   id: string;
@@ -46,7 +47,11 @@ async function call<T>(
   if (!scope || scope.workspaceId !== request.workspaceId) {
     throw new Error("The active workspace changed. Reopen Computers settings.");
   }
-  const result = await invoke<T>(command, { request });
+  const result = await invoke<T>(command, { request }).catch(
+    (error: unknown) => {
+      throw toRuntimeError(error);
+    },
+  );
   if (scope !== activeDataScope()) {
     throw new Error(
       "The account or workspace changed. Refresh Computers settings.",

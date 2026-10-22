@@ -30,11 +30,15 @@ const DOC: &str = "instabox-computer.json";
 const MAX_PENDING: usize = 16;
 const MAX_MACHINES: usize = 100;
 const IDEMPOTENCY_TTL_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+const DESKTOP_START_WIDTH: u64 = 1280;
+const DESKTOP_START_HEIGHT: u64 = 800;
 static MUTATION_LOCK: Mutex<()> = Mutex::new(());
 
+mod create;
 mod metadata;
 mod status;
 mod transport;
+use create::*;
 use metadata::*;
 use status::{fetch_machines, status_inner};
 pub(super) use transport::{api_request, client, endpoint, map_status};
@@ -140,6 +144,10 @@ struct PendingOperation {
     body: Value,
     #[serde(default)]
     created_at_ms: i64,
+    /// Older pending creates did not include desktop startup approval. Keep
+    /// those recoverable without silently adding this new remote mutation.
+    #[serde(default)]
+    desktop_start_approved: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -446,7 +454,8 @@ pub async fn cloud_computer_create(
     let Some(key) = native_key(&credential_name)? else {
         return Err("Connect Instabox before creating a computer.".into());
     };
-    let _ = check_revision(&scope, request.expected_revision)?;
+    let _viewer_guard = viewer::close_for_lifecycle(&window).await?;
+    fence.with_current(|| check_revision(&scope, request.expected_revision).map(|_| ()))?;
     let me_result = api_request(reqwest::Method::GET, "/v1/me", key.as_str(), None, None).await;
     fence.with_current(|| Ok(()))?;
     let me = me_result?;
@@ -483,7 +492,13 @@ pub async fn cloud_computer_create(
     let idem = format!("mivlet-create-{}", random_id()?);
     let body = json!({"name": name, "templateId": "agent-browser", "vault": false, "secrets": [], "envSecrets": []});
     fence.with_current(|| Ok(()))?;
-    update_saved(&scope, Some(request.expected_revision), |saved| {
+    let pending_saved = update_saved(&scope, Some(request.expected_revision), |saved| {
+        if !saved.pending.is_empty() {
+            return Err(
+                "Finish checking the pending Instabox operation before creating another computer."
+                    .into(),
+            );
+        }
         if saved.pending.len() >= MAX_PENDING {
             return Err("An Instabox operation is already pending.".into());
         }
@@ -495,6 +510,7 @@ pub async fn cloud_computer_create(
             path: "/v1/machines".into(),
             body: body.clone(),
             created_at_ms: now_ms(),
+            desktop_start_approved: true,
         });
         Ok(())
     })?;
@@ -508,16 +524,87 @@ pub async fn cloud_computer_create(
     )
     .await;
     fence.with_current(|| Ok(()))?;
+    fence.with_current(|| check_revision(&scope, pending_saved.connection_revision).map(|_| ()))?;
     match result {
         Ok(value) => {
-            let machine_id =
-                pick_string(&value, &["machineId", "id"]).unwrap_or_else(|| "pending".into());
             let operation_id = pick_string(&value, &["operationId", "operation_id", "id"]);
-            update_saved(&scope, None, |saved| {
-                if let Some(p) = saved.pending.iter_mut().find(|p| p.idempotency_key == idem) {
-                    p.machine_id = machine_id;
-                    p.operation_id = operation_id;
+            let response_machine_id = operation_machine_id(&value);
+            let pending_revision =
+                update_saved(&scope, Some(pending_saved.connection_revision), |saved| {
+                    if let Some(p) = saved.pending.iter_mut().find(|p| p.idempotency_key == idem) {
+                        if let Some(machine_id) = response_machine_id.as_deref() {
+                            if is_real_machine_id(machine_id) {
+                                p.machine_id = machine_id.to_string();
+                            }
+                        }
+                        p.operation_id = operation_id.clone();
+                    }
+                    Ok(())
+                })?;
+            fence.with_current(|| Ok(()))?;
+            let Some(operation_id) = operation_id else {
+                return Err("Instabox did not return a create operation identity. Check the operation result before retrying.".into());
+            };
+            let operation = wait_for_operation(key.as_str(), &operation_id, &fence).await?;
+            let state = operation_state(&operation);
+            if state != "succeeded" {
+                if state == "failed" {
+                    update_saved(
+                        &scope,
+                        Some(pending_revision.connection_revision),
+                        |saved| {
+                            saved
+                                .pending
+                                .retain(|pending| pending.idempotency_key != idem);
+                            Ok(())
+                        },
+                    )?;
+                    return Err("Instabox could not create the computer. Check Instabox for details and try again.".into());
                 }
+                return status_inner(&request.workspace_id, &fence).await;
+            }
+            let pending = pending_revision
+                .pending
+                .iter()
+                .find(|pending| pending.idempotency_key == idem)
+                .ok_or_else(|| {
+                    "The Instabox create operation changed while it was running. Refresh and retry."
+                        .to_string()
+                })?;
+            let machine_id = create_machine_id(&value, &operation, pending)?;
+            let queued = update_saved(
+                &scope,
+                Some(pending_revision.connection_revision),
+                |saved| {
+                    let found = saved
+                        .pending
+                        .iter()
+                        .any(|pending| pending.idempotency_key == idem);
+                    if !found {
+                        return Err("The Instabox create operation changed while it was running. Refresh and retry.".into());
+                    }
+                    saved
+                        .pending
+                        .retain(|pending| pending.idempotency_key != idem);
+                    saved.selected_machine_id = Some(machine_id.clone());
+                    queue_desktop_start(saved, &machine_id)
+                },
+            )?;
+            fence.with_current(|| Ok(()))?;
+            let latest =
+                fence.with_current(|| check_revision(&scope, queued.connection_revision))?;
+            if latest.selected_machine_id.as_deref() != Some(machine_id.as_str()) {
+                return Err("The selected Instabox computer changed while creation was finishing. Refresh and retry.".into());
+            }
+            if let Err(error) = start_desktop(key.as_str(), &machine_id, &fence).await {
+                let mut status = status_inner(&request.workspace_id, &fence).await?;
+                status.error = Some(error);
+                return Ok(status);
+            }
+            update_saved(&scope, Some(queued.connection_revision), |saved| {
+                saved.pending.retain(|pending| {
+                    !(pending.action == "desktop-start" && pending.machine_id == machine_id)
+                });
                 Ok(())
             })?;
             fence.with_current(|| Ok(()))?;
@@ -582,6 +669,7 @@ async fn lifecycle(
             path: path.clone(),
             body: body.clone(),
             created_at_ms: now_ms(),
+            desktop_start_approved: false,
         });
         Ok(())
     })?;
@@ -700,24 +788,48 @@ pub async fn cloud_computer_reconcile(
             ..Default::default()
         });
     };
+    let _viewer_guard = viewer::close_for_lifecycle(&window).await?;
+    fence.with_current(|| check_revision(&scope, request.expected_revision).map(|_| ()))?;
     let mut keep = Vec::new();
     let mut expired_replay = false;
     let mut terminal_failure = false;
+    let mut created_machine: Option<String> = None;
+    let mut created_desktop_approved = false;
+    let mut desktop_retry_machine: Option<String> = None;
     for mut pending in saved.pending {
+        if pending.action == "desktop-start" {
+            if desktop_retry_machine.is_none() {
+                desktop_retry_machine = Some(pending.machine_id.clone());
+            }
+            keep.push(pending);
+            continue;
+        }
         if let Some(operation_id) = pending.operation_id.as_deref() {
             if !valid_id(operation_id) {
                 keep.push(pending);
                 continue;
             }
-            let path = format!("/v1/operations/{operation_id}");
-            let result = api_request(reqwest::Method::GET, &path, key.as_str(), None, None).await;
-            fence.with_current(|| Ok(()))?;
+            let result = wait_for_operation(key.as_str(), operation_id, &fence).await;
             match result {
                 Ok(value) => {
-                    fence.with_current(|| Ok(()))?;
-                    let state = pick_string(&value, &["status", "state"]).unwrap_or_default();
+                    let state = operation_state(&value);
                     if state == "failed" {
                         terminal_failure = true;
+                    } else if state == "succeeded" && pending.action == "create" {
+                        match create_machine_id(&Value::Null, &value, &pending) {
+                            Ok(machine_id) => {
+                                if created_machine.is_some() {
+                                    keep.push(pending);
+                                } else {
+                                    created_desktop_approved = pending.desktop_start_approved;
+                                    created_machine = Some(machine_id);
+                                }
+                            }
+                            Err(_) => {
+                                terminal_failure = true;
+                                keep.push(pending);
+                            }
+                        }
                     } else if state != "succeeded" {
                         keep.push(pending);
                     }
@@ -733,6 +845,7 @@ pub async fn cloud_computer_reconcile(
                 keep.push(pending);
                 continue;
             }
+            fence.with_current(|| check_revision(&scope, request.expected_revision).map(|_| ()))?;
             let result = api_request(
                 reqwest::Method::POST,
                 &pending.path,
@@ -747,6 +860,13 @@ pub async fn cloud_computer_reconcile(
                     fence.with_current(|| Ok(()))?;
                     pending.operation_id =
                         pick_string(&value, &["operationId", "operation_id", "id"]);
+                    if pending.action == "create" {
+                        if let Some(machine_id) = operation_machine_id(&value) {
+                            if is_real_machine_id(&machine_id) {
+                                pending.machine_id = machine_id;
+                            }
+                        }
+                    }
                     keep.push(pending);
                 }
                 Err(_) => keep.push(pending),
@@ -754,11 +874,44 @@ pub async fn cloud_computer_reconcile(
         }
     }
     fence.with_current(|| Ok(()))?;
-    update_saved(&scope, Some(request.expected_revision), |saved| {
+    let queued = update_saved(&scope, Some(request.expected_revision), |saved| {
         saved.pending = keep;
+        if let Some(machine_id) = created_machine.as_deref() {
+            saved.selected_machine_id = Some(machine_id.to_string());
+            if created_desktop_approved {
+                queue_desktop_start(saved, machine_id)?;
+            }
+        }
         Ok(())
     })?;
     fence.with_current(|| Ok(()))?;
+    let created_without_desktop = created_machine.is_some() && !created_desktop_approved;
+    let desktop_machine = created_machine.or(desktop_retry_machine);
+    if let Some(machine_id) = desktop_machine {
+        if created_without_desktop {
+            let mut status = status_inner(&request.workspace_id, &fence).await?;
+            status.error = Some(
+                "The computer was created and selected. Start its desktop in Instabox before opening it.".into(),
+            );
+            return Ok(status);
+        }
+        let latest = fence.with_current(|| check_revision(&scope, queued.connection_revision))?;
+        if latest.selected_machine_id.as_deref() != Some(machine_id.as_str()) {
+            return Err("The selected Instabox computer changed while reconciliation was finishing. Refresh and retry.".into());
+        }
+        if let Err(error) = start_desktop(key.as_str(), &machine_id, &fence).await {
+            let mut status = status_inner(&request.workspace_id, &fence).await?;
+            status.error = Some(error);
+            return Ok(status);
+        }
+        update_saved(&scope, Some(queued.connection_revision), |saved| {
+            saved.pending.retain(|pending| {
+                !(pending.action == "desktop-start" && pending.machine_id == machine_id)
+            });
+            Ok(())
+        })?;
+        fence.with_current(|| Ok(()))?;
+    }
     let mut status = status_inner(&request.workspace_id, &fence).await?;
     if expired_replay {
         status.error = Some(

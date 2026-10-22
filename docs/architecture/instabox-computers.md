@@ -49,12 +49,13 @@ copies of that key.
    and [current schema](https://api.instabox.sh/v1/openapi.json).
    The secret is shown once. Enter it directly into Mivlet's protected native
    dialog; never paste it into chat or a browser fixture.
-4. In Settings → Computers, connect using the protected native dialog, then
-   select an existing computer or explicitly create one. Mivlet creates Linux
-   machines using `agent-browser`; it does not copy local credentials or files.
-   For viewing, both the machine and its desktop must already be running. Start
-   the desktop through Instabox first; this draft does not install/start that
-   service. See the [desktop guide](https://instabox.sh/docs/desktop).
+4. In Settings → Computers, choose **Connect Instabox** and enter the key in the
+   protected native dialog. Review the machine name and account-charge notice,
+   then choose **Create computer**. This is the separate creation approval;
+   validating a key never creates a machine. Mivlet creates an `agent-browser`
+   Linux machine and starts its desktop without copying local credentials or
+   files. Existing machines remain available under **Use an existing machine**.
+   See the [desktop guide](https://instabox.sh/docs/desktop).
 
 This enables the implemented lifecycle and view-only paths for live acceptance.
 Remote agent commands, desktop input and file transfer require the restricted
@@ -103,6 +104,16 @@ must never turn an unknown write outcome into a fresh operation. Instabox exec
 is non-idempotent, which is another reason it is not exposed through this
 initial adapter. A stale record outside the provider's idempotency retention
 needs manual reconciliation, not replay.
+
+New creation approvals include starting the created machine's desktop. Mivlet
+waits for the create operation within a bounded request sequence, selects only
+that operation's exact machine, and persists a desktop-start continuation before
+sending it. Desktop startup is complete only when Instabox reports `running`.
+If creation or startup remains unresolved, **Check operation result** resumes
+the recorded work; ordinary status refreshes never replay it or create another
+machine. Older saved create operations do not acquire desktop-start approval.
+Instabox documents desktop start as repeat-safe, leaving an already running
+desktop alone; it is distinct from the lifecycle idempotency-key contract.
 
 Desktop viewing uses a native child WebView and a short-lived view-only stream.
 The bearer URL stays in native memory. React receives safe status and supplies

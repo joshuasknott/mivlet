@@ -20,14 +20,17 @@ describe("Computers settings", () => {
     await userEvent.click(screen.getByRole("button", { name: "Connect Instabox" }));
     expect(port.changeCloudComputer).toHaveBeenCalledExactlyOnceWith("workspace-one", 0, { kind: "connect", agentId: "agent-one" });
     expect(document.querySelector('input[type="password"]')).toBeNull();
-    expect(await screen.findByLabelText("Existing machine")).toBeVisible();
+    expect(await screen.findByRole("button", { name: "Create computer" })).toBeVisible();
+    expect(port.changeCloudComputer).toHaveBeenCalledTimes(1);
+    expect(port.changeCloudComputer).not.toHaveBeenCalledWith("workspace-one", 2, { kind: "create", name: "Mivlet computer" });
   });
 
   it("keeps creation explicit and enforces observed account capacity", async () => {
     port.cloudComputerStatus.mockResolvedValue({ ...connected, machine: null });
     render(<ComputersSettings workspaceId="workspace-one" agentId="agent-one" />);
-    expect(await screen.findByRole("button", { name: "Create a machine…" })).toBeDisabled();
+    expect(await screen.findByRole("button", { name: "Create computer" })).toBeDisabled();
     expect(screen.getByText(/no free machine slots/)).toBeVisible();
+    await userEvent.click(screen.getByText("Use an existing machine"));
     await userEvent.selectOptions(screen.getByLabelText("Existing machine"), machine.id);
     port.changeCloudComputer.mockResolvedValue(connected);
     await userEvent.click(screen.getByRole("button", { name: "Use this machine" }));
@@ -63,14 +66,11 @@ describe("Computers settings", () => {
     expect(port.changeCloudComputer).toHaveBeenLastCalledWith("workspace-one", 2, { kind: "reconcile" });
   });
 
-  it("requires a separate acknowledgement and submits creation only once", async () => {
+  it("keeps creation as one explicit approval and submits only once", async () => {
     port.cloudComputerStatus.mockResolvedValue({ ...connected, machine: null, machines: [], usage: { ...connected.usage!, machineCount: 0 } });
     port.changeCloudComputer.mockReturnValue(new Promise(() => {}));
     render(<ComputersSettings workspaceId="workspace-one" agentId="agent-one" />);
-    await userEvent.click(await screen.findByRole("button", { name: "Create a machine…" }));
-    expect(screen.getByRole("button", { name: "Create computer" })).toBeDisabled();
-    await userEvent.click(screen.getByRole("checkbox", { name: "Create this machine in my own account." }));
-    await userEvent.dblClick(screen.getByRole("button", { name: "Create computer" }));
+    await userEvent.dblClick(await screen.findByRole("button", { name: "Create computer" }));
     expect(port.changeCloudComputer).toHaveBeenCalledTimes(1);
     expect(port.changeCloudComputer).toHaveBeenCalledWith("workspace-one", 2, { kind: "create", name: "Mivlet computer" });
   });
@@ -85,6 +85,18 @@ describe("Computers settings", () => {
     await userEvent.click(screen.getByRole("button", { name: "Disconnect" }));
     expect(port.changeCloudComputer).toHaveBeenCalledWith("workspace-one", 2, { kind: "disconnect" });
     expect(screen.queryByRole("button", { name: /delete/i })).toBeNull();
+  });
+
+  it("keeps the existing-machine chooser available for switching", async () => {
+    const alternate = { id: "machine-two", name: "Writing computer", status: "stopped" };
+    port.cloudComputerStatus.mockResolvedValue({ ...connected, machines: [machine, alternate] });
+    port.changeCloudComputer.mockResolvedValue({ ...connected, machine: alternate, selectedMachineId: alternate.id, machines: [machine, alternate] });
+    render(<ComputersSettings workspaceId="workspace-one" agentId="agent-one" onOpenComputer={() => {}} />);
+    await screen.findByRole("button", { name: "Open computer" });
+    await userEvent.click(screen.getByText("Use an existing machine"));
+    await userEvent.selectOptions(screen.getByLabelText("Existing machine"), alternate.id);
+    await userEvent.click(screen.getByRole("button", { name: "Use this machine" }));
+    expect(port.changeCloudComputer).toHaveBeenCalledWith("workspace-one", 2, { kind: "select", machineId: alternate.id });
   });
 
   it("keeps uncertain effects pending and offers reconciliation instead of duplicate changes", async () => {
@@ -102,6 +114,15 @@ describe("Computers settings", () => {
     expect(await screen.findByRole("alert")).toHaveTextContent("revoked");
     await userEvent.click(screen.getByRole("button", { name: "Refresh" }));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+  it("does not offer a second creation while the created machine's status is unavailable", async () => {
+    port.cloudComputerStatus.mockResolvedValue({ ...connected, machine: null, usage: null, error: "Instabox is temporarily unavailable. Try again shortly." });
+    render(<ComputersSettings workspaceId="workspace-one" agentId="agent-one" />);
+    const create = await screen.findByRole("button", { name: "Create computer" });
+    expect(create).toBeDisabled();
+    await userEvent.click(create);
+    expect(port.changeCloudComputer).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Refresh" })).toBeEnabled();
   });
   it("allows key recovery while an operation still needs reconciliation", async () => {
     port.cloudComputerStatus.mockResolvedValue({ ...connected, machine: null, pendingAction: "create", error: "Instabox rejected this API key." });

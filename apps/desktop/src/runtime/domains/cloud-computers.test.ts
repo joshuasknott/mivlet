@@ -26,6 +26,18 @@ it("rejects a different workspace before dispatch", async () => {
   ).rejects.toThrow("workspace changed");
   expect(bridge.invoke).not.toHaveBeenCalled();
 });
+it("preserves safe native prerequisite errors for setup recovery", async () => {
+  bridge.invoke.mockRejectedValue(
+    "This Instabox account has reached its computer limit.",
+  );
+  await expect(
+    changeCloudComputer(scope.workspaceId, 4, {
+      kind: "create",
+      name: "Example",
+    }),
+  ).rejects.toThrow("This Instabox account has reached its computer limit.");
+  expect(bridge.invoke).toHaveBeenCalledOnce();
+});
 it("rejects late responses after an account transition, even in the same workspace", async () => {
   bridge.invoke.mockImplementation(async () => {
     bridge.activeDataScope.mockReturnValue({ ...scope });

@@ -7,13 +7,28 @@ use super::API_BASE;
 const MAX_RESPONSE_BYTES: usize = 256 * 1024;
 
 pub fn endpoint(path: &str) -> Result<reqwest::Url, String> {
-    let query_ok = path.strip_prefix("/v1/machines?").is_some_and(|query| {
+    let query_ok = if let Some(query) = path.strip_prefix("/v1/machines?") {
         !query.is_empty()
             && query.len() <= 512
             && query
                 .bytes()
                 .all(|b| b.is_ascii_alphanumeric() || b"%=&_-.:~".contains(&b))
-    });
+    } else if let Some(rest) = path.strip_prefix("/v1/operations/") {
+        rest.split_once('?').is_some_and(|(operation_id, query)| {
+            !operation_id.is_empty()
+                && operation_id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b"_-:.".contains(&b))
+                && query.strip_prefix("wait=").is_some_and(|wait| {
+                    !wait.is_empty()
+                        && wait.len() <= 8
+                        && wait.bytes().all(|b| b.is_ascii_alphanumeric())
+                        && (wait.ends_with('s') || wait.ends_with("ms"))
+                })
+        })
+    } else {
+        false
+    };
     if !path.starts_with('/') || path.contains("..") || (path.contains('?') && !query_ok) {
         return Err("Instabox request path is invalid.".into());
     }

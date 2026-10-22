@@ -1,5 +1,17 @@
 # Instabox computer integration visual verification
 
+The simplified setup shows the editable machine name, account-charge and
+desktop-start disclosure, and one **Create computer** approval immediately after
+connection. Existing machines remain under a collapsed chooser, including when
+a machine is already selected. Real-component fixtures were inspected at
+1280 × 720, 760 × 800 and 390 × 844. Narrow keyboard traversal scrolls the Create
+button into view with visible focus and no horizontal body overflow. Captures
+are `output/instabox/simple-setup-compact.png` and
+`output/instabox/simple-setup-narrow-focus.png`. These are mocked native metadata,
+not live provider or native-window acceptance. Component regressions establish
+that connection does not create a machine and pending/quota guards block a
+second creation.
+
 final result: blocked for native/live acceptance; inspected component layouts pass.
 
 The ImageGen target is `output/instabox/visual-target.png`, generated from the
