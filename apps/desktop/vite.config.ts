@@ -78,7 +78,11 @@ export default defineConfig({
     // Keep conversation-only styles beside the lazy ConversationPane graph so
     // the shell's base stylesheet remains covered by its existing ceiling.
     cssCodeSplit: true,
-    terserOptions: { maxWorkers: 2, ecma: 2020, compress: { passes: 3 } },
+    terserOptions: {
+      maxWorkers: 2,
+      ecma: 2020,
+      compress: { passes: 3, reduce_funcs: false },
+    },
     chunkSizeWarningLimit: 600,
     rollupOptions: {
       output: {
