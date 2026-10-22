@@ -11,6 +11,7 @@ import { AgentAvatar, DEFAULT_AGENT_COLOR } from "./agent-icons";
 import { AVATAR_COLOURS, avatarVariant, createAvatarSeed } from "../../lib/blob-avatar";
 
 import { AgentAppearancePicker } from "./AgentAppearancePicker";
+import { AgentComputerChoice } from "./AgentComputerChoice";
 const AgentLearningDialog = lazy(() => import("./AgentLearningDialog").then((module) => ({ default: module.AgentLearningDialog })));
 import { ModelPicker } from "../ModelPicker";
 
@@ -87,6 +88,7 @@ export function AgentEditor({
   onSkillsChange,
   onUseSkill,
   presentation = "modal",
+  workspaceId,
 }: {
   open: boolean;
   agent: MivletAgentProfile | null;
@@ -99,6 +101,7 @@ export function AgentEditor({
   onSkillsChange?: (tasks: MivletLearnedTask[]) => void;
   onUseSkill?: (task: MivletLearnedTask) => void;
   presentation?: "modal" | "panel";
+  workspaceId?: string;
 }) {
   const [draft, setDraft] = useState<AgentDraft>(emptyDraft);
   const modalRef = useRef<HTMLDivElement>(null);
@@ -134,6 +137,8 @@ export function AgentEditor({
       reasoningEffort: agent.reasoningEffort,
       fastMode: agent.fastMode,
       notificationsEnabled: agent.notificationsEnabled !== false,
+      computer: agent.computer,
+      computerPreferenceError: agent.computerPreferenceError,
       icon: "agent",
       iconColor: agent.iconColor || DEFAULT_AGENT_COLOR,
       avatarSeed: agent.avatarSeed ?? `blob-v1:${agent.id}`,
@@ -214,6 +219,7 @@ export function AgentEditor({
           </label>
 
           <div className="agent-editor__model-settings">
+            <AgentComputerChoice workspaceId={workspaceId} value={draft.computer} invalid={Boolean(draft.computerPreferenceError)} onChange={(computer) => setDraft(current => ({ ...current, computer, computerPreferenceError: undefined }))} />
             <div className="agent-editor__field agent-editor__model"><span>Model</span>
               <ModelPicker models={models} selectedId={draft.modelId} label={models.find((model) => model.id === draft.modelId)?.label ?? (draft.modelId ? "Unavailable model" : "Automatic")}
                 effort={draft.reasoningEffort} fastMode={draft.fastMode} onFastModeChange={(fastMode) => setDraft((current) => ({ ...current, fastMode }))}

@@ -778,6 +778,18 @@ impl NativeIdentityDispatch {
             operation,
         )
     }
+
+    /// Poll a native prompt's account fence without treating a concurrent
+    /// identity transaction as a cancellation. A prompt owns its message
+    /// thread and can check again on the next timer tick; dispatch callers
+    /// must continue using `with_current`, which remains fail-fast.
+    pub(crate) fn poll_current(&self) -> Result<bool, String> {
+        poll_identity_dispatch(
+            &IDENTITY_GENERATION,
+            self.snapshot.generation,
+            self.expires_at,
+        )
+    }
 }
 fn try_identity_dispatch<T>(
     generation: &Mutex<u64>,
@@ -794,6 +806,31 @@ fn try_identity_dispatch<T>(
         );
     }
     operation()
+}
+
+fn poll_identity_dispatch(
+    generation: &Mutex<u64>,
+    expected: u64,
+    expires_at: u64,
+) -> Result<bool, String> {
+    if expires_at <= now_epoch() {
+        return Err(
+            "Account identity expired or changed; no new browser input was dispatched.".into(),
+        );
+    }
+    let guard = match generation.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::WouldBlock) => return Ok(false),
+        Err(std::sync::TryLockError::Poisoned(_)) => {
+            return Err("Mivlet account state is unavailable.".into())
+        }
+    };
+    if *guard != expected || expires_at <= now_epoch() {
+        return Err(
+            "Account identity expired or changed; no new browser input was dispatched.".into(),
+        );
+    }
+    Ok(true)
 }
 
 #[cfg(test)]

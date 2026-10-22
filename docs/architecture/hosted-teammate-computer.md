@@ -4,6 +4,10 @@
 > Cloudflare computer and browser endpoints, but this checkout has not
 > provisioned or live-validated their production dependencies.
 
+The separate [user-owned Instabox integration](instabox-computers.md) connects
+directly from the native client. It does not use or activate this Cloudflare
+runner, and does not establish parity with its gated execution capabilities.
+
 ## Boundary
 
 Convex records optional provisioning state for a workspace/teammate pair and

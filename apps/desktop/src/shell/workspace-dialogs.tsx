@@ -235,6 +235,7 @@ export function WorkspaceDialogs({
       {agentEditor && !nav.projectDetailsId ? (
         <Suspense fallback={null}>
           <AgentEditor
+            workspaceId={service.workspaceId}
             presentation={agentEditor.id ? "panel" : "modal"}
             open
             agent={
@@ -281,6 +282,7 @@ export function WorkspaceDialogs({
         >
           <Suspense fallback={null}>
             <SettingsPage
+              onOpenComputer={runtime.agents[0] ? () => { setSettings(false); nav.openCloudComputer(runtime.agents[0].id); } : undefined}
               runtime={runtime}
               theme={theme}
               onThemeChange={onTheme}

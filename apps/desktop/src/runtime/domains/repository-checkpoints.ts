@@ -91,6 +91,7 @@ export async function executeCheckpointAction(
     workspaceId: action.target.workspaceId,
     agentId: action.target.agentId,
     computerGeneration: action.target.expectedGeneration,
+    manualLocalAuthority: true,
   });
   if (!result?.ok)
     throw new Error(

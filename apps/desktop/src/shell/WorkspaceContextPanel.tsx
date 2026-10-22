@@ -351,6 +351,7 @@ export function WorkspaceContextPanel({
         nav.computer ? (
           <Suspense fallback={null}>
             <ComputerInspector
+              cloud={nav.cloudComputer}
               key={nav.computer}
               agentId={nav.computer}
               runtime={runtime}

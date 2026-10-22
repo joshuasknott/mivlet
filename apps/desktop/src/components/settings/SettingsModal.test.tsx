@@ -11,6 +11,7 @@ const TAB_TITLES: Record<SettingsTab, string> = {
   general: "General",
   providers: "Providers",
   models: "Models",
+  computers: "Computers",
   usage: "Usage",
   privacy: "Memory",
 };

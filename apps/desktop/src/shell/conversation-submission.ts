@@ -141,6 +141,11 @@ export function createConversationSubmission({
       );
       return;
     }
+    if (responder.computerPreferenceError === "invalid") {
+      setError("The selected Instabox computer preference is invalid. Re-select a connected machine before sending.");
+      return;
+    }
+    const usesLocalComputer = responder.computer?.kind !== "instabox";
     if (
       composer.attachments.some(
         (attachment) =>
@@ -172,7 +177,7 @@ export function createConversationSubmission({
         submissionScope.current.responderId === expectedResponder;
       await runtime.flushSnapshot();
       await service.refresh();
-      if (mentionedBuiltinPlugins(prompt).length)
+      if (usesLocalComputer && mentionedBuiltinPlugins(prompt).length)
         await localComputer.prepareForTool("read-file");
       if (project) {
         const sourceIds = composer.attachments.flatMap((attachment) =>
@@ -203,7 +208,9 @@ export function createConversationSubmission({
           throw new Error(
             "Choose this agent as the recipient before staging files for its request.",
           );
-        const prepared = composer.attachments.length
+        if (!usesLocalComputer && composer.attachments.length)
+          throw new Error("Cloud · Instabox is selected, but remote file transfer is not ready. Remove the file inputs or reconnect the selected machine before sending.");
+        const prepared = usesLocalComputer && composer.attachments.length
           ? await prepareExecutionAttachments(
               composer.attachments,
               localComputer,

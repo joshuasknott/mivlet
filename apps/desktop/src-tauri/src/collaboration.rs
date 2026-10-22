@@ -105,6 +105,54 @@ pub(crate) fn project_changed(
 fn invalid(message: &str) -> StoreError {
     StoreError::Invalid(message.into())
 }
+
+/// Native source of truth for computer routing. Renderer computer hints are
+/// never sufficient: every local computer tool must identify the durable Work
+/// whose captured route was admitted, and cloud Work can never reach the local
+/// Windows executor.
+pub(crate) fn validate_local_tool_route(
+    workspace_id: &str,
+    agent_id: &str,
+    work_id: Option<&str>,
+    work_generation: Option<u32>,
+) -> std::result::Result<(), String> {
+    let work_id = work_id.ok_or_else(|| {
+        "Computer tools require the native durable Work binding; local routing was refused."
+            .to_string()
+    })?;
+    let work_generation = work_generation.ok_or_else(|| {
+        "Computer tools require the native Work generation; local routing was refused.".to_string()
+    })?;
+    let store = crate::store::try_global()
+        .ok_or_else(|| "Mivlet's encrypted store is unavailable.".to_string())?;
+    store
+        .transaction(|conn| {
+            let scope = authorized_scope::resolve(
+                conn,
+                Some(workspace_id),
+                None,
+                ScopeAccess::Read,
+            )?;
+            let item = repo::get::<Work>(conn, store, &scope.private, Kind::Work, work_id)?
+                .ok_or_else(|| invalid("The native Work binding is unavailable."))?;
+            if item.workspace_id != workspace_id
+                || item.agent_id != agent_id
+                || item.generation != work_generation
+            {
+                return Err(invalid("The native Work binding changed; refresh before using computer tools."));
+            }
+            if matches!(
+                item.computer,
+                Some(crate::cloud_computers::AgentComputerPreference::Instabox { .. })
+            ) {
+                return Err(invalid(
+                    "This Work selected an Instabox computer. The local computer route is unavailable until the native remote capability is ready.",
+                ));
+            }
+            Ok(())
+        })
+        .map_err(|error| error.to_string())
+}
 fn now() -> String {
     Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true)
 }

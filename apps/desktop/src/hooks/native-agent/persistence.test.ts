@@ -85,4 +85,26 @@ describe("queued attempt persistence", () => {
       providerRoute: { selection: { reason: "Selected openai gpt-5." } },
     });
   });
+  it("persists the admitted computer and copies it for restart and retry", () => {
+    const computer = { kind: "instabox" as const, machineId: "machine-a", connectionRevision: 4 };
+    const queued = buildQueuedAttempt({
+      attemptId: "run-cloud",
+      providerId: "openai",
+      model: "gpt-5",
+      threadId: "thread-1",
+      exchanges: buildQueuedExchanges(request),
+      contextReceipt: {
+        version: 1,
+        attemptId: "run-cloud",
+        assembledAt: "2026-07-11T12:00:00.000Z",
+        scope: { level: "thread", threadId: "thread-1" },
+        citations: [],
+        contributions: [],
+      },
+      computerPreference: computer,
+      createdAt: "2026-07-11T12:00:00.000Z",
+    });
+    computer.machineId = "machine-b";
+    expect(queued.computer).toEqual({ kind: "instabox", machineId: "machine-a", connectionRevision: 4 });
+  });
 });

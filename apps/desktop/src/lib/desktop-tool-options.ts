@@ -1,4 +1,8 @@
-import type { ApprovalRequest, HostedBrowserSnapshot } from "@mivlet/protocol";
+import type {
+  AgentComputerPreference,
+  ApprovalRequest,
+  HostedBrowserSnapshot,
+} from "@mivlet/protocol";
 
 export interface DesktopToolExecutorOptions {
   connectorIds?: readonly string[];
@@ -6,6 +10,11 @@ export interface DesktopToolExecutorOptions {
   /** Connection identity selected now; mutations bind to the prepared account instead. */
   connectorAccountCurrent?: (connectorId: string) => string | undefined;
   workspaceId?: string;
+  /** Native durable Work identity; required for every computer effect. */
+  workId?: string;
+  workGeneration?: number;
+  /** Immutable preference captured at Work admission; never infer this from UI state. */
+  computerPreference?: AgentComputerPreference;
   localComputer?: {
     workspaceId: string;
     agentId: string;

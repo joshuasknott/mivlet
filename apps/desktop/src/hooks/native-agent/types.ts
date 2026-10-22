@@ -8,6 +8,7 @@ import type {
   ExecutionContextReceipt,
   ProviderRouteExecutionBinding,
   Spine,
+  AgentComputerPreference,
 } from "@mivlet/protocol";
 import type { ToolExecutor } from "@mivlet/connectors";
 import type { ConversationContextFailure } from "../../lib/conversation-context";
@@ -73,7 +74,9 @@ export interface UseNativeAgentOptions {
   /** App-owned workers must never recover journals when a view or worker mounts. */
   recover?: boolean;
   /** Public assistant contributions can be labelled without turning them into user authority. */
-  attributeHistory?: (conversation: HydratedConversation) => HydratedConversation;
+  attributeHistory?: (
+    conversation: HydratedConversation,
+  ) => HydratedConversation;
   computer?: { workspaceId: string; agentId: string };
   contextOwner?: { internalUserId: string; memberId?: string };
   providers: BackendProvider[];
@@ -125,6 +128,11 @@ export interface UseNativeAgentOptions {
 }
 
 export interface NativeAgentRunControl {
+  /** Immutable computer preference persisted with the attempt and reused on retry. */
+  computerPreference?: AgentComputerPreference;
+  /** Durable Work identity captured before provider dispatch. */
+  workId?: string;
+  workGeneration?: number;
   /** Native-reviewed historical evidence; never persisted again as current input. */
   historyPrefix?: AgentTurnRequest["messages"];
   /** Conservative target-window ceiling for portable sessions with unknown metadata. */

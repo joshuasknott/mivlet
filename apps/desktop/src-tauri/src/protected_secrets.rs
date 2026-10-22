@@ -2,9 +2,11 @@
 //! metadata crosses IPC; values move from a native dialog to OS custody and a
 //! closed native consumer. Interrupted transfers never replay.
 mod capture;
+pub(crate) use capture::prompt_checked;
 mod hosted;
 pub(crate) use hosted::*;
 mod custody;
+pub(crate) use custody::{Custody, NativeCustody, Secret};
 mod repository;
 pub(crate) mod runtime;
 #[cfg(test)]
@@ -12,7 +14,6 @@ mod tests;
 mod webhook;
 
 use crate::store::Store;
-use custody::{Custody, Secret};
 pub(crate) use runtime::{execute, start_maintenance};
 use serde::{Deserialize, Serialize};
 
@@ -25,7 +26,7 @@ const MAX_HISTORY: usize = 500;
 static CUSTODY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Failure {
+pub(crate) enum Failure {
     Invalid,
     Unavailable,
     Expired,
@@ -73,12 +74,12 @@ trait Fence {
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct RequestInput {
-    label: String,
-    reason: String,
-    purpose: String,
-    consumer: String,
-    target_id: String,
+pub(crate) struct RequestInput {
+    pub(crate) label: String,
+    pub(crate) reason: String,
+    pub(crate) purpose: String,
+    pub(crate) consumer: String,
+    pub(crate) target_id: String,
 }
 impl RequestInput {
     fn validate(&self) -> Result<(), Failure> {

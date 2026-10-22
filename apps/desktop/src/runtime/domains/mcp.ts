@@ -53,7 +53,6 @@ export async function resolveRuntimeMcpCapabilityRoute(
   workspaceId: string,
   capabilityId: string,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimeResolvedMcpCapabilityRoute | null>(
     "resolve_mcp_capability_route",
     {
@@ -85,7 +84,6 @@ export interface RuntimeMcpAppResourceRegistration {
 export async function registerRuntimeMcpAppResource(
   request: RuntimeMcpAppResourceRegistration,
 ): Promise<string | null> {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<string>("register_mcp_app_resource", { request }).catch(
     (error) => {
       throw toRuntimeError(error);
@@ -189,7 +187,6 @@ export type RuntimePreparedCapabilityGrant =
 export async function prepareRuntimeCapabilityGrant(
   proposal: RuntimeCapabilityGrantProposal,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimePreparedCapabilityGrant>(
     "prepare_capability_grant",
     {
@@ -202,7 +199,6 @@ export async function commitRuntimeCapabilityGrant(
   proposal: RuntimeCapabilityGrantProposal,
   resolution: ApprovalResolutionRequest,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimeCapabilityGrant>("commit_capability_grant", {
     request: { proposal, resolution },
   });
@@ -211,7 +207,6 @@ export async function commitRuntimeCapabilityGrant(
 export async function prepareRuntimeMcpServerConfiguration(
   configuration: RuntimeMcpServerConfiguration,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimePreparedMcpServerConfiguration>(
     "prepare_mcp_server_configuration",
     {
@@ -224,7 +219,6 @@ export async function commitRuntimeMcpServerConfiguration(
   configuration: RuntimeMcpServerConfiguration,
   resolution: ApprovalResolutionRequest,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimeMcpServerSummary>(
     "commit_mcp_server_configuration",
     {
@@ -234,7 +228,6 @@ export async function commitRuntimeMcpServerConfiguration(
 }
 
 export async function listRuntimeMcpServerConfigurations(workspaceId: string) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimeMcpServerSummary[]>(
     "list_mcp_server_configurations",
     {
@@ -286,7 +279,6 @@ export async function inspectRuntimeRemoteMcpAuthorization(
   workspaceId: string,
   configurationReference: string,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimeRemoteMcpAuthorizationSummary>(
     "inspect_remote_mcp_authorization",
     {
@@ -299,7 +291,6 @@ export async function beginRuntimeRemoteMcpAuthorization(
   workspaceId: string,
   configurationReference: string,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimeRemoteMcpAuthorizationResult>(
     "begin_remote_mcp_authorization",
     {
@@ -312,7 +303,6 @@ export async function disconnectRuntimeRemoteMcpAuthorization(
   workspaceId: string,
   configurationReference: string,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<{ status: "disconnected"; message: string }>(
     "disconnect_remote_mcp_authorization",
     { request: { workspaceId, configurationReference } },
@@ -323,7 +313,6 @@ export async function openRuntimeRemoteMcpSession(
   workspaceId: string,
   configurationReference: string,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimeOpenedRemoteMcpSession>(
     "open_remote_mcp_session",
     {
@@ -337,7 +326,6 @@ export async function sendRuntimeRemoteMcpFrame(
   sessionId: string,
   frame: string,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<string[]>("send_remote_mcp_frame", {
     request: { workspaceId, sessionId, frame },
   });
@@ -353,7 +341,6 @@ export async function pollRuntimeRemoteMcpMessages(
   workspaceId: string,
   sessionId: string,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<RuntimeRemoteMcpPollResult>("poll_remote_mcp_messages", {
     request: { workspaceId, sessionId },
   });
@@ -363,7 +350,6 @@ export async function closeRuntimeRemoteMcpSession(
   workspaceId: string,
   sessionId: string,
 ) {
-  if (!hasTauriRuntime()) return null;
   return invokeNative<null>("close_remote_mcp_session", {
     request: { workspaceId, sessionId },
   });

@@ -689,20 +689,45 @@ fn protected_secret_native_entry_acceptance() {
         "stale-save",
         "stop",
         "expiry",
+        "instabox-validation",
+        "instabox-decline",
+        "instabox-stop",
+        "instabox-busy-save",
+        "instabox-busy-decline",
+        "instabox-busy-stop",
     ] {
+        let instabox = action.starts_with("instabox-");
+        let action = action.strip_prefix("instabox-").unwrap_or(action);
         let stopped = AtomicBool::new(false);
+        let busy = AtomicBool::new(false);
         let deadline = Mutex::new(None::<Instant>);
         std::thread::scope(|threads| {
             // An assertion failure must still close the owned window before
             // scoped-thread cleanup joins the prompt thread.
             let _cancel = CancelOnDrop(&stopped);
-            let request = input();
+            let mut request = input();
+            if instabox {
+                request.label = "Connect your Instabox account".into();
+                request.reason = "Check the key without creating a computer.".into();
+                request.consumer = "instabox-computer-connection".into();
+                request.purpose = "connect-instabox-account".into();
+                request.target_id = "synthetic-native-instabox-entry".into();
+            }
             let stop = &stopped;
             let expires = &deadline;
+            let checking = &busy;
             let prompt = threads.spawn(move || {
-                capture::prompt(&request, &|| {
-                    !stop.load(Ordering::SeqCst)
-                        && expires.lock().unwrap().is_none_or(|at| Instant::now() < at)
+                capture::prompt_checked(&request, &|| {
+                    if stop.load(Ordering::SeqCst)
+                        || expires
+                            .lock()
+                            .unwrap()
+                            .is_some_and(|at| Instant::now() >= at)
+                    {
+                        Err(Failure::Stopped)
+                    } else {
+                        Ok(!checking.load(Ordering::SeqCst))
+                    }
                 })
             });
             let h = window();
@@ -716,6 +741,24 @@ fn protected_secret_native_entry_acceptance() {
                     0
                 );
                 assert_ne!(SendMessageW(edit, EM_GETPASSWORDCHAR, 0, 0), 0);
+                if instabox {
+                    let control_text = |id| {
+                        let mut text = [0u16; 512];
+                        let length = GetWindowTextW(GetDlgItem(h, id), text.as_mut_ptr(), 512);
+                        String::from_utf16_lossy(&text[..length as usize])
+                    };
+                    assert_eq!(control_text(14), "&Instabox API key");
+                    let target = control_text(12);
+                    assert!(target.contains("your Instabox account"));
+                    assert!(target.contains("computer management and view-only desktop access"));
+                    assert!(!target.contains("synthetic-native-instabox-entry"));
+                    let description = control_text(13);
+                    assert!(description.contains("Windows protected storage"));
+                    assert!(description.contains("sent only to api.instabox.sh"));
+                    assert!(description.contains("Never in chat, WebView state or workspace files"));
+                    assert!(description.contains("Checking creates no computer"));
+                    assert!(!description.contains("webhook") && !description.contains("expires"));
+                }
                 let mut client: RECT = std::mem::zeroed();
                 assert_ne!(GetClientRect(h, &mut client), 0);
                 for id in [1, 2, 3, 4, 10, 11, 12, 13, 14] {
@@ -744,6 +787,28 @@ fn protected_secret_native_entry_acceptance() {
                     );
                 }
                 match action {
+                    "busy-save" | "busy-decline" | "busy-stop" => {
+                        busy.store(true, Ordering::SeqCst);
+                        assert_ne!(SetWindowTextW(edit, wide(CANARY).as_ptr()), 0);
+                        // Multiple native timer ticks must leave entry alive.
+                        std::thread::sleep(Duration::from_millis(450));
+                        SendMessageW(h, WM_COMMAND, 1, 0);
+                        assert_ne!(
+                            IsWindow(h),
+                            0,
+                            "Busy identity check accepted Save or closed entry"
+                        );
+                        match action {
+                            "busy-save" => {
+                                busy.store(false, Ordering::SeqCst);
+                                assert_ne!(PostMessageW(h, WM_COMMAND, 1, 0), 0);
+                            }
+                            "busy-decline" => {
+                                assert_ne!(PostMessageW(h, WM_COMMAND, 2, 0), 0);
+                            }
+                            _ => stopped.store(true, Ordering::SeqCst),
+                        }
+                    }
                     "save" | "enter" | "validation" | "stale-save" => {
                         if action == "validation" {
                             SendMessageW(h, WM_COMMAND, 1, 0);
@@ -756,7 +821,7 @@ fn protected_secret_native_entry_acceptance() {
                             let length = GetWindowTextW(GetDlgItem(h, 4), error.as_mut_ptr(), 128);
                             assert!(
                                 String::from_utf16_lossy(&error[..length as usize])
-                                    == "Use a signing secret of 16 to 512 bytes.",
+                                    == "Use a protected credential of 16 to 512 bytes.",
                                 "Native input validation must use a nonsecret error"
                             );
                         }
@@ -799,11 +864,13 @@ fn protected_secret_native_entry_acceptance() {
                 "Owned native entry did not close"
             );
             match action {
-                "save" | "enter" | "validation" => assert!(
+                "save" | "enter" | "validation" | "busy-save" => assert!(
                     result.unwrap().unwrap().as_str() == CANARY,
                     "Synthetic native entry returned different material"
                 ),
-                "decline" | "escape" | "close" => assert!(result.unwrap().is_none()),
+                "decline" | "escape" | "close" | "busy-decline" => {
+                    assert!(result.unwrap().is_none())
+                }
                 _ => assert!(matches!(result, Err(Failure::Stopped))),
             }
         });

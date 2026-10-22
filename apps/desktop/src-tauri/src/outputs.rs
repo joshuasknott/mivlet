@@ -1265,6 +1265,7 @@ mod tests {
                 )
                 .is_err());
                 let delegated = Work {
+                    computer: None,
                     hosted_task: None,
                     repository_binding: None,
                     queue: None,

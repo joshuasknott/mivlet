@@ -7,6 +7,7 @@ import type {
   PermissionMode,
   RuntimeSnapshot
 } from "@mivlet/protocol";
+import { isAgentComputerPreference, normalizeAgentComputerPreference } from "@mivlet/protocol";
 import { normalizeCustomApprovalSettings } from "@mivlet/connectors";
 import {
   LEGACY_STORAGE_KEYS,
@@ -89,7 +90,10 @@ export function persistShellState(state: PersistedShellState) {
   }
 
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    window.localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ ...state, agents: normalizeAgentProfiles(state.agents) }),
+    );
   } catch {
     // Local persistence is best-effort in preview and private browsing modes.
   }
@@ -105,7 +109,7 @@ export function shellStateToRuntimeSnapshot(state: PersistedShellState): Runtime
     approvalAudit: state.approvalAudit,
     dismissedApprovalIds: state.dismissedApprovalIds,
     approvalRules: state.approvalRules,
-    agents: state.agents,
+    agents: normalizeAgentProfiles(state.agents),
     activeAgentId: state.activeAgentId,
     sidebarPreferences: normalizeSidebarPreferences(state.sidebarPreferences),
     pinnedSourceIds: state.pinnedSourceIds,
@@ -206,8 +210,14 @@ function normalizeAgentProfiles(agents: MivletAgentProfile[] | undefined): Mivle
         }))
         .filter((task) => task.id && task.title && task.instruction)
       : [];
+    const rawComputer = agent.computer;
+    const computerIsValid = rawComputer === undefined || isAgentComputerPreference(rawComputer);
     return {
       ...agent,
+      computer: normalizeAgentComputerPreference(rawComputer),
+      computerPreferenceError: computerIsValid
+        ? agent.computerPreferenceError === "invalid" ? "invalid" : undefined
+        : "invalid",
       notificationsEnabled: agent.notificationsEnabled !== false,
       reasoningEffort: typeof agent.reasoningEffort === "string" && /^[a-z][a-z0-9-]{0,31}$/.test(agent.reasoningEffort) ? agent.reasoningEffort : undefined,
       fastMode: agent.fastMode === true,

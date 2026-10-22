@@ -2,15 +2,25 @@
 //! logging, value preview or platform fallback. Capture exclusion must succeed.
 use super::{custody::Secret, Failure, RequestInput};
 
+pub(crate) fn prompt(
+    input: &RequestInput,
+    current: &dyn Fn() -> bool,
+) -> Result<Option<Secret>, Failure> {
+    prompt_checked(input, &|| current().then_some(true).ok_or(Failure::Stopped))
+}
+
 #[cfg(not(windows))]
-pub(super) fn prompt(_: &RequestInput, _: &dyn Fn() -> bool) -> Result<Option<Secret>, Failure> {
+pub(crate) fn prompt_checked(
+    _: &RequestInput,
+    _: &dyn Fn() -> Result<bool, Failure>,
+) -> Result<Option<Secret>, Failure> {
     Err(Failure::Capture)
 }
 
 #[cfg(windows)]
-pub(super) fn prompt(
+pub(crate) fn prompt_checked(
     input: &RequestInput,
-    current: &dyn Fn() -> bool,
+    current: &dyn Fn() -> Result<bool, Failure>,
 ) -> Result<Option<Secret>, Failure> {
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::{
@@ -31,12 +41,12 @@ pub(super) fn prompt(
     const ERROR: i32 = 4;
     static DIALOG: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _dialog = DIALOG.try_lock().map_err(|_| Failure::Capture)?;
-    if !current() {
-        return Err(Failure::Stopped);
-    }
+    // A busy account check keeps entry open but never authorizes Save. A real
+    // invalidation closes it; no identity lock is held across the message loop.
+    current()?;
 
     struct Context<'a> {
-        current: &'a dyn Fn() -> bool,
+        current: &'a dyn Fn() -> Result<bool, Failure>,
         result: Option<Result<Option<Secret>, Failure>>,
     }
     fn wide(text: &str) -> Vec<u16> {
@@ -70,8 +80,8 @@ pub(super) fn prompt(
         if !pointer.is_null() {
             match message {
                 WM_TIMER => {
-                    if !((*pointer).current)() {
-                        close(hwnd, pointer, Err(Failure::Stopped));
+                    if let Err(error) = ((*pointer).current)() {
+                        close(hwnd, pointer, Err(error));
                     }
                     return 0;
                 }
@@ -84,9 +94,19 @@ pub(super) fn prompt(
                     return 0;
                 }
                 WM_COMMAND if wparam & 0xffff == SAVE => {
-                    if !((*pointer).current)() {
-                        close(hwnd, pointer, Err(Failure::Stopped));
-                        return 0;
+                    match ((*pointer).current)() {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            SetWindowTextW(
+                                GetDlgItem(hwnd, ERROR),
+                                wide("Account check in progress. Try Save again.").as_ptr(),
+                            );
+                            return 0;
+                        }
+                        Err(error) => {
+                            close(hwnd, pointer, Err(error));
+                            return 0;
+                        }
                     }
                     let mut buffer = Zeroizing::new([0u16; 513]);
                     let length = GetWindowTextW(
@@ -184,10 +204,16 @@ pub(super) fn prompt(
                 child
             };
         let content_width = width - 48;
+        let instabox = input.consumer == "instabox-computer-connection"
+            && input.purpose == "connect-instabox-account";
         let heading = make("STATIC", &input.label, 0, 20, 18, content_width, 26, 10);
         let reason = make(
             "STATIC",
-            &format!("Agent's reason: {}", input.reason),
+            &format!(
+                "{}: {}",
+                if instabox { "Reason" } else { "Agent's reason" },
+                input.reason
+            ),
             0,
             20,
             48,
@@ -201,6 +227,8 @@ pub(super) fn prompt(
             "STATIC",
             &if cloud {
                 format!("Cloud-only connection: {}\r\nUse: one-call text tasks, without tools or local files", input.target_id)
+            } else if instabox {
+                "For: your Instabox account\r\nUse: computer management and view-only desktop access".to_owned()
             } else {
                 format!(
                     "For webhook: {}\r\nUse: verify incoming HMAC-SHA256 signatures",
@@ -218,6 +246,8 @@ pub(super) fn prompt(
             "STATIC",
             if cloud {
                 "Sent directly over HTTPS, encrypted in cloud custody for 30 days or until revoked. Never saved in chat or WebView state. Provider billing applies."
+            } else if instabox {
+                "Saved in Windows protected storage; sent only to api.instabox.sh. Never in chat, WebView state or workspace files. Checking creates no computer."
             } else {
                 "Only Mivlet's native webhook verifier receives this value. Your agent receives a one-use reference. It expires in 10 minutes."
             },
@@ -232,6 +262,8 @@ pub(super) fn prompt(
             "STATIC",
             if cloud {
                 "&Separate cloud API key"
+            } else if instabox {
+                "&Instabox API key"
             } else {
                 "&Signing secret"
             },

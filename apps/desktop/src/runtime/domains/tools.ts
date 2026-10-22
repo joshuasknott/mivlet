@@ -17,6 +17,10 @@ export interface RuntimeToolRequest {
   workspaceId?: string;
   /** Active teammate scope used by native code to resolve isolated local files. */
   agentId?: string;
+  /** Native durable Work identity used to reject local routing for cloud Work. */
+  workId?: string;
+  workGeneration?: number;
+  manualLocalAuthority?: boolean;
   /** Native-owned live MCP session selected from an explicit semantic binding. */
   mcpSessionId?: string;
   /** Computer authority captured before approval; never refreshed to replay a stale action. */

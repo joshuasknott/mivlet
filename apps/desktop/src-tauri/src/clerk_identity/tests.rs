@@ -31,6 +31,55 @@ mod dispatch_tests {
     }
 
     #[test]
+    fn identity_poll_treats_busy_as_retryable_then_accepts_current_generation() {
+        let generation = Mutex::new(7);
+        let held = generation.lock().unwrap();
+        assert_eq!(
+            poll_identity_dispatch(&generation, 7, now_epoch() + 60),
+            Ok(false)
+        );
+        drop(held);
+        assert_eq!(
+            poll_identity_dispatch(&generation, 7, now_epoch() + 60),
+            Ok(true)
+        );
+    }
+
+    #[test]
+    fn identity_poll_rechecks_changed_generation_after_busy() {
+        let generation = Mutex::new(7);
+        let held = generation.lock().unwrap();
+        assert_eq!(
+            poll_identity_dispatch(&generation, 7, now_epoch() + 60),
+            Ok(false)
+        );
+        drop(held);
+        *generation.lock().unwrap() = 8;
+        assert!(poll_identity_dispatch(&generation, 7, now_epoch() + 60).is_err());
+    }
+
+    #[test]
+    fn identity_poll_rejects_expiry_even_while_generation_is_busy() {
+        let generation = Mutex::new(7);
+        let held = generation.lock().unwrap();
+        assert!(poll_identity_dispatch(&generation, 7, now_epoch().saturating_sub(1)).is_err());
+        drop(held);
+    }
+
+    #[test]
+    fn identity_poll_rejects_a_poisoned_generation_mutex() {
+        use std::sync::Arc;
+        let generation = Arc::new(Mutex::new(7));
+        let poisoned = Arc::clone(&generation);
+        let _ = std::thread::spawn(move || {
+            let _guard = poisoned.lock().unwrap();
+            panic!("poison identity generation for the focused poll test");
+        })
+        .join();
+        assert!(poll_identity_dispatch(&generation, 7, now_epoch() + 60).is_err());
+    }
+
+    #[test]
     fn generation_change_waits_until_fenced_commit_finishes() {
         use std::sync::{atomic::AtomicBool, atomic::Ordering, Arc, Barrier};
         use std::thread;

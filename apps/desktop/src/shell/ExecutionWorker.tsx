@@ -5,7 +5,10 @@ import {
   collaborationToolSpecs,
   isCollaborationTool,
 } from "@mivlet/connectors/native-api/tools";
-import { supportsSharedComputerTools, supportsUserImageInput } from "@mivlet/connectors/native-api/computer-vision";
+import {
+  supportsSharedComputerTools,
+  supportsUserImageInput,
+} from "@mivlet/connectors/native-api/computer-vision";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import type { NativeAgentRunControl } from "../hooks/useNativeAgent";
 import { useExecutionController } from "./useExecutionController";
@@ -42,9 +45,15 @@ import { stagedAttachmentRefs } from "../lib/workspace-execution";
 import { workspaceAgentDirectory } from "../lib/workspace-agent-directory";
 import { coordinationResource } from "../lib/coordination-resources";
 import { discardRuntimeLocalComputerAttachmentBatch } from "../runtime/domains/local-computer";
-import { applyProviderContinuation, providerContinuationHistory } from "../lib/provider-continuation";
+import {
+  applyProviderContinuation,
+  providerContinuationHistory,
+} from "../lib/provider-continuation";
 import { readProviderContinuation } from "../runtime/domains/provider-continuation";
-import { prepareSharedExecutionAttachments, sharedRequestAttachmentIds } from "../lib/shared-execution-attachments";
+import {
+  prepareSharedExecutionAttachments,
+  sharedRequestAttachmentIds,
+} from "../lib/shared-execution-attachments";
 
 /** Mounted by the workspace root, never by a tab. Each admission runs once. */
 export function ExecutionWorker({
@@ -58,6 +67,11 @@ export function ExecutionWorker({
   runtime: ShellRuntime;
   projects: LocalProject[];
 }) {
+  // Admission captures this value on the session. Keep a legacy runtime
+  // fallback for older in-memory fixtures, but never read a mutable profile
+  // after the admitted session has started.
+  const computerPreference = session.computer ?? { kind: "local" as const };
+  const usesLocalComputer = computerPreference.kind === "local";
   const scope = { id: session.work.id, generation: session.work.generation };
   const attempt = useRef<string | undefined>(undefined);
   const controller = useExecutionController({
@@ -73,12 +87,25 @@ export function ExecutionWorker({
     threadId: session.work.conversationId,
     executionAgentId: session.work.agentId,
     executionProviderId: session.model.providerId,
+    executionComputer: computerPreference,
+    executionWorkId: session.work.id,
+    executionWorkGeneration: session.work.generation,
     onApproval: (id) => service.approval(session, id),
     attributeHistory: (history) =>
-      attributeConversation(session.work.capturedContext ? {
-        ...history,
-        messages: history.messages.filter(view => Boolean(view.message.runId && session.work.runIds.includes(view.message.runId))),
-      } : history, service.getSnapshot().data),
+      attributeConversation(
+        session.work.capturedContext
+          ? {
+              ...history,
+              messages: history.messages.filter((view) =>
+                Boolean(
+                  view.message.runId &&
+                  session.work.runIds.includes(view.message.runId),
+                ),
+              ),
+            }
+          : history,
+        service.getSnapshot().data,
+      ),
     wrapExecutor: (base) => async (approval, args) => {
       const runId = attempt.current;
       if (!runId || !service.current(session))
@@ -86,29 +113,62 @@ export function ExecutionWorker({
           "This assignment was stopped before the tool could run.",
         );
       await service.command({ action: "check-work", ...scope, runId });
-      if (!service.current(session) || latest.current.runtime.accountWorkspacePending)
+      if (
+        !service.current(session) ||
+        latest.current.runtime.accountWorkspacePending
+      )
         throw new Error("The workspace changed before the tool could run.");
       const name = approval.action.split(/\s+/)[0];
-      if (approval.id.startsWith("mivlet-shared-")) await checkRuntimeManagedTool(approval.id, name, args);
+      if (approval.id.startsWith("mivlet-shared-"))
+        await checkRuntimeManagedTool(approval.id, name, args);
       if (isCollaborationTool(name)) {
         const raw: Record<string, unknown> = JSON.parse(args);
         if (name === "continuation-read") {
-          if (Object.keys(raw).some(key => !["sequence", "textOffset"].includes(key))
-            || typeof raw.sequence !== "number" || !Number.isSafeInteger(raw.sequence) || raw.sequence < 1
-            || typeof raw.textOffset !== "number" || !Number.isSafeInteger(raw.textOffset) || raw.textOffset < 0)
+          if (
+            Object.keys(raw).some(
+              (key) => !["sequence", "textOffset"].includes(key),
+            ) ||
+            typeof raw.sequence !== "number" ||
+            !Number.isSafeInteger(raw.sequence) ||
+            raw.sequence < 1 ||
+            typeof raw.textOffset !== "number" ||
+            !Number.isSafeInteger(raw.textOffset) ||
+            raw.textOffset < 0
+          )
             throw new Error("Invalid saved-history cursor.");
-          const result = await readProviderContinuation({ workspaceId: service.workspaceId,
-            ...scope, runId, sequence: raw.sequence, textOffset: raw.textOffset });
-          if (!service.current(session)) throw new Error("This continuation was stopped.");
+          const result = await readProviderContinuation({
+            workspaceId: service.workspaceId,
+            ...scope,
+            runId,
+            sequence: raw.sequence,
+            textOffset: raw.textOffset,
+          });
+          if (!service.current(session))
+            throw new Error("This continuation was stopped.");
           return JSON.stringify(result);
         }
         if (name === "workspace-agents") {
-          if (Object.keys(raw).length) throw new Error("Agent discovery takes no arguments.");
-          return JSON.stringify({ instructionAuthority: "none", totalAgents: latest.current.runtime.agents.length, agents: workspaceAgentDirectory(
-            latest.current.runtime.agents, latest.current.runtime.modelOptions, latest.current.runtime.backendProviders,
-          ), assignments: service.getSnapshot().data.work.filter(work => work.rootId === session.work.rootId).map(work => ({
-            id: work.id, agentId: work.agentId, status: work.status, assignment: work.prompt.slice(0, 500), dependencies: work.dependencies,
-          })) });
+          if (Object.keys(raw).length)
+            throw new Error("Agent discovery takes no arguments.");
+          return JSON.stringify({
+            instructionAuthority: "none",
+            totalAgents: latest.current.runtime.agents.length,
+            agents: workspaceAgentDirectory(
+              latest.current.runtime.agents,
+              latest.current.runtime.modelOptions,
+              latest.current.runtime.backendProviders,
+            ),
+            assignments: service
+              .getSnapshot()
+              .data.work.filter((work) => work.rootId === session.work.rootId)
+              .map((work) => ({
+                id: work.id,
+                agentId: work.agentId,
+                status: work.status,
+                assignment: work.prompt.slice(0, 500),
+                dependencies: work.dependencies,
+              })),
+          });
         }
         // Rust strictly validates shapes, membership, generation and replay IDs.
         const command = {
@@ -120,9 +180,9 @@ export function ExecutionWorker({
                 ? "message"
                 : name === "goal-report"
                   ? "goal-report"
-              : name === "project-record"
-                ? "record-fact"
-                : "await-user",
+                  : name === "project-record"
+                    ? "record-fact"
+                    : "await-user",
         } as CollaborationAgentCommand;
         const before = new Set(
           service.getSnapshot().data.work.map((work) => work.id),
@@ -157,9 +217,15 @@ export function ExecutionWorker({
       }
       const resource = coordinationResource(name, args, session.work.agentId);
       if (resource) {
-        await service.command({ action: "agent-command", ...scope, runId,
-          callId: `${approval.id}:resource`, command: { kind: "claim-resource", resource } });
-        if (!service.current(session)) throw new Error("This assignment stopped before its write.");
+        await service.command({
+          action: "agent-command",
+          ...scope,
+          runId,
+          callId: `${approval.id}:resource`,
+          command: { kind: "claim-resource", resource },
+        });
+        if (!service.current(session))
+          throw new Error("This assignment stopped before its write.");
       }
       const output = await base(approval, args);
       if (!service.current(session))
@@ -208,6 +274,15 @@ export function ExecutionWorker({
       let adopted = false;
       try {
         const { controller, runtime, projects } = latest.current;
+        if (
+          !usesLocalComputer &&
+          (session.attachments.length ||
+            (session.work.attachments?.length ?? 0))
+        ) {
+          throw new Error(
+            "Cloud · Instabox is selected, but approved file transfer to the selected machine is not ready. Reconnect the machine or remove the file inputs; Mivlet will not upload them to This PC or another cloud computer.",
+          );
+        }
         if (!service.current(session)) return;
         const provider = runtime.backendProviders.find(
           (provider) =>
@@ -224,32 +299,60 @@ export function ExecutionWorker({
         );
         if (!validation.ok)
           throw new Error(validation.error ?? "This model is unavailable.");
-        const requestRoot = service.getSnapshot().data.work.find(work => work.id === session.work.rootId);
-        const inherited = sharedRequestAttachmentIds(session.work, requestRoot).length
-          ? await prepareSharedExecutionAttachments({ work: session.work, root: requestRoot, attachments: session.attachments,
-              node: await controller.localComputer.refresh(), isCurrent: () => service.current(session) })
-          : session.attachments;
-        if (sharedRequestAttachmentIds(session.work, requestRoot).length) {
-          const receipt = inherited.find(attachment => attachment.workspaceFile)?.workspaceFile;
-          if (receipt) batch = { computerId: receipt.computerId, batchId: receipt.batchId };
+        const requestRoot = service
+          .getSnapshot()
+          .data.work.find((work) => work.id === session.work.rootId);
+        const inherited =
+          usesLocalComputer &&
+          sharedRequestAttachmentIds(session.work, requestRoot).length
+            ? await prepareSharedExecutionAttachments({
+                work: session.work,
+                root: requestRoot,
+                attachments: session.attachments,
+                node: await controller.localComputer.refresh(),
+                isCurrent: () => service.current(session),
+              })
+            : session.attachments;
+        if (
+          usesLocalComputer &&
+          sharedRequestAttachmentIds(session.work, requestRoot).length
+        ) {
+          const receipt = inherited.find(
+            (attachment) => attachment.workspaceFile,
+          )?.workspaceFile;
+          if (receipt)
+            batch = {
+              computerId: receipt.computerId,
+              batchId: receipt.batchId,
+            };
         }
         const resolved = resolveWorkAttachments(inherited, session.work);
         if (resolved.error) throw new Error(resolved.error);
         controller.resetCancellation();
-        const staged = await prepareExecutionAttachments(
-          resolved.attachments,
-          controller.localComputer,
-          service.workspaceId,
-          session.work.agentId,
-          () => service.current(session),
-        );
+        const staged = usesLocalComputer
+          ? await prepareExecutionAttachments(
+              resolved.attachments,
+              controller.localComputer,
+              service.workspaceId,
+              session.work.agentId,
+              () => service.current(session),
+            )
+          : { attachments: [], node: null, batch: undefined };
         const images = composerImageInputs(staged.attachments);
         if (!images.ok) throw new Error(images.error);
-        if (images.images.length && !supportsUserImageInput(provider, { id: session.model.modelId,
-          available: true, capabilities: session.model.capabilities }))
-          throw new Error("Choose a supported image-capable model before continuing this request.");
+        if (
+          images.images.length &&
+          !supportsUserImageInput(provider, {
+            id: session.model.modelId,
+            available: true,
+            capabilities: session.model.capabilities,
+          })
+        )
+          throw new Error(
+            "Choose a supported image-capable model before continuing this request.",
+          );
         if (!service.current(session)) return;
-        if (!session.attachments.length) {
+        if (usesLocalComputer && !session.attachments.length) {
           // Continued assignments recover durable workspace refs; files that
           // were cleaned out of the account root fail closed before dispatch.
           // When the listing itself is unavailable, dispatch proceeds and the
@@ -287,7 +390,12 @@ export function ExecutionWorker({
           throw new Error(
             "Load the current project before continuing this assignment.",
           );
-        const projectMember = Boolean(project && data.teams.find(team => team.projectId === project.id)?.participantIds.includes(session.work.agentId));
+        const projectMember = Boolean(
+          project &&
+          data.teams
+            .find((team) => team.projectId === project.id)
+            ?.participantIds.includes(session.work.agentId),
+        );
         const tools = conversationToolsForModel(
           connectorTools,
           computerToolsReady(staged.node),
@@ -307,9 +415,17 @@ export function ExecutionWorker({
           provider.capabilities.includes("approvals") &&
           session.model.capabilities?.tools !== false;
         if (toolCapable)
-          tools.push(...collaborationToolSpecs(projectMember, Boolean(session.work.continuation), Boolean(session.work.outcomeGoal)));
+          tools.push(
+            ...collaborationToolSpecs(
+              projectMember,
+              Boolean(session.work.continuation),
+              Boolean(session.work.outcomeGoal),
+            ),
+          );
         if (session.work.outcomeGoal && !toolCapable)
-          throw new Error("Outcome goals require a provider route with Mivlet coordination tools. Choose a supported model and explicitly continue.");
+          throw new Error(
+            "Outcome goals require a provider route with Mivlet coordination tools. Choose a supported model and explicitly continue.",
+          );
         if (room.kind === "group" && !toolCapable)
           throw new Error(
             "This model does not support the collaboration tools. Choose a tool-capable model for this participant.",
@@ -321,61 +437,90 @@ export function ExecutionWorker({
             allowedConnectorIds: ids,
             allowedKnowledgeSourceIds: [
               ...new Set([
-                ...(projectMember ? project?.knowledgeSourceIds ?? [] : []),
+                ...(projectMember ? (project?.knowledgeSourceIds ?? []) : []),
                 ...staged.attachments.flatMap((attachment) =>
                   attachment.sourceId ? [attachment.sourceId] : [],
                 ),
               ]),
             ],
-            excludePrivateMemory: Boolean(session.work.capturedContext) || room.kind === "group",
+            excludePrivateMemory:
+              Boolean(session.work.capturedContext) || room.kind === "group",
             excludeDerivedSummaries: Boolean(session.work.capturedContext),
-            excludedKnowledgeSourceIds: capturedFileExclusions(session.work.capturedContext),
+            excludedKnowledgeSourceIds: capturedFileExclusions(
+              session.work.capturedContext,
+            ),
           },
         );
         const generatedUiInstructions = await loadGeneratedUiInstructions();
         if (!service.current(session)) return;
         const instructions = [
           agentExecutionInstructions(session.profile),
-          session.work.capturedContext ? `Captured request context (${session.work.capturedContext.capturedAt}):\n${session.work.capturedContext.text}` : "",
+          session.work.capturedContext
+            ? `Captured request context (${session.work.capturedContext.capturedAt}):\n${session.work.capturedContext.text}`
+            : "",
           CONVERSATION_STYLE_INSTRUCTIONS,
           generatedUiInstructions,
-          tools.some(tool => tool.name === "read-file") ? COMPUTER_WORK_INSTRUCTIONS : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
-          tools.some(tool => tool.name === "local-browser-observe") ? "Owned browser: select exact window, list/observe exact origin, use only advertised fresh single-use ref tools, act once, verify. Blank: navigate only. Activate only the observed tab; fill only empty public text fields. An approved passive download closes the owned browser before private workspace import. Handover persists attention and requires explicit Continue. No arbitrary JS or private fields. Unknown input: fresh request, never replay." : "",
+          tools.some((tool) => tool.name === "read-file")
+            ? COMPUTER_WORK_INSTRUCTIONS
+            : "Computer and workspace file tools are unavailable on this request. Explain this limitation if relevant. Do not claim to have created, read or published files without successful tool results.",
+          tools.some((tool) => tool.name === "local-browser-observe")
+            ? "Owned browser: select exact window, list/observe exact origin, use only advertised fresh single-use ref tools, act once, verify. Blank: navigate only. Activate only the observed tab; fill only empty public text fields. An approved passive download closes the owned browser before private workspace import. Handover persists attention and requires explicit Continue. No arbitrary JS or private fields. Unknown input: fresh request, never replay."
+            : "",
           builtinPluginInstructions(
             session.work.prompt,
             staged.node?.plugins,
             tools.map((tool) => tool.name),
           ),
           collaborationContext(session.work, data, project),
-          toolCapable ? "Use workspace-agents to discover the workspace's real configured agents and their availability. Projects are optional. Only delegate when the user requests other agents or their contribution is necessary for the authorized task. If asked to involve all agents, give each an explicit useful role, or explain why an agent cannot contribute. A quoted mention or agent name by itself is a reference, not a request to delegate." : "This provider cannot use Mivlet's coordination tools. Explain that prerequisite if asked to coordinate agents; never simulate their responses.",
+          toolCapable
+            ? "Use workspace-agents to discover the workspace's real configured agents and their availability. Projects are optional. Only delegate when the user requests other agents or their contribution is necessary for the authorized task. If asked to involve all agents, give each an explicit useful role, or explain why an agent cannot contribute. A quoted mention or agent name by itself is a reference, not a request to delegate."
+            : "This provider cannot use Mivlet's coordination tools. Explain that prerequisite if asked to coordinate agents; never simulate their responses.",
           attachmentRunInstructions(staged.attachments),
         ]
           .filter(Boolean)
           .join("\n\n");
-        retainAttachmentPreviews(service.workspaceId, session.work.conversationId, staged.attachments);
+        retainAttachmentPreviews(
+          service.workspaceId,
+          session.work.conversationId,
+          staged.attachments,
+        );
         const request = buildAgentRequest({
-            model: session.model.modelId,
-            reasoningEffort: session.profile.reasoningEffort,
-            serviceTier: agentServiceTier(session.model, session.profile.fastMode),
-            // userRequest is durable provenance for the root conversation.
-            // The provider must receive this assignment's prompt so a child
-            // cannot mistake the root request for a fresh delegation order.
-            prompt: session.work.prompt,
-            images: images.images,
-            instructions,
-            tools,
-            maxTokens: validation.maxTokens,
-          });
-        applyProviderContinuation(request, session.work.continuation, provider,
-            latest.current.runtime.modelOptions.find(option => option.id === session.model.id),
-            context.systemPrefix);
+          model: session.model.modelId,
+          reasoningEffort: session.profile.reasoningEffort,
+          serviceTier: agentServiceTier(
+            session.model,
+            session.profile.fastMode,
+          ),
+          // userRequest is durable provenance for the root conversation.
+          // The provider must receive this assignment's prompt so a child
+          // cannot mistake the root request for a fresh delegation order.
+          prompt: session.work.prompt,
+          images: images.images,
+          instructions,
+          tools,
+          maxTokens: validation.maxTokens,
+        });
+        applyProviderContinuation(
+          request,
+          session.work.continuation,
+          provider,
+          latest.current.runtime.modelOptions.find(
+            (option) => option.id === session.model.id,
+          ),
+          context.systemPrefix,
+        );
         const outcome = await controller.agent.run(
           request,
           context,
           session.permissionMode,
           undefined,
           {
-            historyPrefix: providerContinuationHistory(session.work.continuation),
+            computerPreference,
+            workId: session.work.id,
+            workGeneration: session.work.generation,
+            historyPrefix: providerContinuationHistory(
+              session.work.continuation,
+            ),
             contextWindowLimit: session.work.continuation?.contextWindow,
             maxTurns: 6,
             canonicalUserMessage:
@@ -393,7 +538,8 @@ export function ExecutionWorker({
                 !service.current(session)
               )
                 throw new Error("This assignment was stopped before dispatch.");
-              if (session.work.schedule) await service.bindScheduledWork(session, attemptId);
+              if (session.work.schedule)
+                await service.bindScheduledWork(session, attemptId);
               // A lost IPC reply may still have committed the binding. Retain
               // its exact passive inputs once admission is attempted.
               adopted = true;

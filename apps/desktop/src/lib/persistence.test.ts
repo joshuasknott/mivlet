@@ -65,6 +65,27 @@ describe("conversation shell persistence", () => {
     expect(restored.agents![0].fastMode).toBe(true);
   });
 
+  it("round-trips the selected user-owned computer and defaults old agents to This PC", () => {
+    const profile = {
+      ...defaultShellState.agents![0],
+      computer: { kind: "instabox" as const, machineId: "machine-a", connectionRevision: 3 },
+    };
+    const snapshot = shellStateToRuntimeSnapshot({ ...defaultShellState, agents: [profile] });
+    expect(shellStateFromRuntimeSnapshot(snapshot, defaultShellState).agents![0].computer).toEqual(profile.computer);
+    const legacy = { ...snapshot, agents: [{ ...profile, computer: undefined }] };
+    expect(shellStateFromRuntimeSnapshot(legacy, defaultShellState).agents![0].computer).toEqual({ kind: "local" });
+  });
+
+  it("retains an invalid explicit machine preference marker instead of silently selecting This PC", () => {
+    const snapshot = shellStateToRuntimeSnapshot({
+      ...defaultShellState,
+      agents: [{ ...defaultShellState.agents![0], computer: { kind: "instabox", machineId: "../other", connectionRevision: 2 } as never }],
+    });
+    const restored = shellStateFromRuntimeSnapshot(snapshot, defaultShellState).agents![0];
+    expect(restored.computer).toEqual({ kind: "local" });
+    expect(restored.computerPreferenceError).toBe("invalid");
+  });
+
   it("round-trips the supported local state without orchestration collections", () => {
     const snapshot = shellStateToRuntimeSnapshot({
       ...defaultShellState,

@@ -1,3 +1,54 @@
+# Instabox computer integration visual verification
+
+The simplified setup shows the editable machine name, account-charge and
+desktop-start disclosure, and one **Create computer** approval immediately after
+connection. Existing machines remain under a collapsed chooser, including when
+a machine is already selected. Real-component fixtures were inspected at
+1280 × 720, 760 × 800 and 390 × 844. Narrow keyboard traversal scrolls the Create
+button into view with visible focus and no horizontal body overflow. Captures
+are `output/instabox/simple-setup-compact.png` and
+`output/instabox/simple-setup-narrow-focus.png`. These are mocked native metadata,
+not live provider or native-window acceptance. Component regressions establish
+that connection does not create a machine and pending/quota guards block a
+second creation.
+
+final result: blocked for native/live acceptance; inspected component layouts pass.
+
+The ImageGen target is `output/instabox/visual-target.png`, generated from the
+existing Mivlet native screenshot and settings reference. It is a four-panel
+concept board, not a full-window screenshot. Implementation retains the current
+Mivlet typography, semantic colors, image avatars, Phosphor icons and established
+settings/editor layout. Additional recovery controls reflect actual API states.
+
+The target and desktop implementation were inspected together. Browser component
+captures are `settings-setup.png`, `settings-connected.png` (1248 x 720),
+`settings-connected-compact.png` (760 x 800), `settings-narrow.png` (390 x 844),
+`settings-error.png`, `agent-choice.png`, and `computer-panel.png`, all under
+`output/instabox/`. They use real components with mocked native metadata, clearly
+labelled in the viewport. They are not authenticated native or live API evidence.
+
+The first compact inspection found collapsed machine identity text; wrapping and
+flex-basis were corrected and recaptured. Narrow settings have no horizontal
+body overflow. Keyboard focus traverses Computer to Model and the fixed Save
+footer. The viewer action originally required a wider slot than the real sidebar;
+the minimum was corrected, and its browser prerequisite now appears on activation.
+The last inspected page had no browser console errors. No new motion was added.
+
+Live video, stream revocation, native child positioning/keyboard accessibility,
+and account transitions remain unaccepted. Native computer automation recovered
+on 22 October, including after a fresh session reset. The actual native window
+was inspected and closed successfully. After the user completed provider setup
+in the isolated profile, Settings → Computers loaded and refreshed; the agent
+editor retained This PC and disabled unconnected Instabox. Synthetic native
+dialog/vault acceptance passed, including corrected Instabox consent text.
+The user's manual Decline check exposed a false failure warning; cancellation
+handling is corrected with regressions, with the native recheck still pending.
+The [acceptance record](docs/architecture/instabox-computers.md#acceptance-attempt-on-22-october-2026)
+distinguishes those checks from authenticated native viewing. Takeover is absent because the
+implemented stream is view-only. Agent execution/files remain unavailable until
+a verified restricted remote runtime exists. This change must remain a draft.
+
+---
 # Conversational UI visual verification
 
 final result: passed for the inspected native layouts

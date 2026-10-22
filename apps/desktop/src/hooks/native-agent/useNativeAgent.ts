@@ -195,7 +195,7 @@ export function useNativeAgent(options: UseNativeAgentOptions) {
         undefined,
         permissionMode,
         attemptToRetry.id,
-        control,
+        { ...control, computerPreference: attemptToRetry.computer },
       );
     },
     [run],

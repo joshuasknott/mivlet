@@ -292,6 +292,39 @@ impl LocalComputerState {
         Ok(())
     }
 
+    /// Manual repository panels have no durable Work id. They still must bind
+    /// to the saved agent's current local route; a cloud preference must never
+    /// become local merely because the panel supplied a computer generation.
+    pub(crate) fn validate_manual_local_route(
+        &self,
+        workspace_id: &str,
+        agent_id: &str,
+    ) -> Result<(), String> {
+        self.validate_target(workspace_id, agent_id)?;
+        let scope = crate::authorized_scope::command_scope(
+            Some(workspace_id.into()),
+            None,
+            crate::authorized_scope::ScopeAccess::Read,
+        )?;
+        let snapshot: Option<crate::models::RuntimeSnapshot> =
+            crate::store::read_workspace_document(&self.snapshot_path, &scope.data)?;
+        let profile = snapshot
+            .and_then(|snapshot| {
+                snapshot
+                    .agents
+                    .into_iter()
+                    .find(|agent| agent.id == agent_id)
+            })
+            .ok_or_else(|| {
+                "Choose a saved agent in this workspace before using checkpoints.".to_string()
+            })?;
+        validate_manual_local_route_preference(
+            profile.computer.as_ref(),
+            profile.computer_preference_error.as_deref(),
+        )?;
+        Ok(())
+    }
+
     pub(crate) fn validate_viewer_generation(
         &self,
         workspace_id: &str,
@@ -432,6 +465,27 @@ impl LocalComputerState {
         Ok(workspace)
     }
 }
+
+fn validate_manual_local_route_preference(
+    computer: Option<&crate::cloud_computers::AgentComputerPreference>,
+    preference_error: Option<&str>,
+) -> Result<(), String> {
+    if preference_error == Some("invalid") {
+        return Err(
+            "This agent's computer preference is invalid; local repository checkpoints are unavailable until it is corrected.".into(),
+        );
+    }
+    if matches!(
+        computer,
+        Some(crate::cloud_computers::AgentComputerPreference::Instabox { .. })
+    ) {
+        return Err(
+            "This agent selected an Instabox computer; local repository checkpoints are unavailable.".into(),
+        );
+    }
+    Ok(())
+}
+
 /// Derive the existing native scope without loading authority or creating files.
 /// Admission and execution use this same identity; callers supply an account root.
 pub(crate) fn computer_scope(
@@ -1159,6 +1213,12 @@ mod tests {
         ] {
             assert!(normalize_user_navigation(value).is_err(), "{value}");
         }
+    }
+
+    #[test]
+    fn manual_route_rejects_an_invalid_saved_computer_preference() {
+        let error = validate_manual_local_route_preference(None, Some("invalid")).unwrap_err();
+        assert!(error.contains("computer preference is invalid"));
     }
 
     #[test]

@@ -2,15 +2,24 @@ import type {
   CodexAppServerEvent,
   CodexAppServerHandle,
   CodexAppServerHandlers,
-  CodexTurnRequest
+  CodexTurnRequest,
 } from "@mivlet/connectors";
 import type { AgentTurnRequest, BackendProvider } from "@mivlet/protocol";
-import { interruptRuntimeCodexTurn, listenRuntimeCodexEvents, respondRuntimeCodexApproval, shutdownRuntimeCodexTurn, startRuntimeCodexTurn } from "../runtime/domains/providers";
+import {
+  interruptRuntimeCodexTurn,
+  listenRuntimeCodexEvents,
+  respondRuntimeCodexApproval,
+  shutdownRuntimeCodexTurn,
+  startRuntimeCodexTurn,
+} from "../runtime/domains/providers";
 
 function hasDesktopRuntime(): boolean {
   return (
     typeof window !== "undefined" &&
-    Boolean((window as Window & { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__)
+    Boolean(
+      (window as Window & { __TAURI_INTERNALS__?: unknown })
+        .__TAURI_INTERNALS__,
+    )
   );
 }
 
@@ -29,7 +38,7 @@ function isCodexEvent(value: unknown): value is CodexAppServerEvent {
 
 export function createDesktopCodexAppServer(
   provider: BackendProvider,
-  handlers: CodexAppServerHandlers
+  handlers: CodexAppServerHandlers,
 ): CodexAppServerHandle | null {
   if (!hasDesktopRuntime() || provider.backendType !== "codex-app-server") {
     return null;
@@ -57,41 +66,51 @@ export function createDesktopCodexAppServer(
       return { threadId };
     },
 
-    async *submitTurn(turn: CodexTurnRequest): AsyncIterable<CodexAppServerEvent> {
+    async *submitTurn(
+      turn: CodexTurnRequest,
+    ): AsyncIterable<CodexAppServerEvent> {
       const queue: CodexAppServerEvent[] = [];
-      let resolveNext: ((value: CodexAppServerEvent | undefined) => void) | null = null;
+      let resolveNext:
+        ((value: CodexAppServerEvent | undefined) => void) | null = null;
       let finished = false;
       const finish = () => {
         finished = true;
         resolveNext?.(undefined);
         resolveNext = null;
       };
-      const unlisten = await listenRuntimeCodexEvents(currentRequestId, (event) => {
-        if (event.type === "retrying") {
-          handlers.onRetry();
-          return;
-        }
-        if (event.type === "thread") {
-          activeThreadId = event.threadId;
-          return;
-        }
-        if (event.type === "turn") {
-          activeTurnId = event.turnId;
-          return;
-        }
-        if (event.type === "process-exited") {
-          finish();
-          return;
-        }
-        if (isCodexEvent(event)) {
-          queue.push(event);
-          resolveNext?.(event);
-          resolveNext = null;
-          if (event.type === "done" || event.type === "cancelled" || event.type === "error") {
-            finished = true;
+      const unlisten = await listenRuntimeCodexEvents(
+        currentRequestId,
+        (event) => {
+          if (event.type === "retrying") {
+            handlers.onRetry();
+            return;
           }
-        }
-      });
+          if (event.type === "thread") {
+            activeThreadId = event.threadId;
+            return;
+          }
+          if (event.type === "turn") {
+            activeTurnId = event.turnId;
+            return;
+          }
+          if (event.type === "process-exited") {
+            finish();
+            return;
+          }
+          if (isCodexEvent(event)) {
+            queue.push(event);
+            resolveNext?.(event);
+            resolveNext = null;
+            if (
+              event.type === "done" ||
+              event.type === "cancelled" ||
+              event.type === "error"
+            ) {
+              finished = true;
+            }
+          }
+        },
+      );
 
       try {
         // The native command acknowledges process startup immediately; it does
@@ -106,16 +125,20 @@ export function createDesktopCodexAppServer(
             contextPrefix: turn.options.contextPrefix,
             permissionMode: turn.options.permissionMode,
             runId: turn.options.attemptId,
-            computer: turn.options.computer
-          }
+            computer: turn.options.computer,
+            workId: turn.options.workId,
+            workGeneration: turn.options.workGeneration,
+          },
         });
         while (!finished || queue.length > 0) {
           if (queue.length > 0) {
             yield queue.shift() as CodexAppServerEvent;
           } else {
-            const next = await new Promise<CodexAppServerEvent | undefined>((resolve) => {
-              resolveNext = resolve;
-            });
+            const next = await new Promise<CodexAppServerEvent | undefined>(
+              (resolve) => {
+                resolveNext = resolve;
+              },
+            );
             if (!next && finished) break;
           }
         }
@@ -128,7 +151,7 @@ export function createDesktopCodexAppServer(
       await respondRuntimeCodexApproval({
         requestId: currentRequestId,
         approvalRequestId: requestId,
-        result
+        result,
       });
     },
 
@@ -136,7 +159,7 @@ export function createDesktopCodexAppServer(
       await interruptRuntimeCodexTurn({
         requestId: currentRequestId,
         threadId: activeThreadId ?? threadId,
-        turnId: turnId ?? activeTurnId ?? undefined
+        turnId: turnId ?? activeTurnId ?? undefined,
       });
     },
 
@@ -144,6 +167,6 @@ export function createDesktopCodexAppServer(
       await shutdownRuntimeCodexTurn(currentRequestId);
       activeThreadId = null;
       activeTurnId = null;
-    }
+    },
   };
 }

@@ -26,6 +26,7 @@ export { ProviderUsageDetails };
 export { AccountDialog } from "../agents/AccountDialog";
 const HostedProviderSettings = lazy(() => import("../hosted/HostedProviderSettings").then(module => ({ default: module.HostedProviderSettings })));
 const McpServerSettings = lazy(() => import("../settings/McpServerSettings").then(module => ({ default: module.McpServerSettings })));
+const ComputersSettings = lazy(() => import("../settings/ComputersSettings").then(module => ({ default: module.ComputersSettings })));
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
   status: "unavailable",
@@ -44,6 +45,7 @@ export function SettingsPage({
   onThemeChange,
   activeTab,
   workspaceName,
+  onOpenComputer,
   dictationCapability = DEFAULT_DICTATION_CAPABILITY,
   titleId = "settings-title"
 }: {
@@ -52,6 +54,7 @@ export function SettingsPage({
   onThemeChange: (theme: "light" | "dark") => void;
   activeTab: SettingsTab;
   workspaceName: string;
+  onOpenComputer?: () => void;
   dictationCapability?: VoiceCapability;
   titleId?: string;
 }) {
@@ -81,7 +84,7 @@ export function SettingsPage({
         ) : activeTab === "models" ? (
           <ProviderModelSettings models={runtime.allModelOptions ?? []} hiddenModelIds={runtime.hiddenModelIds ?? []} onChange={runtime.setModelVisible} />
 
-        ) : activeTab === "usage" ? <ProviderUsageDetails /> : (
+        ) : activeTab === "computers" ? <Suspense fallback={<p role="status">Loading computers…</p>}><ComputersSettings workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId} agentId={runtime.agents[0]?.id} onOpenComputer={onOpenComputer} /></Suspense> : activeTab === "usage" ? <ProviderUsageDetails /> : (
           <MemorySettingsPage
             runtime={runtime}
             onStatus={reportStatus}

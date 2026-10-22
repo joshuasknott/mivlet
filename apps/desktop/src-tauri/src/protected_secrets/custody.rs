@@ -5,12 +5,12 @@ use zeroize::Zeroizing;
 
 use super::Failure;
 
-pub(super) struct Secret(Zeroizing<String>);
+pub(crate) struct Secret(Zeroizing<String>);
 impl Secret {
-    pub(super) fn new(value: String) -> Self {
+    pub(crate) fn new(value: String) -> Self {
         Self(Zeroizing::new(value))
     }
-    pub(super) fn as_str(&self) -> &str {
+    pub(crate) fn as_str(&self) -> &str {
         &self.0
     }
 }
@@ -21,13 +21,13 @@ impl std::ops::Deref for Secret {
     }
 }
 
-pub(super) trait Custody: Send + Sync {
+pub(crate) trait Custody: Send + Sync {
     fn put(&self, account: &str, id: &str, value: &str) -> Result<(), Failure>;
     fn get(&self, account: &str, id: &str) -> Result<Option<Secret>, Failure>;
     fn remove(&self, account: &str, id: &str) -> Result<(), Failure>;
 }
 
-pub(super) struct NativeCustody;
+pub(crate) struct NativeCustody;
 
 impl NativeCustody {
     fn entry(account: &str, id: &str) -> Result<keyring::Entry, Failure> {

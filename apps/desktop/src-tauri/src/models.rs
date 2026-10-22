@@ -1124,6 +1124,10 @@ pub struct MivletAgentProfile {
     #[serde(default)]
     pub knowledge_source_ids: Vec<String>,
     pub permission_label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer: Option<crate::cloud_computers::AgentComputerPreference>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer_preference_error: Option<String>,
     #[serde(default)]
     pub thread_id: Option<String>,
     #[serde(default)]

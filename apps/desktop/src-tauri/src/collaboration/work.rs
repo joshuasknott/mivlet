@@ -334,6 +334,15 @@ fn new_work_with_parent(
         ));
     }
     let agent = profile(ctx.profiles, &agent_id)?;
+    if agent.computer_preference_error.as_deref() == Some("invalid") {
+        return Err(invalid(
+            "The selected Instabox computer preference is invalid. Re-select a connected machine before sending.",
+        ));
+    }
+    if let Some(computer) = agent.computer.as_ref() {
+        crate::cloud_computers::validate_agent_computer_preference(computer)
+            .map_err(|error| invalid(&error))?;
+    }
     let outside_project_team = if let Some(project) = &room.project_id {
         let team = ctx.project_team(project)?;
         let outside = !team.participant_ids.contains(&agent_id);
@@ -360,6 +369,7 @@ fn new_work_with_parent(
         super::context::narrow_workspace_context(captured_context.as_mut().unwrap())?;
     }
     Ok(Work {
+        computer: agent.computer.clone(),
         hosted_task: None,
         repository_binding: crate::local_computer::coding::capture_work_repository(
             ctx.scope.data.workspace_id(),

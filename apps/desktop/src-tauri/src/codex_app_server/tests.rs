@@ -159,6 +159,26 @@ fn approval_responses_preserve_rpc_id_types() {
 }
 
 #[test]
+fn declined_codex_command_does_not_require_a_local_route() {
+    assert!(!super::requires_local_codex_route(
+        super::ApprovalKind::Command,
+        false
+    ));
+    assert!(!super::requires_local_codex_route(
+        super::ApprovalKind::FileChange,
+        false
+    ));
+    assert!(super::requires_local_codex_route(
+        super::ApprovalKind::Command,
+        true
+    ));
+    assert!(!super::requires_local_codex_route(
+        super::ApprovalKind::DynamicTool,
+        true
+    ));
+}
+
+#[test]
 fn desktop_tool_response_accepts_the_camel_case_wire_contract() {
     let response: super::CodexApprovalResponseRequest = serde_json::from_value(json!({
         "requestId": "run-1", "approvalRequestId": "42",

@@ -1,4 +1,11 @@
-import { lazy, Suspense, useEffect, useId, useRef } from "react";
+import {
+  lazy,
+  Suspense,
+  useEffect,
+  useId,
+  useRef,
+  useSyncExternalStore,
+} from "react";
 import type { ShellRuntime } from "../hooks/useShellRuntime";
 import { useLocalComputer } from "../hooks/useLocalComputer";
 import { useHostedComputer } from "../hooks/useHostedComputer";
@@ -6,6 +13,7 @@ import { useHostedBrowserController } from "../hooks/useHostedBrowserController"
 import type { WorkspaceExecution } from "../lib/workspace-execution";
 import { LiveWorkRail } from "../components/agents/LiveWorkRail";
 import { resolveHostedComputerScope } from "../lib/hosted-computer-scope";
+import { CloudComputerPanel } from "../components/agents/CloudComputerPanel";
 
 const ApprovalPanel = lazy(() =>
   import("../components/ApprovalPanel").then((module) => ({
@@ -15,6 +23,46 @@ const ApprovalPanel = lazy(() =>
 
 /** Inspection owns only its manual requests. Closing it never stops an execution. */
 export function ComputerInspector({
+  cloud = false,
+  ...props
+}: {
+  cloud?: boolean;
+  agentId: string;
+  runtime: ShellRuntime;
+  service: WorkspaceExecution;
+  onClose: () => void;
+}) {
+  const state = useSyncExternalStore(
+    props.service.subscribe,
+    props.service.getSnapshot,
+  );
+  const admitted = state.sessions.find(
+    (session) => session.work.agentId === props.agentId,
+  );
+  const profile = props.runtime.agents.find(
+    (agent) => agent.id === props.agentId,
+  );
+  const selected = admitted ? admitted.computer : profile?.computer;
+  const invalid = !admitted && Boolean(profile?.computerPreferenceError);
+  if (cloud || invalid || selected?.kind === "instabox")
+    return (
+      <CloudComputerPanel
+        workspaceId={props.service.workspaceId}
+        invalid={!cloud && invalid}
+        machineId={
+          cloud
+            ? undefined
+            : selected?.kind === "instabox"
+              ? selected.machineId
+              : undefined
+        }
+        onClose={props.onClose}
+      />
+    );
+  return <LocalComputerInspector {...props} />;
+}
+
+function LocalComputerInspector({
   agentId,
   runtime,
   service,
@@ -33,7 +81,9 @@ export function ComputerInspector({
     agentId,
     executionOwner: false,
   });
-  const hostedScope = resolveHostedComputerScope(runtime.accountWorkspaceStatus);
+  const hostedScope = resolveHostedComputerScope(
+    runtime.accountWorkspaceStatus,
+  );
   const hosted = useHostedComputer({
     workspaceId: hostedScope?.workspaceId ?? null,
     agentId,

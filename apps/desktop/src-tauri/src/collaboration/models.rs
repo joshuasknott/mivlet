@@ -127,6 +127,9 @@ pub struct WorkAttachment {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Work {
+    /// Frozen computer route captured from the native agent profile at Work creation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub computer: Option<crate::cloud_computers::AgentComputerPreference>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub hosted_task: Option<crate::hosted_tasks::models::Execution>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

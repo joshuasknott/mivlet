@@ -25,7 +25,10 @@ serde_json = { version = "1", features = ["float_roundtrip"] }
 # Compiles the shared TypeScript/Rust secret-redaction patterns from
 # packages/protocol/src/secret-redaction.json (already in the lockfile).
 regex = "1.12.4"
-tauri = { version = "2", features = [] }
+# Child WebViews are used for the native Instabox viewer. The viewer is never
+# exposed to the renderer and is created only after its HTTPS URL has passed
+# the native origin/path fence below.
+tauri = { version = "2", features = ["unstable"] }
 # Native OS notifications for completion, failure, and approval-needed states.
 # Pinned to the Tauri 2 plugin line; bodies are shaped (privacy-safe) in TS.
 tauri-plugin-notification = "2"

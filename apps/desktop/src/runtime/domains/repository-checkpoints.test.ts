@@ -67,6 +67,7 @@ describe("native checkpoint authority", () => {
       expect.objectContaining({
         arguments: args,
         computerGeneration: 7,
+        manualLocalAuthority: true,
         workspaceId: "workspace",
         agentId: "agent",
       }),

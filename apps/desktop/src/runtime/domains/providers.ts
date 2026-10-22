@@ -252,6 +252,8 @@ export interface RuntimeCodexTurnStartRequest {
     permissionMode?: string;
     runId?: string;
     computer?: { workspaceId: string; agentId: string };
+    workId?: string;
+    workGeneration?: number;
   };
 }
 
