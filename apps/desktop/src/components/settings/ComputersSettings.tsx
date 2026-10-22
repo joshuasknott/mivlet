@@ -46,11 +46,11 @@ export function ComputersSettings({ workspaceId, agentId, onOpenComputer }: {
             <strong>Create a computer</strong>
             <label htmlFor="instabox-name">Machine name</label>
             <input id="instabox-name" required maxLength={80} value={name} disabled={creationBlocked} onChange={event => setName(event.target.value)} />
-            <p>Creates one Linux computer and starts its desktop under your Instabox plan and charges. No Mivlet provider keys, workspace files, or Instabox Vault secrets are copied.</p>
+            <p>Creates and starts one Linux desktop under your Instabox plan and charges. No provider keys, workspace files or Vault secrets are copied.</p>
             {status.usage?.machineCount != null && status.usage.machineLimit != null ? <small>{status.usage.machineCount} of {status.usage.machineLimit} machine slots used.</small> : <small>Instabox checks your account allowance before creation.</small>}
             <button type="submit" disabled={creationBlocked || !name.trim()}>Create computer</button>
           </form>
-          {quotaFull ? <p className="computers-settings__note">Your account has no free machine slots. Select an existing machine or manage your allowance in Instabox.</p> : null}
+          {quotaFull ? <p className="computers-settings__note">No free machine slots. Choose an existing machine or manage your Instabox allowance.</p> : null}
         </> : null}
         <details className="settings-disclosure">
           <summary>Use an existing machine</summary>
@@ -71,12 +71,12 @@ export function ComputersSettings({ workspaceId, agentId, onOpenComputer }: {
         </div>
         <p className="computers-settings__note">Agent computer actions are not available yet.</p>
         <details className="settings-disclosure"><summary>Cloud access and limits</summary>
-          <p className="computers-settings__note">Shared capacity, not private computers per agent. Agent commands, file transfer and desktop input require a verified restricted runtime. Remote website sessions are separate.</p>
+          <p className="computers-settings__note">Agents share this computer. Commands, file transfer and desktop input are not available yet. Website sign-ins are separate.</p>
           <p className="computers-settings__note">Mivlet must stay open to run its agent loop. Closing it does not guarantee that remote processes stop.</p>
         </details>
       </>}
     </section>
-    {status?.pendingAction ? <p role="status">This computer change is not confirmed yet. Check its result before another machine change.</p> : null}
+    {status?.pendingAction ? <p role="status">This change is not confirmed yet. Check its result before retrying.</p> : null}
     {pending ? <p role="status">Checking your computer…</p> : null}
     {error || status?.error ? <p role="alert">{error || status?.error}</p> : null}
     <div className="computers-settings__actions"><button type="button" disabled={pending} onClick={() => void (status?.pendingAction ? act({ kind: "reconcile" }) : refresh())}>{status?.pendingAction ? "Check operation result" : "Refresh"}</button></div>

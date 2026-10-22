@@ -29,7 +29,7 @@ describe("Computers settings", () => {
     port.cloudComputerStatus.mockResolvedValue({ ...connected, machine: null });
     render(<ComputersSettings workspaceId="workspace-one" agentId="agent-one" />);
     expect(await screen.findByRole("button", { name: "Create computer" })).toBeDisabled();
-    expect(screen.getByText(/no free machine slots/)).toBeVisible();
+    expect(screen.getByText(/no free machine slots/i)).toBeVisible();
     await userEvent.click(screen.getByText("Use an existing machine"));
     await userEvent.selectOptions(screen.getByLabelText("Existing machine"), machine.id);
     port.changeCloudComputer.mockResolvedValue(connected);
