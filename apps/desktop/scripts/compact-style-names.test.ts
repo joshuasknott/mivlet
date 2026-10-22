@@ -167,3 +167,35 @@ it("keeps task IDs and query keys distinct from their compactable presentation c
     expect(compactStyleText(css, map)).toContain(`.${map.get(name)}{display:block}`);
   }
 });
+
+it("preserves short aliases, longer token widths and CSS/JS identity beyond 36 classes", () => {
+  const classes = Array.from({ length: 80 }, (_, index) =>
+    `tail-order-class-${index.toString().padStart(2, "0")}`,
+  );
+  const css = classes.map((name) => `.${name}{display:block}`).join("");
+  const frequencyText = classes
+    .slice(0, 36)
+    .flatMap((name, index) => Array.from({ length: 100 - index }, () => name))
+    .join(" ");
+  const jsx = `const ui = <>
+    ${classes.map((name) => `<div className="${name}" />`).join("\n    ")}
+  </>;
+  /* ${frequencyText} */`;
+  const map = styleNameMap(css, [{ fileName: "tail-order.tsx", code: jsx }]);
+
+  expect(map.size).toBe(classes.length);
+  expect(new Set(map.values()).size).toBe(classes.length);
+  classes.slice(0, 36).forEach((name, index) => {
+    expect(map.get(name)).toBe(`_${index.toString(36)}`);
+  });
+
+  const tail = classes.slice(36);
+  expect(tail.every((name) => map.get(name)?.length === 3)).toBe(true);
+  const compactCss = compactStyleText(css, map);
+  const compactJs = compactStyleSource(jsx, "tail-order.tsx", map);
+  classes.forEach((name) => {
+    const alias = map.get(name)!;
+    expect(compactCss).toContain(`.${alias}{`);
+    expect(compactJs).toContain(`className="${alias}"`);
+  });
+});

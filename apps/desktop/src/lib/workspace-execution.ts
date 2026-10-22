@@ -56,8 +56,7 @@ export const restrictedPermission = (
       ? "trusted-scope"
       : "full-access";
 
-/** Durable reference preview captured with the request before staging. */
-export function composerAttachmentRefs(
+function attachmentRefs(
   attachments: readonly ComposerAttachment[],
 ): WorkAttachment[] {
   return attachments.map((attachment) => {
@@ -99,47 +98,18 @@ export function composerAttachmentRefs(
   });
 }
 
+/** Durable reference preview captured with the request before staging. */
+export function composerAttachmentRefs(
+  attachments: readonly ComposerAttachment[],
+): WorkAttachment[] {
+  return attachmentRefs(attachments);
+}
+
 /** Final staged references recorded at dispatch for durable recovery. */
 export function stagedAttachmentRefs(
   attachments: readonly ComposerAttachment[],
 ): WorkAttachment[] {
-  return attachments.map((attachment) => {
-    if (attachment.durableRef) return attachment.durableRef;
-    if (attachment.workspaceFile)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.workspaceFile.mimeType,
-        sizeBytes: attachment.sizeBytes,
-        availability: "workspace-file",
-        relativePath: attachment.workspaceFile.relativePath,
-        sha256: attachment.workspaceFile.sha256,
-      };
-    if (attachment.sourceId)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.type,
-        sizeBytes: attachment.sizeBytes,
-        availability: "knowledge-context",
-        sourceId: attachment.sourceId,
-      };
-    if (attachment.imageInput)
-      return {
-        id: attachment.id,
-        name: attachment.name,
-        mimeType: attachment.type,
-        sizeBytes: attachment.sizeBytes,
-        availability: "image-input",
-      };
-    return {
-      id: attachment.id,
-      name: attachment.name,
-      mimeType: attachment.type,
-      sizeBytes: attachment.sizeBytes,
-      availability: "transient",
-    };
-  });
+  return attachmentRefs(attachments);
 }
 
 export interface ExecutionSession {

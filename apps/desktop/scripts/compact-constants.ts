@@ -1,5 +1,5 @@
 import { gzipSync } from "node:zlib";
-import { minify } from "uglify-js";
+import { minify, type CompressOptions } from "uglify-js";
 import ts from "typescript";
 import type { Plugin } from "vite";
 
@@ -173,20 +173,72 @@ interface ChunkImports {
 /** Validate the emitted syntax and retain a final standard minifier pass only
  * when it also improves both measured encodings. */
 export function compactModule(code: string): string {
-  const compact = compactConstants(code);
-  const result = minify(compact, {
-    module: true,
-    compress: { passes: 3 },
-    mangle: true,
-    output: { comments: "some" },
+  const minifyModule = (source: string, compress: CompressOptions) => {
+    const result = minify(source, {
+      module: true,
+      compress,
+      mangle: true,
+      output: { comments: "some" },
+    });
+    if (result.error) throw result.error;
+    if (!result.code)
+      throw new Error("The emitted module could not be minified.");
+    return result.code;
+  };
+  const measure = (source: string) => ({
+    raw: Buffer.byteLength(source),
+    gzip: gzipSync(source).byteLength,
   });
-  if (result.error) throw result.error;
-  if (!result.code)
-    throw new Error("The emitted module could not be minified.");
-  return Buffer.byteLength(result.code) < Buffer.byteLength(compact) &&
-    gzipSync(result.code).byteLength <= gzipSync(compact).byteLength
-    ? result.code
-    : compact;
+  const improves = (
+    candidate: ReturnType<typeof measure>,
+    input: ReturnType<typeof measure>,
+  ) => candidate.raw < input.raw && candidate.gzip <= input.gzip;
+  const isBetter = (
+    candidate: ReturnType<typeof measure>,
+    current: ReturnType<typeof measure>,
+  ) =>
+    candidate.gzip < current.gzip ||
+    (candidate.gzip === current.gzip && candidate.raw < current.raw);
+  const defaultCompress = { passes: 3 };
+  const tunedCompress = { passes: 3, reduce_funcs: false, reduce_vars: false };
+
+  // Keep the original pass exactly: compact constants, then retain the
+  // standard minifier only when it improves both measured encodings.
+  let best = compactConstants(code);
+  let bestSize = measure(best);
+  const initial = minifyModule(best, defaultCompress);
+  const initialSize = measure(initial);
+  if (improves(initialSize, bestSize)) {
+    best = initial;
+    bestSize = initialSize;
+  }
+
+  // A small bounded follow-up can expose constants created by the first pass.
+  // Both minifier candidates share one compactConstants result per round.
+  for (let round = 0; round < 5; round++) {
+    const compact = compactConstants(best);
+    const candidates = [
+      compact,
+      minifyModule(compact, defaultCompress),
+      minifyModule(compact, tunedCompress),
+    ];
+    let selected = best;
+    let selectedSize = bestSize;
+    for (const candidate of candidates) {
+      const candidateSize = measure(candidate);
+      if (
+        improves(candidateSize, bestSize) &&
+        isBetter(candidateSize, selectedSize)
+      ) {
+        selected = candidate;
+        selectedSize = candidateSize;
+      }
+    }
+    if (selected === best) break;
+    best = selected;
+    bestSize = selectedSize;
+  }
+  return best;
 }
 
 /** Early calls through a static ESM cycle must not acquire new const/TDZ

@@ -8,6 +8,17 @@ import {
   type CloudViewerState,
 } from "../runtime/domains/cloud-computers";
 
+function revokeViewer(workspaceId: string, viewer: CloudViewerState | null) {
+  if (viewer?.machineId && viewer.generation != null)
+    void closeCloudViewer(
+      workspaceId,
+      viewer.machineId,
+      viewer.generation,
+    ).catch(() => {
+      /* Native retains the uncertain revoke for recovery. */
+    });
+}
+
 /** The DOM supplies geometry only; the stream credential stays in native memory. */
 export function useCloudViewer(
   workspaceId: string,
@@ -31,14 +42,7 @@ export function useCloudViewer(
       if (epoch.current === owner) epoch.current++;
       const active = current.current;
       current.current = null;
-      if (active?.machineId && active.generation != null)
-        void closeCloudViewer(
-          workspaceId,
-          active.machineId,
-          active.generation,
-        ).catch(() => {
-          /* Native retains the uncertain revoke for recovery. */
-        });
+      revokeViewer(workspaceId, active);
     };
   }, [workspaceId, machineId, revision]);
 
@@ -74,12 +78,7 @@ export function useCloudViewer(
           );
         }
         if (owner !== epoch.current) {
-          if (next.open && next.machineId && next.generation != null)
-            void closeCloudViewer(
-              workspaceId,
-              next.machineId,
-              next.generation,
-            ).catch(() => {});
+          if (next.open) revokeViewer(workspaceId, next);
           return false;
         }
         current.current = next;

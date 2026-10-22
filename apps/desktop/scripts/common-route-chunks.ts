@@ -8,6 +8,24 @@ type GetModuleInfo = (id: string) => {
  * common accounting; separately budgeted conversation engines stay separate. */
 export function commonRouteChunk(id: string): string | undefined {
   const path = id.replace(/\\/g, "/").split("?")[0];
+  // Onboarding already loads the appearance controls and both stylesheets.
+  // Share their JS/CSS compression; the optional agent editor also fetches
+  // these small onboarding definitions without mounting the page.
+  if (/\/src\/components\/pages\/FirstAgentOnboardingPage\.tsx$/.test(path)
+    || /\/src\/components\/agents\/(?:AgentAppearancePicker\.tsx|AgentColourPicker\.tsx|agent-appearance\.css)$/.test(path)
+    || /\/src\/styles\/routes\/first-agent-onboarding\.css$/.test(path)) return "FirstAgentOnboardingPage";
+  // These modules already belong to the execution worker's static closure.
+  // One common-accounted request lets their strings and wrappers compress
+  // together without adding optional workspace views to startup or execution.
+  // Settings and conversation now fetch this code too; importing these pure
+  // definitions does not mount a worker or dispatch native/remote operations.
+  if (/\/src\/shell\/(?:ExecutionWorker\.tsx|useExecutionController\.ts)$/.test(path)
+    || /\/src\/hooks\/native-agent\/(?:run|events|useNativeAgent|context|retry|persistence|providers|cancellation|recovery|runtime|text-presentation)\.ts$/.test(path)
+    || /\/src\/hooks\/(?:useHostedBrowserController|useHostedComputer)\.ts$/.test(path)
+    || /\/src\/lib\/(?:desktop-tool-runtime|computer-task-executor|collaboration-context|conversation-compaction|shared-execution-attachments|computer-instructions|computer-tools|provider-route-selection|attempt-persistence|provider-continuation|generated-ui-instructions|coordination-resources|workspace-agent-directory|context-selection|hosted-computer-scope|execution-attachments|conversation-presentation|connector-chat|mcp-app-descriptor)\.ts$/.test(path)
+    || /\/src\/runtime\/domains\/(?:provider-continuation|hosted-computer|tools)\.ts$/.test(path)
+    || /\/src\/components\/marketplace\/marketplace-catalog\.ts$/.test(path)
+    || /\/packages\/connectors\/src\/providers\/routing\.ts$/.test(path)) return "ExecutionWorker";
   if (/\/src\/components\/hosted\//.test(path)
     || /\/src\/runtime\/domains\/hosted-tasks\.ts$/.test(path)) return "workspace-tools";
   // Share the deferred settings, marketplace and usage request with the other

@@ -33,7 +33,7 @@ export async function importRuntimeLocalKnowledgeSource(
   candidate: LocalTextFileCandidate,
 ) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<LocalFileImport>("import_local_knowledge_source", {
     candidate,
     ...scope,
@@ -44,7 +44,7 @@ export async function refreshRuntimeLocalKnowledgeSource(
   request: RefreshLocalKnowledgeSourceRequest,
 ) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<LocalKnowledgeRefreshResponse>(
     "refresh_local_knowledge_source",
     {
@@ -85,7 +85,7 @@ export async function loadRuntimeMemoryState() {
 
 export async function saveRuntimeMemoryState(state: MemoryControlState) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<MemoryControlState>("save_memory_state", {
     state,
     ...scope,
@@ -131,7 +131,7 @@ export async function changeRuntimeMemoryRecord(change: {
 
 export async function exportRuntimeMemoryState(_state: MemoryControlState) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<string>("export_memory_state", scope);
 }
 
@@ -156,7 +156,7 @@ export async function listRuntimeContextSummaries(threadId: string) {
 /** Persist one incremental summary revision before it may enter a turn. */
 export async function saveRuntimeContextSummary(summary: ContextSummaryRecord) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<ContextSummaryRecord>("save_context_summary", {
     summary,
     ...scope,

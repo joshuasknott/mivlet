@@ -11,7 +11,7 @@ const graph = (edges: Record<string, string[]>, dynamic: Record<string, string[]
   ? { isEntry: false, importers: edges[id], dynamicImporters: dynamic[id] ?? [] } : null;
 
 it("keeps every cohort under the unchanged common budget accounting", () => {
-  for (const name of ["workspace-tools"]) {
+  for (const name of ["workspace-tools", "ExecutionWorker", "FirstAgentOnboardingPage"]) {
     expect(conversationUpgradeAssetPattern.test(`${name}-hash.js`)).toBe(false);
     expect(intelligentUiAssetPattern.test(`${name}-hash.js`)).toBe(false);
   }
@@ -35,15 +35,21 @@ it("keeps correlated deferred cloud/repository fragments in common-accounted coh
 it("groups deferred workspace editors without pulling them into onboarding or conversation", () => {
   for (const path of ["agents/AgentEditor", "agents/AgentLearningDialog", "projects/ProjectDetailsDialog", "projects/ProjectContextPanel", "projects/ProjectFiles", "projects/ConversationDialogs", "projects/TeamReadiness"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/${path}.tsx`)).toBe("workspace-tools");
-  for (const path of ["agents/AgentAppearancePicker", "agents/AgentColourPicker", "ModelPicker", "pages/OnboardingPage", "pages/FirstAgentOnboardingPage"])
+  for (const path of ["agents/AgentAppearancePicker", "agents/AgentColourPicker", "pages/FirstAgentOnboardingPage"])
+    expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/${path}.tsx`)).toBe("FirstAgentOnboardingPage");
+  for (const path of ["ModelPicker", "pages/OnboardingPage"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/${path}.tsx`)).toBeUndefined();
+  for (const path of ["components/agents/agent-appearance.css", "styles/routes/first-agent-onboarding.css"])
+    expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBe("FirstAgentOnboardingPage");
   expect(commonRouteChunk("/mivlet/apps/desktop/src/styles/agent-settings.css")).toBeUndefined();
 });
 
 it("groups optional inspection views while preserving execution and feature boundaries", () => {
   for (const path of ["shell/ComputerInspector.tsx", "components/agents/LiveWorkRail.tsx", "components/agents/NativeComputerPanel.tsx", "components/navigation/WorkspaceMemories.tsx", "components/navigation/workspace-memories.css", "components/conversation/SideChats.tsx", "components/search/SearchOverlay.tsx", "components/search/SearchResults.tsx", "components/search/search.css", "lib/search/useWorkspaceSearch.ts", "lib/search/results.ts", "runtime/domains/search.ts"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBe("workspace-tools");
-  for (const path of ["shell/ExecutionWorker.tsx", "hooks/useHostedComputer.ts", "hooks/useHostedBrowserController.ts", "lib/hosted-computer-scope.ts", "runtime/domains/hosted-computer.ts", "shell/WorkspaceHistory.tsx", "components/conversation/ArtifactPreview.tsx", "components/CopyButton.tsx", "components/search/SearchFileDialog.tsx", "components/conversation/SideChatContextNotice.tsx"])
+  for (const path of ["shell/ExecutionWorker.tsx", "hooks/useHostedComputer.ts", "hooks/useHostedBrowserController.ts", "lib/hosted-computer-scope.ts", "runtime/domains/hosted-computer.ts", "lib/execution-attachments.ts", "lib/conversation-presentation.ts", "lib/connector-chat.ts", "lib/mcp-app-descriptor.ts"])
+    expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBe("ExecutionWorker");
+  for (const path of ["shell/WorkspaceHistory.tsx", "components/conversation/ArtifactPreview.tsx", "components/CopyButton.tsx", "components/search/SearchFileDialog.tsx", "components/conversation/SideChatContextNotice.tsx"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBeUndefined();
 });
 
@@ -59,10 +65,10 @@ it("shares deferred settings, marketplace and usage code without including their
   ]) expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBe("workspace-tools");
   for (const path of [
     "components/settings/SettingsModal.tsx", "components/marketplace/remote-connectors.ts",
-    "components/marketplace/marketplace-catalog.ts",
     "components/usage/UsageSidebar.tsx", "components/usage/provider-usage-reset.css",
     "components/pages/SettingsPage.tsx",
   ]) expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBeUndefined();
+  expect(commonRouteChunk("/mivlet/apps/desktop/src/components/marketplace/marketplace-catalog.ts")).toBe("ExecutionWorker");
 });
 
 it("moves the real input/hook chain only when all consumers belong to assistant-ui", () => {
