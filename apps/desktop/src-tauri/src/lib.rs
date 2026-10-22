@@ -195,6 +195,16 @@ pub fn run() {
                     let _ = ingress.stop();
                 }
                 tauri::async_runtime::spawn(async move {
+                    if let Some(window) = app.get_webview_window("main") {
+                        let _ = window.destroy();
+                        if let Err(error) =
+                            cloud_computers::viewer::close_for_process(&window).await
+                        {
+                            eprintln!(
+                                "Instabox viewer revocation was not confirmed during exit: {error}"
+                            );
+                        }
+                    }
                     codex_app_server::shutdown_all_runs();
                     embedded_agent::shutdown_all();
                     embedded_mcp::shutdown_all();

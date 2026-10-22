@@ -22,9 +22,12 @@ use tauri::{
 };
 use url::Url;
 
+mod shutdown;
 #[cfg(test)]
 mod viewer_tests;
 mod viewer_validation;
+
+pub(crate) use shutdown::close_for_process;
 
 /// The smallest stream window Mivlet requests.  Short links reduce the impact
 /// of a URL accidentally copied from a native diagnostic surface.
@@ -340,18 +343,14 @@ pub(crate) async fn close_for_lifecycle(
     window: &tauri::WebviewWindow,
 ) -> Result<tokio::sync::MutexGuard<'static, ()>, String> {
     let serial = open_serial().lock().await;
-    let (machine_id, generation, key) = {
+    let (machine_id, key) = {
         let active = active_viewer()
             .lock()
             .map_err(|_| "The native Instabox viewer is unavailable.".to_string())?;
         let Some(active) = active.as_ref() else {
             return Ok(serial);
         };
-        (
-            active.machine_id.clone(),
-            active.fence.snapshot().generation,
-            active.key.clone(),
-        )
+        (active.machine_id.clone(), active.key.clone())
     };
     {
         let mut active = active_viewer()
@@ -360,7 +359,7 @@ pub(crate) async fn close_for_lifecycle(
         let current = active
             .as_mut()
             .ok_or("The native Instabox viewer state disappeared.")?;
-        current.fence.begin_close(generation)?;
+        current.fence.fence_native_close()?;
     }
     let child_result = close_child(window);
     let revoke_result = revoke_stream(&machine_id, key.as_str()).await;
@@ -709,6 +708,23 @@ pub(crate) async fn cloud_computer_viewer_status(
         // newly selected account must never be used to revoke an old stream.
         drop(close_for_lifecycle(&window).await?);
     }
+    let child_missing = {
+        let mut active = active_viewer()
+            .lock()
+            .map_err(|_| "The native Instabox viewer is unavailable.".to_string())?;
+        match active.as_mut() {
+            Some(active) => active
+                .fence
+                .fence_missing_child(window.get_webview(VIEWER_LABEL).is_some())?,
+            None => false,
+        }
+    };
+    if child_missing {
+        // Report local closure even when the provider cannot be reached. An
+        // unconfirmed revoke remains available for explicit Stop viewing;
+        // ordinary status reads must not keep replaying machine-wide DELETE.
+        let _ = close_for_lifecycle(&window).await;
+    }
     let active = active_viewer()
         .lock()
         .map_err(|_| "The native Instabox viewer is unavailable.".to_string())?;
@@ -716,6 +732,24 @@ pub(crate) async fn cloud_computer_viewer_status(
 }
 
 impl ViewerFence {
+    /// Native cleanup may already have fenced local access before it acquired
+    /// the serialization lock. Continue that pending revoke without minting a
+    /// second generation; renderer requests still use strict `begin_close`.
+    fn fence_native_close(&mut self) -> Result<(), String> {
+        if self.closed && self.revoke == RevokeState::Pending {
+            return Ok(());
+        }
+        self.begin_close(self.generation).map(|_| ())
+    }
+
+    fn fence_missing_child(&mut self, child_present: bool) -> Result<bool, String> {
+        if child_present || self.closed {
+            return Ok(false);
+        }
+        self.begin_close(self.generation)?;
+        Ok(true)
+    }
+
     pub(crate) fn new(generation: u64) -> Result<Self, String> {
         if generation == 0 {
             return Err("Computer viewer generation is invalid.".into());

@@ -195,6 +195,9 @@ pub(crate) async fn close_session(app: &tauri::AppHandle) -> bool {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.hide();
         let _ = window.destroy();
+        if let Err(error) = crate::cloud_computers::viewer::close_for_process(&window).await {
+            eprintln!("Instabox viewer revocation was not confirmed during account close: {error}");
+        }
     }
     crate::native_api::shutdown_account();
     crate::codex_app_server::shutdown_all_runs();

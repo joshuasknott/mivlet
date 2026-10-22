@@ -76,3 +76,29 @@ fn close_generation_cannot_collide_with_a_reopened_viewer() {
     let reopened_generation = next_viewer_generation().unwrap();
     assert_ne!(closed.generation, reopened_generation);
 }
+
+#[test]
+fn missing_child_is_fenced_once_and_uncertain_revoke_stays_retryable() {
+    let generation = next_viewer_generation().unwrap();
+    let mut fence = ViewerFence::new(generation).unwrap();
+    assert!(!fence.fence_missing_child(true).unwrap());
+    assert!(!fence.snapshot().closed);
+    assert!(fence.fence_missing_child(false).unwrap());
+    let closed = fence.snapshot();
+    assert!(closed.closed);
+    assert_eq!(closed.revoke, RevokeState::Pending);
+    assert_ne!(closed.generation, generation);
+    assert!(fence.begin_close(closed.generation).is_err());
+    fence.fence_native_close().unwrap();
+    assert_eq!(fence.snapshot(), closed);
+
+    fence.mark_revoke_unconfirmed();
+    assert!(!fence.fence_missing_child(false).unwrap());
+    assert_eq!(fence.snapshot().generation, closed.generation);
+    assert_eq!(fence.snapshot().revoke, RevokeState::Unconfirmed);
+    assert!(fence.begin_close(generation).is_err());
+    assert_eq!(
+        fence.begin_close(closed.generation).unwrap().revoke,
+        RevokeState::Pending
+    );
+}
