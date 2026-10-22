@@ -96,6 +96,15 @@ impl AccountDispatchFence {
             operation()
         })
     }
+
+    /// UI polling may retry a busy identity check. This does not authorize a
+    /// side effect; with_current remains the strict dispatch/commit fence.
+    pub(crate) fn poll_current(&self) -> Result<bool, String> {
+        if CLOSING.load(Ordering::Acquire) {
+            return Err("The account is closing.".into());
+        }
+        self.0.poll_current()
+    }
 }
 
 pub(crate) fn credential_key(key: &str) -> Result<String, String> {

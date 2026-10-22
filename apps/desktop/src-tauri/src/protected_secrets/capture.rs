@@ -2,15 +2,25 @@
 //! logging, value preview or platform fallback. Capture exclusion must succeed.
 use super::{custody::Secret, Failure, RequestInput};
 
+pub(crate) fn prompt(
+    input: &RequestInput,
+    current: &dyn Fn() -> bool,
+) -> Result<Option<Secret>, Failure> {
+    prompt_checked(input, &|| current().then_some(true).ok_or(Failure::Stopped))
+}
+
 #[cfg(not(windows))]
-pub(crate) fn prompt(_: &RequestInput, _: &dyn Fn() -> bool) -> Result<Option<Secret>, Failure> {
+pub(crate) fn prompt_checked(
+    _: &RequestInput,
+    _: &dyn Fn() -> Result<bool, Failure>,
+) -> Result<Option<Secret>, Failure> {
     Err(Failure::Capture)
 }
 
 #[cfg(windows)]
-pub(crate) fn prompt(
+pub(crate) fn prompt_checked(
     input: &RequestInput,
-    current: &dyn Fn() -> bool,
+    current: &dyn Fn() -> Result<bool, Failure>,
 ) -> Result<Option<Secret>, Failure> {
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::{
@@ -31,12 +41,12 @@ pub(crate) fn prompt(
     const ERROR: i32 = 4;
     static DIALOG: std::sync::Mutex<()> = std::sync::Mutex::new(());
     let _dialog = DIALOG.try_lock().map_err(|_| Failure::Capture)?;
-    if !current() {
-        return Err(Failure::Stopped);
-    }
+    // A busy account check keeps entry open but never authorizes Save. A real
+    // invalidation closes it; no identity lock is held across the message loop.
+    current()?;
 
     struct Context<'a> {
-        current: &'a dyn Fn() -> bool,
+        current: &'a dyn Fn() -> Result<bool, Failure>,
         result: Option<Result<Option<Secret>, Failure>>,
     }
     fn wide(text: &str) -> Vec<u16> {
@@ -70,8 +80,8 @@ pub(crate) fn prompt(
         if !pointer.is_null() {
             match message {
                 WM_TIMER => {
-                    if !((*pointer).current)() {
-                        close(hwnd, pointer, Err(Failure::Stopped));
+                    if let Err(error) = ((*pointer).current)() {
+                        close(hwnd, pointer, Err(error));
                     }
                     return 0;
                 }
@@ -84,9 +94,19 @@ pub(crate) fn prompt(
                     return 0;
                 }
                 WM_COMMAND if wparam & 0xffff == SAVE => {
-                    if !((*pointer).current)() {
-                        close(hwnd, pointer, Err(Failure::Stopped));
-                        return 0;
+                    match ((*pointer).current)() {
+                        Ok(true) => {}
+                        Ok(false) => {
+                            SetWindowTextW(
+                                GetDlgItem(hwnd, ERROR),
+                                wide("Account check in progress. Try Save again.").as_ptr(),
+                            );
+                            return 0;
+                        }
+                        Err(error) => {
+                            close(hwnd, pointer, Err(error));
+                            return 0;
+                        }
                     }
                     let mut buffer = Zeroizing::new([0u16; 513]);
                     let length = GetWindowTextW(

@@ -10,7 +10,7 @@ use crate::{
     account_session::AccountDispatchFence,
     authorized_scope::{self, ScopeAccess},
     local_computer::LocalComputerState,
-    protected_secrets::{prompt, Custody, NativeCustody, RequestInput},
+    protected_secrets::{prompt_checked, Custody, Failure, NativeCustody, RequestInput},
     store::{self, repos::scope::PrivateDataScope},
 };
 use serde::{Deserialize, Serialize};
@@ -309,10 +309,9 @@ pub async fn cloud_computer_connect(
     let fence = AccountDispatchFence::capture()?;
     let scope = scope_for(&request.workspace_id)?;
     let credential_name = key_name()?;
-    let generation = state
-        .authority_for(&request.workspace_id, &request.agent_id)?
-        .snapshot()?
-        .generation;
+    let authority = state.authority_for(&request.workspace_id, &request.agent_id)?;
+    let generation = authority.snapshot()?.generation;
+    let ticket = authority.begin_viewer(generation)?;
     let entry_id = format!("instabox-key-{}", chrono::Utc::now().timestamp_millis());
     let input = RequestInput {
         label: "Connect your Instabox account".into(),
@@ -324,22 +323,27 @@ pub async fn cloud_computer_connect(
     let computers = state.inner().clone();
     let workspace = request.workspace_id.clone();
     let agent = request.agent_id.clone();
-    let (secret, fence) = tauri::async_runtime::spawn_blocking(move || {
+    let (secret, fence, ticket) = tauri::async_runtime::spawn_blocking(move || {
         let secret =
             computers.with_protected_input(&workspace, &agent, generation, &entry_id, || {
-                prompt(&input, &|| fence.with_current(|| Ok(())).is_ok())
-                    .map_err(|error| error.to_string())
+                prompt_checked(&input, &|| {
+                    ticket.check().map_err(|_| Failure::Stopped)?;
+                    fence.poll_current().map_err(|_| Failure::Stopped)
+                })
+                .map_err(|error| error.to_string())
             })?;
-        Ok::<_, String>((secret, fence))
+        Ok::<_, String>((secret, fence, ticket))
     })
     .await
     .map_err(|_| "Protected Instabox key entry stopped unexpectedly.".to_string())??;
-    fence.with_current(|| Ok(()))?;
     // Decline, Escape and close leave the connection untouched. Do not check
     // the provider or replace an existing key after deliberate cancellation.
     let Some(secret) = secret else {
         return Ok(None);
     };
+    fence.with_current(|| Ok(()))?;
+    ticket.check()?;
+    drop(ticket);
     if secret.len() < 16 || secret.len() > 512 {
         return Err("Use a valid Instabox API key.".into());
     }

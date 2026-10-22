@@ -202,8 +202,15 @@ The user's manual Decline check in `76c98e77` exposed a false failed-action
 warning after the protected dialog closed. Cancellation now returns an unchanged
 result instead of entering failed-write recovery. Regression tests cover another
 connection attempt, replacement-key cancellation with pending work, and late
-responses after account/workspace changes. Actual post-fix native cancellation
-still needs a manual recheck; component results do not establish it. Native
+responses after account/workspace changes. The user confirmed that post-fix
+Decline returns without the false warning. That check also exposed premature
+dialog closure: the 100 ms account poll treated temporary identity-mutex
+contention as a stopped request. Protected entry now distinguishes a busy check
+from invalidation: it stays open while busy, refuses Save until the check
+succeeds, and still closes on account generation changes, expiry or native Stop.
+The strict dispatch fence remains unchanged; no provider request or credential
+write is authorized by a busy check. The updated dialog lifetime still needs
+integrated native acceptance. Native
 child-view placement/accessibility and guest IPC isolation need a live account.
 
 Once a suitable account and native inspection are available, acceptance must
