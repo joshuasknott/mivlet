@@ -293,7 +293,7 @@ pub async fn cloud_computer_connect(
     window: tauri::WebviewWindow,
     state: State<'_, Arc<LocalComputerState>>,
     request: CloudComputerConnectRequest,
-) -> Result<CloudComputerStatus, String> {
+) -> Result<Option<CloudComputerStatus>, String> {
     if request.workspace_id.trim().is_empty() || request.agent_id.trim().is_empty() {
         return Err("Instabox connection must be started from the main workspace.".into());
     }
@@ -326,8 +326,12 @@ pub async fn cloud_computer_connect(
     })
     .await
     .map_err(|_| "Protected Instabox key entry stopped unexpectedly.".to_string())??;
-    let secret = secret.ok_or_else(|| "Instabox key entry was cancelled.".to_string())?;
     fence.with_current(|| Ok(()))?;
+    // Decline, Escape and close leave the connection untouched. Do not check
+    // the provider or replace an existing key after deliberate cancellation.
+    let Some(secret) = secret else {
+        return Ok(None);
+    };
     if secret.len() < 16 || secret.len() > 512 {
         return Err("Use a valid Instabox API key.".into());
     }
@@ -385,7 +389,7 @@ pub async fn cloud_computer_connect(
     })?;
     fence.with_current(|| Ok(()))?;
     drop(secret);
-    status_inner(&request.workspace_id, &fence).await
+    status_inner(&request.workspace_id, &fence).await.map(Some)
 }
 
 #[tauri::command]

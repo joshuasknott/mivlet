@@ -15,6 +15,9 @@ selection and operation metadata. There is no browser key-entry fallback.
 The dialog identifies Instabox, its API recipient and Windows protected storage;
 it does not reuse the webhook secret's one-use reference or ten-minute expiry
 notice. The key is saved only after account, usage and machine-list validation.
+Decline, Escape and closing the dialog cancel without a failed-action warning,
+provider request or connection change. Cancelling replacement entry preserves
+the existing key, machine selection, pending operation and connection revision.
 
 Account validation is read-only. Machine creation is a separate explicit action
 and uses the standard Linux template without copying local files, provider
@@ -37,11 +40,15 @@ copies of that key.
 2. Use an activated user-owned Instabox account with the quota and template/spec
    entitlements needed for the intended machine. Current account responses are
    authoritative; this draft does not establish free capacity or paid access.
+   Resolve any `inviteRequired` prerequisite reported by `/v1/me`; `/v1/usage`
+   reports the account's current allowance.
 3. Create an API key from Profile → API keys in the
    [Instabox account dashboard](https://api.instabox.sh/). The implemented calls
    need `machines:write`, which includes `machines:read`; no machine-delete or
    image scopes are required. See the [integration guide](https://instabox.sh/docs/integrate)
    and [current schema](https://api.instabox.sh/v1/openapi.json).
+   The secret is shown once. Enter it directly into Mivlet's protected native
+   dialog; never paste it into chat or a browser fixture.
 4. In Settings → Computers, connect using the protected native dialog, then
    select an existing computer or explicitly create one. Mivlet creates Linux
    machines using `agent-browser`; it does not copy local credentials or files.
@@ -172,16 +179,24 @@ They do not validate a real key, provider rejection or the authenticated UI path
 All 1,243 native library tests also passed; 22 opt-in tests were ignored in that
 run, with the two protected-entry/vault tests run explicitly as described above.
 
-The hash-verified unsigned debug build and production renderer from `f29170c1`
-supplied the native window smoke evidence. With the existing public Mivlet
-account configuration, an isolated app/WebView profile reached AI provider
-setup. The corrected dialog was verified through the newly compiled native
-test executable, separately from that earlier app artifact. Actual child-view
-placement/accessibility and guest IPC isolation still need authenticated live
-viewer acceptance.
+The hash-verified unsigned debug builds and production renderers from `f29170c1`
+and `76c98e77` supplied native app evidence. In an isolated app/WebView profile,
+the user manually connected ChatGPT after Mivlet account sign-in. The latter
+build restored the workspace and provider setup after restart. Settings →
+Computers loaded and refreshed the disconnected state. The agent editor kept
+This PC selected, disabled unconnected Instabox, and exposed keyboard focus
+between Computer and Model. No provider prompt or machine creation was sent.
+
+The user's manual Decline check in `76c98e77` exposed a false failed-action
+warning after the protected dialog closed. Cancellation now returns an unchanged
+result instead of entering failed-write recovery. Regression tests cover another
+connection attempt, replacement-key cancellation with pending work, and late
+responses after account/workspace changes. Actual post-fix native cancellation
+still needs a manual recheck; component results do not establish it. Native
+child-view placement/accessibility and guest IPC isolation need a live account.
 
 Once a suitable account and native inspection are available, acceptance must
-cover cancel/invalid key entry, select/create, pause/resume, uncertain lifecycle
+cover invalid key entry, select/create, pause/resume, uncertain lifecycle
 recovery, Stop viewing and failed-revoke retry, account restart, normal exit,
 abrupt exit/reopen, disconnect, and the guest navigation/IPC boundary. Verify old
 stream revocation from a separate client; expiry alone does not establish it.

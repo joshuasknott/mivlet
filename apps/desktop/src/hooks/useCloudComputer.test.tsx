@@ -34,3 +34,25 @@ it("does not retry an uncertain write automatically", async () => {
   expect(hook.result.current.error).toContain("unknown");
   expect(port.changeCloudComputer).toHaveBeenCalledOnce();
 });
+
+it("does not let a late cancellation release a newer workspace action", async () => {
+  let cancel!: (value: null) => void;
+  let complete!: (value: unknown) => void;
+  port.changeCloudComputer.mockImplementationOnce(() => new Promise(done => { cancel = done; }))
+    .mockImplementationOnce(() => new Promise(done => { complete = done; }));
+  const hook = renderHook(({ workspace }) => useCloudComputer(workspace), { initialProps: { workspace: "one" } });
+  await waitFor(() => expect(hook.result.current.status).toEqual(status));
+  act(() => { void hook.result.current.act({ kind: "connect", agentId: "agent-one" }); });
+  hook.rerender({ workspace: "two" });
+  await waitFor(() => expect(hook.result.current.pending).toBe(false));
+  act(() => { void hook.result.current.act({ kind: "disconnect" }); });
+  await act(async () => { cancel(null); });
+  expect(hook.result.current.pending).toBe(true);
+  expect(hook.result.current.status).toEqual(status);
+  expect(hook.result.current.error).toBeNull();
+  await act(async () => hook.result.current.act({ kind: "disconnect" }));
+  expect(port.changeCloudComputer).toHaveBeenCalledTimes(2);
+  await act(async () => { complete({ ...status, connected: false, connectionRevision: 3 }); });
+  expect(hook.result.current.pending).toBe(false);
+  expect(hook.result.current.status?.connectionRevision).toBe(3);
+});

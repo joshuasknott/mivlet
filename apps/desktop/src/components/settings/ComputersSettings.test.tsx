@@ -34,6 +34,35 @@ describe("Computers settings", () => {
     expect(port.changeCloudComputer).toHaveBeenCalledWith("workspace-one", 2, { kind: "select", machineId: machine.id });
   });
 
+  it("returns from cancelled key entry without an error or refresh and permits another attempt", async () => {
+    port.changeCloudComputer.mockResolvedValue(null);
+    render(<ComputersSettings workspaceId="workspace-one" agentId="agent-one" />);
+    const connect = await screen.findByRole("button", { name: "Connect Instabox" });
+    await waitFor(() => expect(connect).toBeEnabled());
+    await userEvent.click(connect);
+    await waitFor(() => expect(connect).toBeEnabled());
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(screen.queryByText("Checking your computer…")).toBeNull();
+    expect(port.cloudComputerStatus).toHaveBeenCalledOnce();
+    await userEvent.click(connect);
+    expect(port.changeCloudComputer).toHaveBeenCalledTimes(2);
+    expect(port.changeCloudComputer).toHaveBeenLastCalledWith("workspace-one", 0, { kind: "connect", agentId: "agent-one" });
+  });
+
+  it("keeps the current machine, error and pending operation when replacement key entry is cancelled", async () => {
+    port.cloudComputerStatus.mockResolvedValue({ ...connected, pendingAction: "pause", error: "Instabox rejected this API key." });
+    port.changeCloudComputer.mockResolvedValueOnce(null).mockResolvedValue(connected);
+    render(<ComputersSettings workspaceId="workspace-one" agentId="agent-one" />);
+    await userEvent.click(await screen.findByRole("button", { name: "Replace API key" }));
+    await waitFor(() => expect(screen.getByRole("button", { name: "Replace API key" })).toBeEnabled());
+    expect(screen.getByText("Research computer · running", { selector: "small" })).toBeVisible();
+    expect(screen.getByRole("alert")).toHaveTextContent("Instabox rejected this API key.");
+    expect(screen.getByRole("button", { name: "Pause" })).toBeDisabled();
+    expect(port.cloudComputerStatus).toHaveBeenCalledOnce();
+    await userEvent.click(screen.getByRole("button", { name: "Check operation result" }));
+    expect(port.changeCloudComputer).toHaveBeenLastCalledWith("workspace-one", 2, { kind: "reconcile" });
+  });
+
   it("requires a separate acknowledgement and submits creation only once", async () => {
     port.cloudComputerStatus.mockResolvedValue({ ...connected, machine: null, machines: [], usage: { ...connected.usage!, machineCount: 0 } });
     port.changeCloudComputer.mockReturnValue(new Promise(() => {}));

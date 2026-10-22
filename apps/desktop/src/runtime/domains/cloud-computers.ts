@@ -65,7 +65,8 @@ export function changeCloudComputer(
   action: CloudComputerAction,
 ) {
   const { kind, ...fields } = action;
-  return call<CloudComputerStatus>(`cloud_computer_${kind}`, {
+  // Native key-entry cancellation returns null without changing the connection.
+  return call<CloudComputerStatus | null>(`cloud_computer_${kind}`, {
     workspaceId,
     expectedRevision,
     ...fields,

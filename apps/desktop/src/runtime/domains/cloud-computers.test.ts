@@ -51,3 +51,23 @@ it("sends exact revision and machine metadata without accepting a key argument",
     },
   );
 });
+
+it("passes through native cancellation while still rejecting a changed account", async () => {
+  bridge.invoke.mockResolvedValue(null);
+  await expect(
+    changeCloudComputer(scope.workspaceId, 4, {
+      kind: "connect",
+      agentId: "agent-one",
+    }),
+  ).resolves.toBeNull();
+  bridge.invoke.mockImplementation(async () => {
+    bridge.activeDataScope.mockReturnValue({ ...scope });
+    return null;
+  });
+  await expect(
+    changeCloudComputer(scope.workspaceId, 4, {
+      kind: "connect",
+      agentId: "agent-one",
+    }),
+  ).rejects.toThrow("account or workspace changed");
+});

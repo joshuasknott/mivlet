@@ -61,7 +61,7 @@ export function useCloudComputer(workspaceId: string | undefined) {
           revision.current,
           action,
         );
-        if (current !== generation.current) return;
+        if (current !== generation.current || next === null) return;
         revision.current = next.connectionRevision;
         setStatus(next);
       } catch (reason) {

@@ -25,9 +25,12 @@ The last inspected page had no browser console errors. No new motion was added.
 Live video, stream revocation, native child positioning/keyboard accessibility,
 and account transitions remain unaccepted. Native computer automation recovered
 on 22 October, including after a fresh session reset. The actual native window
-was inspected and closed successfully; existing account configuration reached
-provider onboarding in the isolated test profile. Synthetic native dialog/vault
-acceptance also passed, including corrected Instabox-specific consent text.
+was inspected and closed successfully. After the user completed provider setup
+in the isolated profile, Settings → Computers loaded and refreshed; the agent
+editor retained This PC and disabled unconnected Instabox. Synthetic native
+dialog/vault acceptance passed, including corrected Instabox consent text.
+The user's manual Decline check exposed a false failure warning; cancellation
+handling is corrected with regressions, with the native recheck still pending.
 The [acceptance record](docs/architecture/instabox-computers.md#acceptance-attempt-on-22-october-2026)
 distinguishes those checks from authenticated native viewing. Takeover is absent because the
 implemented stream is view-only. Agent execution/files remain unavailable until
