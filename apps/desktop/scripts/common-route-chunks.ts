@@ -8,6 +8,10 @@ type GetModuleInfo = (id: string) => {
  * common accounting; separately budgeted conversation engines stay separate. */
 export function commonRouteChunk(id: string): string | undefined {
   const path = id.replace(/\\/g, "/").split("?")[0];
+  // Both connected-app executors remain behind their existing dynamic imports.
+  // Share their cancellation helper and compression without loading them with
+  // the worker or dispatching either kind of operation on import.
+  if (/\/src\/lib\/(?:connector-execution|mcp-semantic-execution|connected-app-cancellation)\.ts$/.test(path)) return "connected-app-execution";
   // Onboarding already loads the appearance controls and both stylesheets.
   // Share their JS/CSS compression; the optional agent editor also fetches
   // these small onboarding definitions without mounting the page.

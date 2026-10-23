@@ -11,10 +11,15 @@ const graph = (edges: Record<string, string[]>, dynamic: Record<string, string[]
   ? { isEntry: false, importers: edges[id], dynamicImporters: dynamic[id] ?? [] } : null;
 
 it("keeps every cohort under the unchanged common budget accounting", () => {
-  for (const name of ["workspace-tools", "ExecutionWorker", "FirstAgentOnboardingPage"]) {
+  for (const name of ["workspace-tools", "ExecutionWorker", "FirstAgentOnboardingPage", "connected-app-execution"]) {
     expect(conversationUpgradeAssetPattern.test(`${name}-hash.js`)).toBe(false);
     expect(intelligentUiAssetPattern.test(`${name}-hash.js`)).toBe(false);
   }
+});
+
+it("shares connected-app executors without moving them into the worker", () => {
+  for (const name of ["connector-execution", "mcp-semantic-execution", "connected-app-cancellation"])
+    expect(commonRouteChunk(`/mivlet/apps/desktop/src/lib/${name}.ts`)).toBe("connected-app-execution");
 });
 
 it("keeps correlated deferred cloud/repository fragments in common-accounted cohorts", () => {
