@@ -8,17 +8,14 @@ type GetModuleInfo = (id: string) => {
  * common accounting; separately budgeted conversation engines stay separate. */
 export function commonRouteChunk(id: string): string | undefined {
   const path = id.replace(/\\/g, "/").split("?")[0];
-  // Both connected-app executors remain behind their existing dynamic imports.
-  // Share their cancellation helper and compression without loading them with
-  // the worker or dispatching either kind of operation on import.
-  if (/\/src\/lib\/(?:connector-execution|mcp-semantic-execution|connected-app-cancellation)\.ts$/.test(path)) return "connected-app-execution";
   // Onboarding already loads the appearance controls and both stylesheets.
   // Share their JS/CSS compression; the optional agent editor also fetches
   // these small onboarding definitions without mounting the page.
   if (/\/src\/components\/pages\/FirstAgentOnboardingPage\.tsx$/.test(path)
     || /\/src\/components\/agents\/(?:AgentAppearancePicker\.tsx|AgentColourPicker\.tsx|agent-appearance\.css)$/.test(path)
     || /\/src\/styles\/routes\/first-agent-onboarding\.css$/.test(path)) return "FirstAgentOnboardingPage";
-  // These modules already belong to the execution worker's static closure.
+  // Execution helpers share the deferred worker request. The small connector
+  // adapter now loads with the worker instead of on its first connector call.
   // One common-accounted request lets their strings and wrappers compress
   // together without adding optional workspace views to startup or execution.
   // Settings and conversation now fetch this code too; importing these pure
@@ -26,7 +23,7 @@ export function commonRouteChunk(id: string): string | undefined {
   if (/\/src\/shell\/(?:ExecutionWorker\.tsx|useExecutionController\.ts)$/.test(path)
     || /\/src\/hooks\/native-agent\/(?:run|events|useNativeAgent|context|retry|persistence|providers|cancellation|recovery|runtime|text-presentation)\.ts$/.test(path)
     || /\/src\/hooks\/(?:useHostedBrowserController|useHostedComputer)\.ts$/.test(path)
-    || /\/src\/lib\/(?:desktop-tool-runtime|computer-task-executor|collaboration-context|conversation-compaction|shared-execution-attachments|computer-instructions|computer-tools|provider-route-selection|attempt-persistence|provider-continuation|generated-ui-instructions|coordination-resources|workspace-agent-directory|workspace-management-output|context-selection|hosted-computer-scope|execution-attachments|conversation-presentation|connector-chat|mcp-app-descriptor)\.ts$/.test(path)
+    || /\/src\/lib\/(?:desktop-tool-runtime|connector-execution|computer-task-executor|collaboration-context|conversation-compaction|shared-execution-attachments|computer-instructions|computer-tools|provider-route-selection|attempt-persistence|provider-continuation|generated-ui-instructions|coordination-resources|workspace-agent-directory|workspace-management-output|context-selection|hosted-computer-scope|execution-attachments|conversation-presentation|connector-chat|mcp-app-descriptor)\.ts$/.test(path)
     || /\/src\/runtime\/domains\/(?:provider-continuation|hosted-computer|tools)\.ts$/.test(path)
     || /\/src\/components\/marketplace\/marketplace-catalog\.ts$/.test(path)
     || /\/packages\/connectors\/src\/providers\/routing\.ts$/.test(path)) return "ExecutionWorker";

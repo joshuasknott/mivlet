@@ -11,15 +11,10 @@ const graph = (edges: Record<string, string[]>, dynamic: Record<string, string[]
   ? { isEntry: false, importers: edges[id], dynamicImporters: dynamic[id] ?? [] } : null;
 
 it("keeps every cohort under the unchanged common budget accounting", () => {
-  for (const name of ["workspace-tools", "ExecutionWorker", "FirstAgentOnboardingPage", "connected-app-execution"]) {
+  for (const name of ["workspace-tools", "ExecutionWorker", "FirstAgentOnboardingPage"]) {
     expect(conversationUpgradeAssetPattern.test(`${name}-hash.js`)).toBe(false);
     expect(intelligentUiAssetPattern.test(`${name}-hash.js`)).toBe(false);
   }
-});
-
-it("shares connected-app executors without moving them into the worker", () => {
-  for (const name of ["connector-execution", "mcp-semantic-execution", "connected-app-cancellation"])
-    expect(commonRouteChunk(`/mivlet/apps/desktop/src/lib/${name}.ts`)).toBe("connected-app-execution");
 });
 
 it("keeps correlated deferred cloud/repository fragments in common-accounted cohorts", () => {
@@ -52,7 +47,7 @@ it("groups deferred workspace editors without pulling them into onboarding or co
 it("groups optional inspection views while preserving execution and feature boundaries", () => {
   for (const path of ["shell/ComputerInspector.tsx", "components/agents/LiveWorkRail.tsx", "components/agents/NativeComputerPanel.tsx", "components/navigation/WorkspaceMemories.tsx", "components/navigation/workspace-memories.css", "components/conversation/SideChats.tsx", "components/search/SearchOverlay.tsx", "components/search/SearchResults.tsx", "components/search/search.css", "lib/search/useWorkspaceSearch.ts", "lib/search/results.ts", "runtime/domains/search.ts"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBe("workspace-tools");
-  for (const path of ["shell/ExecutionWorker.tsx", "hooks/useHostedComputer.ts", "hooks/useHostedBrowserController.ts", "lib/hosted-computer-scope.ts", "runtime/domains/hosted-computer.ts", "lib/execution-attachments.ts", "lib/conversation-presentation.ts", "lib/connector-chat.ts", "lib/mcp-app-descriptor.ts", "lib/workspace-management-output.ts"])
+  for (const path of ["shell/ExecutionWorker.tsx", "hooks/useHostedComputer.ts", "hooks/useHostedBrowserController.ts", "lib/hosted-computer-scope.ts", "runtime/domains/hosted-computer.ts", "lib/execution-attachments.ts", "lib/conversation-presentation.ts", "lib/connector-chat.ts", "lib/mcp-app-descriptor.ts", "lib/workspace-management-output.ts", "lib/connector-execution.ts"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBe("ExecutionWorker");
   for (const path of ["shell/WorkspaceHistory.tsx", "components/conversation/ArtifactPreview.tsx", "components/CopyButton.tsx", "components/search/SearchFileDialog.tsx", "components/conversation/SideChatContextNotice.tsx"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/${path}`)).toBeUndefined();
