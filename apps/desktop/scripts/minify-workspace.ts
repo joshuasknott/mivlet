@@ -13,7 +13,9 @@ export function normalizeEmittedCode(): Plugin {
         if (options.format !== "es" || options.sourcemap) return null;
         const result = minify(code, {
           module: true,
-          compress: { passes: 3 },
+          // Keeping single-use function bindings improves the renderer's
+          // gzip size through the following minifier passes.
+          compress: { passes: 3, reduce_funcs: false },
           mangle: true,
           output: { comments: "some" },
         });

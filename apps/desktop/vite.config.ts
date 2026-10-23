@@ -97,11 +97,13 @@ export default defineConfig({
           // vendor request removes repeated imports without an eager graph change.
           if (id.includes("@phosphor-icons") || id === "\0mivlet-icon-wrapper"
             || id === "\0commonjsHelpers.js") return "vendor";
+          // Every startup closure already includes vendor and the preload helper.
+          // Share their request instead of repeating a separate helper import.
+          if (id.includes("vite/preload-helper")) return "vendor";
           // Conversation-only UI engines are reached through the lazy
           // ConversationPane boundary. Keeping their package graphs in
           // dedicated chunks prevents the shell's generic vendor chunk from
           // eagerly pulling OpenUI, assistant-ui, or MCP App code at startup.
-          if (id.includes("vite/preload-helper")) return "feature-preload";
           if (id.includes("@assistant-ui") || /[/\\]assistant-stream[/\\]/.test(id)
             || assistantInputDependency(id, getModuleInfo)) return "assistant-ui";
           // Zod is used only by the generated-interface catalogues and their
