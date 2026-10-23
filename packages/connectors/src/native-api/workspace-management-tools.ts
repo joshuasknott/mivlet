@@ -56,14 +56,14 @@ export const WORKSPACE_MANAGEMENT_TOOLS: Record<string, BackendTool> = {
   "workspace-inspect": {
     name: "workspace-inspect",
     description:
-      "Inspect the current workspace agents, projects, teams and safe availability summaries. Returns bounded public profiles and a receipt-safe view only; never expose credentials, private instructions, private conversations or unrelated history. Use stable IDs for subsequent lifecycle calls.",
+      "Inspect agents, projects, teams and safe availability. Return bounded public profiles and receipt-safe data only; never expose credentials, private instructions, private conversations or unrelated history. Use stable IDs.",
     defaultMode: "read-only",
     defaultRisk: "low",
     parameters: schema({}, []),
   },
   "agent-create": mutation(
     "agent-create",
-    "Create one persistent Mivlet agent profile for this workspace. Provide a clear name and bounded instructions. The new agent uses the caller's current model by default; modelAgentId may copy an existing agent's model and effort settings only. Never copy credentials, private instructions, conversation history or grants.",
+    "Create persistent agent: clear name, bounded instructions. Default caller model; modelAgentId copies only existing model/effort. Never copy credentials, private instructions, conversation history or grants.",
     {
       name: text(80),
       instructions: text(8_000),
@@ -73,7 +73,7 @@ export const WORKSPACE_MANAGEMENT_TOOLS: Record<string, BackendTool> = {
   ),
   "agent-update": mutation(
     "agent-update",
-    "Update one existing Mivlet agent profile by stable ID. Supply at least one of name, instructions or modelAgentId. Model changes copy only the referenced agent's model and effort settings; credentials, private history, permissions and grants never move through this tool.",
+    "Update agent by ID: name, instructions or modelAgentId. Copy model/effort only; never credentials, private history, permissions or grants.",
     {
       agentId: text(128),
       name: text(80),
@@ -92,14 +92,14 @@ export const WORKSPACE_MANAGEMENT_TOOLS: Record<string, BackendTool> = {
   ),
   "agent-delete": mutation(
     "agent-delete",
-    "Delete one persistent Mivlet agent by stable ID after native checks. Mivlet preserves historical authorship and returns a bounded receipt with the updated safe workspace projection; it does not silently transfer work or grant access. Reassign or stop affected work explicitly.",
+    "Delete agent by ID after native checks. Preserve historical authorship; return bounded receipt/safe projection. Never silently transfer work/access; reassign or stop affected work.",
     { agentId: text(128) },
     ["agentId"],
     "critical",
   ),
   "project-create": mutation(
     "project-create",
-    "Create one Mivlet project with a durable brief and explicit team membership. participantIds must contain existing agent IDs; leadAgentId, when supplied, must be one of them. Project creation shares only the project context selected by the native boundary and never grants provider or computer authority.",
+    "Create project: durable brief, explicit team. participantIds must be existing IDs; supplied leadAgentId must be a participant. Share only native-selected project context; never grant provider/computer authority.",
     {
       name: text(80),
       instructions: text(8_000),
@@ -110,7 +110,7 @@ export const WORKSPACE_MANAGEMENT_TOOLS: Record<string, BackendTool> = {
   ),
   "project-team-update": mutation(
     "project-team-update",
-    "Replace a project's explicit team using its expected revision. participantIds must be existing agent IDs and leadAgentId, when supplied, must be a participant. shareHistory explicitly declares whether current project history is shared during this membership change; native checks cancel or preserve affected work safely.",
+    "Replace project team at expected revision. participantIds must be existing IDs; supplied leadAgentId must be a participant. shareHistory explicitly controls project-history sharing; native safely cancels/preserves affected work.",
     {
       projectId: text(128),
       expectedRevision: { type: "integer", minimum: 1 },

@@ -2,23 +2,15 @@ import type {
   ConversationUiCommand,
   ConversationUiOwner,
 } from "@mivlet/protocol";
-import { getRuntimeAdapter } from "../adapters/select";
-import { toRuntimeError } from "../errors";
+import { invokeRequiredNative } from "../required-native";
 
 export async function conversationUi<T>(
   owner: ConversationUiOwner,
   command: ConversationUiCommand,
 ): Promise<T> {
-  const adapter = getRuntimeAdapter();
-  if (adapter.kind === "preview")
-    throw new Error(
-      "Saving interactive answers and inspecting account context require the installed desktop app.",
-    );
-  try {
-    return await adapter.invoke<T>("collaboration_ui", {
-      request: { ...owner, ...command },
-    });
-  } catch (error) {
-    throw toRuntimeError(error);
-  }
+  return invokeRequiredNative<T>(
+    "collaboration_ui",
+    { request: { ...owner, ...command } },
+    "Saving interactive answers and inspecting account context require the installed desktop app.",
+  );
 }

@@ -152,34 +152,44 @@ export function ResponseSelection({
     streaming,
     dismiss,
   ]);
-  const inspect = useCallback(() => {
-    if (streaming) return;
-    const selection = window.getSelection();
-    if (
-      !selection ||
-      !selection.rangeCount ||
-      selection.isCollapsed ||
-      !content.current?.contains(selection.anchorNode) ||
-      !content.current.contains(selection.focusNode)
-    ) {
+  const inspect = useCallback(
+    (event?: { type: string; key?: string }) => {
+      if (streaming) return;
+      const selection = window.getSelection();
       if (
-        !toolbar.current?.contains(document.activeElement) &&
-        !content.current?.contains(document.activeElement)
-      )
+        !selection ||
+        !selection.rangeCount ||
+        selection.isCollapsed ||
+        !content.current?.contains(selection.anchorNode) ||
+        !content.current.contains(selection.focusNode)
+      ) {
+        const activeInContent = content.current?.contains(
+          document.activeElement,
+        );
+        const focusTraversal =
+          activeInContent &&
+          (event?.type === "selectionchange" ||
+            (event?.type === "keyup" && event.key === "Tab"));
+        if (
+          !toolbar.current?.contains(document.activeElement) &&
+          !focusTraversal
+        )
+          dismiss();
+        return;
+      }
+      const quote = selection.toString().trim();
+      const passage = selectedSourcePassage(interactionSource, quote);
+      if (!passage) {
         dismiss();
-      return;
-    }
-    const quote = selection.toString().trim();
-    const passage = selectedSourcePassage(interactionSource, quote);
-    if (!passage) {
-      dismiss();
-      return;
-    }
-    if (quote !== range.current?.toString().trim()) setStatus("");
-    range.current = selection.getRangeAt(0).cloneRange();
-    setAnchor(range.current.getBoundingClientRect());
-    setSelected(passage);
-  }, [interactionSource, streaming, dismiss]);
+        return;
+      }
+      if (quote !== range.current?.toString().trim()) setStatus("");
+      range.current = selection.getRangeAt(0).cloneRange();
+      setAnchor(range.current.getBoundingClientRect());
+      setSelected(passage);
+    },
+    [interactionSource, streaming, dismiss],
+  );
   useEffect(() => {
     // Pointer-up can run before the browser has committed the final range
     // (notably for a triple-click). Track the document-level selection event,

@@ -384,6 +384,23 @@ describe("response contextual actions", () => {
     expect(screen.getByRole("button", { name: "Copy code" })).toHaveFocus();
   });
 
+  it("dismisses a collapsed selection from pointer and keyboard clearing", () => {
+    const view = setup();
+    view.content.focus();
+    window.getSelection()!.removeAllRanges();
+    fireEvent.pointerUp(view.content);
+    expect(screen.queryByRole("toolbar")).toBeNull();
+
+    const range = document.createRange();
+    range.selectNodeContents(view.content.firstElementChild!);
+    window.getSelection()!.addRange(range);
+    fireEvent.pointerUp(view.content);
+    expect(screen.getByRole("toolbar")).toBeVisible();
+    window.getSelection()!.removeAllRanges();
+    fireEvent.keyUp(view.content, { key: "ArrowRight" });
+    expect(screen.queryByRole("toolbar")).toBeNull();
+  });
+
   it("dismisses cleared selections and outside clicks", () => {
     const { content } = setup();
     window.getSelection()!.removeAllRanges();
