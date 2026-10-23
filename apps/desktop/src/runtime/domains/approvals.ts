@@ -6,12 +6,7 @@ import type {
   ApprovalResolutionRequest,
   ApprovalResolutionResponse,
 } from "@mivlet/protocol";
-import {
-  hasTauriRuntime,
-  invoke,
-  invokeNative,
-  activeDataScope,
-} from "../bridge";
+import { invokeNative, activeDataScope } from "../bridge";
 
 interface ApprovalAuditRecordResponse {
   persisted: boolean;
@@ -65,19 +60,11 @@ export async function loadRuntimeActionHistory(
   category?: ActionHistoryCategory | string,
   limit?: number,
 ) {
-  if (!hasTauriRuntime()) {
-    return null;
-  }
   const scope = activeDataScope();
   if (!scope) return null;
-
-  try {
-    return await invoke<ActionHistoryEvent[]>("list_action_history", {
-      category: category ?? null,
-      limit: limit ?? null,
-      ...scope,
-    });
-  } catch {
-    return null;
-  }
+  return invokeNative<ActionHistoryEvent[]>("list_action_history", {
+    category: category ?? null,
+    limit: limit ?? null,
+    ...scope,
+  }).catch(() => null);
 }
