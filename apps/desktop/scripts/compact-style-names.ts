@@ -119,15 +119,37 @@ export function styleNameMap(
     visit(source);
   }
   const names = new Map<string, string>();
-  Array.from(candidates)
+  const compactableClasses = Array.from(candidates)
     .filter(
       (name) =>
         seen.has(name) &&
         !opaque.has(name) &&
         !dynamic.some((prefix) => name.startsWith(prefix)),
     )
-    .sort(byFrequency)
-    .forEach((name, index) => names.set(name, `_${index.toString(36)}`));
+    .sort(byFrequency);
+  // Keep the most frequent short tokens stable. Longer tokens have identical
+  // encoded width within each base-36 bucket, so ordering those names by
+  // reverse source spelling improves measured CSS/JS compression without
+  // changing raw length or the frequency contract for the short names.
+  compactableClasses.slice(0, 36).forEach((name, index) =>
+    names.set(name, `_${index.toString(36)}`),
+  );
+  const tailSlotsByWidth = new Map<number, number[]>();
+  compactableClasses.slice(36).forEach((_, tailIndex) => {
+    const index = tailIndex + 36;
+    const width = `_${index.toString(36)}`.length;
+    const slots = tailSlotsByWidth.get(width) ?? [];
+    slots.push(index);
+    tailSlotsByWidth.set(width, slots);
+  });
+  for (const slots of tailSlotsByWidth.values()) {
+    const namesInBucket = slots
+      .map((index) => compactableClasses[index]!)
+      .sort((a, b) => b.localeCompare(a));
+    namesInBucket.forEach((name, index) =>
+      names.set(name, `_${slots[index]!.toString(36)}`),
+    );
+  }
   const variables = Array.from(
     new Set(
       Array.from(css.matchAll(/(--[a-z][a-z0-9-]*)\s*:/g), (match) => match[1]),

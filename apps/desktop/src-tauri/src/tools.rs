@@ -34,7 +34,9 @@ use approval_policy::{
     is_computer_tool, is_protected_secret_tool, require_computer_generation,
     routine_connector_read, validate_tool_name, verify_execution_permit, verify_tool_authority,
 };
-pub(crate) use approval_policy::{tool_policy, validate_tool_approval_binding};
+pub(crate) use approval_policy::{
+    tool_arguments_fingerprint, tool_policy, validate_tool_approval_binding,
+};
 use files::MAX_TOOL_OUTPUT_BYTES;
 pub(crate) use files::{run_read_file, run_write_file};
 #[cfg(test)]
@@ -97,7 +99,7 @@ pub struct ToolResult {
 }
 
 /// The closed set of tools Rust will execute. Anything else fails closed.
-pub(crate) const SUPPORTED_TOOLS: [&str; 67] = [
+pub(crate) const SUPPORTED_TOOLS: [&str; 73] = [
     "repository-pr-read",
     "repository-pr-local",
     "repository-pr-action",
@@ -125,6 +127,12 @@ pub(crate) const SUPPORTED_TOOLS: [&str; 67] = [
     "repository-write",
     "repository-run",
     "workspace-run",
+    "workspace-inspect",
+    "agent-create",
+    "agent-update",
+    "agent-delete",
+    "project-create",
+    "project-team-update",
     "repository-commit",
     "repository-publish",
     "read-file",

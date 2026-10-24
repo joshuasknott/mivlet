@@ -54,7 +54,7 @@ describe("conversation turns", () => {
       sourceRevisionId: "revision-1",
     }));
   });
-  it("shows branch heads supplied by bounded page metadata", () => {
+  it("keeps branch heads internal without rendering alternative response controls", () => {
     const select = vi.fn();
     const messages = [
       {
@@ -71,15 +71,14 @@ describe("conversation turns", () => {
         {...props}
         messages={messages}
         state={{ ...initial, currentAttemptId: null, running: false }}
+        selectedHeadId="answer-1"
         branchHeadIds={["answer-1", "older-answer"]}
         onSelectBranch={select}
       />,
     );
-    expect(screen.getByRole("navigation", { name: "Conversation alternatives" })).toBeVisible();
-    const options = screen.getAllByRole("button", { name: /Option/ });
-    expect(options).toHaveLength(2);
-    fireEvent.click(options[1]!);
-    expect(select).toHaveBeenCalledWith("older-answer");
+    expect(screen.queryByRole("navigation", { name: "Conversation alternatives" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Option/ })).toBeNull();
+    expect(select).not.toHaveBeenCalled();
   });
   it("omits repeated direct-chat identity but preserves project attribution", () => {
     const view = render(<ConversationFeed {...props} showAuthor={false} state={initial} />);

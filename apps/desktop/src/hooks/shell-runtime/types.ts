@@ -19,6 +19,9 @@ import type {
   MemoryRecord,
   PermissionMode,
   PreparedExecutionContext,
+  WorkspaceManageRequest,
+  WorkspaceManageResponse,
+  ProjectSourceFolderImport,
 } from "@mivlet/protocol";
 import type {
   ToolApprovalGate,
@@ -39,6 +42,7 @@ import type {
 
 export interface ShellRuntime {
   flushSnapshot: () => Promise<void>;
+  manageWorkspaceFromChat: (request: Omit<WorkspaceManageRequest, "workspaceId" | "expectedAgentRevision">) => Promise<WorkspaceManageResponse>;
   // navigation
   activeItem: string;
   setActiveItem: (value: string) => void;
@@ -111,6 +115,7 @@ export interface ShellRuntime {
   // knowledge + memory
   workspaceKnowledgeSources: KnowledgeSource[];
   importKnowledgeFile: (file: File, decodedContent?: string) => Promise<string | null>;
+  importProjectSourceFolder: () => Promise<ProjectSourceFolderImport | null>;
   pinnedSourceIds: string[];
   managedMemoryRecords: MemoryRecord[];
   memoryDisabled: boolean;

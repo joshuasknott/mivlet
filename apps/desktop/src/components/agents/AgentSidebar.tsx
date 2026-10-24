@@ -191,10 +191,6 @@ export function AgentSidebar({
             : [...settings.pinned, { kind: entity.kind, id: entity.item.id }] });
           restoreRowFocus(key);
         } },
-        ...(manual ? [
-          { label: "Move up", disabled: index === 0, run: () => move(-1) },
-          { label: "Move down", disabled: index === list.length - 1, run: () => move(1) },
-        ] : []),
       ]} /></div>
     </div>;
   };

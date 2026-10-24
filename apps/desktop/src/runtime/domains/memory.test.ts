@@ -9,6 +9,8 @@ import {
   loadRuntimeImportedKnowledgeSources,
   refreshRuntimeLocalKnowledgeSource,
   searchRuntimeKnowledgeSources,
+  loadRuntimeMemoryState,
+  listRuntimeContextSummaries,
 } from "./memory";
 import { selectRuntimeAdapterForTest } from "../adapters/select";
 
@@ -40,10 +42,28 @@ describe("workspace knowledge runtime", () => {
       importedAt: "2026-08-28T09:00:00.000Z",
     };
     await expect(loadRuntimeImportedKnowledgeSources()).resolves.toBeNull();
+    await expect(loadRuntimeMemoryState()).resolves.toBeNull();
+    await expect(listRuntimeContextSummaries("chat-a")).resolves.toBeNull();
+    await expect(
+      searchRuntimeKnowledgeSources("notes", []),
+    ).resolves.toBeNull();
     await expect(
       importRuntimeLocalKnowledgeSource(candidate),
     ).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("retains the unavailable-read fallback after native failures", async () => {
+    setNative(true);
+    setActiveRuntimeDataScope("workspace-a");
+    mocks.invoke.mockRejectedValue(new Error("Store unavailable"));
+    await expect(loadRuntimeImportedKnowledgeSources()).resolves.toBeNull();
+    await expect(loadRuntimeMemoryState()).resolves.toBeNull();
+    await expect(listRuntimeContextSummaries("chat-a")).resolves.toBeNull();
+    await expect(
+      searchRuntimeKnowledgeSources("notes", []),
+    ).resolves.toBeNull();
+    expect(mocks.invoke).toHaveBeenCalledTimes(4);
   });
 
   it("uses the selected workspace for native refresh and search", async () => {

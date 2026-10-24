@@ -18,22 +18,18 @@ import {
 
 export async function loadRuntimeImportedKnowledgeSources() {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
-  try {
-    return await invoke<LocalFileImport[]>(
-      "list_imported_knowledge_sources",
-      scope,
-    );
-  } catch {
-    return null;
-  }
+  if (!scope) return null;
+  return invokeNative<LocalFileImport[]>(
+    "list_imported_knowledge_sources",
+    scope,
+  ).catch(() => null);
 }
 
 export async function importRuntimeLocalKnowledgeSource(
   candidate: LocalTextFileCandidate,
 ) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<LocalFileImport>("import_local_knowledge_source", {
     candidate,
     ...scope,
@@ -44,7 +40,7 @@ export async function refreshRuntimeLocalKnowledgeSource(
   request: RefreshLocalKnowledgeSourceRequest,
 ) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<LocalKnowledgeRefreshResponse>(
     "refresh_local_knowledge_source",
     {
@@ -60,32 +56,26 @@ export async function searchRuntimeKnowledgeSources(
   limit?: number,
 ) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
-  try {
-    return await invoke<KnowledgeSearchResponse>("search_knowledge_sources", {
-      query,
-      sources,
-      limit,
-      ...scope,
-    });
-  } catch {
-    return null;
-  }
+  if (!scope) return null;
+  return invokeNative<KnowledgeSearchResponse>("search_knowledge_sources", {
+    query,
+    sources,
+    limit,
+    ...scope,
+  }).catch(() => null);
 }
 
 export async function loadRuntimeMemoryState() {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
-  try {
-    return await invoke<MemoryControlState>("list_memory_state", scope);
-  } catch {
-    return null;
-  }
+  if (!scope) return null;
+  return invokeNative<MemoryControlState>("list_memory_state", scope).catch(
+    () => null,
+  );
 }
 
 export async function saveRuntimeMemoryState(state: MemoryControlState) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<MemoryControlState>("save_memory_state", {
     state,
     ...scope,
@@ -131,7 +121,7 @@ export async function changeRuntimeMemoryRecord(change: {
 
 export async function exportRuntimeMemoryState(_state: MemoryControlState) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<string>("export_memory_state", scope);
 }
 
@@ -142,21 +132,17 @@ export async function exportRuntimeMemoryState(_state: MemoryControlState) {
  */
 export async function listRuntimeContextSummaries(threadId: string) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime() || !threadId) return null;
-  try {
-    return await invoke<ContextSummaryRecord[]>("list_context_summaries", {
-      threadId,
-      ...scope,
-    });
-  } catch {
-    return null;
-  }
+  if (!scope || !threadId) return null;
+  return invokeNative<ContextSummaryRecord[]>("list_context_summaries", {
+    threadId,
+    ...scope,
+  }).catch(() => null);
 }
 
 /** Persist one incremental summary revision before it may enter a turn. */
 export async function saveRuntimeContextSummary(summary: ContextSummaryRecord) {
   const scope = activeDataScope();
-  if (!scope || !hasTauriRuntime()) return null;
+  if (!scope) return null;
   return invokeNative<ContextSummaryRecord>("save_context_summary", {
     summary,
     ...scope,

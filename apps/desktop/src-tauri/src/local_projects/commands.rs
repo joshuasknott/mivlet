@@ -10,6 +10,7 @@ use super::{
 use crate::store::repos::local_project as repo;
 use crate::store::StoreError;
 pub(super) fn local_project_create(
+    app: tauri::AppHandle,
     window: tauri::WebviewWindow,
     request: CreateLocalProjectRequest,
 ) -> Result<LocalProject, String> {
@@ -24,7 +25,24 @@ pub(super) fn local_project_create(
                 None,
                 ScopeAccess::Write,
             )?;
-            create_at(tx, store, &scope, request, &now)
+            let profiles = if request.participant_ids.is_some() {
+                Some(
+                    crate::snapshot::load_runtime_snapshot_in_transaction(
+                        &app,
+                        tx,
+                        &request.workspace_id,
+                    )?
+                    .ok_or_else(|| {
+                        StoreError::Invalid(
+                            "Mivlet's persisted agent profiles are not available.".into(),
+                        )
+                    })?
+                    .agents,
+                )
+            } else {
+                None
+            };
+            create_at(tx, store, &scope, request, &now, profiles.as_deref())
         })
         .map_err(|error| error.to_string())
 }

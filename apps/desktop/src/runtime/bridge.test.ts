@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invokeNative } from "./bridge";
+import { clearRuntimeConnectorAuth } from "./domains/connectors";
+import { listRuntimeMcpServerConfigurations } from "./domains/mcp";
+import {
+  loadRuntimeApprovalAudit,
+  loadRuntimeApprovalRules,
+} from "./domains/approvals";
 import {
   clearRuntimeAdapterForTest,
   selectRuntimeAdapterForTest,
@@ -18,6 +24,17 @@ describe("native command boundary", () => {
   it("does not dispatch native commands in the browser preview", async () => {
     selectRuntimeAdapterForTest("preview");
     await expect(invokeNative("load_runtime_snapshot")).resolves.toBeNull();
+    expect(mocks.invoke).not.toHaveBeenCalled();
+  });
+
+  it("keeps connector and MCP commands native-only through the shared guard", async () => {
+    selectRuntimeAdapterForTest("preview");
+    await expect(clearRuntimeConnectorAuth("connector-a")).resolves.toBeNull();
+    await expect(
+      listRuntimeMcpServerConfigurations("workspace-a"),
+    ).resolves.toBeNull();
+    await expect(loadRuntimeApprovalAudit()).resolves.toBeNull();
+    await expect(loadRuntimeApprovalRules()).resolves.toBeNull();
     expect(mocks.invoke).not.toHaveBeenCalled();
   });
 
@@ -44,6 +61,11 @@ describe("native command boundary", () => {
       message: "Workspace is busy",
       code: "workspace_busy",
       retryable: true,
+    });
+    await expect(loadRuntimeApprovalAudit()).resolves.toBeNull();
+    await expect(loadRuntimeApprovalRules()).resolves.toBeNull();
+    expect(mocks.invoke).toHaveBeenLastCalledWith("list_approval_rules", {
+      workspaceId: "preview-default",
     });
   });
 });

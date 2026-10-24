@@ -151,12 +151,11 @@
 .desktop-frame--agents .conversation-message__attachments strong { font-size: 11px; font-weight: 500; }
 .desktop-frame--agents .conversation-message__attachments small { color: var(--ink-muted); font-size: 10px; }
 .desktop-frame--agents .composer-glow, .desktop-frame--agents .composer-glow:hover, .desktop-frame--agents .composer-glow:focus-within { border: 0; background: transparent; box-shadow: none; }
-.desktop-frame--agents .composer { grid-template-columns: 36px minmax(0, 1fr) auto; border: 1px solid var(--line-strong); background: var(--surface-raised); box-shadow: var(--shadow-1); transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
+.desktop-frame--agents .composer { border: 1px solid var(--line-strong); background: var(--surface-raised); box-shadow: var(--shadow-1); transition: border-color var(--motion-fast) ease, box-shadow var(--motion-fast) ease; }
 .desktop-frame--agents .composer:focus-within { border-color: var(--ink-soft); box-shadow: var(--shadow-1); }
-.desktop-frame--agents .composer-field { grid-column: 2; grid-row: 1; width: 100%; min-width: 0; }
+.desktop-frame--agents .composer-field { width: 100%; min-width: 0; }
 .desktop-frame--agents .composer-input { max-height: min(248px, 32dvh); line-height: 22px; }
-.desktop-frame--agents .composer-control-group { grid-column: 1; grid-row: 1; min-width: 0; }
-.desktop-frame--agents .composer-control-group--end { grid-column: 3; grid-row: 1; }
+.desktop-frame--agents .composer-control-group { min-width: 0; }
 .desktop-frame--agents .composer-model { min-width: 0; padding: 0 6px; background: transparent; border: 0; border-radius: 8px; box-shadow: none; font-size: 12px; font-weight: 400; }
 .desktop-frame--agents .composer-model { max-width: 220px; gap: 4px; color: var(--ink); }
 .desktop-frame--agents .composer-model > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -164,7 +163,7 @@
 .desktop-frame--agents .composer-chip, .desktop-frame--agents .send-button, .desktop-frame--agents .voice-action__primary { flex: 0 0 36px; border-radius: 50%; }
 .desktop-frame--agents .voice-actions { flex-shrink: 0; }
 .desktop-frame--agents .send-button:disabled { opacity: .35; cursor: default; }
-.desktop-frame--agents .composer .voice-feedback, .desktop-frame--agents .composer .composer-status { grid-column: 1 / -1; width: 100%; margin: 8px 4px 0; }
+.desktop-frame--agents .composer .voice-feedback, .desktop-frame--agents .composer .composer-status { width: 100%; margin: 8px 4px 0; }
 
 .live-rail {
   position: relative;
@@ -344,9 +343,6 @@ button.local-computer-files__entry:disabled { opacity: .55; }
   .desktop-frame--agents > .workspace { height: 100%; min-height: 0; border-right: 0; grid-template-rows: 60px minmax(0, 1fr); }
   .live-rail { inset: 0; width: 100%; height: 100dvh; padding: max(12px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom)); }
   .live-rail__header button { width: 44px; height: 44px; }
-  .desktop-frame--agents .composer { grid-template-columns: 40px minmax(0, 1fr) auto; padding: 6px; min-height: 58px; }
-  .desktop-frame--agents .composer-chip, .desktop-frame--agents .voice-action__primary, .desktop-frame--agents .send-button { width: 40px; height: 44px; flex-basis: 40px; }
-  .desktop-frame--agents .composer-input { min-height: 44px; padding: 11px 2px; font-size: 16px; }
   .cloud-panel-browser-launcher input { height: 40px; }
   .cloud-panel-browser-launcher button { min-height: 40px; padding-inline: 11px; }
   .local-computer-files__toolbar button { min-height: 40px; }

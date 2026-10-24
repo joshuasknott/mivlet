@@ -1,7 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { ArrowUp } from "@phosphor-icons/react/dist/csr/ArrowUp";
-import { ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";
-import { PencilSimple } from "@phosphor-icons/react/dist/csr/PencilSimple";
+import { ArrowRight } from "@phosphor-icons/react/dist/csr/ArrowRight";
 import { Trash } from "@phosphor-icons/react/dist/csr/Trash";
 import { Pause } from "@phosphor-icons/react/dist/csr/Pause";
 import { Play } from "@phosphor-icons/react/dist/csr/Play";
@@ -10,6 +8,7 @@ import { ListBullets } from "@phosphor-icons/react/dist/csr/ListBullets";
 import type { CollaborationWorkItem, OutcomeGoalInput } from "@mivlet/protocol";
 import type { WorkspaceExecution } from "../../lib/workspace-execution";
 import { editableQueue } from "../../lib/work-queue";
+import { SidebarMenu } from "../agents/SidebarMenu";
 import "./conversation-work-controls.css";
 
 const goalLabels = { active: "In progress", paused: "Paused", completed: "Agent reports achieved", blocked: "Needs your input", "budget-exhausted": "Budget reached" };
@@ -41,9 +40,6 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
   const [criteria, setCriteria] = useState(goalDraft?.successCriteria ?? "");
   const [turns, setTurns] = useState(goalDraft?.maxTurns ?? 6);
   const [tokens, setTokens] = useState(goalDraft?.maxTokens ?? 128000);
-  const [guiding, setGuiding] = useState(false);
-  const [guidance, setGuidance] = useState("");
-  const [guidanceState, setGuidanceState] = useState("");
   const busy = pending || disabled;
   const action = async (operation: () => Promise<unknown>, done?: () => void) => {
     if (busy) return;
@@ -58,9 +54,8 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
     || !["active", "paused"].includes(goalWork.outcomeGoal!.status)
   );
   const pageIndex = Math.min(page, Math.max(0, Math.ceil(queue.length / 6) - 1));
-  const live = Boolean(active?.status === "running" && active.modelOptionId.startsWith("codex::") && !active.executionOwner);
   const lastLive = active?.liveSteering?.at(-1);
-  const hasControls = Boolean(goal || goalForm || queue.length || cloudTasks.length || active || error);
+  const hasControls = Boolean(goal || goalForm || queue.length || cloudTasks.length || lastLive || error);
   if (!hasControls) return null;
   return <section className="conversation-work-controls" aria-label="Goal and queued requests">
     {goal ? <div className="conversation-goal-row">
@@ -97,25 +92,32 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
       <div className="conversation-work-actions"><button type="submit" disabled={busy || !objective.trim() || !criteria.trim()}>Use for next request</button><button type="button" onClick={() => setGoalForm(false)}>Cancel</button></div>
     </form> : null}
     {queue.length ? <div className="conversation-work-queue">
-      <p className="conversation-queue-label">Up next · {queue.length}</p>
-      <ol start={pageIndex * 6 + 1}>
+      <ol aria-label="Queued requests" start={pageIndex * 6 + 1}>
         {queue.slice(pageIndex * 6, pageIndex * 6 + 6).map((item, offset) => {
           const index = pageIndex * 6 + offset;
           return <li key={item.id}>
-            <span className="conversation-queue-number" aria-hidden="true">{index + 1}</span>
+            <ListBullets className="conversation-queue-icon" size={15} aria-hidden="true" />
             {editing === item.id ? <form className="conversation-work-form" onSubmit={event => { event.preventDefault(); void action(() => service.command({ action: "edit-queued-work", id: item.id, expectedGeneration: item.generation, prompt: editText }), () => setEditing(undefined)); }}>
               <label>Edit queued request<textarea autoFocus required maxLength={32000} rows={2} value={editText} onChange={event => setEditText(event.target.value)} /></label>
               <div className="conversation-work-actions"><button type="submit" disabled={busy || !editText.trim()}>Save</button><button type="button" disabled={busy} onClick={() => setEditing(undefined)}>Cancel</button></div>
             </form> : <>
-              <div className="conversation-queue-message"><span>{item.userRequest}</span><small>{item.agentName}{item.queue?.held ? " · Paused" : ""}{item.attachments?.length ? ` · ${item.attachments.length} attached` : ""}</small>
-                {!item.hostedTask && <button type="button" disabled={busy} onClick={() => setCloudReviewId(item.id)}>Cloud options</button>}
+              <div className="conversation-queue-message"><span title={item.userRequest}>{item.userRequest}</span>
+                {item.queue?.held ? <small>Paused</small> : null}
+                {item.attachments?.length ? <small>{item.attachments.length} attached</small> : null}
               </div>
-              <div className="conversation-work-actions">
-                <button type="button" title="Move up" aria-label={`Move queued request ${index + 1} up`} disabled={busy || index === 0} onClick={() => void action(() => service.command({ action: "move-queued-work", id: item.id, expectedGeneration: item.generation, beforeId: queue[index - 1].id }))}><ArrowUp size={16} aria-hidden="true" /></button>
-                <button type="button" title="Move down" aria-label={`Move queued request ${index + 1} down`} disabled={busy || index === queue.length - 1} onClick={() => void action(() => service.command({ action: "move-queued-work", id: item.id, expectedGeneration: item.generation, beforeId: queue[index + 2]?.id }))}><ArrowDown size={16} aria-hidden="true" /></button>
-                <button type="button" title={item.queue?.held ? "Resume" : "Pause"} aria-label={`${item.queue?.held ? "Resume" : "Pause"} queued request ${index + 1}`} disabled={busy} onClick={() => void action(() => service.command({ action: "set-work-held", id: item.id, expectedGeneration: item.generation, held: !item.queue?.held }))}>{item.queue?.held ? <Play size={16} aria-hidden="true" /> : <Pause size={16} aria-hidden="true" />}</button>
-                <button type="button" title="Edit" aria-label={`Edit queued request ${index + 1}`} disabled={busy} onClick={() => { setEditText(item.userRequest); setEditing(item.id); }}><PencilSimple size={17} aria-hidden="true" /></button>
+              <div className="conversation-queue-actions">
+                <button type="button" className="conversation-queue-steer" aria-label={`Steer with queued request ${index + 1}`}
+                  title={item.attachments?.length || item.outcomeGoal ? "Requests with files or goals stay queued" : item.userRequest.length > 2000 ? "Live steering supports up to 2,000 characters" : "Send to this agent’s active foreground Codex turn"}
+                  disabled={busy || Boolean(item.attachments?.length || item.outcomeGoal) || item.userRequest.length > 2000 || !roots.some(root => root.agentId === item.agentId && root.status === "running" && root.currentRunId && root.modelOptionId.startsWith("codex::") && !root.executionOwner)}
+                  onClick={() => void action(() => service.steerQueued(item.id, item.generation))}><ArrowRight size={15} aria-hidden="true" />Steer</button>
                 <button type="button" title="Remove" aria-label={`Remove queued request ${index + 1}`} disabled={busy} onClick={() => void action(() => service.stop(item.id))}><Trash size={16} aria-hidden="true" /></button>
+                <SidebarMenu label={`Options for queued request ${index + 1}`} triggerClassName="conversation-queue-more" items={[
+                  { label: "Edit", disabled: busy, run: () => { setEditText(item.userRequest); setEditing(item.id); } },
+                  { label: "Move up", disabled: busy || index === 0, run: () => void action(() => service.command({ action: "move-queued-work", id: item.id, expectedGeneration: item.generation, beforeId: queue[index - 1].id })) },
+                  { label: "Move down", disabled: busy || index === queue.length - 1, run: () => void action(() => service.command({ action: "move-queued-work", id: item.id, expectedGeneration: item.generation, beforeId: queue[index + 2]?.id })) },
+                  { label: item.queue?.held ? "Resume" : "Pause", disabled: busy, run: () => void action(() => service.command({ action: "set-work-held", id: item.id, expectedGeneration: item.generation, held: !item.queue?.held })) },
+                  ...(!item.hostedTask ? [{ label: "Cloud options", disabled: busy, run: () => setCloudReviewId(item.id) }] : []),
+                ]} />
               </div>
             </>}
           </li>;
@@ -126,19 +128,7 @@ export function ConversationWorkControls({ work, conversationId, service, goalDr
     {roots.filter(item => item.id === cloudReviewId || cloudTasks.includes(item)).map(item => <Suspense key={item.id} fallback={<p role="status">Loading cloud task…</p>}>
       <HostedTaskControls item={item} onChanged={service.refresh} disabled={busy} />
     </Suspense>)}
-    {active ? <div className="conversation-work-guidance">
-      <button type="button" onClick={() => setGuiding(!guiding)} aria-expanded={guiding}>Guide active work</button>
-      {guiding ? <div className="conversation-work-form">
-        <label>Guidance for {active.agentName}<textarea value={guidance} onChange={event => setGuidance(event.target.value)} maxLength={2000} rows={2} /></label>
-        <p>{live ? "Live guidance is sent to this Codex turn. It cannot undo actions that have already started." : "This route takes guidance in a fresh turn after the current response. Earlier actions are not replayed."}</p>
-        <div className="conversation-work-actions">
-          {live ? <button type="button" disabled={busy || !guidance.trim()} onClick={() => void action(() => service.liveSteer(active.id, active.generation, guidance), () => { setGuidance(""); setGuidanceState("Live guidance saved. Check its delivery receipt below."); })}>Send live guidance</button> : null}
-          <button type="button" disabled={busy || !guidance.trim()} onClick={() => void action(() => service.reply(active.id, active.generation, guidance), () => { setGuidance(""); setGuidanceState("Guidance queued for the next fresh turn."); })}>Queue for next turn</button>
-        </div>
-      </div> : null}
-      {guidanceState ? <p role="status">{guidanceState}</p> : null}
-      {lastLive ? <p role="status">Live guidance: {lastLive.delivery === "accepted" ? "accepted by Codex" : lastLive.delivery === "rejected" ? "not accepted; use a next-turn follow-up" : lastLive.delivery === "uncertain" ? "delivery uncertain; review before continuing" : "waiting for receipt"}.</p> : null}
-    </div> : null}
+    {lastLive ? <p className="conversation-work-receipt" role="status">Live guidance: {lastLive.delivery === "accepted" ? "accepted by Codex" : lastLive.delivery === "rejected" ? "not accepted; review the paused request" : lastLive.delivery === "uncertain" ? "delivery uncertain; review before continuing" : "waiting for receipt"}.</p> : null}
     {error ? <p className="conversation-work-error" role="alert">{error}</p> : null}
   </section>;
 }

@@ -86,6 +86,7 @@ export async function createWorkspaceRoom(
 ) {
   await deps.runtime.flushSnapshot();
   const id = `thread-${crypto.randomUUID()}`;
+  let draftProjectId = projectId;
   if (draft.kind === "project" && !projectId) {
     const project = await createLocalProject({
       workspaceId: deps.workspaceId,
@@ -93,25 +94,13 @@ export async function createWorkspaceRoom(
       threadId: id,
       name: draft.title,
       instructions: draft.instructions,
-      knowledgeSourceIds: [],
-    });
-    deps.projects.setProjects((current) => [...current, project]);
-    const data = await deps.service
-      .refresh()
-      .then(() => deps.service.getSnapshot().data);
-    const team = data.teams.find((entry) => entry.projectId === project.id);
-    if (!team)
-      throw new Error(
-        "The project was saved, but its team could not be loaded. Reload the workspace to finish setup.",
-      );
-    await deps.service.command({
-      action: "update-team",
-      projectId: project.id,
-      expectedRevision: team.revision,
+      knowledgeSourceIds: draft.knowledgeSourceIds ?? [],
       participantIds: draft.participantIds,
       leadAgentId: draft.facilitatorId || undefined,
-      shareHistory: true,
     });
+    draftProjectId = project.id;
+    deps.projects.setProjects((current) => [...current, project]);
+    await deps.service.refresh();
   } else
     await deps.service.command({
       action: "create-conversation",
@@ -123,7 +112,7 @@ export async function createWorkspaceRoom(
       projectId,
     });
   if (seedText && draft.facilitatorId)
-    await deps.saveDraft(id, draft.facilitatorId, seedText, projectId);
+    await deps.saveDraft(id, draft.facilitatorId, seedText, draftProjectId);
   deps.open(id, true);
   return id;
 }

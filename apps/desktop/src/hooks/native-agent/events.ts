@@ -270,6 +270,7 @@ async function applyToolCall(
 ) {
   const needsApproval =
     !isCollaborationTool(event.tool) &&
+    event.tool !== "workspace-inspect" &&
     !isRoutineConnectorRead(event.approval) &&
     !["connector-call", "connector-action"].includes(
       event.approval.action.split(/\s+/)[0],
