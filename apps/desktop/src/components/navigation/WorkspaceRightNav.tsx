@@ -16,6 +16,10 @@ import { ArrowsOutSimple } from "@phosphor-icons/react/dist/csr/ArrowsOutSimple"
 import { ArrowsInSimple } from "@phosphor-icons/react/dist/csr/ArrowsInSimple";
 import { DotsThree } from "@phosphor-icons/react/dist/csr/DotsThree";
 import { X } from "@phosphor-icons/react/dist/csr/X";
+import { Clock } from "@phosphor-icons/react/dist/csr/Clock";
+import { FileText } from "@phosphor-icons/react/dist/csr/FileText";
+import { BookOpen } from "@phosphor-icons/react/dist/csr/BookOpen";
+import { CaretLeft } from "@phosphor-icons/react/dist/csr/CaretLeft";
 import { useMediaQuery } from "../../hooks/useMediaQuery";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import {
@@ -26,6 +30,7 @@ import {
 import type { PanelScope } from "./workspace-panel-data";
 import "./navigation.css";
 import "./right-panel.css";
+import "./right-panel-rail.css";
 
 export type NavContext =
   | { kind: "agent"; agent: MivletAgentProfile }
@@ -34,9 +39,9 @@ export type NavContext =
   | null;
 
 const sections = [
-  { id: "activity", label: "Activity" },
-  { id: "files", label: "Files" },
-  { id: "memory", label: "Memory" },
+  { id: "activity", label: "Activity", icon: Clock },
+  { id: "files", label: "Files", icon: FileText },
+  { id: "memory", label: "Memory", icon: BookOpen },
 ] as const;
 
 /** One content inspector; closing it returns to the preserved collection. */
@@ -47,7 +52,9 @@ export function WorkspaceRightNav({
   scope = "chat",
   ownerLabel,
   onScopeChange,
-  open,
+  open: requestedOpen,
+  replaced = false,
+  onOpen,
   onClose,
   activity,
   library,
@@ -70,6 +77,8 @@ export function WorkspaceRightNav({
   ownerLabel?: string;
   onScopeChange?: (scope: PanelScope) => void;
   open: boolean;
+  replaced?: boolean;
+  onOpen?: () => void;
   onClose: () => void;
   activity?: (navigate: (page: PanelPage) => void) => ReactNode;
   library?: ReactNode;
@@ -85,10 +94,15 @@ export function WorkspaceRightNav({
   onCloseComputer?: () => void;
   onChatActiveChange?: (active: boolean) => void;
 }) {
+  const open = requestedOpen && !replaced;
   const panel = useRef<HTMLElement>(null);
   const more = useRef<HTMLDetailsElement>(null);
   const compact = useMediaQuery("(max-width: 850px)");
-  useModalFocusTrap({ active: open && compact, containerRef: panel, onClose });
+  useModalFocusTrap({
+    active: open && compact,
+    containerRef: panel,
+    onClose,
+  });
   const prefix = useId();
   const [state, dispatch] = useReducer(reduceRightPanel, {
     page: "activity",
@@ -119,6 +133,7 @@ export function WorkspaceRightNav({
     onCloseComputer?.();
     setVisited((current) => new Set([...current, page]));
     dispatch({ type: "select", page });
+    onOpen?.();
     if (more.current) more.current.open = false;
   };
   const lastHistory = useRef<string | null>(null);
@@ -141,30 +156,55 @@ export function WorkspaceRightNav({
   };
   useEffect(() => {
     const closeApp = (event: Event) => {
-      if (selected?.kind === "mcp-app" && (event as CustomEvent<{ id?: string }>).detail?.id === selected.id)
+      if (
+        selected?.kind === "mcp-app" &&
+        (event as CustomEvent<{ id?: string }>).detail?.id === selected.id
+      )
         dispatch({ type: "close" });
     };
     window.addEventListener("mivlet:mcp-app-panel-closed", closeApp);
-    return () => window.removeEventListener("mivlet:mcp-app-panel-closed", closeApp);
+    return () =>
+      window.removeEventListener("mivlet:mcp-app-panel-closed", closeApp);
   }, [selected?.id, selected?.kind]);
   useEffect(() => {
     if (selected?.kind !== "mcp-app" || !open || computerAgentId) return;
-    const target = Array.from(panel.current?.querySelectorAll<HTMLElement>("[data-mcp-app-panel]") ?? [])
-      .find((candidate) => candidate.dataset.mcpAppPanel === selected.id);
-    if (target) window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-ready", { detail: { id: selected.id, target } }));
+    const target = Array.from(
+      panel.current?.querySelectorAll<HTMLElement>("[data-mcp-app-panel]") ??
+        [],
+    ).find((candidate) => candidate.dataset.mcpAppPanel === selected.id);
+    if (target)
+      window.dispatchEvent(
+        new CustomEvent("mivlet:mcp-app-panel-ready", {
+          detail: { id: selected.id, target },
+        }),
+      );
   }, [selected?.id, selected?.kind, open, computerAgentId]);
   const dockedApp = useRef<string | undefined>(undefined);
   useEffect(() => {
-    const next = selected?.kind === "mcp-app" && !computerAgentId ? selected.id : undefined;
+    const next =
+      selected?.kind === "mcp-app" && !computerAgentId
+        ? selected.id
+        : undefined;
     const previousApp = dockedApp.current;
     dockedApp.current = next;
     if (previousApp && previousApp !== next)
-      window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id: previousApp } }));
+      window.dispatchEvent(
+        new CustomEvent("mivlet:mcp-app-panel-closed", {
+          detail: { id: previousApp },
+        }),
+      );
   }, [selected?.id, selected?.kind, computerAgentId]);
-  useEffect(() => () => {
-    if (dockedApp.current)
-      window.dispatchEvent(new CustomEvent("mivlet:mcp-app-panel-closed", { detail: { id: dockedApp.current } }));
-  }, []);
+  useEffect(
+    () => () => {
+      if (dockedApp.current)
+        window.dispatchEvent(
+          new CustomEvent("mivlet:mcp-app-panel-closed", {
+            detail: { id: dockedApp.current },
+          }),
+        );
+    },
+    [],
+  );
   const focusKey = inspecting ? (selected?.id ?? "computer") : state.page;
   const lastFocus = useRef(focusKey);
   useEffect(() => {
@@ -188,7 +228,14 @@ export function WorkspaceRightNav({
       : context?.kind === "agent"
         ? context.agent.name
         : undefined;
-  const heading = title || contextName || "Workspace";
+  const heading = {
+    activity: "Activity",
+    files: "Files",
+    memory: "Memory",
+    history: "Work history",
+    chats: "Conversations",
+    schedules: "Schedules",
+  }[state.page];
   const pages: { id: PanelPage; content: ReactNode }[] = [
     {
       id: "activity",
@@ -244,103 +291,116 @@ export function WorkspaceRightNav({
       ref={panel}
       className="workspace-context right-panel"
       data-expanded={expanded}
+      data-open={open}
       aria-label="Workspace panel"
-      role={compact ? "dialog" : undefined}
+      aria-description={title || contextName}
+      role={compact && open ? "dialog" : undefined}
       aria-modal={(compact && open) || undefined}
-      hidden={!open}
+      data-replaced={replaced}
     >
-      <header className="right-panel__header">
-        {inspecting ? (
-          <div className="right-panel__inspector-title">
+      <div className="right-panel__body" hidden={!open}>
+        <header className="right-panel__header">
+          {inspecting ? (
+            <div className="right-panel__inspector-title">
+              <button
+                type="button"
+                className="right-panel__back"
+                onClick={closeContent}
+              >
+                <ArrowLeft size={17} aria-hidden="true" />
+                Back
+              </button>
+              <h2 title={selected?.title}>
+                {computerAgentId ? "Computer" : selected?.title}
+              </h2>
+            </div>
+          ) : (
+            <div className="right-panel__heading">
+              <h2>{heading}</h2>
+              {onScopeChange && ownerLabel ? (
+                <select
+                  aria-label="Panel scope"
+                  value={scope}
+                  onChange={(event) =>
+                    onScopeChange(event.target.value as PanelScope)
+                  }
+                >
+                  <option value="chat">This chat</option>
+                  <option value="owner">All in {ownerLabel}</option>
+                </select>
+              ) : null}
+            </div>
+          )}
+          <div className="right-panel__controls">
             <button
               type="button"
-              className="right-panel__back"
-              onClick={closeContent}
+              className="right-panel__expand"
+              aria-label={
+                expanded ? "Reduce workspace panel" : "Expand workspace panel"
+              }
+              aria-pressed={expanded}
+              onClick={() => setExpanded((value) => !value)}
             >
-              <ArrowLeft size={17} aria-hidden="true" />
-              Back
+              {expanded ? (
+                <ArrowsInSimple size={18} aria-hidden="true" />
+              ) : (
+                <ArrowsOutSimple size={18} aria-hidden="true" />
+              )}
             </button>
-            <h2 title={selected?.title}>
-              {computerAgentId ? "Computer" : selected?.title}
-            </h2>
           </div>
-        ) : (
-          <div className="right-panel__heading">
-            <h2 title={heading}>{heading}</h2>
-            {onScopeChange && ownerLabel ? (
-              <select
-                aria-label="Panel scope"
-                value={scope}
-                onChange={(event) =>
-                  onScopeChange(event.target.value as PanelScope)
-                }
-              >
-                <option value="chat">This chat</option>
-                <option value="owner">All in {ownerLabel}</option>
-              </select>
-            ) : null}
-          </div>
-        )}
-        <div className="right-panel__controls">
-          {!inspecting && (sideChats || schedules) ? (
-            <details
-              ref={more}
-              className="right-panel__more"
-              onKeyDown={(event) => {
-                if (event.key === "Escape") {
-                  event.currentTarget.open = false;
-                  event.currentTarget.querySelector("summary")?.focus();
-                  event.stopPropagation();
-                }
-              }}
+        </header>
+        <div className="right-panel__content" id={prefix + "-content"}>
+          {pages.map(({ id, content }) => (
+            <div
+              key={id + ":" + scopeKey}
+              className="right-panel__page"
+              id={prefix + "-page-" + id}
+              role="tabpanel"
+              aria-labelledby={
+                prefix +
+                "-" +
+                (sections.some((section) => section.id === id)
+                  ? id
+                  : "activity")
+              }
+              hidden={inspecting || state.page !== id}
             >
-              <summary aria-label="More workspace options">
-                <DotsThree size={20} aria-hidden="true" />
-              </summary>
-              <div>
-                {sideChats ? (
-                  <button type="button" onClick={() => navigate("chats")}>
-                    Conversations
-                  </button>
-                ) : null}
-                {schedules ? (
-                  <button type="button" onClick={() => navigate("schedules")}>
-                    Schedules
-                  </button>
-                ) : null}
-              </div>
-            </details>
-          ) : null}
-          <button
-            type="button"
-            className="right-panel__expand"
-            aria-label={
-              expanded ? "Reduce workspace panel" : "Expand workspace panel"
-            }
-            aria-pressed={expanded}
-            onClick={() => setExpanded((value) => !value)}
+              {visited.has(id) ? content : null}
+            </div>
+          ))}
+          <div
+            className="right-panel__inspector"
+            id={prefix + "-inspector"}
+            hidden={!inspecting}
           >
-            {expanded ? (
-              <ArrowsInSimple size={18} aria-hidden="true" />
-            ) : (
-              <ArrowsOutSimple size={18} aria-hidden="true" />
-            )}
-          </button>
-          <button
-            type="button"
-            className="right-panel__close"
-            aria-label="Close workspace panel"
-            onClick={onClose}
-          >
-            <X size={19} aria-hidden="true" />
-          </button>
+            {computerAgentId
+              ? computer
+              : selected
+                ? renderTab?.(selected, closeContent)
+                : null}
+          </div>
         </div>
-      </header>
-      {!inspecting && (
+      </div>
+      <nav className="right-panel__rail" aria-label="Workspace tools">
+        <button
+          type="button"
+          className="right-panel__rail-toggle"
+          aria-label={open ? "Close workspace panel" : "Open workspace panel"}
+          aria-expanded={open}
+          aria-controls={prefix + "-content"}
+          onClick={open ? onClose : onOpen}
+        >
+          {open ? (
+            <X size={18} aria-hidden="true" />
+          ) : (
+            <CaretLeft size={18} aria-hidden="true" />
+          )}
+        </button>
         <div
           className="right-panel__sections"
           role="tablist"
           aria-label="Workspace sections"
+          aria-orientation="vertical"
         >
           {sections.map((section, index) => (
             <button
@@ -348,25 +408,30 @@ export function WorkspaceRightNav({
               type="button"
               role="tab"
               id={prefix + "-" + section.id}
-              aria-selected={activeSection === section.id}
+              aria-selected={open && activeSection === section.id}
+              aria-expanded={open && activeSection === section.id}
               aria-controls={
-                prefix +
-                "-page-" +
-                (activeSection === section.id ? state.page : section.id)
+                inspecting && activeSection === section.id
+                  ? prefix + "-inspector"
+                  : prefix +
+                    "-page-" +
+                    (activeSection === section.id ? state.page : section.id)
               }
               tabIndex={activeSection === section.id ? 0 : -1}
-              onClick={() => navigate(section.id)}
+              onClick={() => {
+                if (open && state.page === section.id && !inspecting) onClose();
+                else navigate(section.id);
+              }}
               onKeyDown={(event) => {
-                const next =
-                  event.key === "ArrowRight"
-                    ? (index + 1) % sections.length
-                    : event.key === "ArrowLeft"
-                      ? (index + sections.length - 1) % sections.length
-                      : event.key === "Home"
-                        ? 0
-                        : event.key === "End"
-                          ? sections.length - 1
-                          : undefined;
+                const next = ["ArrowDown", "ArrowRight"].includes(event.key)
+                  ? (index + 1) % sections.length
+                  : ["ArrowUp", "ArrowLeft"].includes(event.key)
+                    ? (index + sections.length - 1) % sections.length
+                    : event.key === "Home"
+                      ? 0
+                      : event.key === "End"
+                        ? sections.length - 1
+                        : undefined;
                 if (next === undefined) return;
                 event.preventDefault();
                 navigate(sections[next].id);
@@ -375,34 +440,43 @@ export function WorkspaceRightNav({
                   ?.focus();
               }}
             >
-              {section.label}
+              <span className="right-panel__rail-icon">
+                <section.icon size={22} aria-hidden="true" />
+              </span>
+              <span>{section.label}</span>
             </button>
           ))}
         </div>
-      )}
-      <div className="right-panel__content">
-        {pages.map(({ id, content }) => (
-          <div
-            key={id + ":" + scopeKey}
-            className="right-panel__page"
-            id={prefix + "-page-" + id}
-            role="tabpanel"
-            aria-labelledby={
-              sections.some((section) => section.id === id)
-                ? prefix + "-" + id
-                : prefix + "-activity"
-            }
-            hidden={inspecting || state.page !== id}
+        {sideChats || schedules ? (
+          <details
+            ref={more}
+            className="right-panel__more"
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.currentTarget.open = false;
+                event.currentTarget.querySelector("summary")?.focus();
+                event.stopPropagation();
+              }
+            }}
           >
-            {visited.has(id) ? content : null}
-          </div>
-        ))}
-        {computerAgentId
-          ? computer
-          : selected
-            ? renderTab?.(selected, closeContent)
-            : null}
-      </div>
+            <summary aria-label="More workspace options">
+              <DotsThree size={22} aria-hidden="true" />
+            </summary>
+            <div>
+              {sideChats ? (
+                <button type="button" onClick={() => navigate("chats")}>
+                  Conversations
+                </button>
+              ) : null}
+              {schedules ? (
+                <button type="button" onClick={() => navigate("schedules")}>
+                  Schedules
+                </button>
+              ) : null}
+            </div>
+          </details>
+        ) : null}
+      </nav>
     </aside>
   );
 }

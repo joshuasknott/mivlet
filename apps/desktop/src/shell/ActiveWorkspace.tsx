@@ -475,6 +475,7 @@ export function ActiveWorkspace({
         </Suspense>
         <WorkspaceContextPanel
           hidden={Boolean(agentEditor?.id) || Boolean(nav.projectDetailsId)}
+          onReveal={() => { setAgentEditor(null); nav.setProjectDetailsId(null); }}
           nav={nav}
           runtime={runtime}
           service={service}

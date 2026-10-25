@@ -156,6 +156,11 @@
 .turn-answer { width: fit-content; max-width: min(680px, 90%); padding: 10px 14px; border-radius: 16px; background: var(--surface-hover); }
 .turn-answer:has(.generated-interface) { width: min(680px, 90%); }
 .turn-answer .message-markdown { font-size: 14px; line-height: 1.55; }
+:where([data-theme="dark"]) .conversation-response > .turn-answer { padding: 4px 0 0 38px; max-width: min(718px, 100%); border-radius: 0; background: transparent; }
+:where([data-theme="dark"]) .turn-answer .message-markdown { font-size: 15px; line-height: 1.75; }
+@media (max-width: 700px) {
+  :where([data-theme="dark"]) .conversation-response > .turn-answer { padding-left: 0; }
+}
 .conversation-message--user { padding-bottom: 22px; }
 .message-actions { position: absolute; bottom: 0; left: 0; height: 22px; margin: 0; opacity: 0; pointer-events: none; gap: 8px; }
 .conversation-message--user .message-actions { left: auto; right: 0; }

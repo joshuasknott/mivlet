@@ -1,25 +1,339 @@
-.workspace-memories { padding: 22px 24px; overflow: auto; }
-.workspace-memories__group { margin-top: 28px; }
-.workspace-memories__group h3 { margin: 0 0 10px; color: var(--team-muted); font-size: 12px; font-weight: 500; }
-.workspace-memories__record { padding: 18px 0; border-bottom: 1px solid var(--team-border); overflow-wrap: anywhere; }
-.workspace-memories__record-heading { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
-.workspace-memories__record strong { font-size: 14px; font-weight: 550; }
-.workspace-memories__record p { margin: 8px 0 14px; color: var(--ink-muted); white-space: pre-wrap; line-height: 1.6; }
-.workspace-memories__record small { color: var(--team-muted); font-size: 11px; }
-.workspace-memories__record details { position: relative; flex-shrink: 0; }
-.workspace-memories__record summary { cursor: pointer; list-style: none; padding: 0 8px; min-width: 32px; min-height: 32px; text-align: center; }
-.workspace-memories__record summary::-webkit-details-marker { display: none; }
-.workspace-memories__actions { position: absolute; right: 0; top: 28px; z-index: 2; min-width: 120px; padding: 5px; border: 1px solid var(--team-border); border-radius: 8px; background: var(--surface); box-shadow: 0 6px 20px #0001; }
-.workspace-memories button { color: var(--ink); font: inherit; cursor: pointer; }
-.workspace-memories button:disabled { opacity: .5; cursor: default; }
-.workspace-memories__actions button { display: block; width: 100%; border: 0; background: transparent; text-align: left; padding: 10px; border-radius: 4px; }
-.workspace-memories__actions button:hover { background: var(--surface-hover); }
-.workspace-memories__editor { padding: 16px 0; border-bottom: 1px solid var(--team-border); }
-.workspace-memories__editor p, .workspace-memories__notice { color: var(--team-muted); line-height: 1.6; }
-.workspace-memories__editor label { display: grid; gap: 8px; margin-bottom: 14px; }
-.workspace-memories__editor input, .workspace-memories__editor textarea { box-sizing: border-box; width: 100%; min-width: 0; border: 1px solid var(--team-border); border-radius: 6px; background: var(--surface); color: var(--ink); padding: 10px; font: inherit; }
-.workspace-memories__editor textarea { resize: vertical; }
-.workspace-memories__editor > div, .workspace-memories__suggestion-actions { display: flex; gap: 10px; margin-top: 12px; }
-.workspace-memories__editor button, .workspace-memories__suggestion-actions button { padding: 8px 10px; border: 1px solid var(--team-border); background: transparent; border-radius: 6px; }
-.workspace-memories :is(button, summary, input, textarea):focus-visible { outline: 2px solid var(--ink-soft); outline-offset: 2px; }
-@media (pointer: coarse) { .workspace-memories summary, .workspace-memories button { min-height: 44px; } }
+.workspace-memories {
+  padding: 22px 24px;
+  overflow: auto;
+}
+.workspace-memories__group {
+  margin-top: 28px;
+}
+.workspace-memories__group h3 {
+  margin: 0 0 10px;
+  color: var(--team-muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+.workspace-memories__record {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--team-border);
+  overflow-wrap: anywhere;
+}
+.workspace-memories__record-heading {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.workspace-memories__record strong {
+  font-size: 14px;
+  font-weight: 550;
+}
+.workspace-memories__record p {
+  margin: 8px 0 14px;
+  color: var(--ink-muted);
+  white-space: pre-wrap;
+  line-height: 1.6;
+}
+.workspace-memories__record small {
+  color: var(--team-muted);
+  font-size: 11px;
+}
+.workspace-memories__record details {
+  position: relative;
+  flex-shrink: 0;
+}
+.workspace-memories__record summary {
+  cursor: pointer;
+  list-style: none;
+  padding: 0 8px;
+  min-width: 32px;
+  min-height: 32px;
+  text-align: center;
+}
+.workspace-memories__record summary::-webkit-details-marker {
+  display: none;
+}
+.workspace-memories__actions {
+  position: absolute;
+  right: 0;
+  top: 28px;
+  z-index: 2;
+  min-width: 120px;
+  padding: 5px;
+  border: 1px solid var(--team-border);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: 0 6px 20px #0001;
+}
+.workspace-memories button {
+  color: var(--ink);
+  font: inherit;
+  cursor: pointer;
+}
+.workspace-memories button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.workspace-memories__actions button {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  padding: 10px;
+  border-radius: 4px;
+}
+.workspace-memories__actions button:hover {
+  background: var(--surface-hover);
+}
+.workspace-memories__editor {
+  padding: 16px 0;
+  border-bottom: 1px solid var(--team-border);
+}
+.workspace-memories__editor p,
+.workspace-memories__notice {
+  color: var(--team-muted);
+  line-height: 1.6;
+}
+.workspace-memories__editor label {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.workspace-memories__editor input,
+.workspace-memories__editor textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--team-border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--ink);
+  padding: 10px;
+  font: inherit;
+}
+.workspace-memories__editor textarea {
+  resize: vertical;
+}
+.workspace-memories__editor > div,
+.workspace-memories__suggestion-actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 12px;
+}
+.workspace-memories__editor button,
+.workspace-memories__suggestion-actions button {
+  padding: 8px 10px;
+  border: 1px solid var(--team-border);
+  background: transparent;
+  border-radius: 6px;
+}
+.workspace-memories :is(button, summary, input, textarea):focus-visible {
+  outline: 2px solid var(--ink-soft);
+  outline-offset: 2px;
+}
+@media (pointer: coarse) {
+  .workspace-memories summary,
+  .workspace-memories button {
+    min-height: 44px;
+  }
+}
+
+/* Curated records share one surface; suggestions have a deliberate review state. */
+.workspace-memories__group h3 {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.workspace-memories__group h3 > span,
+.workspace-memories__count {
+  color: var(--ink-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+.workspace-memories__record {
+  display: flex;
+  gap: 12px;
+  padding: 18px 0;
+}
+.workspace-memories__kind-icon {
+  flex-shrink: 0;
+  margin-top: 3px;
+  color: var(--ink-muted);
+}
+.workspace-memories__record[data-kind="preference"]
+  > .workspace-memories__kind-icon {
+  color: light-dark(#7650be, #b89be8);
+}
+.workspace-memories__record[data-kind="decision"]
+  > .workspace-memories__kind-icon {
+  color: light-dark(#3d65af, #92b2ec);
+}
+.workspace-memories__record-content {
+  min-width: 0;
+  flex: 1;
+}
+.workspace-memories__record-heading {
+  gap: 6px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.workspace-memories__record-heading strong {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+.workspace-memories__record-heading details {
+  margin: -4px -5px 0 0;
+}
+.workspace-memories__record-heading summary {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  border-radius: 5px;
+}
+.workspace-memories__record-heading summary:hover {
+  background: var(--surface-hover);
+}
+.workspace-memories__kind {
+  padding: 3px 6px;
+  border-radius: 5px;
+  color: var(--ink-muted);
+  background: var(--surface-hover);
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+.workspace-memories__record p.workspace-memories__value {
+  margin: 7px 0 10px;
+  font-size: 14px;
+  line-height: 1.65;
+}
+.workspace-memories__value:not([data-expanded="true"]) {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 4;
+  overflow: hidden;
+}
+.workspace-memories__source {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.workspace-memories__read-more,
+.workspace-memories__source-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 5px 0;
+  border: 0;
+  background: transparent;
+  font-size: 12px !important;
+  min-height: 32px;
+}
+.workspace-memories__source-link {
+  margin-top: 3px;
+}
+.workspace-memories__provenance {
+  margin-top: 6px;
+  color: var(--ink-muted);
+  font-size: 12px;
+}
+.workspace-memories__provenance summary {
+  min-height: 32px;
+  padding: 6px 0;
+  text-align: left;
+  width: auto;
+  list-style: revert;
+}
+.workspace-memories__provenance p {
+  font-size: 12px;
+}
+.workspace-memories__record--suggested {
+  padding: 16px;
+  border: 1px solid light-dark(#e5ddf1, #4a3e5b);
+  border-radius: 8px;
+  background: light-dark(#f6f2fc, #2d2636);
+  margin-top: 10px;
+}
+.workspace-memories__record--suggested > .workspace-memories__kind-icon {
+  color: light-dark(#7650be, #b89be8);
+}
+.workspace-memories__record--suggested .workspace-memories__kind {
+  background: transparent;
+  padding-inline: 0;
+}
+.workspace-memories__suggestion-actions {
+  flex-wrap: wrap;
+}
+.workspace-memories__suggestion-actions button {
+  min-height: 36px;
+  padding: 8px 14px;
+}
+.workspace-memories__suggestion-actions button:first-child {
+  color: var(--surface);
+  background: var(--ink);
+  border-color: var(--ink);
+}
+.workspace-memories__inherited {
+  margin-top: 24px;
+  border-top: 1px solid var(--line);
+  padding-top: 10px;
+}
+.workspace-memories__inherited > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0;
+  cursor: pointer;
+  min-height: 56px;
+  list-style: none;
+}
+.workspace-memories__inherited > summary::-webkit-details-marker {
+  display: none;
+}
+.workspace-memories__inherited > summary > span:first-of-type {
+  flex: 1;
+  font-size: 13px;
+}
+.workspace-memories__inherited > summary small {
+  display: block;
+  color: var(--ink-muted);
+  font-size: 11px;
+  margin-top: 5px;
+}
+.workspace-memories__inherited .workspace-memories__group {
+  margin-top: 8px;
+}
+.workspace-memories__editor {
+  scroll-margin-top: 150px;
+}
+.workspace-memories__notice {
+  font-size: 12px;
+}
+
+.workspace-memories__metadata {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.workspace-memories__metadata .workspace-memories__source-link {
+  margin-top: 0;
+}
+@media (pointer: coarse), (max-width: 850px) {
+  .workspace-library__toolbar > button,
+  .workspace-library__toolbar > .workspace-library__upload > button,
+  .workspace-memories__source-link,
+  .workspace-memories__read-more,
+  .workspace-memories__suggestion-actions button {
+    min-height: 44px;
+  }
+  .workspace-memories__record-heading summary {
+    min-height: 44px;
+    width: 44px;
+  }
+}
