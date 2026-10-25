@@ -137,6 +137,7 @@ export function useShellRuntime(
       initialState.agents?.[0]?.id ??
       "chief-of-staff",
   );
+  const [agentRevision, setAgentRevision] = useState(initialState.agentRevision ?? 0);
   const [pinnedSourceIds, setPinnedSourceIds] = useState<string[]>(
     initialState.pinnedSourceIds,
   );
@@ -295,6 +296,7 @@ export function useShellRuntime(
       dismissedApprovalIds,
       approvalRules,
       agents,
+      agentRevision,
       activeAgentId,
       pinnedSourceIds,
       importedKnowledgeSources,
@@ -315,6 +317,7 @@ export function useShellRuntime(
       approvalAudit,
       approvalRules,
       agents,
+      agentRevision,
       activeAgentId,
       connectedBackendIds,
       onboardingDismissed,
@@ -341,11 +344,20 @@ export function useShellRuntime(
     workspaceScopeGeneration,
     activeWorkspaceScope,
     setLastAction,
+    onAgentsChanged: (nextAgents, revision, selectedAgentId) => {
+      setAgents(nextAgents);
+      setAgentRevision(revision);
+      setActiveAgentId(selectedAgentId);
+      if (!nextAgents.some(agent => agent.id === activeItem) && agents.some(agent => agent.id === activeItem)) {
+        setActiveItem(selectedAgentId);
+      }
+    },
     onReset: () => {
       setActiveItem(defaultShellState.activeItem);
       setSidebarPreferences(normalizeSidebarPreferences(undefined));
 
       setAgents(defaultShellState.agents ?? []);
+      setAgentRevision(0);
       setActiveAgentId(defaultShellState.activeAgentId ?? "chief-of-staff");
       setOnboardingDismissed(false);
       setOnboardingVersion(FIRST_AGENT_ONBOARDING_VERSION);
@@ -362,6 +374,7 @@ export function useShellRuntime(
       setMemoryExportText("");
     },
     onHydrate: (recovered) => {
+      setAgentRevision(recovered.agentRevision ?? 0);
       approvals.hydrate(recovered);
       setActiveItem(recovered.activeItem);
 

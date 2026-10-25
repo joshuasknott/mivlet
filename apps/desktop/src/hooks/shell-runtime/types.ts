@@ -19,6 +19,8 @@ import type {
   MemoryRecord,
   PermissionMode,
   PreparedExecutionContext,
+  WorkspaceManageRequest,
+  WorkspaceManageResponse,
 } from "@mivlet/protocol";
 import type {
   ToolApprovalGate,
@@ -39,6 +41,7 @@ import type {
 
 export interface ShellRuntime {
   flushSnapshot: () => Promise<void>;
+  manageWorkspaceFromChat: (request: Omit<WorkspaceManageRequest, "workspaceId" | "expectedAgentRevision">) => Promise<WorkspaceManageResponse>;
   // navigation
   activeItem: string;
   setActiveItem: (value: string) => void;

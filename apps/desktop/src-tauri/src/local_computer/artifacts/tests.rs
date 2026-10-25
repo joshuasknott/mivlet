@@ -42,10 +42,10 @@ fn json_preview_is_literal_bounded_utf8_and_export_preserves_original_bytes() {
     let receipt = artifact_receipt("Data", "json", bytes);
     let preview = preview_bytes(&receipt.artifact, bytes);
     assert_eq!(preview.mime_type, "application/json");
-    let visible = preview.text.unwrap();
+    let visible = preview.text.as_deref().unwrap();
     assert!(preview.truncated);
     assert!(visible.len() <= 256 * 1024);
-    assert!(text.starts_with(&visible));
+    assert!(text.starts_with(visible));
     assert!(preview.image_data_url.is_none());
     assert!(!preview.has_office_preview());
     let root = tempfile::tempdir().unwrap();

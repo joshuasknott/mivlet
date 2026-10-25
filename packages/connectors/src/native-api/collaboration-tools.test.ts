@@ -74,24 +74,4 @@ describe("workspace collaboration tool contracts", () => {
     expect(ordinary).not.toContain("continuation-read");
     expect(collaborationToolSpecs(false, true).map(tool => tool.name)).toContain("continuation-read");
   });
-
-  it("advertises workspace lifecycle tools through the shared collaboration route", () => {
-    const names = collaborationToolSpecs(false).map((tool) => tool.name);
-    expect(names).toEqual(expect.arrayContaining([
-      "workspace-inspect",
-      "agent-create",
-      "agent-update",
-      "agent-delete",
-      "project-create",
-      "project-team-update",
-    ]));
-    for (const name of [
-      "workspace-inspect",
-      "agent-create",
-      "agent-update",
-      "agent-delete",
-      "project-create",
-      "project-team-update",
-    ]) expect(isCollaborationTool(name)).toBe(true);
-  });
 });

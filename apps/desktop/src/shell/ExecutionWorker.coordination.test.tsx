@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   ApprovalRequest,
   BackendProvider,
+  CollaborationSnapshot,
   CollaborationWorkItem,
   LocalProject,
   MivletAgentProfile,
@@ -106,6 +107,7 @@ vi.mock("../runtime/domains/local-computer", () => ({
 }));
 
 import { collaborationToolSpecs } from "@mivlet/connectors/native-api/tools";
+import { createApprovalGate } from "@mivlet/connectors";
 import { providerModelOptions, type ProviderModelOption } from "../lib/provider-models";
 import { ExecutionWorker } from "./ExecutionWorker";
 
@@ -192,6 +194,7 @@ function runtime(activeProvider: BackendProvider = provider): ShellRuntime {
     accountWorkspaceStatus: { state: "ready", accountBound: true, activeWorkspace: { source: "local", localWorkspaceId: "workspace-local" } },
     assembleConversationContext: vi.fn(async () => ({ messages: [{ role: "user", content: "CURRENT_REQUEST_ONLY" }] })),
     recordBackendToolCall: vi.fn(),
+    manageWorkspaceFromChat: vi.fn(),
   } as unknown as ShellRuntime;
 }
 
@@ -205,7 +208,7 @@ function makeHarness(options: {
   const modelId = agentId === "reviewer" ? "review-model" : "lead-model";
   let current = true;
   invalidateHarnessOwners.push(() => { current = false; });
-  const snapshot = {
+  const snapshot: { data: CollaborationSnapshot } = {
     data: {
       conversations: [{
         id: "conversation-direct",
@@ -227,9 +230,10 @@ function makeHarness(options: {
     },
   };
   const commands: unknown[] = [];
+  const gate = createApprovalGate();
   const service = {
     workspaceId: "workspace-local",
-    approvals: { acquire: vi.fn(() => ({})) },
+    approvals: { acquire: vi.fn(() => gate) },
     current: vi.fn(() => current),
     getSnapshot: vi.fn(() => snapshot),
     command: vi.fn(async (command: unknown) => {
@@ -240,6 +244,7 @@ function makeHarness(options: {
     approval: vi.fn(),
     released: vi.fn(async () => undefined),
     report: vi.fn(),
+    refresh: vi.fn(async () => undefined),
   };
   const session = {
     key: "work-lead:1:0",
@@ -252,7 +257,7 @@ function makeHarness(options: {
     started: false,
     approvalIds: new Set<string>(),
   };
-  return { service, session, commands, setCurrent: (value: boolean) => { current = value; } };
+  return { service, session, commands, gate, setCurrent: (value: boolean) => { current = value; } };
 }
 
 async function renderWorker(options: {
@@ -295,6 +300,60 @@ function approval(tool: string, id = "call-1"): ApprovalRequest {
 }
 
 describe("ExecutionWorker coordination reachability", () => {
+  it("waits for approval before creating an agent and returns only public saved data", async () => {
+    const setup = await renderWorker();
+    const saved = { agents: setup.runtime.agents, agentRevision: 1, activeAgentId: "lead",
+      collaboration: setup.service.getSnapshot().data, projects: [],
+      receipt: { id: "saved", operation: "create-agent" as const, summary: "Created researcher", replayed: false } };
+    vi.mocked(setup.runtime.manageWorkspaceFromChat).mockResolvedValue(saved);
+    const execute = harness.options!.wrapExecutor(async () => "base");
+    const args = JSON.stringify({ name: "Researcher", instructions: "Research" });
+    const pending = execute(approval("agent-create"), args);
+    await waitFor(() => expect(setup.gate.hasPending("call-1")).toBe(true));
+    expect(setup.runtime.manageWorkspaceFromChat).not.toHaveBeenCalled();
+    setup.gate.resolveGrant("call-1");
+    const output = await pending;
+    expect(setup.runtime.manageWorkspaceFromChat).toHaveBeenCalledWith(expect.objectContaining({
+      workId: "work-lead", generation: 1, runId: "attempt-lead", callId: "call-1", tool: "agent-create", arguments: args,
+    }));
+    expect(output).toContain("Created researcher");
+    expect(output).not.toContain("PRIVATE_INSTRUCTIONS");
+    expect(setup.service.refresh).toHaveBeenCalledOnce();
+  });
+
+  it("does not send a denied workspace deletion to native execution", async () => {
+    const setup = await renderWorker();
+    const execute = harness.options!.wrapExecutor(async () => "base");
+    const pending = execute(approval("agent-delete"), '{"agentId":"reviewer"}');
+    const rejected = expect(pending).rejects.toThrow(/declined/i);
+    await waitFor(() => expect(setup.gate.hasPending("call-1")).toBe(true));
+    setup.gate.resolveDeny("call-1");
+    await rejected;
+    expect(setup.runtime.manageWorkspaceFromChat).not.toHaveBeenCalled();
+  });
+
+  it("rechecks Stop after approval and before a workspace mutation", async () => {
+    const setup = await renderWorker();
+    const execute = harness.options!.wrapExecutor(async () => "base");
+    const pending = execute(approval("agent-update"), '{"agentId":"reviewer","name":"Scout"}');
+    const rejected = expect(pending).rejects.toThrow(/stopped/i);
+    await waitFor(() => expect(setup.gate.hasPending("call-1")).toBe(true));
+    setup.setCurrent(false);
+    setup.gate.resolveGrant("call-1");
+    await rejected;
+    expect(setup.runtime.manageWorkspaceFromChat).not.toHaveBeenCalled();
+  });
+
+  it("inspects the workspace without queuing a mutation approval", async () => {
+    const setup = await renderWorker();
+    vi.mocked(setup.runtime.manageWorkspaceFromChat).mockResolvedValue({ agents: setup.runtime.agents, agentRevision: 0,
+      collaboration: setup.service.getSnapshot().data, projects: [],
+      receipt: { id: "read", operation: "inspect", summary: "Inspected", replayed: false } });
+    const execute = harness.options!.wrapExecutor(async () => "base");
+    await expect(execute(approval("workspace-inspect"), "{}")).resolves.toContain("Inspected");
+    expect(setup.gate.pendingCount()).toBe(0);
+  });
+
   beforeEach(() => {
     harness.run.mockClear();
     harness.options = undefined;

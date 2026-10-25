@@ -267,6 +267,7 @@ pub fn run() {
             collaboration::provider_continuation_read::provider_continuation_read,
             collaboration::ui::collaboration_ui,
             collaboration::collaboration_command,
+            collaboration::workspace_management::workspace_manage,
             local_projects::local_project_list,
             local_projects::local_project_update,
             local_projects::local_project_archive,

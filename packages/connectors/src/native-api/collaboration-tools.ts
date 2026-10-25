@@ -1,13 +1,4 @@
 import type { BackendTool, NativeToolSpec } from "@mivlet/protocol";
-import {
-  WORKSPACE_MANAGEMENT_TOOLS,
-  isWorkspaceManagementTool,
-} from "./workspace-management-tools";
-export {
-  WORKSPACE_MANAGEMENT_TOOLS,
-  isWorkspaceManagementTool,
-  workspaceManagementToolSpecs,
-} from "./workspace-management-tools";
 
 const field = (maxLength: number) => ({
   type: "string",
@@ -105,10 +96,10 @@ export const COLLABORATION_TOOLS: Record<string, BackendTool> = {
 };
 
 export function isCollaborationTool(name: string): boolean {
-  return Object.hasOwn(COLLABORATION_TOOLS, name) || isWorkspaceManagementTool(name);
+  return Object.hasOwn(COLLABORATION_TOOLS, name);
 }
 export function collaborationToolSpecs(project: boolean, continuation = false, goal = false): NativeToolSpec[] {
-  return [...Object.values(COLLABORATION_TOOLS), ...Object.values(WORKSPACE_MANAGEMENT_TOOLS)]
+  return Object.values(COLLABORATION_TOOLS)
     .filter((tool) => project || tool.name !== "project-record")
     .filter((tool) => continuation || tool.name !== "continuation-read")
     .filter((tool) => goal || tool.name !== "goal-report")

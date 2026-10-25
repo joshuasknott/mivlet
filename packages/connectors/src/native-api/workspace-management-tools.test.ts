@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { effectForTool } from "../permission-policy";
 import { buildToolApproval } from "./approvals";
-import { lookupTool, registeredToolSpecs } from "./tools";
+import { createApprovalGate, createToolExecutor } from "./tool-executor";
+import { isCollaborationTool, lookupTool, registeredToolSpecs } from "./tools";
 import {
   WORKSPACE_MANAGEMENT_TOOLS,
   isWorkspaceManagementTool,
@@ -16,6 +17,7 @@ interface JsonSchema {
   minItems?: number;
   uniqueItems?: boolean;
   required?: string[];
+  anyOf?: Array<{ required?: string[] }>;
   properties?: Record<string, JsonSchema>;
   additionalProperties?: boolean;
 }
@@ -43,9 +45,14 @@ describe("workspace management tool contracts", () => {
     expect(schema("agent-create").properties?.name).toMatchObject({
       type: "string",
       minLength: 1,
-      maxLength: 120,
+      maxLength: 80,
     });
     expect(schema("agent-update").required).toEqual(["agentId"]);
+    expect(schema("agent-update").anyOf).toEqual([
+      { required: ["name"] },
+      { required: ["instructions"] },
+      { required: ["modelAgentId"] },
+    ]);
     expect(schema("agent-delete").required).toEqual(["agentId"]);
     expect(WORKSPACE_MANAGEMENT_TOOLS["agent-delete"]).toMatchObject({
       defaultMode: "full-access",
@@ -61,7 +68,8 @@ describe("workspace management tool contracts", () => {
     ]);
     expect(schema("project-create").properties?.participantIds).toMatchObject({
       type: "array",
-      maxItems: 32,
+      minItems: 1,
+      maxItems: 8,
       uniqueItems: true,
     });
     expect(schema("project-team-update").required).toEqual([
@@ -72,11 +80,11 @@ describe("workspace management tool contracts", () => {
     ]);
     expect(schema("project-team-update").properties?.expectedRevision).toMatchObject({
       type: "integer",
-      minimum: 0,
+      minimum: 1,
     });
   });
 
-  it("is present in the supported model-facing registry and policy", () => {
+  it("is present in the lookup registry, dedicated model specs and policy", () => {
     for (const name of Object.keys(WORKSPACE_MANAGEMENT_TOOLS)) {
       expect(lookupTool(name), name).toBe(WORKSPACE_MANAGEMENT_TOOLS[name]);
       expect(registeredToolSpecs().some((tool) => tool.name === name), name).toBe(false);
@@ -88,6 +96,13 @@ describe("workspace management tool contracts", () => {
     expect(effectForTool("agent-delete")).toBe("delete");
     expect(effectForTool("project-create")).toBe("app-state-mutation");
     expect(effectForTool("project-team-update")).toBe("app-state-mutation");
+  });
+
+  it("does not route lifecycle tools through the coordination bypass", () => {
+    for (const name of Object.keys(WORKSPACE_MANAGEMENT_TOOLS)) {
+      expect(isWorkspaceManagementTool(name)).toBe(true);
+      expect(isCollaborationTool(name)).toBe(false);
+    }
   });
 
   it("binds every mutating lifecycle approval to its complete arguments", () => {
@@ -105,8 +120,43 @@ describe("workspace management tool contracts", () => {
       approval.dataUsed.find((value) => value.startsWith("Arguments SHA-256: "));
     expect(digest(first)).toMatch(/^Arguments SHA-256: [a-f0-9]{64}$/);
     expect(digest(first)).not.toBe(digest(changed));
-    expect(buildToolApproval("codex", "workspace-inspect", "{}").dataUsed).not.toContain(
-      expect.stringContaining("Arguments SHA-256:"),
+    expect(
+      buildToolApproval("codex", "workspace-inspect", "{}").dataUsed.some((value) =>
+        /^Arguments SHA-256: [a-f0-9]{64}$/.test(value),
+      ),
+    ).toBe(true);
+    expect(
+      buildToolApproval("codex", "agent-update", JSON.stringify({ agentId: "agent-a", name: "Scout" })).decisions,
+    ).toEqual(["once", "deny"]);
+    expect(buildToolApproval("codex", "workspace-inspect", "{}").decisions).toEqual(["once", "deny"]);
+    expect(buildToolApproval("codex", "read-file", '{"path":"notes.md"}').decisions).toEqual([
+      "once",
+      "modify",
+      "deny",
+    ]);
+  });
+
+  it("keeps lifecycle mutations behind the real approval gate and out of Read Only", async () => {
+    const approval = buildToolApproval(
+      "codex",
+      "agent-create",
+      JSON.stringify({ name: "Scout", instructions: "Research." }),
     );
+    expect(approval).toMatchObject({ mode: "full-access", riskLevel: "high" });
+    const gate = createApprovalGate();
+    expect(gate.register(approval)).toBe(true);
+    gate.resolveGrant(approval.id);
+    const executor = createToolExecutor({
+      gate,
+      permissionMode: "read-only",
+      runtime: {
+        readFile: async () => null,
+        writeFile: async () => 0,
+        runShell: async () => ({ stdout: "", stderr: "", exitCode: 0 }),
+        fetchUrl: async () => null,
+      },
+    });
+    await expect(executor(approval, JSON.stringify({ name: "Scout", instructions: "Research." })))
+      .rejects.toThrow(/Read Only|read-only profile forbids agent-create/i);
   });
 });

@@ -57,6 +57,7 @@ export interface PersistedShellState {
   approvalRules: import("@mivlet/protocol").ApprovalGrant[];
   /** User-owned agents. Optional only for snapshots created before agents existed. */
   agents?: import("@mivlet/protocol").MivletAgentProfile[];
+  agentRevision?: number;
   activeAgentId?: string;
   sidebarPreferences?: import("@mivlet/protocol").SidebarPreferences;
   pinnedSourceIds: string[];

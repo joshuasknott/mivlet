@@ -174,7 +174,7 @@ export function buildToolApproval(
         ? boundedPreview(preview)
         : preview;
     });
-  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || toolName.startsWith("local-browser-") || isProtectedSecretTool(toolName) || (isWorkspaceManagementTool(toolName) && toolName !== "workspace-inspect")) {
+  if (toolName === "create-spreadsheet" || toolName === "create-document" || toolName === "create-presentation" || toolName === "create-pdf" || toolName === "workspace-run" || toolName === "workspace-start" || toolName.startsWith("repository-") || toolName.startsWith("command-") || toolName.startsWith("local-browser-") || isProtectedSecretTool(toolName) || isWorkspaceManagementTool(toolName)) {
     dataUsed.push(`${ARGUMENT_DIGEST_PREFIX}${sha256Hex(canonicalArguments)}`);
   }
 
@@ -238,7 +238,12 @@ export function buildToolApproval(
     requestedAt: new Date(0).toISOString(),
     // Tool execution permits are one-time. Session/rule shortcuts are not
     // offered; a standing grant cannot mint or skip a native permit.
-    decisions: ["once", "modify", "deny"],
+    // Workspace lifecycle calls bind the exact request and native only accepts
+    // a one-use permit. The generic modify flow sends an effective request
+    // that this boundary does not carry, so do not advertise it here.
+    decisions: isWorkspaceManagementTool(toolName)
+      ? ["once", "deny"]
+      : ["once", "modify", "deny"],
     // High/critical full-access risk requires exact confirmation (existing system).
     confirmationPhrase:
       mode === "full-access" && (risk === "high" || risk === "critical")
