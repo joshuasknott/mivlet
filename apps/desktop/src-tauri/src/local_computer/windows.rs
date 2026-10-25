@@ -73,44 +73,6 @@ fn background_disable_shield(class: &str, application: &str) -> bool {
         )
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn browser_shortcuts_use_process_names_not_titles_or_browser_embedded_apps() {
-        for name in [
-            "chrome", "msedge", "CHROMIUM", "Brave", "firefox", "vivaldi", "opera",
-        ] {
-            assert!(browser_application(name));
-        }
-        for name in [
-            "notepad",
-            "cmd",
-            "powershell",
-            "Mivlet",
-            "Chrome browser",
-            "chrome.exe",
-            "Chrome_WidgetWin_1",
-        ] {
-            assert!(!browser_application(name));
-        }
-    }
-    #[test]
-    fn cleanup_only_enables_windows_the_pinned_driver_can_shield() {
-        assert!(background_disable_shield("Chrome_WidgetWin_1", "chrome"));
-        assert!(background_disable_shield("Notepad", "Notepad"));
-        assert!(background_disable_shield(
-            "WinUIDesktopWin32WindowClass",
-            "sample"
-        ));
-        assert!(!background_disable_shield(
-            "WindowsForms10.Window",
-            "MivletComputerFixture"
-        ));
-        assert!(!background_disable_shield("HwndWrapper[sample]", "sample"));
-    }
-}
-
 #[cfg(windows)]
 mod platform {
     use super::*;
@@ -552,4 +514,42 @@ pub(super) fn privacy_check(window: u64) -> Result<(), String> {
 #[cfg(not(windows))]
 pub(super) fn privacy_check(_: u64) -> Result<(), String> {
     Err("Computer use requires Windows.".into())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn browser_shortcuts_use_process_names_not_titles_or_browser_embedded_apps() {
+        for name in [
+            "chrome", "msedge", "CHROMIUM", "Brave", "firefox", "vivaldi", "opera",
+        ] {
+            assert!(browser_application(name));
+        }
+        for name in [
+            "notepad",
+            "cmd",
+            "powershell",
+            "Mivlet",
+            "Chrome browser",
+            "chrome.exe",
+            "Chrome_WidgetWin_1",
+        ] {
+            assert!(!browser_application(name));
+        }
+    }
+    #[test]
+    fn cleanup_only_enables_windows_the_pinned_driver_can_shield() {
+        assert!(background_disable_shield("Chrome_WidgetWin_1", "chrome"));
+        assert!(background_disable_shield("Notepad", "Notepad"));
+        assert!(background_disable_shield(
+            "WinUIDesktopWin32WindowClass",
+            "sample"
+        ));
+        assert!(!background_disable_shield(
+            "WindowsForms10.Window",
+            "MivletComputerFixture"
+        ));
+        assert!(!background_disable_shield("HwndWrapper[sample]", "sample"));
+    }
 }

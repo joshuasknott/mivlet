@@ -24,6 +24,13 @@ const MAX_HISTORY: usize = 500;
 // still owns the durable claim; this lock closes delete-versus-late-put races.
 static CUSTODY_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
+pub(crate) fn capture_portable_passphrase(
+    label: &str,
+    reason: &str,
+) -> Result<Option<zeroize::Zeroizing<String>>, String> {
+    capture::portable_passphrase(label, reason)
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Failure {
     Invalid,

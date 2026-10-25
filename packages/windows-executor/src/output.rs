@@ -112,6 +112,7 @@ impl OutputLog {
             redacted: inner.redacted,
         })
     }
+    #[cfg(any(windows, test))]
     pub(crate) fn push(&self, stream: OutputStream, bytes: &[u8]) {
         let Ok(mut inner) = self.0.lock() else { return };
         let index = stream.index();
@@ -152,6 +153,7 @@ impl OutputLog {
             inner.closed = true;
         }
     }
+    #[cfg(any(windows, test))]
     pub(crate) fn summary(&self) -> Result<(String, bool), String> {
         let inner = self
             .0

@@ -1,5 +1,7 @@
 packages:
   - apps/*
+  # The marketing site has its own workspace and deployment lockfile.
+  - '!apps/marketing'
   - packages/*
 
 overrides:
@@ -7,7 +9,15 @@ overrides:
   '@opentelemetry/core@<2.8.0': 2.8.0
   brace-expansion@>=2.0.0 <2.1.7: 2.1.7
   brace-expansion@>=4.0.0 <5.0.12: 5.0.12
-  fast-uri@>=3.0.0 <3.1.8: 3.1.8
+  fast-uri@>=3.0.0 <3.1.9: 3.1.9
+  zod@>=4.0.0 <4.6.6: 4.6.6
+  # OpenUI imports EventType only; AG-UI 1 supports the patched Zod 4 peer.
+  '@openuidev/react-headless>@ag-ui/core': 1.0.3
+  # The compatibility patch makes the header-record schema explicit for Zod 4.
+  'gitlab-ai-provider>zod': 4.6.6
+  body-parser@>=2.0.0 <2.4.0: 2.4.0
+  undici@>=8.0.0 <8.12.2: 8.12.2
+  undici@>=6.5.0 <6.29.1: 6.29.1
   hono: 4.13.13
   ip-address@<=10.7.3: 10.7.4
   katex@<0.18.2: 0.18.2
@@ -24,6 +34,7 @@ overrides:
   vite: 7.3.7
 
 patchedDependencies:
+  gitlab-ai-provider@6.12.1: patches/gitlab-ai-provider@6.12.1.patch
   braces@3.0.3: patches/braces@3.0.3.patch
   http-cache-semantics@4.2.0: patches/http-cache-semantics@4.2.0.patch
   marked@18.0.11: patches/marked@18.0.11.patch

@@ -264,6 +264,10 @@ pub(super) fn prepare_local_data_restore(
     }
     std::fs::copy(&canonical, &pending)
         .map_err(|_| "Mivlet could not stage the selected backup.".to_string())?;
+    if let Err(error) = crate::paths::ensure_private_file(&pending) {
+        let _ = std::fs::remove_file(&pending);
+        return Err(error);
+    }
     let staged = validate_backup_candidate(&pending, &store.vault);
     if let Err(error) = staged {
         let _ = std::fs::remove_file(&pending);

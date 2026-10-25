@@ -327,6 +327,7 @@ export function ExecutionWorker({
               provider.backendType === "native-api",
           ),
           staged.node?.runtimeAvailable === true,
+          staged.node?.backend !== "platform-unavailable",
         );
         const toolCapable =
           supportsSharedComputerTools(provider) &&

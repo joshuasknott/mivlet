@@ -15,6 +15,78 @@ fn vault() -> Vault {
 }
 
 #[test]
+fn import_commit_blocks_a_queued_autosave_until_reopen() {
+    let directory = TempDir::new().unwrap();
+    let path = directory.path().join("import.db");
+    let key = vault::MasterKey::generate().unwrap();
+    let store = Arc::new(Store::open(&path, Vault::new(&key).unwrap()).unwrap());
+    let (entered, waiting) = std::sync::mpsc::channel();
+    let mut writer = None;
+    store
+        .import_transaction(|tx| {
+            tx.execute(
+                "UPDATE workspace SET name='Imported' WHERE id='default'",
+                [],
+            )?;
+            let stale_store = Arc::clone(&store);
+            writer = Some(std::thread::spawn(move || {
+                entered.send(()).unwrap();
+                stale_store.transaction(|tx| {
+                    tx.execute(
+                        "UPDATE workspace SET name='Stale renderer' WHERE id='default'",
+                        [],
+                    )?;
+                    Ok(())
+                })
+            }));
+            waiting.recv().unwrap();
+            Ok(())
+        })
+        .unwrap();
+    let error = writer.unwrap().join().unwrap().unwrap_err().to_string();
+    assert!(error.contains("must restart"));
+    assert!(store.with_conn(|_| Ok(())).is_err());
+    drop(store);
+
+    let reopened = Store::open(&path, Vault::new(&key).unwrap()).unwrap();
+    let name: String = reopened
+        .with_conn(|conn| {
+            Ok(
+                conn.query_row("SELECT name FROM workspace WHERE id='default'", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert_eq!(name, "Imported");
+    reopened.transaction(|_| Ok(())).unwrap();
+}
+
+#[test]
+fn failed_import_rolls_back_without_freezing_store() {
+    let store = Store::open_in_memory(vault()).unwrap();
+    let result: Result<()> = store.import_transaction(|tx| {
+        tx.execute(
+            "UPDATE workspace SET name='Partial import' WHERE id='default'",
+            [],
+        )?;
+        Err(StoreError::Invalid("Rejected import".into()))
+    });
+    assert!(result.is_err());
+    let name: String = store
+        .with_conn(|conn| {
+            Ok(
+                conn.query_row("SELECT name FROM workspace WHERE id='default'", [], |row| {
+                    row.get(0)
+                })?,
+            )
+        })
+        .unwrap();
+    assert_eq!(name, "My Workspace");
+    store.transaction(|_| Ok(())).unwrap();
+}
+
+#[test]
 fn identity_fenced_approval_transaction_rolls_back_and_rejects_stale_generation() {
     let store = Store::open_in_memory(vault()).unwrap();
     let expected = crate::clerk_identity::NativeIdentityGenerationSnapshot {

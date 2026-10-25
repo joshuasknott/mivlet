@@ -24,6 +24,10 @@ const COMPUTER_TOOLS = new Set([
   "generate-image", "edit-image",
 ]);
 const IMAGE_TOOLS = new Set(["generate-image", "edit-image"]);
+const ISOLATED_EXECUTION_TOOLS = new Set([
+  "command-input", "command-jobs", "command-output", "command-stop",
+  "workspace-start", "workspace-run", "repository-start", "repository-run",
+]);
 
 export function computerToolsReady(computer: LocalComputerSnapshot | null | undefined): boolean {
   return computer?.lifecycle === "ready" && computer.controller === "agent";
@@ -34,8 +38,20 @@ export function isLocalComputerTool(name: string, _argumentsJson: string): boole
 }
 
 /** Merge computer and connector tools without re-enabling unrelated runtimes. */
-export function conversationComputerTools(connectedTools: NativeToolSpec[], ready: boolean, visualSupported = false, plugins: BuiltinPlugins = { computer: false }, imageApiConnected = false, runtimeAvailable = true): NativeToolSpec[] {
-  const permitted = (name: string) => ready && (isProtectedSecretTool(name) || ((!IMAGE_TOOLS.has(name) || imageApiConnected) && plugins.computer && (visualSupported || !name.startsWith("local-desktop-")) && (runtimeAvailable || (!name.startsWith("local-app-") && !name.startsWith("local-desktop-") && !name.startsWith("local-browser-")))));
+export function conversationComputerTools(connectedTools: NativeToolSpec[], ready: boolean, visualSupported = false, plugins: BuiltinPlugins = { computer: false }, imageApiConnected = false, runtimeAvailable = true, platformAvailable = true): NativeToolSpec[] {
+  // A missing Cua executable on an otherwise supported Windows host should
+  // hide app/browser control while leaving separately prepared execution
+  // available. Linux/non-Windows reports platformAvailable=false and hides
+  // both classes until a native implementation exists.
+  const executionAvailable = runtimeAvailable || platformAvailable;
+  const permitted = (name: string) => {
+    if (!ready) return false;
+    if (isProtectedSecretTool(name)) return platformAvailable;
+    return (!IMAGE_TOOLS.has(name) || imageApiConnected) && plugins.computer
+      && (visualSupported || !name.startsWith("local-desktop-"))
+      && (runtimeAvailable || (!name.startsWith("local-app-") && !name.startsWith("local-desktop-") && !name.startsWith("local-browser-")))
+      && (executionAvailable || !ISOLATED_EXECUTION_TOOLS.has(name));
+  };
   const tools = new Map(connectedTools.filter((tool) => (!tool.name.startsWith("local-browser") || COMPUTER_TOOLS.has(tool.name)) && tool.name !== "run-shell" && (!isLocalComputerTool(tool.name, "") || permitted(tool.name))).map((tool) => [tool.name, tool]));
   for (const tool of registeredToolSpecs()) {
     if (tool.name === "web-fetch" || (isLocalComputerTool(tool.name, "") && permitted(tool.name))) tools.set(tool.name, tool);
@@ -44,11 +60,11 @@ export function conversationComputerTools(connectedTools: NativeToolSpec[], read
 }
 
 /** Both new turns and retries resolve tools against the model actually executing. */
-export function conversationToolsForModel(connectedTools: NativeToolSpec[], ready: boolean, provider: BackendProvider | undefined, model: BackendModel | undefined, plugins?: BuiltinPlugins, imageApiConnected = false, runtimeAvailable = true): NativeToolSpec[] {
+export function conversationToolsForModel(connectedTools: NativeToolSpec[], ready: boolean, provider: BackendProvider | undefined, model: BackendModel | undefined, plugins?: BuiltinPlugins, imageApiConnected = false, runtimeAvailable = true, platformAvailable = true): NativeToolSpec[] {
   // Codex owns subscription image generation. Never offer an automatic metered
   // API alternative on that route, even when an OpenAI API key is connected.
   const directImageApi = provider?.backendType !== "codex-app-server" && imageApiConnected;
-  return conversationComputerTools(connectedTools, ready && supportsSharedComputerTools(provider) && model?.available === true, supportsComputerVision(provider, model), plugins, directImageApi, runtimeAvailable);
+  return conversationComputerTools(connectedTools, ready && supportsSharedComputerTools(provider) && model?.available === true, supportsComputerVision(provider, model), plugins, directImageApi, runtimeAvailable, platformAvailable);
 }
 
 export function supportsComputerVision(provider: BackendProvider | undefined, model: BackendModel | undefined): boolean {

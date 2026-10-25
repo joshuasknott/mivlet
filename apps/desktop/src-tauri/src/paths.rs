@@ -8,6 +8,47 @@ pub fn app_data_dir(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
     Ok(crate::account_session::root()?.to_path_buf())
 }
 
+/// Restrict native-owned directories to the authenticated local user.
+///
+/// Linux's default umask is not an application security boundary: an existing
+/// directory may have been created with group/world read bits, and a permissive
+/// umask can expose newly-created account data.  Tighten existing paths as
+/// well as new ones.  Other platforms keep their native ACL semantics.
+pub(crate) fn ensure_private_dir(path: &std::path::Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|_| "Mivlet could not inspect its private data directory.".to_string())?;
+    if !metadata.is_dir() || metadata.file_type().is_symlink() {
+        return Err("Mivlet private data directory is not a regular directory.".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o700);
+        std::fs::set_permissions(path, permissions)
+            .map_err(|_| "Mivlet could not protect its private data directory.".to_string())?;
+    }
+    Ok(())
+}
+
+/// Restrict a native-owned database or artifact file to the authenticated user.
+pub(crate) fn ensure_private_file(path: &std::path::Path) -> Result<(), String> {
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|_| "Mivlet could not inspect its private data file.".to_string())?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() {
+        return Err("Mivlet private data file is not a regular file.".into());
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut permissions = metadata.permissions();
+        permissions.set_mode(0o600);
+        std::fs::set_permissions(path, permissions)
+            .map_err(|_| "Mivlet could not protect its private data file.".to_string())?;
+    }
+    Ok(())
+}
+
 pub(crate) fn installation_data_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     use tauri::Manager;
     let tauri_cand = app.path().app_data_dir().ok();
@@ -255,6 +296,12 @@ fn ensure_valid_data_dir(
     }
     std::fs::create_dir_all(&candidate)
         .map_err(|e| PathResolutionError::Invalid(format!("create data dir failed: {}", e)))?;
+    if let Err(error) = ensure_private_dir(&candidate) {
+        if !existed {
+            let _ = std::fs::remove_dir_all(&candidate);
+        }
+        return Err(PathResolutionError::Invalid(error));
+    }
     match strict_canonicalize(&candidate) {
         Ok(c) => Ok(c),
         Err(e) => {
@@ -347,3 +394,31 @@ pub fn resolve_data_directory_pre_init(
 // Note: app_data_dir and app_data_file_path are defined near top of module and
 // delegate into resolve_data_directory (above) for the hardened logic. No
 // duplicate definitions here to avoid compile errors.
+
+#[cfg(all(test, unix))]
+mod privacy_tests {
+    use super::{ensure_private_dir, ensure_private_file};
+    use std::os::unix::fs::PermissionsExt;
+
+    #[test]
+    fn private_data_paths_remove_group_and_world_bits() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("account");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o755)).unwrap();
+        ensure_private_dir(&directory).unwrap();
+        assert_eq!(
+            std::fs::metadata(&directory).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+
+        let file = directory.join("fable-vault.db");
+        std::fs::write(&file, b"private").unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o644)).unwrap();
+        ensure_private_file(&file).unwrap();
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+}

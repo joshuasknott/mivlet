@@ -15,13 +15,15 @@ pub(crate) fn initialize(app: &tauri::AppHandle) -> Result<bool, String> {
     let Ok(identity) = crate::clerk_identity::native_identity_generation_snapshot() else {
         return Ok(false);
     };
-    let root = crate::paths::installation_data_dir(app)?
-        .join("accounts")
-        .join(&identity.account_binding);
+    let accounts = crate::paths::installation_data_dir(app)?.join("accounts");
+    std::fs::create_dir_all(&accounts).map_err(|_| "Could not prepare account storage.")?;
+    crate::paths::ensure_private_dir(&accounts)?;
+    let root = accounts.join(&identity.account_binding);
     if crate::paths::contains_symlink(&root) {
         return Err("Account storage cannot contain symbolic links or junctions.".into());
     }
     std::fs::create_dir_all(&root).map_err(|_| "Could not prepare account storage.")?;
+    crate::paths::ensure_private_dir(&root)?;
     let root = crate::paths::strict_canonicalize(&root).map_err(|e| e.to_string())?;
     ACCOUNT
         .set(identity.account_binding)

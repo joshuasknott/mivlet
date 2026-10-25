@@ -1,0 +1,24 @@
+diff --git a/dist/index.js b/dist/index.js
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -694,7 +694,7 @@
+ 
+ // src/gitlab-direct-access.ts
+ var directAccessTokenSchema = import_zod.z.object({
+-  headers: import_zod.z.record(import_zod.z.string()),
++  headers: import_zod.z.record(import_zod.z.string(), import_zod.z.string()),
+   token: import_zod.z.string()
+ });
+ var DEFAULT_AI_GATEWAY_URL = "https://cloud.gitlab.com";
+diff --git a/dist/index.mjs b/dist/index.mjs
+--- a/dist/index.mjs
++++ b/dist/index.mjs
+@@ -615,7 +615,7 @@
+ 
+ // src/gitlab-direct-access.ts
+ var directAccessTokenSchema = z.object({
+-  headers: z.record(z.string()),
++  headers: z.record(z.string(), z.string()),
+   token: z.string()
+ });
+ var DEFAULT_AI_GATEWAY_URL = "https://cloud.gitlab.com";

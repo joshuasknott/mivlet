@@ -732,6 +732,7 @@ fn live_named_shortcut_replaces_text_and_rejects_replay() {
 }
 
 #[test]
+#[cfg(windows)]
 #[ignore = "requires MIVLET_NATIVE_LIVE_FIXTURE_PID for the disposable acceptance app in an interactive Windows session"]
 fn live_actions_stop_queue_and_reconnect() {
     let pid = std::env::var("MIVLET_NATIVE_LIVE_FIXTURE_PID")

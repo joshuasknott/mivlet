@@ -95,7 +95,6 @@ pub fn run(account: String) {
     #[cfg(not(windows))]
     {
         let _ = account;
-        return;
     }
     #[cfg(windows)]
     {

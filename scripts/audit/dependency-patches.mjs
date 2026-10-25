@@ -112,6 +112,7 @@ export function classifyAdvisories(report, patches) {
   for (const advisory of Object.values(report.advisories)) {
     const patch = patches.find(
       (entry) =>
+        typeof entry.advisory === "string" &&
         entry.advisory === advisory.github_advisory_id &&
         entry.package === advisory.module_name &&
         Array.isArray(advisory.findings) &&
@@ -122,6 +123,7 @@ export function classifyAdvisories(report, patches) {
   }
   for (const patch of patches) {
     if (
+      patch.advisory !== null &&
       !reviewed.some(
         (advisory) => advisory.github_advisory_id === patch.advisory,
       )

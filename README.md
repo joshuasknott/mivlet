@@ -26,9 +26,13 @@ supported production service or a signed installer release. See [LICENSE](LICENS
 Public source access does not provide a hosted Mivlet account service, provider
 subscriptions, or connector credentials; configure your own services as described below.
 
-Mivlet is pre-release Windows desktop software. The local workspace has optional
-cloud task and phone services, deployed against the existing development account
-setup. Production tenancy and full signed-in service acceptance remain unverified.
+Mivlet is pre-release desktop software. Windows x64 is the supported native
+computer-control host; Kubuntu/Linux x86_64 is a preview build for ordinary
+workspace use. The local workspace has optional cloud task and phone services,
+deployed against the existing development account setup. Production tenancy and
+full signed-in service acceptance remain unverified. See the [Kubuntu/Linux
+operations guide](docs/operations/kubuntu.md) for prerequisites, packaging and
+the exact Linux capability limits.
 
 ### Implemented locally
 
@@ -332,15 +336,18 @@ docs                maintained architecture, security, and operations notes
 
 - Node.js 22 or newer
 - pnpm 10 (the repository pins `pnpm@10.34.7`)
-- Stable Rust and the Windows Tauri prerequisites
-- Windows WebView2
+- Stable Rust and the Tauri prerequisites for the target platform
+- Windows WebView2 for Windows builds; WebKitGTK and the KDE desktop portal for
+  the Kubuntu preview (see the [Linux operations guide](docs/operations/kubuntu.md))
 - Official Codex app-server components for optional ChatGPT browser sign-in
 
 Native computer use supports Windows x64. The normal development/build commands
 download and verify the pinned driver, then bundle it with Mivlet and its license
 notices. Installed users need no Docker, Python, Node, uv or separate Cua app for
-this capability. Windows WebView2 and a validated model provider are still
-required; provider-specific runtime prerequisites above remain separate.
+this capability. Linux builds deliberately omit the Windows Cua and isolated
+execution runtimes: workspace files, providers, web fetch, ordinary MCP and
+human-initiated validated link/artifact opening remain available, while native
+desktop/browser control, isolated command jobs and live server previews do not.
 
 ## Development
 
@@ -390,6 +397,11 @@ Daily Linux PR loops can use `pnpm check:pr` (or `pnpm test:pr` for the package
 tests). The Windows embedded-host suite is `pnpm test:host`. `pnpm lint` is
 security-subset ESLint (`lint:security`) plus the explicit-any ratchet, not
 typed or React lint.
+
+For a physical Kubuntu acceptance run, follow the [Kubuntu/Linux operations
+guide](docs/operations/kubuntu.md). A Linux package check or browser preview is
+not evidence for Windows native computer control, isolated execution, provider
+authentication, or a signed release.
 
 For Rust changes, also run:
 

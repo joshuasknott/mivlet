@@ -8,6 +8,7 @@ struct Inventory {
 }
 const INVENTORY: &str =
     include_str!("../../../apps/desktop/src-tauri/resources/execution-runtime/files.json");
+#[cfg(windows)]
 pub(crate) fn stage(
     resources: &Path,
     destination: &Path,

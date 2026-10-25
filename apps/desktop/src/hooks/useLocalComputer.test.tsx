@@ -134,6 +134,18 @@ describe("native local computer",()=>{
     await expect(result.current.prepareForTool("write-file")).resolves.toMatchObject({computerId:"computer-a"});
     expect(result.current).not.toHaveProperty("allowControl");
   });
+  it("keeps separately prepared execution available when Windows Cua is missing",async()=>{
+    mocks.load.mockResolvedValue(node({runtimeAvailable:false, message:"Repair Cua"}));
+    const{result}=hook();await waitFor(()=>expect(result.current.node).not.toBeNull());
+    await expect(result.current.prepareForTool("workspace-run")).resolves.toMatchObject({computerId:"computer-a"});
+    await expect(result.current.prepareForTool("local-app-list")).rejects.toThrow("Repair Cua");
+  });
+  it("fails closed for isolated execution on an unsupported platform",async()=>{
+    mocks.load.mockResolvedValue(node({backend:"platform-unavailable", isolation:"none", runtimeAvailable:false, message:"Linux desktop control is unavailable."}));
+    const{result}=hook();await waitFor(()=>expect(result.current.node).not.toBeNull());
+    await expect(result.current.prepareForTool("read-file")).resolves.toMatchObject({computerId:"computer-a"});
+    await expect(result.current.prepareForTool("workspace-run")).rejects.toThrow("Linux desktop control is unavailable");
+  });
   it("Stop during connection discards an outstanding status result",async()=>{
     mocks.load.mockResolvedValue(node({control:{...idle,status:"connecting",requestId:"pending",generation:1,application:"Fixture"}}));
     const{result}=hook();await waitFor(()=>expect(result.current.busy).toBe(true));

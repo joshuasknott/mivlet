@@ -2,6 +2,187 @@
 //! logging, value preview or platform fallback. Capture exclusion must succeed.
 use super::{custody::Secret, Failure, RequestInput};
 
+/// Capture a portable-transfer passphrase in a native masked control. The
+/// value is returned only to the native command and never crosses WebView IPC.
+/// Kubuntu uses the installed KDE dialog directly (no shell and no argv secret);
+/// a Zenity fallback supports minimal Wayland/X11 installations.
+pub(super) fn portable_passphrase(
+    label: &str,
+    reason: &str,
+) -> Result<Option<zeroize::Zeroizing<String>>, String> {
+    #[cfg(windows)]
+    {
+        let input = RequestInput {
+            label: label.to_string(),
+            reason: reason.to_string(),
+            purpose: "portable-transfer-passphrase".into(),
+            consumer: "mivlet-native-transfer".into(),
+            target_id: "portable-transfer".into(),
+        };
+        prompt(&input, &|| crate::account_session::ensure_current().is_ok())
+            .map_err(|failure| failure.to_string())
+            .map(|secret| secret.map(|value| zeroize::Zeroizing::new(value.as_str().to_string())))
+    }
+    #[cfg(not(windows))]
+    {
+        use std::os::fd::AsRawFd;
+        use std::path::Path;
+        use std::process::{Child, Command, Stdio};
+        use std::time::{Duration, Instant};
+        use zeroize::Zeroizing;
+
+        const MAX_OUTPUT_BYTES: usize = crate::portable_transfer::MAX_PASSPHRASE_CHARS * 4 + 2;
+
+        fn stop_dialog(child: &mut Child) {
+            let _ = child.kill();
+            let _ = child.wait();
+        }
+
+        fn make_stdout_nonblocking(stdout: &impl AsRawFd) -> Result<(), String> {
+            let fd = stdout.as_raw_fd();
+            // The dialog is a fixed trusted system binary. A nonblocking pipe
+            // lets this process keep its session/timeout fence without joining
+            // a reader that a descendant could hold open indefinitely.
+            let flags = unsafe { libc::fcntl(fd, libc::F_GETFL) };
+            if flags < 0 || unsafe { libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK) } < 0
+            {
+                return Err("Native passphrase entry failed.".into());
+            }
+            Ok(())
+        }
+
+        fn run_dialog(
+            program: &Path,
+            args: &[String],
+        ) -> Result<Option<Zeroizing<Vec<u8>>>, String> {
+            fn drain_stdout(
+                stdout: &mut impl std::io::Read,
+                output: &mut Zeroizing<Vec<u8>>,
+                scratch: &mut Zeroizing<[u8; 512]>,
+                max_output_bytes: usize,
+            ) -> Result<(), String> {
+                loop {
+                    match stdout.read(&mut **scratch) {
+                        Ok(0) => return Ok(()),
+                        Ok(length) => {
+                            if output.len().saturating_add(length) > max_output_bytes {
+                                return Err(
+                                    "Native passphrase entry returned too much text.".into()
+                                );
+                            }
+                            output.extend_from_slice(&scratch[..length]);
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                            return Ok(())
+                        }
+                        Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(_) => return Err("Native passphrase entry failed.".into()),
+                    }
+                }
+            }
+
+            let mut child: Child = Command::new(program)
+                .args(args)
+                .stdin(Stdio::null())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .map_err(|_| "Native passphrase entry is unavailable.".to_string())?;
+            let stdout = match child.stdout.take() {
+                Some(stdout) => stdout,
+                None => {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err("Native passphrase entry failed.".into());
+                }
+            };
+            if let Err(error) = make_stdout_nonblocking(&stdout) {
+                stop_dialog(&mut child);
+                return Err(error);
+            }
+            let mut stdout = stdout;
+            let mut output = Zeroizing::new(Vec::with_capacity(MAX_OUTPUT_BYTES));
+            let mut scratch = Zeroizing::new([0u8; 512]);
+            let started = Instant::now();
+            loop {
+                if crate::account_session::ensure_current().is_err() {
+                    stop_dialog(&mut child);
+                    return Err("The account session ended during native passphrase entry.".into());
+                }
+                if started.elapsed() > Duration::from_secs(300) {
+                    stop_dialog(&mut child);
+                    return Err("Native passphrase entry timed out.".into());
+                }
+                if let Err(error) =
+                    drain_stdout(&mut stdout, &mut output, &mut scratch, MAX_OUTPUT_BYTES)
+                {
+                    stop_dialog(&mut child);
+                    return Err(error);
+                }
+                let status = match child.try_wait() {
+                    Ok(status) => status,
+                    Err(_) => {
+                        stop_dialog(&mut child);
+                        return Err("Native passphrase entry failed.".into());
+                    }
+                };
+                if let Some(status) = status {
+                    // The direct dialog has exited. Drain once more because it
+                    // may have written between the polling drain and try_wait.
+                    // Stop at WouldBlock rather than waiting for EOF: a
+                    // descendant may retain the pipe without being part of the
+                    // dialog's lifecycle.
+                    drain_stdout(&mut stdout, &mut output, &mut scratch, MAX_OUTPUT_BYTES)?;
+                    return Ok(status.success().then_some(output));
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+        }
+
+        let prompt = format!(
+            "{label}\n\n{reason}\n\nUse at least {min} characters.",
+            min = crate::portable_transfer::MIN_PASSPHRASE_CHARS
+        );
+        let kdialog_args = vec![
+            "--password".into(),
+            prompt.clone(),
+            "--title".into(),
+            "Mivlet portable transfer".into(),
+        ];
+        let zenity_args = vec![
+            "--password".into(),
+            "--title=Mivlet portable transfer".into(),
+            format!("--text={prompt}"),
+        ];
+        let output = match run_dialog(Path::new("/usr/bin/kdialog"), &kdialog_args) {
+            Ok(output) => output,
+            Err(error) if error == "Native passphrase entry is unavailable." => {
+                run_dialog(Path::new("/usr/bin/zenity"), &zenity_args)?
+            }
+            Err(error) => return Err(error),
+        };
+        let Some(mut output) = output else {
+            return Ok(None);
+        };
+        while matches!(output.last(), Some(b'\r' | b'\n')) {
+            output.pop();
+        }
+        let text = std::str::from_utf8(&output)
+            .map_err(|_| "Native passphrase entry returned invalid text.".to_string())?;
+        let mut passphrase = Zeroizing::new(String::with_capacity(text.len()));
+        passphrase.push_str(text);
+        if passphrase.chars().count() < crate::portable_transfer::MIN_PASSPHRASE_CHARS
+            || passphrase.chars().count() > crate::portable_transfer::MAX_PASSPHRASE_CHARS
+            || passphrase.chars().any(char::is_control)
+        {
+            return Err(
+                "Choose a passphrase of 12–512 characters without control characters.".into(),
+            );
+        }
+        Ok(Some(passphrase))
+    }
+}
+
 #[cfg(not(windows))]
 pub(super) fn prompt(_: &RequestInput, _: &dyn Fn() -> bool) -> Result<Option<Secret>, Failure> {
     Err(Failure::Capture)
@@ -37,6 +218,7 @@ pub(super) fn prompt(
 
     struct Context<'a> {
         current: &'a dyn Fn() -> bool,
+        purpose: &'a str,
         result: Option<Result<Option<Secret>, Failure>>,
     }
     fn wide(text: &str) -> Vec<u16> {
@@ -100,14 +282,26 @@ pub(super) fn prompt(
                     let Ok(value) = String::from_utf16(&buffer[..length as usize]) else {
                         return 0;
                     };
-                    let value = Secret::new(value);
-                    if value.len() < 16 || value.len() > 512 {
-                        SetWindowTextW(
-                            GetDlgItem(hwnd, ERROR),
-                            wide("Use a protected credential of 16 to 512 bytes.").as_ptr(),
-                        );
+                    let portable = (*pointer).purpose == "portable-transfer-passphrase";
+                    let valid = if portable {
+                        let length = value.chars().count();
+                        (crate::portable_transfer::MIN_PASSPHRASE_CHARS
+                            ..=crate::portable_transfer::MAX_PASSPHRASE_CHARS)
+                            .contains(&length)
+                            && !value.chars().any(char::is_control)
+                    } else {
+                        (16..=512).contains(&value.len())
+                    };
+                    if !valid {
+                        let message = if portable {
+                            "Use 12–512 characters; no control characters."
+                        } else {
+                            "Use a protected credential of 16 to 512 bytes."
+                        };
+                        SetWindowTextW(GetDlgItem(hwnd, ERROR), wide(message).as_ptr());
                         return 0;
                     }
+                    let value = Secret::new(value);
                     close(hwnd, pointer, Ok(Some(value)));
                     return 0;
                 }
@@ -126,6 +320,7 @@ pub(super) fn prompt(
 
     let mut context = Context {
         current,
+        purpose: &input.purpose,
         result: None,
     };
     // The context remains on this message thread until the window and controls
@@ -197,9 +392,15 @@ pub(super) fn prompt(
         );
         let cloud =
             input.consumer == "hosted-provider-enrollment" && input.purpose == "cloud-api-provider";
+        let portable = input.purpose == "portable-transfer-passphrase";
         let target = make(
             "STATIC",
-            &if cloud {
+            &if portable {
+                format!(
+                    "Portable transfer: {}\r\nUse: encrypt or decrypt the selected workspace bundle",
+                    input.target_id
+                )
+            } else if cloud {
                 format!("Cloud-only connection: {}\r\nUse: one-call text tasks, without tools or local files", input.target_id)
             } else {
                 format!(
@@ -216,7 +417,9 @@ pub(super) fn prompt(
         );
         let description = make(
             "STATIC",
-            if cloud {
+            if portable {
+                "Used only to encrypt or decrypt this transfer bundle. Never saved in chat or WebView state, and not retained after the transfer."
+            } else if cloud {
                 "Sent directly over HTTPS, encrypted in cloud custody for 30 days or until revoked. Never saved in chat or WebView state. Provider billing applies."
             } else {
                 "Only Mivlet's native webhook verifier receives this value. Your agent receives a one-use reference. It expires in 10 minutes."
@@ -230,7 +433,9 @@ pub(super) fn prompt(
         );
         let label = make(
             "STATIC",
-            if cloud {
+            if portable {
+                "&Transfer passphrase"
+            } else if cloud {
                 "&Separate cloud API key"
             } else {
                 "&Signing secret"
@@ -255,7 +460,11 @@ pub(super) fn prompt(
         SendMessageW(edit, EM_SETLIMITTEXT, 512, 0);
         let error = make(
             "STATIC",
-            "16–512 bytes. Cancel declines this request.",
+            if portable {
+                "12–512 characters, without control characters. Cancel declines this request."
+            } else {
+                "16–512 bytes. Cancel declines this request."
+            },
             0,
             20,
             274,

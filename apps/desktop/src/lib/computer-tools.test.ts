@@ -28,9 +28,18 @@ describe("conversation computer tools", () => {
   });
   it("hides native app tools when the bundled runtime is missing while preserving scoped files", () => {
     const prior = conversationComputerTools([connector], true, true, enabled);
-    const names = conversationComputerTools(prior, true, true, enabled, false, false).map(tool => tool.name);
-    expect(names).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "workspace-run", "create-spreadsheet", "create-document", "create-pdf", "computer-artifact"]));
+    const names = conversationComputerTools(prior, true, true, enabled, false, false, false).map(tool => tool.name);
+    expect(names).toEqual(expect.arrayContaining(["gmail-read", "read-file", "write-file", "create-spreadsheet", "create-document", "create-pdf", "computer-artifact"]));
+    expect(names).not.toContain("workspace-run");
+    expect(names).not.toContain("repository-run");
+    expect(names).not.toContain("command-input");
     expect(names.some(name => name.startsWith("local-app-") || name.startsWith("local-desktop-") || name.startsWith("local-browser-"))).toBe(false);
+    const windowsWithoutCua = conversationComputerTools(prior, true, true, enabled, false, false, true).map(tool => tool.name);
+    expect(windowsWithoutCua).toContain("workspace-run");
+    expect(windowsWithoutCua).not.toContain("local-browser-open");
+    expect(windowsWithoutCua).toContain("request-secret");
+    const linux = conversationComputerTools(prior, true, true, enabled, false, false, false).map(tool => tool.name);
+    expect(linux).not.toContain("request-secret");
   });
   it("requires a separate image API connection and Computer plugin even for previously discovered image tools", () => {
     const discovered = ["generate-image", "edit-image"].map((name) => ({ name, description: "Image API", parameters: "{}" }));
