@@ -124,6 +124,7 @@ describe("workspace room actions", () => {
         participantIds: ["mira"],
         facilitatorId: "mira",
         shareHistory: false,
+        knowledgeSourceIds: ["source-1"],
       },
     );
     expect(localProjects.createLocalProject).toHaveBeenCalledWith({
@@ -132,7 +133,7 @@ describe("workspace room actions", () => {
       threadId: id,
       name: "Launch",
       instructions: "Ship it.",
-      knowledgeSourceIds: [],
+      knowledgeSourceIds: ["source-1"],
     });
     expect(service.command).toHaveBeenCalledWith({
       action: "update-team",

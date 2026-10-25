@@ -232,13 +232,18 @@ boundary. Questions, blockers, errors, uncertain delivery and exhausted budgets
 stop automatic continuation. Explicit Continue retains prior usage and adds only
 the existing bounded round; goals grant no additional tool authority.
 
-**Guide active work** offers next-turn guidance on supported routes. Foreground
-Codex additionally supports deliberate live guidance using its documented
+Queued requests appear in a compact strip above the composer, with **Steer**,
+Remove and an options menu for editing, reordering, pausing and cloud review.
+**Steer** sends a queued text request to the same agent's active foreground
+Codex turn using its documented
 `turn/steer` method. Native code supplies the observed exact thread and expected
 turn identity, persists an event before delivery, and records accepted, rejected
 or uncertain delivery. Acceptance does not undo earlier actions. An unconfirmed
 receipt pauses for review; the app never automatically resends it or silently
-converts it into another turn. Unsupported adapters retain next-turn guidance.
+converts it into another turn. The queued request is held before delivery and
+removed only after an accepted receipt; failed or unconfirmed delivery leaves
+it paused for review. Requests with attachments or goals, text over 2,000
+characters, and unsupported adapters retain the ordinary queue path.
 The official protocol is documented in [Codex App Server](https://learn.chatgpt.com/docs/app-server#steer-an-active-turn).
 
 - **Steering** (`steer-work`) records a deliberate update with an idempotent
@@ -604,9 +609,11 @@ rejects duplicate selections and active-work races, then stages attributed text
 in the composer. It never dispatches a tool automatically. Reopening a response
 restores answers without generating another response or replaying actions.
 
-Selection actions validate the literal passage against the saved revision before
-staging Quote, Explain or Refine. Save to memory is an explicit call to the
-existing scoped memory service. Work states come from durable runtime events;
+The floating selection toolbar validates the literal passage against the saved
+revision before Add to chat stages an attributed quote or Ask in side chat
+opens a new owner-bound Side Chat with that quote in its draft. Neither action
+sends a message automatically. Add to memory explicitly calls the existing
+scoped memory service. Work states come from durable runtime events;
 restart-interrupted work requires review and reconciliation before continuation.
 Handoff detail identifies sender, recipient and the frozen shared snapshot.
 

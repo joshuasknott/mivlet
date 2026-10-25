@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     fs::{self, OpenOptions},
     io::Write,
-    path::{Path, PathBuf},
+    path::Path,
     sync::Arc,
 };
 
@@ -17,16 +17,12 @@ mod validation;
 
 pub use preview::ArtifactPreview;
 pub(crate) use preview::{commit_export, stage_export};
-pub(super) use preview::{
-    prepare_open, prepare_open_copy, preview_bytes, verify_prepared_copy, verify_prepared_open,
-};
+pub(super) use preview::{prepare_open, preview_bytes, verify_prepared_open};
 pub(crate) use storage::read_bounded_limit;
 pub(super) use storage::{canonical, digest, opened_path, read_bounded, title_for, write_copy};
 pub(crate) use validation::{allowed_path, check_office};
 pub(super) use validation::{check_content, checked_pdf};
-pub(super) use validation::{
-    check_office_metadata_xml, contains_ascii_case_insensitive, mime_for, MAX_BYTES,
-};
+pub(super) use validation::{mime_for, MAX_BYTES};
 #[cfg(test)]
 mod tests;
 

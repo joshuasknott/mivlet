@@ -66,7 +66,7 @@ pub(super) fn validate_payload_store(
     })
 }
 
-pub(super) fn project_from_row(
+pub(crate) fn project_from_row(
     scope: &AuthorizedCommandScope,
     row: LocalProjectRow,
 ) -> crate::store::Result<LocalProject> {

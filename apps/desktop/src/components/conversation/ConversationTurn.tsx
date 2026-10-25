@@ -96,8 +96,8 @@ type TurnProps = Pick<
   | "onOpenConnector"
   | "onPreviewArtifact"
   | "onDraftResponse"
+  | "onAskSideChat"
   | "onSaveMemory"
-  | "onPinResponse"
   | "onDraftPreview"
   | "onMcpAppApproval"
   | "onMcpAppResourceRegister"
@@ -364,6 +364,11 @@ export const ConversationTurnView = memo(function ConversationTurnView({
               source={turn.responseSource}
               streaming={running}
               onDraft={props.onDraftResponse ?? (() => undefined)}
+              onAskSideChat={
+                props.onAskSideChat
+                  ? (draft) => props.onAskSideChat!(draft, props.agent.id)
+                  : undefined
+              }
               onSaveMemory={
                 props.onSaveMemory ??
                 (async () => {
@@ -371,17 +376,6 @@ export const ConversationTurnView = memo(function ConversationTurnView({
                     "Memory is unavailable for this conversation.",
                   );
                 })
-              }
-              onPin={
-                props.onPinResponse
-                  ? (selection, source) =>
-                      props.onPinResponse!(
-                        selection,
-                        source,
-                        turn.id,
-                        props.agent.id,
-                      )
-                  : undefined
               }
             >
               <GeneratedResponse

@@ -1,5 +1,8 @@
+use super::preview::{prepare_open_copy, verify_prepared_copy};
+use super::validation::{check_office_metadata_xml, contains_ascii_case_insensitive};
 use super::*;
 use lopdf::dictionary;
+use std::path::PathBuf;
 
 #[test]
 fn saving_published_bytes_never_clobbers_and_revocation_prevents_placement() {
@@ -42,12 +45,12 @@ fn json_preview_is_literal_bounded_utf8_and_export_preserves_original_bytes() {
     let receipt = artifact_receipt("Data", "json", bytes);
     let preview = preview_bytes(&receipt.artifact, bytes);
     assert_eq!(preview.mime_type, "application/json");
-    let visible = preview.text.unwrap();
+    let visible = preview.text.as_deref().unwrap();
     assert!(preview.truncated);
     assert!(visible.len() <= 256 * 1024);
-    assert!(text.starts_with(&visible));
+    assert!(text.starts_with(visible));
     assert!(preview.image_data_url.is_none());
-    assert!(!preview.has_office_preview());
+    assert!(preview.office.is_none());
     let root = tempfile::tempdir().unwrap();
     let destination = root.path().join("data.json");
     let staged = stage_export(&destination, "json", bytes).unwrap();

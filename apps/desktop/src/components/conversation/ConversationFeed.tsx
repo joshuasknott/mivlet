@@ -4,7 +4,6 @@ import { conversationTurns } from "../../lib/conversation-history";
 import type { ConversationTurn } from "../../lib/conversation-presentation-types";
 import { isPresenceScopeCurrent } from "../../lib/agent-presence";
 import {
-  branchHeads,
   branchHasMissingAncestor,
   visibleConversationBranch,
 } from "../../lib/conversation-branches";
@@ -112,9 +111,9 @@ export function ConversationFeed(props: Props) {
     callbackScope,
   );
   const onDraftResponse = useTurnCallback(props.onDraftResponse, callbackScope);
+  const onAskSideChat = useTurnCallback(props.onAskSideChat, callbackScope);
   const onDraftPreview = useTurnCallback(props.onDraftPreview, callbackScope);
   const onSaveMemory = useTurnCallback(props.onSaveMemory, callbackScope);
-  const onPinResponse = useTurnCallback(props.onPinResponse, callbackScope);
   const onMcpAppApproval = useTurnCallback(
     props.onMcpAppApproval,
     callbackScope,
@@ -215,15 +214,6 @@ export function ConversationFeed(props: Props) {
   const branchUnavailable = useMemo(
     () => branchHasMissingAncestor(props.messages, props.selectedHeadId),
     [props.messages, props.selectedHeadId],
-  );
-  const availableBranchHeads = useMemo(
-    () => [
-      ...new Set([
-        ...branchHeads(props.messages),
-        ...(props.branchHeadIds ?? []),
-      ]),
-    ],
-    [props.messages, props.branchHeadIds],
   );
   for (const fact of props.decisionEvents ?? []) {
     const index = entries.findIndex(
@@ -327,9 +317,9 @@ export function ConversationFeed(props: Props) {
             isMcpRunCurrent={isMcpRunCurrent}
             onOpenConnector={onOpenConnector}
             onDraftResponse={onDraftResponse}
+            onAskSideChat={onAskSideChat}
             onDraftPreview={onDraftPreview}
             onSaveMemory={onSaveMemory}
-            onPinResponse={onPinResponse}
             onMcpAppApproval={onMcpAppApproval}
             onMcpAppResourceRegister={onMcpAppResourceRegister}
             onMcpAppResourceRelease={onMcpAppResourceRelease}
@@ -363,25 +353,6 @@ export function ConversationFeed(props: Props) {
           {props.approval}
           {props.interruption}
         </div>
-      ) : null}
-      {availableBranchHeads.length > 1 && props.onSelectBranch ? (
-        <nav
-          className="conversation-branch-picker"
-          aria-label="Conversation alternatives"
-        >
-          <span>Alternative responses</span>
-          {availableBranchHeads.map((headId, index) => (
-            <button
-              type="button"
-              key={headId}
-              disabled={props.branchSelectionPending}
-              aria-pressed={headId === props.selectedHeadId}
-              onClick={() => props.onSelectBranch!(headId)}
-            >
-              Option {index + 1}
-            </button>
-          ))}
-        </nav>
       ) : null}
     </>
   );

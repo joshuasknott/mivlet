@@ -80,3 +80,45 @@ Required comparison evidence:
 - Fix any P0/P1/P2 issue and capture the same state again before a passing result.
 
 No visual acceptance claim is made from build success or HTTP health.
+
+## New project dialog — 2026-10-19
+
+Source visual truth: `output/new-project-2026-10-19/reference.png` (1254 × 1254).
+Implementation evidence: `output/new-project-2026-10-19/desktop.png` and
+`output/new-project-2026-10-19/mobile.png`.
+
+The approved image and final desktop capture were opened together in one
+comparison input. The generated modal is 859 × 1022 image pixels, equivalent
+to approximately 480 × 571 CSS pixels. The implemented modal measures
+480 × 573 CSS pixels at the 1280 × 720 browser viewport and density 1; the
+browser capture excludes its 32-pixel right gutter (1248 × 720 image pixels).
+The normalized side-by-side evidence is `output/new-project-2026-10-19/comparison.png`.
+The main form and controls are readable there, so a separate focused crop is
+unnecessary. The final mobile capture is 390 × 844 at density 1, with a 366 × 569
+dialog, no horizontal overflow, and all primary controls visible. Source and
+implementation backgrounds differ because the QA fixture renders current
+production navigation components.
+
+Fonts/typography: existing Inter, readable 14px fields and 22px title.
+Spacing/layout: compact single column, matching field order and modal proportions.
+Colors/tokens: existing light/dark semantic surfaces, neutral borders, dark action.
+Image quality: production agent avatars and Phosphor icons remain intact.
+Copy/content: the selected name, optional instructions, source folders, agent chips,
+and More options match the approved concept. The source dropdown chevron is omitted
+because only local folder import is supported. Coordinator/readiness details remain
+behind the disclosure. Folder-selection results show imported/skipped file counts.
+
+Browser interactions exercised the folder callback, adding/removing agents,
+Escape within the picker, coordinator selection, project submission and the
+serialized source IDs. The empty-team picker measured 595–855px horizontally
+inside the dialog's 400–880px bounds. Browser warnings/errors were empty. Folder selection and
+submission use mocked native callbacks in this fixture; installed picker and
+live-provider acceptance are not established by this evidence.
+
+Comparison history: initial desktop density was 614px tall; tightened form/footer
+spacing to the final 573px capture. Anchored the agent list within the form width
+so an empty team cannot clip the picker outside the modal. No actionable P0/P1/P2
+visual differences remain in the inspected states. Residual check: exercise the
+installed native picker when desktop resources permit.
+
+final result: passed

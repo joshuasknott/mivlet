@@ -6,7 +6,7 @@ use super::{
     LocalProjectRunAuthorRow, RunAuthorPayload, Store, StoreError, UpdateLocalProjectRequest,
     MAX_NAME_CHARACTERS, MAX_PROJECTS,
 };
-pub(super) fn create_at(
+pub(crate) fn create_at(
     tx: &rusqlite::Connection,
     store: &Store,
     scope: &AuthorizedCommandScope,

@@ -91,6 +91,7 @@ export function WorkspaceConversationDialogs({
             }
             models={runtime.modelOptions}
             providers={runtime.backendProviders}
+            onImportSourceFolder={runtime.importProjectSourceFolder}
             projectName={editor.focused ? editingProject?.name : undefined}
             edit={Boolean(editingRoom || (editingProject && !editor.focused))}
             initial={

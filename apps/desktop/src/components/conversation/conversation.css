@@ -80,12 +80,9 @@
 .message-actions { display: flex; align-items: center; flex-wrap: wrap; margin-top: 8px; color: var(--ink-muted); font-size: 10px; }
 .message-actions button, .copy-control button { border: 0; background: transparent; color: var(--ink-muted); font: inherit; padding: 5px 0; cursor: pointer; }
 .message-actions button:hover, .copy-control button:hover { color: var(--ink); }
-.conversation-branch-picker { display: flex; align-items: center; gap: 6px; margin: 14px auto 4px; color: var(--ink-muted); font-size: 11px; }
 .conversation-history-older { display: flex; justify-content: center; margin: 8px auto 14px; }
 .conversation-history-older button { min-height: 32px; border: 1px solid var(--line); border-radius: 999px; padding: 6px 12px; background: var(--surface); color: var(--ink-muted); font: inherit; font-size: 11px; cursor: pointer; }
 .conversation-history-older button:disabled { opacity: .55; cursor: default; }
-.conversation-branch-picker button { border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-muted); font: inherit; padding: 5px 9px; cursor: pointer; }
-.conversation-branch-picker button:hover, .conversation-branch-picker button[aria-pressed="true"] { border-color: var(--ink-muted); color: var(--ink); }
 
 /* assistant-ui action primitives stay in the same quiet footer language as
    the existing Mivlet actions while retaining the library's focus semantics. */

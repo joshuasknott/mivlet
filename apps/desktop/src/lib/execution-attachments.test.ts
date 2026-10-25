@@ -18,6 +18,22 @@ const work = (attachments: CollaborationWorkItem["attachments"] = []): Collabora
   }) as CollaborationWorkItem;
 
 describe("work attachment recovery", () => {
+  it("preserves the admitted durable receipt over newer local attachment metadata", () => {
+    const durableRef: WorkAttachment = {
+      id: "original", name: "original.txt", mimeType: "text/plain", sizeBytes: 128,
+      availability: "workspace-file", relativePath: "Attachments/original.txt", sha256: "original-hash",
+    };
+    const attachment: ComposerAttachment = {
+      id: "local", name: "local.txt", type: "text/plain", sizeBytes: 256, durableRef, sourceId: "other-source",
+      workspaceFile: {
+        attachmentId: "local", originalName: "local.txt", mimeType: "text/plain", relativePath: "Attachments/local.txt",
+        sizeBytes: 256, computerId: "other-computer", batchId: "other-batch", sha256: "other-hash", stagedAt: "2026-10-19T00:00:00Z",
+      },
+    };
+    expect(composerAttachmentRefs([attachment])[0]).toBe(durableRef);
+    expect(stagedAttachmentRefs([attachment])[0]).toBe(durableRef);
+  });
+
   it("records composer refs at submission without claiming staged paths", () => {
     const attachments: ComposerAttachment[] = [
       {

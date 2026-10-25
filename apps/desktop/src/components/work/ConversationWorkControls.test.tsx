@@ -1,4 +1,5 @@
 import { act, fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import type { CollaborationWorkItem } from "@mivlet/protocol";
 import type { WorkspaceExecution } from "../../lib/workspace-execution";
@@ -15,7 +16,7 @@ const item = (id: string, patch: Partial<CollaborationWorkItem> = {}): Collabora
   createdAt: "2026-10-17T00:00:00Z", updatedAt: "2026-10-17T00:00:00Z", queue: { order: 1, held: false }, ...patch,
 });
 function setup(work: CollaborationWorkItem[], command = vi.fn().mockResolvedValue({ work })) {
-  const service = { command, stop: vi.fn().mockResolvedValue(undefined), liveSteer: vi.fn().mockResolvedValue(undefined), reply: vi.fn().mockResolvedValue(undefined) } as unknown as WorkspaceExecution;
+  const service = { command, stop: vi.fn().mockResolvedValue(undefined), steerQueued: vi.fn().mockResolvedValue(undefined) } as unknown as WorkspaceExecution;
   const onGoalDraftChange = vi.fn();
   render(<ConversationWorkControls work={work} conversationId="room" service={service} onGoalDraftChange={onGoalDraftChange} />);
   return { service, command, onGoalDraftChange };
@@ -31,7 +32,8 @@ describe("conversation Work controls", () => {
   it("uses exact generation-bound queue edits and preserves failed input", async () => {
     const command = vi.fn().mockRejectedValue(new Error("The request already started."));
     setup([item("one")], command);
-    fireEvent.click(screen.getByRole("button", { name: "Edit queued request 1" }));
+    fireEvent.click(screen.getByRole("button", { name: "Options for queued request 1" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Edit" }));
     fireEvent.change(screen.getByRole("textbox", { name: "Edit queued request" }), { target: { value: "Check keyboard navigation" } });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
     expect(command).toHaveBeenCalledWith({ action: "edit-queued-work", id: "one", expectedGeneration: 4, prompt: "Check keyboard navigation" });
@@ -40,11 +42,14 @@ describe("conversation Work controls", () => {
   });
 
   it("moves, pauses and removes queued roots without touching running work", async () => {
-    const { command, service } = setup([item("running", { status: "running", runIds: ["run"] }), item("one"), item("two", { queue: { order: 2, held: false } })]);
-    expect(screen.getByRole("button", { name: "Move queued request 1 up" })).toBeDisabled();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Move queued request 2 up" })));
+    const { command, service } = setup([item("running", { status: "running", currentRunId: "run", runIds: ["run"] }), item("one"), item("two", { queue: { order: 2, held: false } })]);
+    fireEvent.click(screen.getByRole("button", { name: "Options for queued request 1" }));
+    expect(screen.getByRole("menuitem", { name: "Move up" })).toBeDisabled();
+    fireEvent.click(screen.getByRole("button", { name: "Options for queued request 2" }));
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Move up" })));
     expect(command).toHaveBeenLastCalledWith({ action: "move-queued-work", id: "two", expectedGeneration: 4, beforeId: "one" });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Pause queued request 1" })));
+    fireEvent.click(screen.getByRole("button", { name: "Options for queued request 1" }));
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Pause" })));
     expect(command).toHaveBeenLastCalledWith({ action: "set-work-held", id: "one", expectedGeneration: 4, held: true });
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove queued request 1" })));
     expect(service.stop).toHaveBeenCalledWith("one");
@@ -58,13 +63,39 @@ describe("conversation Work controls", () => {
     expect(onGoalDraftChange).not.toHaveBeenCalled();
   });
 
-  it("offers Codex live guidance and keeps other routes at the next safe turn", async () => {
-    const { service } = setup([item("active", { status: "running", runIds: ["run"] })]);
-    fireEvent.click(screen.getByRole("button", { name: "Guide active work" }));
-    fireEvent.change(screen.getByRole("textbox", { name: "Guidance for Atlas" }), { target: { value: "Keep the parser unchanged" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Send live guidance" })));
-    expect(service.liveSteer).toHaveBeenCalledWith("active", 4, "Keep the parser unchanged");
-    expect(screen.getByRole("status")).toHaveTextContent("Live guidance saved");
+  it("shows only the queued message and compact actions before opening options", async () => {
+    const { service } = setup([item("active", { status: "running", currentRunId: "run", runIds: ["run"] }), item("one")]);
+    expect(screen.queryByText("Guide active work")).toBeNull();
+    expect(screen.queryByText(/Up next/)).toBeNull();
+    expect(screen.queryByText("Atlas")).toBeNull();
+    expect(screen.queryByText("Cloud options")).toBeNull();
+    expect(screen.queryByRole("menuitem")).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Steer with queued request 1" })));
+    expect(service.steerQueued).toHaveBeenCalledWith("one", 4);
+  });
+
+  it("leaves no guidance button or empty controls gap while an agent is running", () => {
+    setup([item("active", { status: "running", currentRunId: "run", runIds: ["run"] })]);
+    expect(screen.queryByRole("region", { name: "Goal and queued requests" })).toBeNull();
+  });
+
+  it("opens queue options with the keyboard and restores focus on Escape", async () => {
+    const user = userEvent.setup();
+    setup([item("one")]);
+    const trigger = screen.getByRole("button", { name: "Options for queued request 1" });
+    trigger.focus();
+    await user.keyboard("{ArrowDown}");
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(trigger).toHaveFocus();
+  });
+
+  it("keeps cloud review reachable in queue options", async () => {
+    setup([item("one")]);
+    fireEvent.click(screen.getByRole("button", { name: "Options for queued request 1" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Cloud options" }));
+    expect(await screen.findByText("Cloud control one")).toBeVisible();
   });
 
   it.each(["completed", "blocked", "budget-exhausted"] as const)("allows a new goal after a %s report while retaining its history", (status) => {
@@ -81,12 +112,33 @@ describe("conversation Work controls", () => {
     expect(screen.getByText("Goal: Previous outcome")).toBeTruthy();
   });
 
-  it("never advertises in-flight steering for unsupported or native background routes", async () => {
-    const { service } = setup([item("active", { status: "running", runIds: ["run"], modelOptionId: "claude::fixture" })]);
-    fireEvent.click(screen.getByRole("button", { name: "Guide active work" }));
-    expect(screen.queryByRole("button", { name: "Send live guidance" })).toBeNull();
-    fireEvent.change(screen.getByRole("textbox", { name: "Guidance for Atlas" }), { target: { value: "Check the final paragraph" } });
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Queue for next turn" })));
-    expect(service.reply).toHaveBeenCalledWith("active", 4, "Check the final paragraph");
+  it.each([
+    { modelOptionId: "claude::fixture" },
+    { executionOwner: "native-background" as const },
+    { agentId: "another-agent" },
+    { status: "awaiting-approval" as const },
+  ])("disables steering without a supported matching foreground turn: %j", (patch) => {
+    const { service } = setup([item("active", { status: "running", currentRunId: "run", runIds: ["run"], ...patch }), item("one")]);
+    const steer = screen.getByRole("button", { name: "Steer with queued request 1" });
+    expect(steer).toBeDisabled();
+    fireEvent.click(steer);
+    expect(service.steerQueued).not.toHaveBeenCalled();
+  });
+
+  it("disables steering for oversized text, attachments and goals", () => {
+    setup([item("active", { status: "running", currentRunId: "run", runIds: ["run"] }),
+      item("long", { userRequest: "x".repeat(2001) }),
+      item("file", { attachments: [{ id: "file" }] as CollaborationWorkItem["attachments"] }),
+      item("goal", { outcomeGoal: { objective: "Outcome", successCriteria: "Evidence", status: "active" } }),
+    ]);
+    for (const button of screen.getAllByRole("button", { name: /Steer with queued request/ })) expect(button).toBeDisabled();
+  });
+
+  it("keeps a rejected steering message visible and reports the error", async () => {
+    const { service } = setup([item("active", { status: "running", currentRunId: "run", runIds: ["run"] }), item("one")]);
+    vi.mocked(service.steerQueued).mockRejectedValue(new Error("Delivery uncertain. Review the paused request."));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Steer with queued request 1" })));
+    expect(screen.getByRole("alert")).toHaveTextContent("Delivery uncertain");
+    expect(screen.getByText("Request one")).toBeVisible();
   });
 });

@@ -93,7 +93,7 @@ export async function createWorkspaceRoom(
       threadId: id,
       name: draft.title,
       instructions: draft.instructions,
-      knowledgeSourceIds: [],
+      knowledgeSourceIds: draft.knowledgeSourceIds ?? [],
     });
     deps.projects.setProjects((current) => [...current, project]);
     const data = await deps.service

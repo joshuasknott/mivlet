@@ -474,6 +474,7 @@ export function ActiveWorkspace({
               service={service}
               runtime={runtime}
               projects={projects.projects}
+              onProjectsChanged={() => projects.refresh()}
             />
           ))}
         </Suspense>

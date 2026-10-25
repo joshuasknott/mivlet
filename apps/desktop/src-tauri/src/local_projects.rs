@@ -237,12 +237,18 @@ mod project_ops;
 mod sharing;
 
 use helpers::{
-    author_from_row, global_store, next_revision, project_from_row, require_main_window,
-    thread_is_owned, timestamp, validate_id, validate_id_store, validate_payload_store,
+    author_from_row, global_store, next_revision, require_main_window, thread_is_owned, timestamp,
+    validate_id, validate_id_store, validate_payload_store,
 };
 use migration::migrate_group_at;
 use project_ops::{archive_at, bind_author_at, create_at, update_at};
 use sharing::{add_share_at, remove_share_at};
+
+// Native chat workspace management needs the same transaction-level project
+// primitive as the renderer command. Keep the implementation in project_ops
+// and expose only these narrow crate-private helpers.
+pub(crate) use helpers::project_from_row;
+pub(crate) use project_ops::create_at as create_project_at;
 
 #[tauri::command]
 pub fn local_project_create(

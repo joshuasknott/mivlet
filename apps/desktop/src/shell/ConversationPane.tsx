@@ -44,7 +44,6 @@ import {
   registerRuntimeMcpAppResource,
   releaseRuntimeMcpAppResource,
 } from "../runtime/domains/mcp";
-import { saveRuntimeResponseAsPinnedOutput } from "../runtime/domains/outputs";
 import { useOutputRevisions } from "../components/conversation/useOutputRevisions";
 import { useMcpAppApprovals } from "../components/conversation/useMcpAppApprovals";
 import {
@@ -58,13 +57,14 @@ import {
 } from "../lib/conversation-branches";
 import { useConversationOrigin } from "./useConversationOrigin";
 import type { ConversationOriginNavigation } from "./useWorkspaceNavigation";
+import { activeWorkspaceScope } from "./workspace-presentation";
 import { ConversationWorkControls } from "../components/work/ConversationWorkControls";
 import { previewFeedbackWork } from "../lib/preview-feedback";
 import {
   conversationAuthors,
   idleAgentState,
+  openResponseSideChat,
   pendingConversationTurns,
-  responseOutputId,
 } from "./conversation-pane-helpers";
 import { createConversationSubmission } from "./conversation-submission";
 
@@ -98,6 +98,7 @@ export function ConversationPane({
   onProviders,
   onProjectUpdate,
   onDraftReady,
+  onOpenSideChat,
   origin,
   onOriginConsumed,
   onInspectWork,
@@ -129,6 +130,7 @@ export function ConversationPane({
     patch: Pick<LocalProject, "name" | "instructions" | "knowledgeSourceIds">,
   ) => Promise<void>;
   onDraftReady: (append: (text: string) => void) => void;
+  onOpenSideChat: (conversationId: string) => void;
   origin?: ConversationOriginNavigation | null;
   onOriginConsumed?: () => void;
   onInspectWork?: (id: string) => void;
@@ -138,18 +140,59 @@ export function ConversationPane({
     [runtime.agents],
   );
   const owner = runtime.accountWorkspaceStatus.activeContextOwner;
+  const runtimeRef = useRef(runtime);
+  runtimeRef.current = runtime;
+  const workspaceScope = activeWorkspaceScope(
+    runtime.accountWorkspaceStatus,
+  );
   const appScope = useRef({
     active,
     roomId: room.id,
     generation: room.generation,
+    workspaceScope,
   });
-  appScope.current = { active, roomId: room.id, generation: room.generation };
+  appScope.current = {
+    active,
+    roomId: room.id,
+    generation: room.generation,
+    workspaceScope,
+  };
   useEffect(
     () => () => {
       appScope.current.active = false;
     },
     [],
   );
+  const askInSideChat = async (draft: string, authorId: string) => {
+    await openResponseSideChat({
+      service,
+      runtime,
+      room,
+      workspaceId: service.workspaceId,
+      authorId,
+      draft,
+      isCurrent: () => {
+        const current = appScope.current;
+        const latestRoom = service
+          .getSnapshot()
+          .data.conversations.find((candidate) => candidate.id === room.id);
+        return (
+          current.active &&
+          current.roomId === room.id &&
+          current.generation === room.generation &&
+          current.workspaceScope === workspaceScope &&
+          activeWorkspaceScope(
+            runtimeRef.current.accountWorkspaceStatus,
+          ) === workspaceScope &&
+          latestRoom?.workspaceId === room.workspaceId &&
+          latestRoom.chat?.ownerKind === room.chat?.ownerKind &&
+          latestRoom.chat?.ownerId === room.chat?.ownerId &&
+          latestRoom?.generation === room.generation
+        );
+      },
+      open: onOpenSideChat,
+    });
+  };
   const composer = useScopedComposer({
     workspaceId: service.workspaceId,
     accountId: `${owner?.internalUserId}:${owner?.memberId ?? ""}`,
@@ -745,23 +788,7 @@ export function ConversationPane({
                   )?.message.currentRevisionId,
                 )
               }
-              onPinResponse={async (text, source, runId, agentId) => {
-                await saveRuntimeResponseAsPinnedOutput(
-                  {
-                    id: responseOutputId(source.messageId, runId, text),
-                    title: `Pinned response from ${agentById.get(agentId)?.name ?? "agent"}`,
-                    source: {
-                      conversationId: room.id,
-                      branchId: history?.thread.messageHead.selectedHeadId,
-                      messageId: source.messageId,
-                      sourceRevisionId: source.sourceRevisionId,
-                      agentId,
-                    },
-                    content: text,
-                  },
-                  service.workspaceId,
-                );
-              }}
+              onAskSideChat={askInSideChat}
               onOpenConnector={onPlugins}
               onDraftResponse={(text) => {
                 composer.appendText(text);

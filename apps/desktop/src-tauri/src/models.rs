@@ -1157,6 +1157,12 @@ pub struct RuntimeSnapshot {
     /// User-owned agent identities and their non-secret execution preferences.
     #[serde(default)]
     pub agents: Vec<MivletAgentProfile>,
+    /// Monotonic compare-and-set fence for chat-driven agent roster changes.
+    /// Renderer snapshot writers must carry this value forward; native roster
+    /// mutations increment it so a trailing stale writer cannot resurrect an
+    /// older set of agents.
+    #[serde(default)]
+    pub agent_revision: u64,
     #[serde(default)]
     pub active_agent_id: Option<String>,
     #[serde(default)]

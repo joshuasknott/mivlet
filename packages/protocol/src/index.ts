@@ -3,6 +3,7 @@ export * as Spine from "./spine/index.js";
 export * from "./domains/approvals.js";
 export * from "./domains/account-cloud.js";
 export * from "./domains/agent-runtime.js";
+export * from "./domains/agent-profile.js";
 export * from "./domains/connectors.js";
 export * from "./domains/connected-source-search.js";
 export * from "./domains/provider-routing.js";
@@ -19,6 +20,7 @@ export * from "./domains/repository-checkpoints.js";
 export * from "./domains/conversation-restore.js";
 export * from "./domains/local-projects.js";
 export * from "./domains/collaboration.js";
+export * from "./domains/workspace-management.js";
 export * from "./domains/conversation-ui.js";
 export * from "./domains/search.js";
 export * from "./domains/voice.js";
@@ -47,6 +49,7 @@ import type {
   PermissionMode,
   PermissionProfileId,
 } from "./domains/approvals.js";
+import type { MivletAgentProfile } from "./domains/agent-profile.js";
 import type {
   BackendProvider,
   ContextRecordAuthorityScope,
@@ -738,6 +741,15 @@ export interface LocalFileImport extends KnowledgeSource {
   origin: "local-import";
 }
 
+/** Result of a native, bounded source-folder snapshot import. */
+export interface ProjectSourceFolderImport {
+  /** Opaque account-scoped identity of the selected canonical folder. */
+  id: string;
+  name: string;
+  sources: LocalFileImport[];
+  skippedCount: number;
+}
+
 export interface RefreshLocalKnowledgeSourceRequest {
   sourceId: string;
   expectedContentFingerprint: string;
@@ -981,6 +993,8 @@ export interface RuntimeSnapshot {
   approvalRules: ApprovalGrant[];
   /** User-defined agent identities and their non-secret execution preferences. */
   agents?: MivletAgentProfile[];
+  /** Monotonic CAS revision for native agent profile lifecycle mutations. */
+  agentRevision?: number;
   /** The agent currently owning the conversation surface. */
   activeAgentId?: string;
   sidebarPreferences?: SidebarPreferences;
@@ -1024,48 +1038,6 @@ export interface RuntimeSnapshot {
    */
   customApprovalSettings?: CustomApprovalSettings;
   savedAt: string;
-}
-
-export type MivletAgentIcon = "agent";
-
-/** A repeatable responsibility explicitly taught to a teammate by the user. */
-export interface MivletLearnedTask {
-  id: string;
-  title: string;
-  instruction: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-/**
- * A user-owned agent. Instructions and selections are non-secret; provider
- * credentials remain in the native credential boundary.
- */
-export interface MivletAgentProfile {
-  id: string;
-  name: string;
-  instructions: string;
-  modelId: string;
-  reasoningEffort?: string;
-  /** Opt-in faster processing for models that advertise a supported service tier. */
-  fastMode?: boolean;
-  icon: MivletAgentIcon;
-  /** In-app completion and attention notices; never controls approval prompts. */
-  notificationsEnabled?: boolean;
-  /** Legacy appearance metadata retained for saved-profile compatibility. */
-  iconColor: string;
-  /** Versioned, non-secret seed for a stable generated blob portrait. */
-  avatarSeed?: string;
-  /** Locally uploaded, normalized image. Remote URLs are deliberately unsupported. */
-  iconImageDataUrl?: string;
-  connectorIds: string[];
-  knowledgeSourceIds: string[];
-  /** Structured, reviewable work learned from conversation. */
-  learnedTasks?: MivletLearnedTask[];
-  permissionLabel: ApprovalPresetLabel;
-  threadId?: string;
-  /** Local conversation references for this teammate, including earlier chats. */
-  threadIds?: string[];
 }
 
 export type { McpClientAccess, McpServerConfig, McpConsentRequest, McpClientGrant, McpConsentDecision, McpServerStatus } from "./domains/mcp-server";

@@ -24,6 +24,7 @@ mod schedules;
 mod steering;
 pub(crate) mod ui;
 mod work;
+pub(crate) mod workspace_management;
 pub(crate) use schedules::{
     bind_schedule, check_schedule, finish_schedule, stage_schedule, validate_schedule_project,
 };

@@ -70,6 +70,7 @@ pub mod paths;
 mod permission_policy;
 #[cfg(test)]
 mod product_spine_parity;
+mod project_source_folders;
 mod protected_secrets;
 mod provider_process;
 mod provider_usage;
@@ -267,6 +268,7 @@ pub fn run() {
             collaboration::provider_continuation_read::provider_continuation_read,
             collaboration::ui::collaboration_ui,
             collaboration::collaboration_command,
+            collaboration::workspace_management::workspace_manage,
             local_projects::local_project_list,
             local_projects::local_project_update,
             local_projects::local_project_archive,
@@ -309,6 +311,7 @@ pub fn run() {
             snapshot::save_imported_knowledge_sources,
             snapshot::import_local_knowledge_source,
             snapshot::refresh_local_knowledge_source,
+            project_source_folders::import_project_source_folder,
             memory::list_memory_state,
             memory::save_memory_state,
             memory::correct_memory_record,

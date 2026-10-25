@@ -13,8 +13,8 @@ describe("conversation participants", () => {
   it("creates a project team without a coordinator and keeps explicit participants", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<ConversationDialog agents={agents} initial={{ kind: "project" }} onSave={onSave} onClose={() => {}} />);
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Launch" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Chief" }));
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Launch" } });
+    fireEvent.click(screen.getByText("More options"));
     expect(screen.getByRole("combobox", { name: "Coordinator Optional" })).toHaveValue("");
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() =>
@@ -30,13 +30,14 @@ describe("conversation participants", () => {
   it("replaces an automatic participant while retaining explicitly selected people", async () => {
     const onSave = vi.fn().mockResolvedValue(undefined);
     render(<ConversationDialog agents={agents} initial={{ kind: "project" }} onSave={onSave} onClose={() => {}} />);
-    fireEvent.change(screen.getByLabelText("Project name"), { target: { value: "Launch" } });
+    fireEvent.change(screen.getByLabelText("Name"), { target: { value: "Launch" } });
+    fireEvent.click(screen.getByText("More options"));
     fireEvent.change(screen.getByLabelText("Coordinator Optional"), { target: { value: "product" } });
-    fireEvent.click(screen.getByRole("checkbox", { name: "Chief" }));
     fireEvent.change(screen.getByLabelText("Coordinator Optional"), { target: { value: "researcher" } });
+    fireEvent.click(screen.getByText("Add", { selector: "summary" }));
     expect(screen.getByRole("checkbox", { name: "Chief" })).toBeChecked();
     expect(screen.getByRole("checkbox", { name: "Product" })).not.toBeChecked();
-    expect(screen.getByRole("checkbox", { name: "Researcher Coordinator" })).toBeChecked();
+    expect(screen.getByRole("checkbox", { name: "Researcher" })).toBeChecked();
     fireEvent.click(screen.getByRole("button", { name: "Create project" }));
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith(

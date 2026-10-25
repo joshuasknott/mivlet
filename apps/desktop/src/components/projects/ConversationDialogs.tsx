@@ -1,21 +1,33 @@
 import { useId, useRef, useState } from "react";
-import type { BackendProvider, MivletAgentProfile } from "@mivlet/protocol";
+import type { BackendProvider, MivletAgentProfile, ProjectSourceFolderImport } from "@mivlet/protocol";
 import { useModalFocusTrap } from "../../hooks/useModalFocusTrap";
 import type { ProviderModelOption } from "../../lib/provider-models";
 import { ProfileAgentAvatar } from "../agents/agent-icons";
 import { TeamReadiness } from "./TeamReadiness";
+import { NewProjectDialog } from "./NewProjectDialog";
+import type { ConversationDraft } from "./conversation-draft";
 
-export interface ConversationDraft {
-  kind: "direct" | "project";
-  title: string;
-  instructions: string;
-  participantIds: string[];
-  /** Empty when the Project Team has no designated coordinator. */
-  facilitatorId: string;
-  shareHistory: boolean;
+export type { ConversationDraft } from "./conversation-draft";
+
+interface ConversationDialogProps {
+  agents: MivletAgentProfile[];
+  models?: ProviderModelOption[];
+  providers?: BackendProvider[];
+  initial?: Partial<ConversationDraft>;
+  edit?: boolean;
+  projectName?: string;
+  onImportSourceFolder?: () => Promise<ProjectSourceFolderImport | null>;
+  onSave: (draft: ConversationDraft) => Promise<void>;
+  onClose: () => void;
 }
 
-export function ConversationDialog({
+export function ConversationDialog(props: ConversationDialogProps) {
+  return props.initial?.kind === "project" && !props.edit && !props.projectName
+    ? <NewProjectDialog {...props} />
+    : <ConversationDetailsDialog {...props} />;
+}
+
+function ConversationDetailsDialog({
   agents,
   models = [],
   providers = [],
@@ -24,16 +36,7 @@ export function ConversationDialog({
   projectName,
   onSave,
   onClose,
-}: {
-  agents: MivletAgentProfile[];
-  models?: ProviderModelOption[];
-  providers?: BackendProvider[];
-  initial?: Partial<ConversationDraft>;
-  edit?: boolean;
-  projectName?: string;
-  onSave: (draft: ConversationDraft) => Promise<void>;
-  onClose: () => void;
-}) {
+}: ConversationDialogProps) {
   const [kind] = useState<ConversationDraft["kind"]>(initial?.kind ?? "direct");
   const [title, setTitle] = useState(initial?.title ?? "");
   const [instructions, setInstructions] = useState(initial?.instructions ?? "");
