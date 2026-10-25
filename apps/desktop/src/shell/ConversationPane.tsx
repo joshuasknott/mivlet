@@ -1,4 +1,6 @@
 import { useConversationOutputRequests } from "./useConversationOutputRequests";
+import { markChatReady } from "../lib/renderer-performance";
+import { hasNativeRuntimeAdapter } from "../runtime/adapters/select";
 import { useConversationBranches } from "./useConversationBranches";
 import { ArrowDown } from "@phosphor-icons/react/dist/csr/ArrowDown";
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
@@ -396,6 +398,10 @@ export function ConversationPane({
     [runtime.modelOptions],
   );
   const model = models.find((model) => model.id === profile?.modelId);
+  useEffect(() => {
+    if (active && composer.ready && history && model && !state.loading && !state.error)
+      markChatReady(hasNativeRuntimeAdapter());
+  }, [active, composer.ready, history, model, state.loading, state.error]);
   const appApprovals = useMcpAppApprovals(
     runtime,
     `${service.workspaceId}:${room.id}:${room.generation}`,
