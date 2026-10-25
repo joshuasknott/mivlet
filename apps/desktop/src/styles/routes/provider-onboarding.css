@@ -70,6 +70,26 @@
   border: 0;
   min-height: 44px;
 }
+.provider-onboarding > .settings-disclosure {
+  width: 100%;
+  max-width: 700px;
+  flex-shrink: 0;
+}
+.provider-onboarding > .settings-disclosure > summary {
+  min-height: 44px;
+  align-content: center;
+  color: var(--ink);
+  font-size: 13px;
+}
+.provider-onboarding > .settings-disclosure > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+.provider-onboarding > .settings-disclosure .settings-page__body {
+  overflow-wrap: anywhere;
+  line-height: 1.6;
+}
 .provider-onboarding .provider-connection-flow {
   width: 100%;
   max-width: 580px;

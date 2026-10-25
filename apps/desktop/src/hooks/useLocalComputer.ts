@@ -93,8 +93,17 @@ export function useLocalComputer({ workspaceId, agentId, executionOwner = true }
       if (!node) throw new Error(scope.target ? "Computer status is unavailable. Refresh it in the Computer panel." : "Open a local workspace before using Computer Use.");
       if (!node.plugins) throw new Error("Computer capability information is unavailable. Restart the desktop app to load its current runtime.");
       if (!node.plugins.computer) throw new Error("Enable Computer Use in Plugins first.");
-      if (tool.startsWith("local-app-") || tool.startsWith("local-desktop-")) {
-        if (!node.runtimeAvailable) throw new Error(node.message || "The bundled Windows computer runtime is unavailable.");
+      if (tool.startsWith("local-app-") || tool.startsWith("local-desktop-") || tool.startsWith("local-browser-") ||
+          tool === "command-input" || tool === "command-jobs" || tool === "command-output" || tool === "command-stop" ||
+          tool === "workspace-start" || tool === "workspace-run" || tool === "repository-start" || tool === "repository-run") {
+        const desktopOrBrowser = tool.startsWith("local-app-") || tool.startsWith("local-desktop-") || tool.startsWith("local-browser-");
+        // A Windows install with a missing Cua payload can still use the
+        // separately prepared managed execution boundary.  Linux (and any
+        // future platform explicitly reported as unavailable) cannot.
+        const available = desktopOrBrowser
+          ? node.runtimeAvailable
+          : node.runtimeAvailable || node.backend !== "platform-unavailable";
+        if (!available) throw new Error(node.message || "This computer capability is unavailable on the current platform.");
       }
       return node;
     },

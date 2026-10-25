@@ -96,9 +96,52 @@ jobs:
       - run: cargo test --manifest-path vendor/webview2-com/Cargo.toml --lib --locked --target-dir apps/desktop/src-tauri/target
       - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
 
+  linux:
+    needs: changes
+    if: needs.changes.outputs.native == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    env:
+      CARGO_BUILD_JOBS: 2
+      CARGO_PROFILE_DEV_DEBUG: 0
+      CARGO_PROFILE_TEST_DEBUG: 0
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Install Linux native prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libwebkit2gtk-4.1-dev build-essential curl file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev libdbus-1-dev patchelf
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.34.7
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+          shared-key: mivlet-linux
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm linux:doctor
+      - run: pnpm linux:test
+      - run: pnpm --filter @mivlet/protocol build
+      - run: pnpm --filter @mivlet/connectors build
+      - run: pnpm --filter @mivlet/agent-host build
+      - run: pnpm test:host
+      - run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check
+      - run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --locked
+      # Shared Windows implementation bodies remain compiled for fail-closed
+      # Linux stubs. Windows CI retains strict dead-code validation.
+      - run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features --locked -- -D warnings -A dead_code
+      - run: pnpm tauri:build --debug --bundles deb
+
   check:
     if: always()
-    needs: [changes, typescript, windows]
+    needs: [changes, typescript, windows, linux]
     runs-on: ubuntu-latest
     steps:
       - name: Require every affected job to pass
@@ -108,7 +151,9 @@ jobs:
           NATIVE: ${{ needs.changes.outputs.native }}
           TYPESCRIPT: ${{ needs.typescript.result }}
           WINDOWS: ${{ needs.windows.result }}
+          LINUX: ${{ needs.linux.result }}
         run: |
           test "$CHANGES" = success
           if [ "$CODE" = true ]; then test "$TYPESCRIPT" = success; fi
           if [ "$NATIVE" = true ]; then test "$WINDOWS" = success; fi
+          if [ "$NATIVE" = true ]; then test "$LINUX" = success; fi

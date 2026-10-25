@@ -69,6 +69,37 @@ pub(crate) fn write_document_in_transaction<T: serde::Serialize>(
         .map_err(|error| error.to_string())
 }
 
+/// Transactional writer for an owner-private document. The private owner
+/// digest is part of the preference key and therefore remains bound to the
+/// authenticated destination owner during portable transfer imports.
+pub(crate) fn write_private_document_in_transaction<T: serde::Serialize>(
+    tx: &rusqlite::Transaction<'_>,
+    store: &Store,
+    path: &Path,
+    scope: &repos::scope::PrivateDataScope,
+    value: &T,
+) -> std::result::Result<(), String> {
+    let (storage_scope, key) = private_document_location(path, scope)?;
+    let value = serde_json::to_value(value)
+        .map_err(|_| "Mivlet could not encode an encrypted private document.".to_string())?;
+    repos::preferences::upsert_scoped(tx, store, &storage_scope, &key, &value, &timestamp())
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn read_private_document_in_transaction<T: serde::de::DeserializeOwned>(
+    tx: &rusqlite::Transaction<'_>,
+    store: &Store,
+    path: &Path,
+    scope: &repos::scope::PrivateDataScope,
+) -> std::result::Result<Option<T>, String> {
+    let (storage_scope, key) = private_document_location(path, scope)?;
+    repos::preferences::get_scoped(tx, store, &storage_scope, &key)
+        .map_err(|error| error.to_string())?
+        .map(serde_json::from_value)
+        .transpose()
+        .map_err(|_| "Mivlet could not decode an encrypted private document.".to_string())
+}
+
 pub(crate) fn private_document_location(
     path: &Path,
     scope: &repos::scope::PrivateDataScope,

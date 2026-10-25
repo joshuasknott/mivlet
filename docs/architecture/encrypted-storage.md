@@ -151,6 +151,21 @@ key and deliberately contains no provider or connector credentials.
 Knowledge and memory have separate bounded, secret-scanned plaintext export
 paths. Those exports are not full database backups.
 
+### Portability across operating systems
+
+The native portable-transfer workflow is the supported cross-platform path. It
+seals the selected history and configuration in a passphrase-encrypted envelope;
+provider credentials, OS-vault keys, approval grants, leases and other native
+authority are deliberately excluded and must be re-established on the target
+installation. Follow the [Kubuntu/Linux operations guide](../operations/kubuntu.md)
+for its preview limits and acceptance procedure.
+
+An ordinary SQLite backup is not portable between operating systems. It remains
+bound to the matching native credential-store key (Windows installations use the
+Windows OS credential/DPAPI boundary), so copying a database or raw app-data
+directory to Linux cannot restore the account. Do not copy credential-store
+files or provider tokens as a workaround.
+
 ## Repository contract
 
 New durable data belongs behind a repository under `src/store/repos` and a

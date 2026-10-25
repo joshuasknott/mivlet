@@ -3,6 +3,8 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -112,8 +114,53 @@ fn valid_id(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-fn executable(app: &AppHandle) -> Result<(std::path::PathBuf, File), String> {
-    let resource = if cfg!(debug_assertions) {
+fn verify_resource_file(
+    path: &std::path::Path,
+    expected_hash: &str,
+    executable: bool,
+) -> Result<File, String> {
+    #[cfg(not(unix))]
+    let _ = executable;
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|_| "The bundled agent host resource is unavailable.")?;
+    if !metadata.file_type().is_file() {
+        return Err("The bundled agent host resource is unavailable.".into());
+    }
+    #[cfg(unix)]
+    if executable && metadata.permissions().mode() & 0o111 == 0 {
+        return Err("The bundled agent host resource is not executable.".into());
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.share_mode(1); // Deny replacement or writes while this host runs.
+    }
+    let mut file = options
+        .open(path)
+        .map_err(|_| "The bundled agent host resource is unavailable.")?;
+    let mut hash = Sha256::new();
+    let mut buffer = [0u8; 65536];
+    loop {
+        let count = file
+            .read(&mut buffer)
+            .map_err(|_| "The bundled agent host resource could not be verified.")?;
+        if count == 0 {
+            break;
+        }
+        hash.update(&buffer[..count]);
+    }
+    if hex::encode(hash.finalize()) != expected_hash {
+        return Err(
+            "The bundled agent host resource failed integrity verification. Repair Mivlet.".into(),
+        );
+    }
+    Ok(file)
+}
+
+fn executable(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<File>), String> {
+    let resource = if tauri::is_dev() {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/agent-host")
     } else {
         app.path()
@@ -126,38 +173,67 @@ fn executable(app: &AppHandle) -> Result<(std::path::PathBuf, File), String> {
             .map_err(|_| "The bundled agent host is missing. Rebuild or repair Mivlet.")?,
     )
     .map_err(|_| "The bundled agent host manifest is invalid.")?;
-    if manifest["protocol"] != 1 || manifest["sdk"] != "0.0.0-dev-19449" {
+    let (platform, architecture, target, binary) =
+        if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+            ("win32", "x64", "bun-windows-x64", "mivlet-agent-host.exe")
+        } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
+            (
+                "linux",
+                "x64",
+                "bun-linux-x64-baseline",
+                "mivlet-agent-host",
+            )
+        } else {
+            return Err("The bundled agent host is unavailable on this operating system.".into());
+        };
+    if manifest["protocol"] != 1
+        || manifest["sdk"] != "0.0.0-dev-19449"
+        || manifest["platform"] != platform
+        || manifest["architecture"] != architecture
+        || manifest["target"] != target
+        || manifest["binary"] != binary
+    {
         return Err("The bundled agent host version is unsupported.".into());
     }
-    let path = resource.join("mivlet-agent-host.exe");
-    let mut options = std::fs::OpenOptions::new();
-    options.read(true);
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        options.share_mode(1); // Deny replacement or writes while this host runs.
+    let expected_sidecars: &[&str] = if cfg!(target_os = "linux") {
+        &["node_modules/@opencode-ai/pty-linux-x64-gnu/bin/opencode-pty"]
+    } else {
+        &[]
+    };
+    let sidecars = manifest["sidecars"]
+        .as_array()
+        .ok_or("The bundled agent host manifest is invalid.")?;
+    if sidecars.len() != expected_sidecars.len() {
+        return Err("The bundled agent host sidecar manifest is unsupported.".into());
     }
-    let mut file = options
-        .open(&path)
-        .map_err(|_| "The bundled agent host is unavailable.")?;
-    let mut hash = Sha256::new();
-    let mut buffer = [0u8; 65536];
-    loop {
-        let count = file
-            .read(&mut buffer)
-            .map_err(|_| "The bundled agent host could not be verified.")?;
-        if count == 0 {
-            break;
+    let mut leases = Vec::with_capacity(sidecars.len() + 1);
+    let path = resource.join(binary);
+    leases.push(verify_resource_file(
+        &path,
+        manifest["sha256"]
+            .as_str()
+            .ok_or("The bundled agent host manifest is invalid.")?,
+        true,
+    )?);
+    for (entry, expected_path) in sidecars.iter().zip(expected_sidecars) {
+        let relative = entry["path"]
+            .as_str()
+            .ok_or("The bundled agent host sidecar manifest is invalid.")?;
+        if relative != *expected_path {
+            return Err("The bundled agent host sidecar manifest is unsupported.".into());
         }
-        hash.update(&buffer[..count]);
+        let hash = entry["sha256"]
+            .as_str()
+            .filter(|hash| hash.len() == 64)
+            .ok_or("The bundled agent host sidecar manifest is invalid.")?;
+        leases.push(verify_resource_file(&resource.join(relative), hash, true)?);
     }
-    if manifest["sha256"].as_str() != Some(hex::encode(hash.finalize()).as_str()) {
-        return Err("The bundled agent host failed integrity verification. Repair Mivlet.".into());
-    }
-    Ok((path, file))
+    Ok((path, leases))
 }
 
-pub(crate) fn host_command(app: &AppHandle) -> Result<(Command, File, tempfile::TempDir), String> {
+pub(crate) fn host_command(
+    app: &AppHandle,
+) -> Result<(Command, Vec<File>, tempfile::TempDir), String> {
     let (path, image_lease) = executable(app)?;
     let directory = tempfile::Builder::new()
         .prefix("mivlet-agent-")

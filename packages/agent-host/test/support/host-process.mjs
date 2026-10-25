@@ -4,27 +4,29 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { executable, windowsHostSkipOptions } from "./windows-host.mjs";
 
-function timeoutError(label, events) {
+function timeoutError(label, events, stderr = "") {
   const recent = events.slice(-8).map(event => JSON.stringify(event)).join("\n");
-  return new Error(`Timed out waiting for ${label}. Recent host output:\n${recent}`);
+  const diagnostics = stderr ? `\nRecent host stderr:\n${stderr.slice(-4000)}` : "";
+  return new Error(`Timed out waiting for ${label}. Recent host output:\n${recent}${diagnostics}`);
 }
 
 export class AgentHostProcess {
   #events = [];
   #history = [];
   #frames = [];
+  #stderr = "";
   #waiters = [];
   #closed;
   #spawnError;
 
-  constructor(args = [], env = {}) {
+  constructor(args = [], env = {}, options = {}) {
     const skip = windowsHostSkipOptions();
     if (skip.skip) throw new Error(skip.skip);
-    this.directory = mkdtempSync(join(tmpdir(), "mivlet-agent-host-test-"));
+    this.directory = options.directory ?? mkdtempSync(join(tmpdir(), "mivlet-agent-host-test-"));
     this.child = spawn(executable, args, {
       cwd: this.directory,
       env: { ...Object.fromEntries(["SystemRoot", "WINDIR"].filter(key => process.env[key]).map(key => [key, process.env[key]])), TEMP: this.directory, TMP: this.directory, ...env },
-      stdio: ["pipe", "pipe", "ignore"],
+      stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
     this.#closed = new Promise((resolve) => {
@@ -43,6 +45,10 @@ export class AgentHostProcess {
       throw new Error(`failed to spawn ${executable}`);
     }
     this.child.stdout.setEncoding("utf8");
+    this.child.stderr.setEncoding("utf8");
+    this.child.stderr.on("data", (chunk) => {
+      this.#stderr += chunk;
+    });
     let buffer = "";
     this.child.stdout.on("data", (chunk) => {
       buffer += chunk;
@@ -88,7 +94,7 @@ export class AgentHostProcess {
       const timer = setTimeout(() => {
         const position = this.#waiters.indexOf(waiter);
         if (position >= 0) this.#waiters.splice(position, 1);
-        reject(timeoutError(label, this.#events));
+        reject(timeoutError(label, this.#events, this.#stderr));
       }, timeoutMs);
       waiter.timer = timer;
       this.#waiters.push(waiter);

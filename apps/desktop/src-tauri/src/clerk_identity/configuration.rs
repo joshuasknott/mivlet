@@ -501,7 +501,17 @@ pub(super) fn load_convex_site_url_from(raw: Option<String>) -> Result<Url, Iden
 }
 
 pub(super) fn load_convex_site_url() -> Result<Url, IdentityError> {
-    load_convex_site_url_from(crate::env_compat::var_opt("MIVLET_CONVEX_URL"))
+    load_convex_site_url_from(native_convex_configuration())
+}
+
+fn native_convex_configuration() -> Option<String> {
+    // Public deployment origin only. A present empty override remains empty
+    // and is rejected by the normal HTTPS-origin validator.
+    crate::env_compat::var_opt("MIVLET_CONVEX_URL").or_else(|| {
+        option_env!("MIVLET_CONVEX_URL")
+            .or(option_env!("FABLE_CONVEX_URL"))
+            .map(str::to_owned)
+    })
 }
 
 pub(super) fn validate_convex_http_path(path: &str) -> Result<(), IdentityError> {
@@ -524,7 +534,7 @@ pub(super) fn validate_convex_http_path(path: &str) -> Result<(), IdentityError>
 
 #[allow(dead_code)]
 pub(super) fn load_convex_url() -> Result<Url, IdentityError> {
-    load_convex_url_from(crate::env_compat::var_opt("MIVLET_CONVEX_URL"))
+    load_convex_url_from(native_convex_configuration())
 }
 
 pub(super) fn disabled_status() -> IdentityStatus {

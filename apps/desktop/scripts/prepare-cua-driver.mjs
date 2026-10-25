@@ -12,7 +12,8 @@ const digest = (bytes) => createHash("sha256").update(bytes).digest("hex");
 // PowerShell 7 exports its module path; Windows PowerShell must discover its own modules.
 const powershellEnv = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "psmodulepath"));
 if (process.platform !== "win32" || process.arch !== "x64") {
-  throw new Error("The bundled native computer currently supports Windows x64 only.");
+  console.log("Cua Driver: skipped; the bundled desktop computer runtime currently supports Windows x64 only.");
+  process.exit(0);
 }
 const executable = join(resources, manifest.executable);
 const existing = await readFile(executable).catch(() => null);

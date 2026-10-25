@@ -118,6 +118,7 @@ pub(crate) fn write_copy(
     bytes: &[u8],
 ) -> Result<PathBuf, String> {
     fs::create_dir_all(directory).map_err(|_| "Mivlet could not create its artifact folder.")?;
+    crate::paths::ensure_private_dir(directory)?;
     let directory = canonical(directory)?;
     if fs::read_dir(&directory)
         .map_err(|_| "The artifact folder is unavailable.")?
@@ -129,6 +130,10 @@ pub(crate) fn write_copy(
     }
     let target = directory.join(id);
     fs::create_dir(&target).map_err(|_| "Mivlet could not reserve an artifact file.")?;
+    if let Err(error) = crate::paths::ensure_private_dir(&target) {
+        let _ = fs::remove_dir(&target);
+        return Err(error);
+    }
     let file_path = target.join(name);
     let result = (|| {
         let mut file = OpenOptions::new()
@@ -136,6 +141,7 @@ pub(crate) fn write_copy(
             .create_new(true)
             .open(&file_path)
             .map_err(|_| "Mivlet could not create the artifact copy.")?;
+        crate::paths::ensure_private_file(&file_path)?;
         file.write_all(bytes)
             .and_then(|_| file.sync_all())
             .map_err(|_| "Mivlet could not save the artifact copy.")?;
