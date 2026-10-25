@@ -64,16 +64,17 @@ The extra D-Bus development package supports native Secret Service access.
 ```bash
 git clone https://github.com/joshuasknott/mivlet.git
 cd mivlet
-git switch --track origin/codex/kubuntu-support-20261025
 pnpm install --frozen-lockfile
 pnpm linux:doctor
 pnpm linux:doctor --desktop
 ```
 
-The October 25 migration branches preserve independent unfinished/historical
-work. They are not successive upgrades to merge together. This Linux branch
-starts from integrated `main` commit `b36da26a` (PR #172); the preserved startup,
-chat, right-navigation and older variants were inspected and left separate.
+The default `main` branch contains the reconciled desktop source, Linux support
+and the independent marketing app. The October 25 migration branches remain
+recovery copies of unfinished/historical work; no special branch selection is
+needed. Older startup, chat and navigation snapshots were superseded by newer
+integrated fixes. The experimental renderer benchmark and draft Instabox work
+remain separate and are not prerequisites for this Linux build.
 Do not copy Windows `node_modules`, Rust `target` directories, runtime caches,
 virtual environments or executable profiles onto Linux.
 
@@ -186,9 +187,9 @@ the native workflow below; GitHub does not contain your local conversations.
 1. Keep the original Windows account and data intact. Stop active turns and the
    background worker. Create a normal encrypted recovery backup on Windows as
    an additional rollback copy; it still requires the original OS vault key.
-2. Run this branch's native Windows app with your existing account configuration
-   and sign in to the original Mivlet account. Use a separate checkout for this
-   branch if your current checkout contains unfinished work. The feature must
+2. Run the current `main` native Windows app with your existing account
+   configuration and sign in to the original Mivlet account. Use a separate
+   checkout if your current checkout contains unfinished work. The feature must
    exist in the Windows exporter as well as the Linux importer.
 3. Open **Settings → General → Move to another computer**, expand
    **Export encrypted portable history**, and choose **Export portable history**.
@@ -229,7 +230,7 @@ nonempty destination fails without replacing the destination data.
 
 ### Resume on the ThinkCentre
 
-The GitHub branch is the installation handoff. Once Kubuntu is set up, follow
+GitHub `main` is the installation handoff. Once Kubuntu is set up, follow
 the clone/prerequisite commands above. Run `hostname -I` and
 `systemctl is-active ssh` only if remote assistance is wanted; an SSH server is
 not required to clone, build or run Mivlet locally.
@@ -281,11 +282,15 @@ executable included. The extracted package created its window and finished
 loading its bundled page under an isolated Xvfb/D-Bus session with a fresh
 profile. This startup smoke check did not authenticate an account or provider.
 
-One release gate remains open at this checkpoint: `pnpm perf:check` reports
-386,170 gzip bytes for common JavaScript/CSS against its 385,024-byte ceiling
-(1,146 bytes over). The existing budget is unchanged. The production frontend
-and Debian build succeed; the draft needs this small bundle regression resolved
-before release readiness is claimed.
+One release gate remains open after reconciliation: `pnpm perf:check` reports
+393,787 gzip bytes for common JavaScript/CSS against its 385,090-byte ceiling
+(8,697 bytes over) in the Windows/Node 24 production profile. The Zod security
+update accounts for 7,622 bytes of growth compared with the earlier Linux build;
+the other major common chunks retain the same raw sizes. The security fix and
+the existing budget are both retained. The production frontend and Debian build
+succeed, but the failed size gate remains a release-readiness issue. This source
+integration supports migration and destination-machine testing; it is not a
+claim that every release gate or physical acceptance check has passed.
 
 The native Secret Service acceptance test wrote, reopened, read and deleted one
 synthetic credential using a disposable, isolated service. That establishes the
@@ -294,8 +299,8 @@ destination. The pinned Antigravity Linux archive/member hashes and an
 unauthenticated ACP initialization were checked; no paid provider request was
 made.
 
-Keep the GitHub pull request as a draft until the physical acceptance steps
-above pass. Real account/provider authentication, KWallet unlock and persistence,
-native Windows-to-Kubuntu transfer dialogs, Plasma graphics and device/OAuth
-flows remain destination-machine checks. Preserve the Windows installation and
-its recovery material while completing them.
+The integrated source is available for destination-machine testing, but is not
+a claim of completed physical acceptance. Real account/provider authentication,
+KWallet unlock and persistence, native Windows-to-Kubuntu transfer dialogs,
+Plasma graphics and device/OAuth flows remain destination-machine checks.
+Preserve the Windows installation and its recovery material while completing them.
