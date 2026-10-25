@@ -55,8 +55,8 @@ jobs:
       - name: Verify the independent marketing app
         run: |
           pnpm --dir apps/marketing install --frozen-lockfile
-          pnpm --dir apps/marketing test
           pnpm --dir apps/marketing build
+          pnpm --dir apps/marketing test
 
   windows:
     needs: changes

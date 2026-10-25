@@ -37,13 +37,17 @@ fn prepared(ctx: &Context<'_>, writable: bool) -> Result<(Target, Review)> {
     request.selected_paths = Some(vec!["main.ts".into()]);
     request.writable_paths = Some(writable_paths.clone());
     request.checks = Some(vec![]);
+    // Preparation custody is process-wide. Independent in-memory stores must
+    // not reuse an identity while another parallel test holds its guard.
+    static NEXT_FIXTURE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let fixture_id = NEXT_FIXTURE.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let task = TaskIdentity {
         local_workspace_id: request.workspace_id.clone(),
         agent_id: request.agent_id.clone(),
         work_id: request.work_id.clone(),
         work_generation: request.expected_generation,
-        task_id: "task-coding-unit".into(),
-        run_id: "cloud-run-coding-unit".into(),
+        task_id: format!("task-coding-unit-{fixture_id}"),
+        run_id: format!("cloud-run-coding-unit-{fixture_id}"),
     };
     let repo = CodingRepository {
         snapshot,
