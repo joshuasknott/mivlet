@@ -33,7 +33,7 @@ it("keeps correlated deferred cloud/repository fragments in common-accounted coh
 });
 
 it("groups deferred workspace editors without pulling them into onboarding or conversation", () => {
-  for (const path of ["agents/AgentEditor", "agents/AgentLearningDialog", "projects/ProjectDetailsDialog", "projects/ProjectContextPanel", "projects/ProjectFiles", "projects/ConversationDialogs", "projects/TeamReadiness"])
+  for (const path of ["agents/AgentEditor", "agents/AgentLearningDialog", "projects/NewProjectDialog", "projects/ProjectDetailsDialog", "projects/ProjectContextPanel", "projects/ProjectFiles", "projects/ConversationDialogs", "projects/TeamReadiness"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/${path}.tsx`)).toBe("workspace-tools");
   for (const path of ["agents/AgentAppearancePicker", "agents/AgentColourPicker", "ModelPicker", "pages/OnboardingPage", "pages/FirstAgentOnboardingPage"])
     expect(commonRouteChunk(`/mivlet/apps/desktop/src/components/${path}.tsx`)).toBeUndefined();

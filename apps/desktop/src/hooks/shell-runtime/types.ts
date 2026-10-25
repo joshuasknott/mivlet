@@ -1,6 +1,5 @@
 import type {
   AccountWorkspaceStatus,
-  ActionHistoryEvent,
   ApprovalAuditEntry,
   ApprovalDecision,
   ApprovalGrant,
@@ -67,17 +66,11 @@ export interface ShellRuntime {
   voiceProvider: "browser" | "openai";
   setVoiceProvider: (provider: "browser" | "openai") => void;
   setVoiceEnabled: (enabled: boolean) => void;
-  toggleVoice: () => void;
-  setImportStatus: (status: string | null) => void;
-
-  importStatus: string | null;
-
   // connected apps
   connectorManifests: ConnectorManifest[];
   refreshConnectorStatuses: () => Promise<ConnectorManifest[] | null>;
   connectorAccounts: Record<string, ConnectorAccountOption[]>;
   connectorStatus: string | null;
-  connectorImportedSources: KnowledgeSource[];
   connectConnector: (connector: ConnectorManifest) => Promise<void>;
   disconnectConnector: (connectorId: string) => Promise<void>;
   refreshConnector: (connectorId: string) => Promise<void>;
@@ -120,7 +113,6 @@ export interface ShellRuntime {
   managedMemoryRecords: MemoryRecord[];
   memoryDisabled: boolean;
   memoryState: MemoryControlState;
-  memoryExportText: string;
   memoryStatus: string;
   toggleMemoryPin: (recordId: string) => void;
   forgetMemory: (recordId: string) => Promise<void>;
@@ -140,9 +132,7 @@ export interface ShellRuntime {
   // agent-runtime backends
   backendProviders: BackendProvider[];
   connectedBackendIds: string[];
-  backendStatus: string | null;
   onboardingRequired: boolean;
-  connectBackend: (providerId: string, secret?: string) => Promise<void>;
   /**
    * Verified connect path used by onboarding + Settings. Stores the key, then
    * verifies it against the provider inside the Rust boundary (the secret never
@@ -189,11 +179,7 @@ export interface ShellRuntime {
   sidebarPreferences: import("@mivlet/protocol").SidebarPreferences;
   setSidebarPreferences: (preferences: import("@mivlet/protocol").SidebarPreferences) => void;
   setModelVisible: (modelId: string, visible: boolean) => void;
-  /** The provider model id that should drive the next agent run (re-validated). */
-  resolvedSelectedModelId: string;
-  /** The collision-safe picker id corresponding to `resolvedSelectedModelId`. */
-  resolvedModelOptionId: string;
-  /** Persisted model selection (raw; prefer resolvedSelectedModelId at run time). */
+  /** Persisted model selection (raw; provider selection is revalidated at run time). */
   selectedModelId: string;
   selectModel: (modelId: string) => void;
   /** Resolved internal approval mode used by the agent loop. */
@@ -235,15 +221,6 @@ export interface ShellRuntime {
   refreshIdentity: () => Promise<void>;
   signOutIdentity: () => Promise<void>;
   reconcileAccountWorkspace: () => Promise<void>;
-  /**
-   * Inspectable action history (model calls, connector actions, tool/shell
-   * actions, web actions, approvals, and blocked policy decisions).
-   * Audit observes actions and never carries secrets. Surfaced for the
-   * Settings / Privacy / History view.
-   */
-  actionHistory: ActionHistoryEvent[];
-  /** Re-fetch action history from the Rust store (poll on demand). */
-  refreshActionHistory: () => void;
   // shell-level status
   lastAction: string;
 

@@ -33,7 +33,7 @@ export function commonRouteChunk(id: string): string | undefined {
   // These editors share a deferred setup boundary. Appearance and model pickers
   // are deliberately excluded: onboarding and conversation import them too.
   if (/\/src\/components\/agents\/(?:AgentEditor|AgentLearningDialog)\.tsx$/.test(path)
-    || /\/src\/components\/projects\/(?:ProjectDetailsDialog|ProjectContextPanel|ProjectFiles|ConversationDialogs|TeamReadiness)\.tsx$/.test(path)
+    || /\/src\/components\/projects\/(?:NewProjectDialog|ProjectDetailsDialog|ProjectContextPanel|ProjectFiles|ConversationDialogs|TeamReadiness)\.tsx$/.test(path)
     || /\/src\/components\/projects\/projects\.css$/.test(path)) return "workspace-tools";
   // Load the optional workspace inspection surfaces together without mounting
   // inactive views. Do not include hosted-computer helpers: execution also owns

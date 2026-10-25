@@ -112,18 +112,17 @@ describe("conversation shell runtime", () => {
 
   it("hides models across conversations without silently rerouting a selected model", async () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
-    await act(async () => { await result.current.connectBackend("xai", "test-key"); });
+    await act(async () => { await result.current.connectBackendWithVerify("xai", "test-key"); });
     const model = result.current.modelOptions.find((option) => option.available)!;
     act(() => result.current.selectModel(model.id));
     act(() => result.current.setModelVisible(model.id, false));
     expect(result.current.modelOptions.some((option) => option.id === model.id)).toBe(false);
     expect(result.current.allModelOptions.some((option) => option.id === model.id)).toBe(true);
-    expect(result.current.resolvedSelectedModelId).toBe("");
+    expect(result.current.selectedModelId).toBe(model.id);
     act(() => result.current.selectModel(model.id));
     expect(result.current.selectedModelId).toBe(model.id);
-    expect(result.current.resolvedSelectedModelId).toBe("");
     act(() => result.current.setModelVisible(model.id, true));
-    expect(result.current.resolvedSelectedModelId).toBe(model.modelId);
+    expect(result.current.modelOptions.some((option) => option.id === model.id)).toBe(true);
   });
 
   it("opens an authenticated workspace without a provider or completed onboarding", async () => {
@@ -143,7 +142,7 @@ describe("conversation shell runtime", () => {
       expect(result.current.accountWorkspaceStatus.state).toBe("ready"),
     );
     await act(async () => {
-      await result.current.connectBackend("xai", "xai-test-key");
+      await result.current.connectBackendWithVerify("xai", "xai-test-key");
     });
     expect(result.current.firstAgentSetupRequired).toBe(true);
     const originalId = result.current.agents[0]!.id;
@@ -226,7 +225,7 @@ describe("conversation shell runtime", () => {
     const { result } = renderHook(() => useShellRuntime(), { wrapper });
 
     await act(async () => {
-      await result.current.connectBackend("xai", "xai-test-key");
+      await result.current.connectBackendWithVerify("xai", "xai-test-key");
     });
     expect(result.current.connectedBackendIds).toContain("xai");
     expect(JSON.stringify(result.current.backendProviders)).not.toContain(

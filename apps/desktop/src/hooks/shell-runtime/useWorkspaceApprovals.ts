@@ -1,7 +1,6 @@
 import type { ToolApprovalGate } from "@mivlet/connectors";
 import { redactSecretsFromObject } from "@mivlet/connectors/agent-runtime";
 import type {
-  ActionHistoryEvent,
   ApprovalAuditEntry,
   ApprovalDecision,
   ApprovalGrant,
@@ -21,7 +20,6 @@ import {
   type PersistedShellState,
 } from "../../lib/types";
 import {
-  loadRuntimeActionHistory,
   loadRuntimeApprovalAudit,
   loadRuntimeApprovalRules,
   resolveRuntimeApprovalRequest,
@@ -56,7 +54,6 @@ export function useWorkspaceApprovals(options: {
   const [backendToolApprovals, setBackendToolApprovals] = useState<
     ApprovalRequest[]
   >([]);
-  const [actionHistory, setActionHistory] = useState<ActionHistoryEvent[]>([]);
   const [dismissedApprovalIds, setDismissedApprovalIds] = useState<string[]>(
     initialState.dismissedApprovalIds,
   );
@@ -104,23 +101,6 @@ export function useWorkspaceApprovals(options: {
       active = false;
     };
   }, [workspaceScopeGeneration]);
-
-  const refreshActionHistory = useCallback(() => {
-    const identity = workspaceIdentityRef.current;
-    void loadRuntimeActionHistory().then((events) => {
-      if (
-        identity === workspaceIdentityRef.current &&
-        events &&
-        Array.isArray(events)
-      ) {
-        setActionHistory(events.slice(0, 200));
-      }
-    });
-  }, [workspaceScopeGeneration]);
-
-  useEffect(() => {
-    refreshActionHistory();
-  }, [refreshActionHistory]);
 
   useEffect(() => {
     let active = true;
@@ -565,7 +545,6 @@ export function useWorkspaceApprovals(options: {
 
   const reset = () => {
     setApprovalAudit([]);
-    setActionHistory([]);
     setApprovalRules([]);
     setDismissedApprovalIds([]);
     setSessionApprovalGrants([]);
@@ -581,8 +560,6 @@ export function useWorkspaceApprovals(options: {
     runtime: {
       openApprovals,
       approvalAudit,
-      actionHistory,
-      refreshActionHistory,
       sessionApprovalGrants,
       approvalRules,
       editingApprovalId,

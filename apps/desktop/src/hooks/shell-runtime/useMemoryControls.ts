@@ -4,7 +4,7 @@ import {
   type RefObject,
   type SetStateAction,
 } from "react";
-import { exportMemories, isLiveMemory } from "@mivlet/knowledge";
+import { isLiveMemory } from "@mivlet/knowledge";
 import type { MemoryControlState, MemoryRecord } from "@mivlet/protocol";
 import {
   changeRuntimeMemoryRecord,
@@ -23,7 +23,6 @@ export function useMemoryControls({
   setMemoryDisabled,
   setManagedMemoryRecords,
   setMemoryStatus,
-  setMemoryExportText,
 }: {
   memoryDisabled: boolean;
   managedMemoryRecords: MemoryRecord[];
@@ -32,7 +31,6 @@ export function useMemoryControls({
   setMemoryDisabled: Dispatch<SetStateAction<boolean>>;
   setManagedMemoryRecords: Dispatch<SetStateAction<MemoryRecord[]>>;
   setMemoryStatus: Dispatch<SetStateAction<string>>;
-  setMemoryExportText: Dispatch<SetStateAction<string>>;
 }) {
   const commitMemoryState = (state: MemoryControlState, status: string) => {
     // Capture the pre-change state so a native save failure rolls back the
@@ -230,14 +228,9 @@ export function useMemoryControls({
 
   const exportMemory = async () => {
     try {
-      // Live memories only: forgotten/disabled records are excluded by
-      // `exportMemories`. The native export is authoritative when present; the
-      // fallback re-applies the same live-only filter so secrets never ride
-      // along on a forgotten record's payload and disabled records never leak.
-      const liveFallback = exportMemories(memoryState.records);
-      const exported =
-        (await exportRuntimeMemoryState(memoryState)) ?? liveFallback;
-      setMemoryExportText(exported);
+      // The native export remains authoritative and keeps the live-memory
+      // filtering at the native boundary.
+      await exportRuntimeMemoryState(memoryState);
       setMemoryStatus("Memory export ready.");
     } catch (error) {
       setMemoryStatus(

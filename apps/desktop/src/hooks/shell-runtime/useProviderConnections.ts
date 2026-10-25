@@ -106,8 +106,6 @@ export function useProviderConnections({
     Record<string, ModelDiscoveryOutcome>
   >({});
 
-  const [backendStatus, setBackendStatus] = useState<string | null>(null);
-
   const [providerScopeGeneration, setProviderScopeGeneration] = useState(
     workspaceScopeGeneration,
   );
@@ -152,11 +150,6 @@ export function useProviderConnections({
           ...current,
           [providerId]: result,
         }));
-        if (result.outcome === "failed")
-          setBackendStatus(
-            result.message ??
-              "Model discovery failed. Choose Refresh models to retry.",
-          );
       },
     });
   }, [workspaceScopeGeneration, workspaceIdentityRef]);
@@ -229,10 +222,6 @@ export function useProviderConnections({
     [modelOptions, connectedAgentBackend?.id],
   );
 
-  const resolvedSelectedModelId = resolvedModelOption?.modelId ?? "";
-
-  const resolvedModelOptionId = resolvedModelOption?.id ?? "";
-
   const refreshBackendProviders = useCallback(
     (checkedProviderId?: string) => requests.refresh(checkedProviderId),
     [requests],
@@ -251,7 +240,6 @@ export function useProviderConnections({
     );
     setDiscoveredModels({});
     setModelDiscoveryByProvider({});
-    setBackendStatus(null);
     void refreshBackendProviders();
     return () => requests.dispose();
   }, [requests, refreshBackendProviders, workspaceScopeGeneration]);
@@ -307,8 +295,7 @@ export function useProviderConnections({
   //
   // The verified path (`connectBackendWithVerify`) is the single connect entry
   // point for onboarding + Settings: store → mark connecting → verify against
-  // the provider inside the boundary → reflect. `connectBackend` is retained as
-  // a fire-and-forget wrapper over it for the legacy contract.
+  // the provider inside the boundary → reflect.
   const resetProviderDiscovery = (providerId: string) => {
     connectionChecks.delete(providerId);
     setDiscoveredModels((current) => {
@@ -361,13 +348,11 @@ export function useProviderConnections({
     if (!isMivletProviderEnabled(providerId)) {
       const message =
         "This provider is not available in the current Mivlet release.";
-      setBackendStatus(message);
       return { providerId, outcome: "unsupported", message };
     }
     const token = requests.invalidate(providerId);
     if (!requests.isCurrent(token)) return staleConnection(providerId);
     resetProviderDiscovery(providerId);
-    setBackendStatus(`Connecting ${providerId}…`);
     // Surface the connecting state on the provider card while the round-trip
     // is in flight. This is a transient UI state; the boundary re-resolves to
     // connected/needs-auth after verification.
@@ -380,7 +365,6 @@ export function useProviderConnections({
         if (!ALLOW_PREVIEW_FALLBACKS || hasTauriRuntime()) {
           const message = "Connect your AI provider in the installed Mivlet desktop app.";
           markProviderState(providerId, "needs-auth");
-          setBackendStatus(message);
           setLastAction(message);
           return { providerId, outcome: "unsupported", message };
         }
@@ -391,7 +375,6 @@ export function useProviderConnections({
           current.includes(providerId) ? current : [...current, providerId],
         );
         markProviderState(providerId, "connected");
-        setBackendStatus(`${providerId} connected (preview).`);
         setLastAction(`${providerId} connected (preview)`);
         return { providerId, outcome: "ready" };
       }
@@ -410,7 +393,6 @@ export function useProviderConnections({
         markProviderState(providerId, "needs-auth");
         const message =
           "Mivlet could not verify this provider in the desktop runtime. Update Mivlet and try again.";
-        setBackendStatus(message);
         setLastAction(message);
         return { providerId, outcome: "failed", message };
       }
@@ -428,7 +410,6 @@ export function useProviderConnections({
         const status =
           message ??
           `${providerId} rejected this key. Check the key and try again.`;
-        setBackendStatus(status);
         setLastAction(status);
         return { providerId, outcome, message: status };
       }
@@ -441,7 +422,6 @@ export function useProviderConnections({
           (outcome === "configured"
             ? `${providerId} configured. The endpoint will be checked when first used.`
             : `${providerId} connected.`);
-        setBackendStatus(status);
         setLastAction(
           outcome === "configured"
             ? `${providerId} configured`
@@ -461,7 +441,6 @@ export function useProviderConnections({
       const status =
         message ??
         `${providerId} could not be verified. Retry before running an agent.`;
-      setBackendStatus(status);
       setLastAction(status);
       return { providerId, outcome, message };
     } catch (error) {
@@ -474,17 +453,9 @@ export function useProviderConnections({
         error instanceof Error
           ? error.message
           : `Could not connect ${providerId}.`;
-      setBackendStatus(message);
       setLastAction(message);
       return { providerId, outcome: "failed", message };
     }
-  };
-
-  const connectBackend = async (
-    providerId: string,
-    secret = "preview-connection",
-  ) => {
-    await connectBackendWithVerify(providerId, secret);
   };
 
   const checkBackendConnectionOnce = async (
@@ -506,10 +477,8 @@ export function useProviderConnections({
     if (provider.id === "antigravity") {
       try {
         if (provider.authState === "install-required") {
-          setBackendStatus("Installing Google's Antigravity ACP runtime…");
           await installRuntimeAntigravity();
           if (!requests.isCurrent(token)) return staleConnection(providerId);
-          setBackendStatus("Opening Google sign-in…");
           const login = await startRuntimeAntigravityBrowserLogin();
           if (!requests.isCurrent(token)) return staleConnection(providerId);
           await refreshBackendProviders(providerId);
@@ -521,7 +490,6 @@ export function useProviderConnections({
                 outcome: "unsupported",
                 message: "Antigravity setup is available in the desktop app.",
               };
-          setBackendStatus(result.message ?? "Antigravity connected.");
           return result;
         }
         const result = await checkRuntimeAntigravityConnection();
@@ -543,7 +511,6 @@ export function useProviderConnections({
             : "Antigravity could not be installed or connected.";
         await refreshBackendProviders(providerId);
         if (!requests.isCurrent(token)) return staleConnection(providerId);
-        setBackendStatus(message);
         return { providerId, outcome: "failed", message };
       }
     }
@@ -556,7 +523,6 @@ export function useProviderConnections({
           provider.authState !== "connected" &&
           providerId !== "opencode"
         ) {
-          setBackendStatus(`Opening the official ${provider.label} sign-in…`);
           await startRuntimeManagedLogin(providerId);
           if (!requests.isCurrent(token)) return staleConnection(providerId);
         }
@@ -569,9 +535,6 @@ export function useProviderConnections({
           outcome: "unsupported" as const,
           message: `${provider.label} setup is available in the desktop app.`,
         };
-        setBackendStatus(
-          resolved.message ?? `${provider.label} connection checked.`,
-        );
         return resolved;
       } catch (error) {
         if (!requests.isCurrent(token)) return staleConnection(providerId);
@@ -581,7 +544,6 @@ export function useProviderConnections({
             : `${provider.label} could not be connected.`;
         await refreshBackendProviders(providerId);
         if (!requests.isCurrent(token)) return staleConnection(providerId);
-        setBackendStatus(message);
         return { providerId, outcome: "failed", message };
       }
     }
@@ -602,7 +564,6 @@ export function useProviderConnections({
               current.installHint ??
               "The provider runtime is not connected yet.",
           };
-      setBackendStatus(result.message ?? `${providerId} connection checked.`);
       return result;
     }
 
@@ -617,7 +578,6 @@ export function useProviderConnections({
             ? "Browser preview uses a synthetic provider connection; live health checks run in the desktop app."
             : "Check your AI provider in the installed Mivlet desktop app.",
       };
-      setBackendStatus(previewResult.message ?? null);
       return previewResult;
     }
 
@@ -627,20 +587,11 @@ export function useProviderConnections({
       await refreshBackendProviders(providerId);
       if (!requests.isCurrent(token)) return staleConnection(providerId);
       markProviderState(providerId, "needs-auth");
-      setBackendStatus(
-        result.message ?? `${providerId} rejected or revoked this key.`,
-      );
       return result;
     }
 
     await refreshBackendProviders(providerId);
     if (!requests.isCurrent(token)) return staleConnection(providerId);
-    setBackendStatus(
-      result.message ??
-        (result.outcome === "ready"
-          ? `${providerId} is healthy.`
-          : `${providerId} could not be checked right now.`),
-    );
     return result;
   };
 
@@ -676,11 +627,6 @@ export function useProviderConnections({
     if (!requests.isCurrent(token)) return staleConnection(providerId);
     resetProviderDiscovery(providerId);
     markProviderState(providerId, "connecting");
-    setBackendStatus(
-      providerId === "codex"
-        ? "Opening the official ChatGPT sign-in…"
-        : "Opening the official Google sign-in…",
-    );
     try {
       const started =
         providerId === "codex"
@@ -690,12 +636,10 @@ export function useProviderConnections({
                 (provider) => provider.id === providerId,
               );
               if (status?.authState === "install-required") {
-                setBackendStatus("Preparing Google Antigravity…");
                 await installRuntimeAntigravity();
                 if (!requests.isCurrent(token))
                   return staleConnection(providerId);
               }
-              setBackendStatus("Opening the official Google sign-in…");
               return startRuntimeAntigravityBrowserLogin();
             })();
       if (!requests.isCurrent(token)) return staleConnection(providerId);
@@ -728,7 +672,6 @@ export function useProviderConnections({
         verified.outcome === "ready"
           ? { providerId, outcome: "ready" as const, message: started.message }
           : verified;
-      setBackendStatus(result.message ?? "ChatGPT connected.");
       setLastAction(result.message ?? "ChatGPT connected");
       return result;
     } catch (error) {
@@ -739,7 +682,6 @@ export function useProviderConnections({
         error instanceof Error
           ? error.message
           : "Provider sign-in could not be completed.";
-      setBackendStatus(message);
       setLastAction(message);
       return { providerId, outcome: "failed", message };
     }
@@ -753,7 +695,6 @@ export function useProviderConnections({
     setConnectedBackendIds((current) =>
       current.filter((id) => id !== providerId),
     );
-    setBackendStatus(`Disconnecting ${providerId}…`);
     try {
       if (providerId === "antigravity") {
         const cleared = await logoutRuntimeAntigravity();
@@ -762,7 +703,6 @@ export function useProviderConnections({
           requests.finishMutation(token);
           await refreshBackendProviders(providerId);
           if (!requests.isCurrent(token)) return;
-          setBackendStatus("Antigravity disconnected.");
           setLastAction("Antigravity disconnected");
           return;
         }
@@ -776,7 +716,6 @@ export function useProviderConnections({
           requests.finishMutation(token);
           await refreshBackendProviders(providerId);
           if (!requests.isCurrent(token)) return;
-          setBackendStatus(`${providerId} disconnected.`);
           setLastAction(`${providerId} disconnected`);
           return;
         }
@@ -802,14 +741,12 @@ export function useProviderConnections({
               : provider,
           ),
         );
-        setBackendStatus(`${providerId} disconnected (preview).`);
         setLastAction(`${providerId} disconnected (preview)`);
         return;
       }
 
       await refreshBackendProviders(providerId);
       if (!requests.isCurrent(token)) return;
-      setBackendStatus(`${providerId} disconnected.`);
       setLastAction(`${providerId} disconnected`);
     } catch (error) {
       if (!requests.isCurrent(token)) return;
@@ -819,7 +756,6 @@ export function useProviderConnections({
         error instanceof Error
           ? error.message
           : `Could not disconnect ${providerId}.`;
-      setBackendStatus(message);
       setLastAction(message);
     }
   };
@@ -831,20 +767,15 @@ export function useProviderConnections({
         : [],
     setConnectedBackendIds,
     backendProviders: scopedBackendProviders,
-    backendStatus,
-    setBackendStatus,
     connectedAgentBackends,
     connectedAgentBackend,
     allModelOptions,
     modelOptions,
     selectableModels,
-    resolvedSelectedModelId,
-    resolvedModelOptionId,
     modelDiscoveryByProvider,
     refreshModels,
     refreshBackendProviders,
     connectBackendWithVerify,
-    connectBackend,
     checkBackendConnection,
     startBackendBrowserLogin,
     disconnectBackend,

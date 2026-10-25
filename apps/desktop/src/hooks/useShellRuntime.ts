@@ -145,7 +145,6 @@ export function useShellRuntime(
   const [importedKnowledgeSources, setImportedKnowledgeSources] = useState<
     LocalFileImport[]
   >(initialState.importedKnowledgeSources);
-  const [importStatus, setImportStatus] = useState<string | null>(null);
 
   const [connectorManifests, setConnectorManifests] =
     useState<ConnectorManifest[]>(connectors);
@@ -208,7 +207,6 @@ export function useShellRuntime(
   const [memoryDisabled, setMemoryDisabled] = useState(
     initialState.memoryDisabled,
   );
-  const [memoryExportText, setMemoryExportText] = useState("");
   const [memoryStatus, setMemoryStatus] = useState("Memory ready");
   const [onboardingDismissed, setOnboardingDismissed] = useState(
     initialState.onboardingComplete ?? false,
@@ -248,19 +246,15 @@ export function useShellRuntime(
     connectedBackendIds,
     setConnectedBackendIds,
     backendProviders,
-    backendStatus,
     connectedAgentBackends,
     connectedAgentBackend,
     allModelOptions,
     modelOptions,
     selectableModels,
-    resolvedSelectedModelId,
-    resolvedModelOptionId,
     modelDiscoveryByProvider,
     refreshModels,
     refreshBackendProviders,
     connectBackendWithVerify,
-    connectBackend,
     checkBackendConnection,
     startBackendBrowserLogin,
     disconnectBackend,
@@ -364,15 +358,12 @@ export function useShellRuntime(
       setOnboardingVersion(FIRST_AGENT_ONBOARDING_VERSION);
       setPinnedSourceIds([]);
       setImportedKnowledgeSources([]);
-      setImportStatus(null);
-
       setConnectorImportedSources([]);
       setConnectorManifests(connectors);
       setConnectorAccounts({});
       setConnectorStatus(null);
       setManagedMemoryRecords([]);
       setMemoryDisabled(false);
-      setMemoryExportText("");
     },
     onHydrate: (recovered) => {
       setAgentRevision(recovered.agentRevision ?? 0);
@@ -452,19 +443,9 @@ export function useShellRuntime(
 
     void listRuntimeConnectorKnowledgeSources()
       .then((sources) => {
-        if (active && sources) {
-          setConnectorImportedSources(sources);
-        }
+        if (active && sources) setConnectorImportedSources(sources);
       })
-      .catch((error) => {
-        if (active) {
-          setImportStatus(
-            error instanceof Error
-              ? error.message
-              : "Mivlet could not load connector knowledge.",
-          );
-        }
-      });
+      .catch(() => undefined);
 
     return () => {
       active = false;
@@ -546,13 +527,6 @@ export function useShellRuntime(
     };
   }, [workspaceScopeGeneration]);
 
-  const toggleVoice = () => {
-    setVoiceEnabled((enabled) => {
-      setLastAction(enabled ? "Voice paused" : "Voice ready");
-      return !enabled;
-    });
-  };
-
   const addImportedKnowledgeSource = (source: LocalFileImport) => {
     setImportedKnowledgeSources((current) =>
       [
@@ -572,8 +546,6 @@ export function useShellRuntime(
     decodedContent?: string,
   ) => {
     const importScope = connectorScopeRef.current;
-    setImportStatus(`Reading ${sourceName}...`);
-
     try {
       const content = decodedContent ?? (await readFileAsText(file));
       if (connectorScopeRef.current !== importScope) return null;
@@ -583,9 +555,6 @@ export function useShellRuntime(
         sizeBytes: file.size,
         importedAt: new Date().toISOString(),
       };
-      // Surface the indexing state before the (async) native import resolves so
-      // the user sees the source move reading -> indexing -> indexed.
-      setImportStatus(`Indexing ${sourceName}...`);
       const nativeImported = await importRuntimeLocalKnowledgeSource(candidate);
       if (connectorScopeRef.current !== importScope) return null;
       const imported = nativeImported ?? importLocalTextFile(candidate);
@@ -611,9 +580,6 @@ export function useShellRuntime(
 
       addImportedKnowledgeSource(indexed);
       onImported?.(indexed.id);
-      setImportStatus(
-        `Imported ${indexed.title}. It is pinned as untrusted knowledge.`,
-      );
       setLastAction(`Imported source: ${indexed.title}`);
       return indexed.id;
     } catch (error) {
@@ -623,8 +589,7 @@ export function useShellRuntime(
           ? error.message
           : "Mivlet could not import that file.";
       // Import failure must not leave a phantom source or stale optimistic
-      // state: nothing was added, so we surface the failure and clear indexing.
-      setImportStatus(message);
+      // state: nothing was added.
       setLastAction(message);
       return null;
     }
@@ -656,7 +621,6 @@ export function useShellRuntime(
     setMemoryDisabled,
     setManagedMemoryRecords,
     setMemoryStatus,
-    setMemoryExportText,
   });
 
   // Account readiness is separate from the provider setup gate in the shell.
@@ -886,16 +850,10 @@ export function useShellRuntime(
     setVoiceEnabled,
     voiceProvider,
     setVoiceProvider,
-    toggleVoice,
-    setImportStatus,
-
-    importStatus,
-
     connectorManifests,
     refreshConnectorStatuses,
     connectorAccounts,
     connectorStatus,
-    connectorImportedSources,
     connectConnector,
     disconnectConnector,
     refreshConnector,
@@ -924,7 +882,6 @@ export function useShellRuntime(
     managedMemoryRecords,
     memoryDisabled,
     memoryState,
-    memoryExportText,
     memoryStatus,
     toggleMemoryPin,
     forgetMemory,
@@ -938,9 +895,7 @@ export function useShellRuntime(
     assembleConversationContext,
     backendProviders,
     connectedBackendIds,
-    backendStatus,
     onboardingRequired,
-    connectBackend,
     connectBackendWithVerify,
     checkBackendConnection,
     startBackendBrowserLogin,
@@ -964,8 +919,6 @@ export function useShellRuntime(
           : [...new Set([...current, modelId])],
       );
     },
-    resolvedSelectedModelId,
-    resolvedModelOptionId,
     selectedModelId,
     selectModel,
     permissionMode,

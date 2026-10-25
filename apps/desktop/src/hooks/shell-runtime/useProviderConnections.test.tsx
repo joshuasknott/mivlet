@@ -162,7 +162,11 @@ describe("provider startup and recovery", () => {
     expect(
       result.current.connectedAgentBackends.map((provider) => provider.id),
     ).toEqual(["openai"]);
-    expect(result.current.resolvedSelectedModelId).toBe(primary.models[0].id);
+    expect(
+      result.current.connectedAgentBackends[0]?.models.some(
+        (model) => model.id === primary.models[0].id && model.available,
+      ),
+    ).toBe(true);
     expect(
       result.current.backendProviders.find((provider) => provider.id === "xai")
         ?.authState,
@@ -193,7 +197,11 @@ describe("provider startup and recovery", () => {
         result.current.connectedAgentBackends.map((provider) => provider.id),
       ).toEqual(["xai"]),
     );
-    expect(result.current.resolvedSelectedModelId).toBe("");
+    expect(
+      result.current.backendProviders.find((provider) => provider.id === "openai")?.models.some(
+        (model) => model.id === primary.models[0].id && model.available,
+      ),
+    ).toBe(false);
     expect(
       result.current.backendProviders.find(
         (provider) => provider.id === "openai",
@@ -351,7 +359,6 @@ describe("provider startup and recovery", () => {
       await disconnect;
     });
     expect(result.current.connectedAgentBackends).toEqual([]);
-    expect(result.current.backendStatus).toBe("openai disconnected.");
   });
 
   it("ignores old discovery after a key is replaced and verifies the new credential once", async () => {
