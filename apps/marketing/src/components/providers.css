@@ -1,0 +1,138 @@
+.providers-section {
+  display: grid;
+  grid-template-columns: minmax(16rem, 0.8fr) minmax(0, 1.4fr);
+  gap: clamp(2rem, 6vw, 6rem);
+  align-items: center;
+  width: 100%;
+  margin: 0 auto;
+}
+
+.providers-section h2 {
+  max-width: 15ch;
+  margin: 0;
+  color: #181925;
+  font-size: clamp(2.125rem, 4vw, 3rem);
+  font-weight: 680;
+  letter-spacing: -0.055em;
+  line-height: 1.02;
+}
+
+.providers-section__copy {
+  max-width: 29rem;
+  margin: 1.35rem 0 0;
+  color: #6f7180;
+  font-size: 1rem;
+  line-height: 1.55;
+}
+.providers-section__requirements {
+  max-width: 29rem;
+  margin: 1rem 0 0;
+  color: #656a79;
+  font-size: 0.8125rem;
+  line-height: 1.65;
+}
+
+.providers-marquee {
+  min-width: 0;
+  overflow: hidden;
+  padding: 1.6rem 0;
+  -webkit-mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 10%,
+    #000 90%,
+    transparent
+  );
+  mask-image: linear-gradient(
+    90deg,
+    transparent,
+    #000 10%,
+    #000 90%,
+    transparent
+  );
+}
+
+.providers-marquee__track {
+  display: flex;
+  width: max-content;
+  animation: providers-marquee-scroll 34s linear infinite;
+  will-change: transform;
+}
+
+.providers-marquee__list {
+  display: flex;
+  align-items: center;
+  gap: clamp(1.25rem, 2.6vw, 2.45rem);
+  flex: 0 0 auto;
+  list-style: none;
+  margin: 0;
+  padding: 0 clamp(0.7rem, 1.4vw, 1.25rem);
+}
+
+.providers-marquee__item {
+  display: grid;
+  width: clamp(3.25rem, 5.5vw, 5.2rem);
+  height: clamp(3.25rem, 5.5vw, 5.2rem);
+  place-items: center;
+  flex: 0 0 auto;
+}
+
+.provider-logo {
+  display: grid;
+  width: clamp(2.4rem, 4.2vw, 3.8rem);
+  height: clamp(2.4rem, 4.2vw, 3.8rem);
+  place-items: center;
+  color: #222431;
+  filter: drop-shadow(0 0.35rem 0.7rem rgba(57, 50, 87, 0.1));
+}
+
+.provider-mark,
+.provider-mark__image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+@keyframes providers-marquee-scroll {
+  from {
+    transform: translate3d(0, 0, 0);
+  }
+  to {
+    transform: translate3d(-50%, 0, 0);
+  }
+}
+
+@media (max-width: 780px) {
+  .providers-section {
+    grid-template-columns: 1fr;
+    gap: 2rem;
+  }
+
+  .providers-section h2 {
+    max-width: none;
+  }
+  .providers-marquee {
+    margin-inline: -0.75rem;
+  }
+}
+
+@media (max-width: 430px) {
+  .providers-section__copy {
+    max-width: 34ch;
+  }
+  .providers-marquee__track {
+    animation-duration: 29s;
+  }
+  .providers-marquee__list {
+    gap: 1.2rem;
+  }
+  .providers-marquee__item {
+    width: 3.1rem;
+    height: 3.1rem;
+  }
+  .provider-logo {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+}

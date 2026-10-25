@@ -52,6 +52,11 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm quality
       - run: pnpm test:pr
+      - name: Verify the independent marketing app
+        run: |
+          pnpm --dir apps/marketing install --frozen-lockfile
+          pnpm --dir apps/marketing test
+          pnpm --dir apps/marketing build
 
   windows:
     needs: changes

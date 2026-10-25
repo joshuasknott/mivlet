@@ -46,7 +46,7 @@ try {
     process.exitCode = 1;
   } else {
     console.log(
-      "Production dependency audit passed; only the two source-verified local patches remain in the registry report.",
+      `Production dependency audit passed; ${reviewed.length} source-verified local patch advisories remain in the registry report.`,
     );
   }
 } catch (error) {

@@ -236,7 +236,7 @@ test("patch verification rejects missing/tampered sources and expired review", (
 });
 
 test("audit permits only exact patched advisories and versions", () => {
-  const advisories = patches.map((patch) => ({
+  const advisories = patches.filter((patch) => patch.advisory !== null).map((patch) => ({
     github_advisory_id: patch.advisory,
     module_name: patch.package,
     findings: [{ version: patch.version }],
@@ -247,6 +247,13 @@ test("audit permits only exact patched advisories and versions", () => {
     muted: [],
   };
   assert.equal(classifyAdvisories(report, patches).unreviewed.length, 0);
+  report.advisories.withdrawn = {
+    github_advisory_id: "GHSA-vfj7-8cjw-p6xm",
+    module_name: "braces",
+    findings: [{ version: "3.0.3" }],
+  };
+  assert.equal(classifyAdvisories(report, patches).unreviewed.length, 1);
+  delete report.advisories.withdrawn;
   report.advisories.new = {
     github_advisory_id: "GHSA-new-finding",
     module_name: "braces",

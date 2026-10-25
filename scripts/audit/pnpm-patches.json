@@ -4,7 +4,8 @@
     {
       "package": "braces",
       "version": "3.0.3",
-      "advisory": "GHSA-vfj7-8cjw-p6xm",
+      "advisory": null,
+      "reason": "Retain depth hardening after GHSA-vfj7-8cjw-p6xm was withdrawn on 2026-10-23; this patch exempts no registry advisory.",
       "expiresOn": "2026-10-31",
       "sha256": {
         "lib/parse.js": "4e02977a812be67315989a37389abebf0a540c6c91848aae472abbba524eebb4",
