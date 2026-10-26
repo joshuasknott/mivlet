@@ -146,7 +146,7 @@ pub(crate) fn validate_result(
             || object
                 .get("outputTokens")
                 .and_then(Value::as_u64)
-                .is_none_or(|v| v > u64::from(binding.budget.max_output_tokens))
+                .is_none_or(|v| v > binding.budget.max_output_tokens.into())
             || !object
                 .get("costUsd")
                 .and_then(Value::as_f64)

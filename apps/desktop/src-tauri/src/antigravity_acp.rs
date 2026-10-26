@@ -5,8 +5,6 @@
 //! only observes connection state, model metadata, streamed text, and explicit
 //! permission requests. OAuth material never crosses the Tauri boundary.
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::HashMap,
     fs,
@@ -29,42 +27,12 @@ use url::Url;
 use crate::models::{BackendModel, BackendVerifyResult};
 
 pub const PROVIDER_ID: &str = "antigravity";
-#[cfg(target_os = "linux")]
-const VERSION: &str = "1.4.3";
-#[cfg(not(target_os = "linux"))]
 const VERSION: &str = "1.1.1";
-#[cfg(target_os = "linux")]
-const ARCHIVE_URL: &str =
-    "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-1.4.3-linux-x86_64.zip";
-#[cfg(not(target_os = "linux"))]
 const ARCHIVE_URL: &str = "https://dl.google.com/agy-extensions/releases/windows/agy-acp-server-agy_acp_server_1.1.1-windows-x86_64.zip";
-#[cfg(target_os = "linux")]
-const ARCHIVE_SHA256: &str = "0634ce5306ba92c932945455e7a83fda78e2d99c33fa8aa6ee0566206a382714";
-#[cfg(not(target_os = "linux"))]
 const ARCHIVE_SHA256: &str = "47cb50eef14f0a4655d78cfcfda869bcea7aaee5f9787e936bc2935ea612c3b8";
-#[cfg(target_os = "linux")]
-const ARCHIVE_BYTES: u64 = 336_846_435;
-#[cfg(not(target_os = "linux"))]
 const ARCHIVE_BYTES: u64 = 468_238_392;
-#[cfg(not(target_os = "linux"))]
 const SERVER_BYTES: u64 = 430_801_616;
-#[cfg(not(target_os = "linux"))]
 const HARNESS_BYTES: u64 = 130_971_800;
-#[cfg(target_os = "linux")]
-const SERVER_BYTES: u64 = 927_707_135;
-#[cfg(target_os = "linux")]
-const HARNESS_BYTES: u64 = 133_926_136;
-#[cfg(target_os = "linux")]
-const SERVER_SHA256: &str = "7e06ec4aab6dcff53911a16c124692bc95c8848b2a1fd3220be6f67dbe7efafb";
-#[cfg(target_os = "linux")]
-const HARNESS_SHA256: &str = "55b2d1d8206d3f38353cdba3c5c5d087cd718241b90500bce4f8009f64495285";
-#[cfg(not(target_os = "linux"))]
-const SERVER_SHA256: &str = "";
-#[cfg(not(target_os = "linux"))]
-const HARNESS_SHA256: &str = "";
-// The ACP registry publishes the archive digest, but not member digests for
-// the current Linux release. Keep extraction bounded and require non-empty
-// regular files; the archive digest authenticates the complete pair.
 const MAX_ENTRY_BYTES: u64 = 2_000_000_000;
 const MAX_EXTRACTED_BYTES: u64 = 3_500_000_000;
 const AUTH_PREFIX: &str = "Open the following link to authenticate the ACP server: ";
@@ -171,19 +139,11 @@ fn runtime_dir(app: &AppHandle) -> Result<PathBuf, String> {
 }
 
 fn server_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(runtime_dir(app)?.join(if cfg!(target_os = "windows") {
-        "agy_acp_server.exe"
-    } else {
-        "agy_acp_server.par"
-    }))
+    Ok(runtime_dir(app)?.join("agy_acp_server.exe"))
 }
 
 fn harness_path(app: &AppHandle) -> Result<PathBuf, String> {
-    Ok(runtime_dir(app)?.join(if cfg!(target_os = "windows") {
-        "localharness_external.exe"
-    } else {
-        "localharness_external"
-    }))
+    Ok(runtime_dir(app)?.join("localharness_external.exe"))
 }
 
 fn profile_dir(app: &AppHandle, user_id: &str) -> Result<PathBuf, String> {
@@ -205,68 +165,13 @@ fn runtime_installed(app: &AppHandle) -> bool {
     let Ok(harness) = harness_path(app) else {
         return false;
     };
-    fn valid_file(path: PathBuf, expected: Option<u64>, expected_hash: Option<&str>) -> bool {
-        let Ok(metadata) = fs::symlink_metadata(&path) else {
+    fn valid_file(path: PathBuf, expected: u64) -> bool {
+        let Ok(metadata) = fs::symlink_metadata(path) else {
             return false;
         };
-        if !metadata.is_file() || metadata.len() == 0 {
-            return false;
-        }
-        if let Some(expected) = expected {
-            if metadata.len() != expected {
-                return false;
-            }
-        }
-        #[cfg(unix)]
-        if metadata.permissions().mode() & 0o111 == 0 {
-            return false;
-        }
-        if let Some(expected_hash) = expected_hash {
-            let Ok(mut file) = fs::File::open(path) else {
-                return false;
-            };
-            let mut hash = Sha256::new();
-            let mut buffer = [0u8; 65_536];
-            loop {
-                let Ok(read) = std::io::Read::read(&mut file, &mut buffer) else {
-                    return false;
-                };
-                if read == 0 {
-                    break;
-                }
-                hash.update(&buffer[..read]);
-            }
-            if hex::encode(hash.finalize()) != expected_hash {
-                return false;
-            }
-        }
-        true
+        metadata.file_type().is_file() && metadata.len() == expected
     }
-    valid_file(
-        server,
-        if cfg!(target_os = "windows") {
-            Some(SERVER_BYTES)
-        } else {
-            None
-        },
-        if cfg!(target_os = "linux") {
-            Some(SERVER_SHA256)
-        } else {
-            None
-        },
-    ) && valid_file(
-        harness,
-        if cfg!(target_os = "windows") {
-            Some(HARNESS_BYTES)
-        } else {
-            None
-        },
-        if cfg!(target_os = "linux") {
-            Some(HARNESS_SHA256)
-        } else {
-            None
-        },
-    )
+    valid_file(server, SERVER_BYTES) && valid_file(harness, HARNESS_BYTES)
 }
 
 pub(crate) fn status_for(app: &AppHandle, authenticated: bool) -> AntigravityStatus {
@@ -291,24 +196,15 @@ pub fn antigravity_status(app: AppHandle) -> Result<AntigravityStatus, String> {
     ))
 }
 
-#[cfg(not(any(
-    all(target_os = "windows", target_arch = "x86_64"),
-    all(target_os = "linux", target_arch = "x86_64")
-)))]
+#[cfg(not(all(target_os = "windows", target_arch = "x86_64")))]
 #[tauri::command]
 pub async fn install_antigravity_runtime(
     _app: AppHandle,
 ) -> Result<AntigravityInstallResult, String> {
-    Err(
-        "The managed Antigravity installer currently supports Windows x64 and Linux x64 only."
-            .into(),
-    )
+    Err("The managed Antigravity installer currently supports Windows x64 only.".into())
 }
 
-#[cfg(any(
-    all(target_os = "windows", target_arch = "x86_64"),
-    all(target_os = "linux", target_arch = "x86_64")
-))]
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
 #[tauri::command]
 pub async fn install_antigravity_runtime(
     app: AppHandle,
@@ -383,18 +279,10 @@ pub async fn install_antigravity_runtime(
     let mut zip = zip::ZipArchive::new(file)
         .map_err(|_| "Google's Antigravity archive was not a valid ZIP file.".to_string())?;
     let mut extracted_bytes = 0_u64;
-    let files = if cfg!(target_os = "windows") {
-        [
-            ("agy_acp_server.exe", Some(SERVER_BYTES)),
-            ("localharness_external.exe", Some(HARNESS_BYTES)),
-        ]
-    } else {
-        [
-            ("agy_acp_server.par", None),
-            ("localharness_external", None),
-        ]
-    };
-    for (name, expected) in files {
+    for (name, expected) in [
+        ("agy_acp_server.exe", SERVER_BYTES),
+        ("localharness_external.exe", HARNESS_BYTES),
+    ] {
         let mut entry = zip
             .by_name(name)
             .map_err(|_| format!("Google's Antigravity archive did not contain {name}."))?;
@@ -405,17 +293,13 @@ pub async fn install_antigravity_runtime(
         if extracted_bytes > MAX_EXTRACTED_BYTES {
             return Err("The Antigravity archive exceeded the bounded extraction size.".into());
         }
-        if expected.is_some_and(|size| entry.size() != size) {
+        if entry.size() != expected {
             return Err(format!("{name} did not match the pinned release."));
         }
-        let output_path = staging.join(name);
-        let mut output = fs::File::create(&output_path)
+        let mut output = fs::File::create(staging.join(name))
             .map_err(|_| format!("Mivlet could not install {name}."))?;
         std::io::copy(&mut entry, &mut output)
             .map_err(|_| format!("Mivlet could not extract {name}."))?;
-        #[cfg(unix)]
-        fs::set_permissions(&output_path, fs::Permissions::from_mode(0o755))
-            .map_err(|_| format!("Mivlet could not mark {name} executable."))?;
     }
     let final_dir = runtime_dir(&app)?;
     if let Some(parent) = final_dir.parent() {
@@ -481,8 +365,6 @@ fn command(
     }
     let (profile, _) = prepare_profile(app, user_id)?;
     let mut command = Command::new(server_path(app)?);
-    #[cfg(target_os = "linux")]
-    command.arg("--uid=");
     for key in [
         "GEMINI_API_KEY",
         "GOOGLE_API_KEY",
@@ -1284,20 +1166,19 @@ mod tests {
 
     #[test]
     fn validates_the_exact_agent_and_auth_method() {
-        let initialized = json!({"result":{"protocolVersion":1,"agentInfo":{"name":"antigravity-acp","version":format!("agy_acp_server_{VERSION}")},"authMethods":[{"id":"oauth-personal"}]}});
+        let initialized = json!({"result":{"protocolVersion":1,"agentInfo":{"name":"antigravity-acp","version":"agy_acp_server_1.1.1"},"authMethods":[{"id":"oauth-personal"}]}});
         assert!(validate_initialize(&initialized).is_ok());
-        let wrong = json!({"result":{"protocolVersion":1,"agentInfo":{"name":"other","version":format!("agy_acp_server_{VERSION}")},"authMethods":[{"id":"oauth-personal"}]}});
+        let wrong = json!({"result":{"protocolVersion":1,"agentInfo":{"name":"other","version":"agy_acp_server_1.1.1"},"authMethods":[{"id":"oauth-personal"}]}});
         assert!(validate_initialize(&wrong).is_err());
     }
 
     #[test]
     fn accepts_only_the_pinned_runtime_version_forms() {
-        let prefixed = format!("agy_acp_server_{VERSION}");
-        for version in [VERSION, prefixed.as_str()] {
+        for version in [VERSION, "agy_acp_server_1.1.1"] {
             let initialized = json!({"result":{"protocolVersion":1,"agentInfo":{"name":"antigravity-acp","version":version},"authMethods":[{"id":"oauth-personal"}]}});
             assert!(validate_initialize(&initialized).is_ok());
         }
-        let wrong = json!({"result":{"protocolVersion":1,"agentInfo":{"name":"antigravity-acp","version":"agy_acp_server_not-pinned"},"authMethods":[{"id":"oauth-personal"}]}});
+        let wrong = json!({"result":{"protocolVersion":1,"agentInfo":{"name":"antigravity-acp","version":"agy_acp_server_1.1.2"},"authMethods":[{"id":"oauth-personal"}]}});
         assert!(validate_initialize(&wrong).is_err());
     }
 
@@ -1360,7 +1241,7 @@ mod tests {
             if descendant_started.exists() {
                 break;
             }
-            if let Some(status) = child.try_wait().unwrap() {
+            if let Some(status) = child.child.try_wait().unwrap() {
                 panic!("the provider launcher exited before its descendant was ready: {status}");
             }
             thread::sleep(Duration::from_millis(50));

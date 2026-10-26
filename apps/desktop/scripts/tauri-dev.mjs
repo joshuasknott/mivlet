@@ -1,3 +1,5 @@
+import "./prepare-cua-driver.mjs";
+import "./prepare-execution-runtime.mjs";
 import "../../../packages/agent-host/scripts/build.mjs";
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
@@ -8,10 +10,6 @@ import { createServer } from "vite";
 import { applyLocalEnvironment } from "./local-env.mjs";
 
 const desktopRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-if (process.platform === "win32" && process.arch === "x64") {
-  await import("./prepare-cua-driver.mjs");
-  await import("./prepare-execution-runtime.mjs");
-}
 const localEnvironmentPath = resolve(desktopRoot, ".env.local");
 const tauriEntrypoint = resolve(
   desktopRoot,
@@ -66,17 +64,6 @@ const config = JSON.parse(
   readFileSync(resolve(desktopRoot, "src-tauri/tauri.dev.conf.json"), "utf8"),
 );
 config.build = { ...config.build, beforeDevCommand: "" };
-if (process.platform === "linux" && process.arch === "x64") {
-  config.bundle = {
-    ...(config.bundle ?? {}),
-    icon: ["icons/icon.png", "icons/32x32.png", "icons/128x128.png", "icons/128x128@2x.png"],
-    resources: [
-      "resources/agent-host/**/*",
-      "resources/pdfjs-notices/**/*",
-      "resources/pdf-fonts/README.md",
-    ],
-  };
-}
 const child = spawn(
   process.execPath,
   [tauriEntrypoint, "dev", "--config", JSON.stringify(config)],

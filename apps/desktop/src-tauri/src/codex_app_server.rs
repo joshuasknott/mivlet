@@ -33,7 +33,7 @@ mod login;
 mod steering;
 #[path = "codex_app_server/turns.rs"]
 mod turns;
-#[cfg(all(test, windows))]
+#[cfg(test)]
 use discovery::codex_candidates_from;
 use discovery::{codex_command, find_codex_executable, missing_codex_runtime_message};
 #[cfg(test)]
@@ -327,17 +327,13 @@ pub(crate) fn usage_probe() -> Result<(Value, Value), String> {
 }
 
 fn codex_executable_command(path: &PathBuf) -> Command {
+    let mut command = Command::new(path);
     #[cfg(windows)]
     {
-        let mut command = Command::new(path);
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000);
-        command
     }
-    #[cfg(not(windows))]
-    {
-        Command::new(path)
-    }
+    command
 }
 
 fn write_json_line(stdin: &Arc<Mutex<ChildStdin>>, value: &Value) -> Result<(), String> {

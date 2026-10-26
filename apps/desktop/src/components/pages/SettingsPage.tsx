@@ -26,7 +26,6 @@ export { ProviderUsageDetails };
 export { AccountDialog } from "../agents/AccountDialog";
 const HostedProviderSettings = lazy(() => import("../hosted/HostedProviderSettings").then(module => ({ default: module.HostedProviderSettings })));
 const McpServerSettings = lazy(() => import("../settings/McpServerSettings").then(module => ({ default: module.McpServerSettings })));
-const PortableTransferSettings = lazy(() => import("../settings/PortableTransferSettings").then(module => ({ default: module.PortableTransferSettings })));
 
 const DEFAULT_DICTATION_CAPABILITY: VoiceCapability = {
   status: "unavailable",
@@ -115,7 +114,6 @@ function GeneralSettings({
   onStatus: (message: string) => void;
 }) {
   const [externalOpen, setExternalOpen] = useState(false);
-  const [transferOpen, setTransferOpen] = useState(false);
   const accountConfigured =
     runtime.identityStatus.enabled && runtime.accountWorkspaceStatus.configured;
 
@@ -139,7 +137,6 @@ function GeneralSettings({
       <section className="settings-group" aria-labelledby="external-assistants-heading"><h2 id="external-assistants-heading">External assistants</h2><details className="settings-disclosure" onToggle={(event) => setExternalOpen(event.currentTarget.open)}><summary>Manage MCP server and client access</summary>{externalOpen && <Suspense fallback={<p role="status">Loading phone and client access…</p>}><McpServerSettings workspaceId={runtime.accountWorkspaceStatus.activeWorkspace.localWorkspaceId} agents={runtime.agents} /></Suspense>}</details></section>
       <section className="settings-group" aria-labelledby="general-voice-heading"><h2 id="general-voice-heading">Voice input</h2><div className="settings-group__surface"><DictationPrivacySettings runtime={runtime} capability={dictationCapability} onStatus={onStatus} /></div></section>
       <BackgroundExecutionSettings />
-      <section className="settings-group" aria-labelledby="portable-transfer-heading"><h2 id="portable-transfer-heading">Move to another computer</h2><details className="settings-disclosure" onToggle={(event) => setTransferOpen(event.currentTarget.open)}><summary>Export encrypted portable history</summary>{transferOpen && <Suspense fallback={<p role="status">Loading transfer controls…</p>}><PortableTransferSettings mode="export" /></Suspense>}</details></section>
     </div>
   );
 }

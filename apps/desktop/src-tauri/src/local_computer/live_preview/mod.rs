@@ -4,25 +4,18 @@ mod picker;
 #[cfg(windows)]
 mod proxy;
 use super::LocalComputerState;
-#[cfg(windows)]
 use serde::Serialize;
-#[cfg(windows)]
-use serde_json::json;
-use serde_json::Value;
-use std::sync::Arc;
-#[cfg(windows)]
+use serde_json::{json, Value};
 use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicBool, AtomicU64, Ordering},
-        Mutex, OnceLock, Weak,
+        Arc, Mutex, OnceLock, Weak,
     },
     time::{Duration, Instant},
 };
 
-#[cfg(windows)]
 const TTL: Duration = Duration::from_secs(10 * 60);
-#[cfg(windows)]
 const MAX_PREVIEWS: usize = 8;
 const HOST_SUFFIX: &str = ".mivlet-preview.localhost";
 
@@ -45,7 +38,6 @@ pub(crate) fn preview_origin(uri: &str) -> Option<String> {
     }
     Some(parsed.origin().ascii_serialization())
 }
-#[cfg(windows)]
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct Descriptor {

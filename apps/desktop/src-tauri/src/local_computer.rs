@@ -496,13 +496,11 @@ pub(crate) fn normalize_user_navigation(value: &str) -> Result<String, String> {
 fn ensure_scope_directories(scope: &ComputerScope) -> Result<(), String> {
     std::fs::create_dir_all(&scope.directory)
         .map_err(|_| "Mivlet could not create the agent computer workspace.".to_string())?;
-    crate::paths::ensure_private_dir(&scope.directory)?;
     crate::paths::strict_canonicalize(&scope.directory)
         .map_err(|_| "The agent computer directory failed its security check.".to_string())?;
     let workspace = scope.directory.join("workspace");
     std::fs::create_dir_all(&workspace)
         .map_err(|_| "Mivlet could not create the agent computer workspace.".to_string())?;
-    crate::paths::ensure_private_dir(&workspace)?;
     crate::paths::strict_canonicalize(&workspace)
         .map_err(|_| "A agent computer directory failed its security check.".to_string())?;
     Ok(())
@@ -996,55 +994,9 @@ fn computer_snapshot(
     let runtime_available = cfg!(all(windows, target_arch = "x86_64"))
         && state.driver_directory.join("cua-driver.exe").is_file()
         && error.is_none();
-    let platform_available = cfg!(all(windows, target_arch = "x86_64"));
-    let capabilities = advertised_capabilities(runtime_available);
-    let message = error.or_else(|| (!runtime_available).then(|| {
-        if cfg!(all(windows, target_arch = "x86_64")) {
-            "The bundled Windows x64 computer runtime is unavailable. Repair the Mivlet installation.".into()
-        } else {
-            "Desktop application control, owned browser control, and isolated native execution are unavailable on this platform. Private workspace files remain available.".into()
-        }
-    }));
-    Ok(LocalComputerSnapshot {
-        plugins: state.plugins.snapshot(),
-        computer_id: scope.computer_id,
-        workspace_id,
-        agent_id,
-        locality: "local",
-        backend: if runtime_available || platform_available {
-            "cua-driver"
-        } else {
-            "platform-unavailable"
-        },
-        isolation: if runtime_available || platform_available {
-            "windows-session"
-        } else {
-            "none"
-        },
-        lifecycle: "ready",
-        controller: if authority.transitioning {
-            "paused"
-        } else {
-            "agent"
-        },
-        generation: authority.generation,
-        capabilities,
-        runtime_available,
-        control,
-        retired_computer: authority.retired_docker,
-        message,
-        updated_at: Utc::now().to_rfc3339(),
-    })
-}
-
-fn advertised_capabilities(runtime_available: bool) -> Vec<&'static str> {
-    if runtime_available {
-        vec!["persistent-files", "app-observe", "app-control"]
-    } else {
-        // Scoped workspace files remain useful on Linux and other hosts. Do
-        // not advertise desktop control merely because the Rust state exists.
-        vec!["persistent-files"]
-    }
+    Ok(LocalComputerSnapshot{plugins:state.plugins.snapshot(),computer_id:scope.computer_id,workspace_id,agent_id,locality:"local",backend:"cua-driver",isolation:"windows-session",lifecycle:"ready",controller:if authority.transitioning{"paused"}else{"agent"},generation:authority.generation,
+        capabilities:vec!["persistent-files","app-observe","app-control"],runtime_available,control,retired_computer:authority.retired_docker,
+        message:error.or_else(||(!runtime_available).then(||"The bundled Windows x64 computer runtime is unavailable. Repair the Mivlet installation.".into())),updated_at:Utc::now().to_rfc3339()})
 }
 #[tauri::command]
 pub async fn local_computer_status(
@@ -1171,16 +1123,6 @@ pub(crate) async fn shutdown_all(state: Arc<LocalComputerState>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn unavailable_platform_keeps_private_files_but_not_desktop_capabilities() {
-        assert_eq!(advertised_capabilities(false), vec!["persistent-files"]);
-        assert_eq!(
-            advertised_capabilities(true),
-            vec!["persistent-files", "app-observe", "app-control"]
-        );
-    }
-
     #[test]
     fn scope_directories_are_stable_and_agent_isolated() {
         let temp = tempfile::tempdir().unwrap();
@@ -1367,7 +1309,7 @@ mod tests {
         assert_eq!(first.mime_type, "text/csv");
         assert_eq!(first.size_bytes, 21);
         assert_eq!(
-            std::fs::read(workspace.join(std::path::Path::new(&first.relative_path))).unwrap(),
+            std::fs::read(workspace.join(first.relative_path.replace('/', "\\"))).unwrap(),
             b"name,value\r\nalpha,6\r\n"
         );
     }

@@ -3,8 +3,6 @@
 use serde::Deserialize;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::{
     collections::{HashMap, HashSet},
     fs::File,
@@ -114,21 +112,11 @@ fn valid_id(value: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-fn verify_resource_file(
-    path: &std::path::Path,
-    expected_hash: &str,
-    executable: bool,
-) -> Result<File, String> {
-    #[cfg(not(unix))]
-    let _ = executable;
+fn verify_resource_file(path: &std::path::Path, expected_hash: &str) -> Result<File, String> {
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|_| "The bundled agent host resource is unavailable.")?;
     if !metadata.file_type().is_file() {
         return Err("The bundled agent host resource is unavailable.".into());
-    }
-    #[cfg(unix)]
-    if executable && metadata.permissions().mode() & 0o111 == 0 {
-        return Err("The bundled agent host resource is not executable.".into());
     }
     let mut options = std::fs::OpenOptions::new();
     options.read(true);
@@ -159,8 +147,8 @@ fn verify_resource_file(
     Ok(file)
 }
 
-fn executable(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<File>), String> {
-    let resource = if tauri::is_dev() {
+fn executable(app: &AppHandle) -> Result<(std::path::PathBuf, File), String> {
+    let resource = if cfg!(debug_assertions) {
         std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources/agent-host")
     } else {
         app.path()
@@ -173,67 +161,18 @@ fn executable(app: &AppHandle) -> Result<(std::path::PathBuf, Vec<File>), String
             .map_err(|_| "The bundled agent host is missing. Rebuild or repair Mivlet.")?,
     )
     .map_err(|_| "The bundled agent host manifest is invalid.")?;
-    let (platform, architecture, target, binary) =
-        if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
-            ("win32", "x64", "bun-windows-x64", "mivlet-agent-host.exe")
-        } else if cfg!(all(target_os = "linux", target_arch = "x86_64")) {
-            (
-                "linux",
-                "x64",
-                "bun-linux-x64-baseline",
-                "mivlet-agent-host",
-            )
-        } else {
-            return Err("The bundled agent host is unavailable on this operating system.".into());
-        };
-    if manifest["protocol"] != 1
-        || manifest["sdk"] != "0.0.0-dev-19449"
-        || manifest["platform"] != platform
-        || manifest["architecture"] != architecture
-        || manifest["target"] != target
-        || manifest["binary"] != binary
-    {
+    if manifest["protocol"] != 1 || manifest["sdk"] != "0.0.0-dev-19449" {
         return Err("The bundled agent host version is unsupported.".into());
     }
-    let expected_sidecars: &[&str] = if cfg!(target_os = "linux") {
-        &["node_modules/@opencode-ai/pty-linux-x64-gnu/bin/opencode-pty"]
-    } else {
-        &[]
-    };
-    let sidecars = manifest["sidecars"]
-        .as_array()
+    let path = resource.join("mivlet-agent-host.exe");
+    let expected_hash = manifest["sha256"]
+        .as_str()
         .ok_or("The bundled agent host manifest is invalid.")?;
-    if sidecars.len() != expected_sidecars.len() {
-        return Err("The bundled agent host sidecar manifest is unsupported.".into());
-    }
-    let mut leases = Vec::with_capacity(sidecars.len() + 1);
-    let path = resource.join(binary);
-    leases.push(verify_resource_file(
-        &path,
-        manifest["sha256"]
-            .as_str()
-            .ok_or("The bundled agent host manifest is invalid.")?,
-        true,
-    )?);
-    for (entry, expected_path) in sidecars.iter().zip(expected_sidecars) {
-        let relative = entry["path"]
-            .as_str()
-            .ok_or("The bundled agent host sidecar manifest is invalid.")?;
-        if relative != *expected_path {
-            return Err("The bundled agent host sidecar manifest is unsupported.".into());
-        }
-        let hash = entry["sha256"]
-            .as_str()
-            .filter(|hash| hash.len() == 64)
-            .ok_or("The bundled agent host sidecar manifest is invalid.")?;
-        leases.push(verify_resource_file(&resource.join(relative), hash, true)?);
-    }
-    Ok((path, leases))
+    let file = verify_resource_file(&path, expected_hash)?;
+    Ok((path, file))
 }
 
-pub(crate) fn host_command(
-    app: &AppHandle,
-) -> Result<(Command, Vec<File>, tempfile::TempDir), String> {
+pub(crate) fn host_command(app: &AppHandle) -> Result<(Command, File, tempfile::TempDir), String> {
     let (path, image_lease) = executable(app)?;
     let directory = tempfile::Builder::new()
         .prefix("mivlet-agent-")
