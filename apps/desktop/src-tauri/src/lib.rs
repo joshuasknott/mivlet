@@ -52,8 +52,6 @@ mod hosted_tasks;
 #[cfg(windows)]
 mod interactive_network_guard;
 mod knowledge;
-#[cfg(all(test, target_os = "linux"))]
-mod linux_acceptance;
 mod local_computer;
 mod local_projects;
 mod local_schedules;
@@ -70,7 +68,6 @@ mod oauth_loopback;
 mod outputs;
 pub mod paths;
 mod permission_policy;
-mod portable_transfer;
 #[cfg(test)]
 mod product_spine_parity;
 mod project_source_folders;
@@ -495,8 +492,6 @@ pub fn run() {
             store::encrypted_store_status,
             store::export_local_data,
             store::backup_local_data,
-            portable_transfer::portable_transfer_export,
-            portable_transfer::portable_transfer_import,
             store::prepare_local_data_restore,
             store::delete_local_data,
             diagnostics::local_diagnostics,

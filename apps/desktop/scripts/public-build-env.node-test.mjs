@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { publicBuildEnvironment } from "../../apps/desktop/scripts/public-build-env.mjs";
+import { publicBuildEnvironment } from "./public-build-env.mjs";
 
 test("desktop launch configuration carries public account endpoints without local secrets", () => {
   const result = publicBuildEnvironment({ PATH: "/usr/bin" }, {

@@ -63,18 +63,8 @@ struct RepositoryLock {
     local: Mutex<()>,
 }
 struct RepositoryGuard<'a> {
-    _process: fs::File,
     _local: MutexGuard<'a, ()>,
-}
-impl Drop for RepositoryGuard<'_> {
-    fn drop(&mut self) {
-        // Release the cross-process flock explicitly before the in-process
-        // mutex guard drops. Unix flock locks can remain held by duplicated
-        // or inherited descriptors until every copy closes; an explicit
-        // unlock prevents a completed/failed operation from poisoning the
-        // next same-directory preview while preserving the fail-closed lock.
-        let _ = self._process.unlock();
-    }
+    _process: fs::File,
 }
 impl RepositoryLock {
     fn try_lock(&self) -> Result<RepositoryGuard<'_>, String> {

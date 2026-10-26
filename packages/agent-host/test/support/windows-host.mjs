@@ -4,13 +4,9 @@ import { fileURLToPath } from "node:url";
 import { test as nodeTest } from "node:test";
 
 const testDirectory = dirname(fileURLToPath(import.meta.url));
-export function hostExecutableFor(platform = process.platform) {
-  const binary = platform === "win32" ? "mivlet-agent-host.exe" : "mivlet-agent-host";
-  return resolve(testDirectory, `../../../../apps/desktop/src-tauri/resources/agent-host/${binary}`);
-}
-export const executable = hostExecutableFor();
+export const executable = resolve(testDirectory, "../../../../apps/desktop/src-tauri/resources/agent-host/mivlet-agent-host.exe");
 
-export const WINDOWS_HOST_SKIP_REASON = "the bundled agent host is unsupported on this platform";
+export const WINDOWS_HOST_SKIP_REASON = "the acceptance host is the bundled Windows executable";
 
 export function windowsHostMissingReason(path = executable) {
   return `bundled agent host is missing: ${path}`;
@@ -18,12 +14,10 @@ export function windowsHostMissingReason(path = executable) {
 
 export function windowsHostSkipReason({
   platform = process.platform,
-  architecture = process.arch,
-  present = existsSync(hostExecutableFor(platform)),
+  present = existsSync(executable),
 } = {}) {
-  if (architecture !== "x64") return WINDOWS_HOST_SKIP_REASON;
-  if (!(["win32", "linux"].includes(platform))) return WINDOWS_HOST_SKIP_REASON;
-  if (!present) return windowsHostMissingReason(hostExecutableFor(platform));
+  if (platform !== "win32") return WINDOWS_HOST_SKIP_REASON;
+  if (!present) return windowsHostMissingReason();
   return null;
 }
 

@@ -235,12 +235,14 @@ impl SessionControl {
             }
         }
     }
-    #[cfg(windows)]
     pub(crate) fn close(&self) {
         self.0.ready.store(false, Ordering::Release);
         if let Ok(mut state) = self.0.state.lock() {
             state.closed = true;
-            state.endpoint = None;
+            #[cfg(windows)]
+            {
+                state.endpoint = None;
+            }
         }
     }
     #[cfg(windows)]

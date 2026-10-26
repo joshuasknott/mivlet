@@ -2,14 +2,6 @@
 
 Choose checks by the final diff. Documentation-only edits need link/command validation and `git diff --check`; they do not require compiling every application. Implementation changes need the relevant package tests, types, build, and any affected security or quality gates. Run the broad gate for cross-package work and release readiness, or when explicitly requested.
 
-For Kubuntu/Linux x86_64 development and physical acceptance, use the
-[Kubuntu/Linux operations guide](../operations/kubuntu.md). Linux is a preview
-host for ordinary workspace files, providers, web fetch, remote/stdio MCP and
-validated human-initiated link/artifact opening. It does not provide the Windows
-Cua desktop/owned-browser backend, isolated command jobs or live server
-previews, and never substitutes a host-shell fallback. A Linux check therefore
-cannot establish those Windows capabilities or a signed release.
-
 Keep each pull request focused on one behavior or cleanup, with its reason and
 actual validation results. Use a separate branch and worktree per concurrent
 change; agree ownership before editing shared protocol, runtime, or lockfiles.
@@ -111,11 +103,10 @@ fails, is cancelled, or unexpectedly skips. Documentation-only PRs skip compilat
 
 TypeScript changes run types, quality and package tests on Linux. Rust/Tauri,
 embedded host, protocol/connectors, dependency, release and workflow changes also
-run Windows and Linux host fixtures, Rust tests, Clippy and formatting with Cargo
-caching. The Linux job also builds a debug Debian package. Each supported host
-requires its own pinned optional Bun dependency; missing binaries fail the build.
-Linux daily loops use `pnpm test:pr`; `pnpm test:host` exercises the actual
-platform's bundled executable on Windows x64 and Linux x64.
+run Windows host acceptance, Rust tests, Clippy and formatting with Cargo caching.
+The Windows Bun dependency is optional on other operating systems; Windows host
+builds still fail if it is absent. Linux daily loops use `pnpm test:pr`. Host
+executable tests remain `pnpm test:host` on Windows. These tests never substitute a Linux host.
 
 Full validation (`pnpm check`, Rust tests, Clippy and formatting) runs manually or
 nightly at 03:17 UTC. Installer generation remains manual in the Windows
@@ -180,7 +171,7 @@ Require the aggregate CI check before merging and rerun affected checks after co
 
 | Scope | Commands |
 | --- | --- |
-| Repository types and tests | `pnpm typecheck`, `pnpm test:pr` (PR package tests; excludes `@mivlet/agent-host`), `pnpm test` (full workspace, including platform host fixtures) |
+| Repository types and tests | `pnpm typecheck`, `pnpm test:pr` (Linux PR package tests; excludes `@mivlet/agent-host`), `pnpm test` (full workspace, including host; fixture tests skip unless Windows + bundled executable) |
 | Linux PR loop (matches CI) | `pnpm check:pr` |
 | Linux package tests without agent-host | `pnpm test:pr` (`test:ci` is an alias) |
 | Code quality | `pnpm quality` (`lint` is security-subset ESLint via `lint:security` plus the explicit-any ratchet, not typed/React lint; `format:check` is an allowlisted ratchet, not repository-wide Prettier) |
@@ -190,7 +181,7 @@ Require the aggregate CI check before merging and rerun affected checks after co
 | Performance budgets | `pnpm perf:check`, `pnpm perf:test`, `pnpm perf:runtime` |
 | Release manifest | `pnpm release:test` |
 | Rust compile | `pnpm tauri:check` |
-| Embedded Windows/Linux x64 agent host | `pnpm test:host` (also `pnpm --filter @mivlet/agent-host typecheck` / `build`) |
+| Embedded Windows agent host | `pnpm test:host` (also `pnpm --filter @mivlet/agent-host typecheck` / `build`) |
 | Hosted runner | `pnpm --filter @mivlet/hosted-runner test`, `pnpm --filter @mivlet/hosted-runner build`, `pnpm --filter @mivlet/hosted-runner worker:deploy:dry-run` |
 | Full repository gate | `pnpm check` |
 
@@ -215,29 +206,19 @@ renderer budget check and native inspection as well as source tests. Neither
 the ceilings nor the asset accounting categories change for this optimization.
 
 `pnpm test` still runs every workspace test, including `@mivlet/agent-host`. Host
-fixture tests run with the native executable on Windows x64 or Linux x64 and
-skip unsupported platforms. Build the host before running its fixture suite.
+fixture tests skip unless they are on Windows with the bundled executable present,
+so the chain no longer aborts on Linux.
 `pnpm test:pr` matches PR CI, which excludes that package entirely.
 `pnpm check:pr` is the Linux TypeScript job (`typecheck`, `quality`, `test:pr`).
-`pnpm check` / `verify:build` compile the current platform's Bun host.
-Changing root `package.json` is a native path and schedules both native jobs.
-
-The Linux package intentionally excludes the Windows Cua and execution
-runtimes. Portable transfer uses its passphrase-encrypted envelope and excludes
-credentials and native authority; SQLite backups remain bound to the matching
-OS credential-store key and are not a cross-platform migration mechanism. Verify
-the transfer and the Linux capability failures on the physical machine as
-described in the operations guide.
+`pnpm check` / `verify:build` compile the Windows Bun host even on Linux.
+Changing root `package.json` is a native path and schedules the 35-minute
+Windows job.
 
 For Rust changes, use the affected tests plus:
 
 `cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml -- --check`
 
 `cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings`
-
-For Linux, append `-A dead_code`: shared Windows implementation bodies remain
-compiled behind unavailable-platform stubs. All other warnings remain errors;
-the Windows job retains strict dead-code validation.
 
 `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml`
 
@@ -285,8 +266,8 @@ requires that development server. For reproducible process-tree memory and
 native-window startup measurements, follow [native performance observation](native-performance.md).
 
 `verify:build` builds the embedded host before the test gate runs its actual
-platform executable. Linux fixture results do not replace Windows acceptance,
-or vice versa. The fixture tests use the
+Windows executable. That compile runs on Linux as part of `pnpm check`; it is
+not a substitute for `pnpm test:host` on Windows. The fixture tests use the
 same cleared environment and stdio framing as native custody, with
 deterministic OpenAI-compatible,
 DeepSeek and Anthropic SSE. They verify tool results, denial, ordering, Stop,

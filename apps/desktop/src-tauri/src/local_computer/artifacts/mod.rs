@@ -475,21 +475,8 @@ fn open_with_system(path: &Path) -> Result<(), String> {
 }
 
 #[cfg(not(windows))]
-fn open_with_system(path: &Path) -> Result<(), String> {
-    // `path` has just been receipt-validated and generation-fenced above.
-    // Pass it as one argument to the desktop portal helper; never invoke a
-    // shell or accept a model-provided executable/URI.
-    std::process::Command::new("xdg-open")
-        .arg(path)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|_| {
-            "Linux could not open this artifact. Install xdg-open and an app for this file type."
-                .into()
-        })
+fn open_with_system(_path: &Path) -> Result<(), String> {
+    Err("Artifact opening is currently supported by the Windows desktop app.".into())
 }
 
 #[tauri::command]

@@ -79,15 +79,3 @@ test('test:host matches the Windows CI agent-host suite', () => {
   assert.equal(pkg.scripts['test:host'], windowsHostTests);
   assert.match(ci, /^\s+- run: pnpm test:host$/m);
 });
-
-test('Linux native changes cannot pass the aggregate check with a skipped or failed Linux job', () => {
-  assert.deepEqual(affected(['scripts/linux/doctor.mjs']), { code: true, native: true });
-  assert.deepEqual(affected(['apps/desktop/scripts/public-build-env.mjs']), { code: true, native: true });
-  assert.match(ci, /needs: \[changes, typescript, windows, linux\]/);
-  assert.match(ci, /LINUX: \$\{\{ needs\.linux\.result \}\}/);
-  assert.ok(ci.includes('if [ "$NATIVE" = true ]; then test "$LINUX" = success; fi'));
-  const linux = ci.slice(ci.indexOf('\n  linux:'), ci.indexOf('\n  check:'));
-  assert.match(linux, /pnpm test:host/);
-  assert.match(linux, /cargo test .*--locked/);
-  assert.match(linux, /pnpm tauri:build --debug --bundles deb/);
-});

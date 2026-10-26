@@ -2618,7 +2618,6 @@ dependencies = [
  "image",
  "jsonwebtoken",
  "keyring",
- "libc",
  "lopdf",
  "mivlet-windows-executor",
  "png 0.17.16",

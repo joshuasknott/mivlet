@@ -9,11 +9,6 @@ pub fn app_data_dir(_app: &tauri::AppHandle) -> Result<PathBuf, String> {
 }
 
 /// Restrict native-owned directories to the authenticated local user.
-///
-/// Linux's default umask is not an application security boundary: an existing
-/// directory may have been created with group/world read bits, and a permissive
-/// umask can expose newly-created account data.  Tighten existing paths as
-/// well as new ones.  Other platforms keep their native ACL semantics.
 pub(crate) fn ensure_private_dir(path: &std::path::Path) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|_| "Mivlet could not inspect its private data directory.".to_string())?;
@@ -31,7 +26,6 @@ pub(crate) fn ensure_private_dir(path: &std::path::Path) -> Result<(), String> {
     Ok(())
 }
 
-/// Restrict a native-owned database or artifact file to the authenticated user.
 pub(crate) fn ensure_private_file(path: &std::path::Path) -> Result<(), String> {
     let metadata = std::fs::symlink_metadata(path)
         .map_err(|_| "Mivlet could not inspect its private data file.".to_string())?;

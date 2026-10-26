@@ -18,26 +18,6 @@ fn separate_repository_lock_instances_cannot_overlap() {
     assert!(second.try_lock().is_ok());
 }
 
-#[cfg(unix)]
-#[test]
-fn repository_guard_unlocks_before_a_cloned_process_descriptor_closes() {
-    let root = tempfile::tempdir().unwrap();
-    let first = RepositoryLock {
-        directory: root.path().to_path_buf(),
-        local: Mutex::new(()),
-    };
-    let second = RepositoryLock {
-        directory: root.path().to_path_buf(),
-        local: Mutex::new(()),
-    };
-    let guard = first.try_lock().unwrap();
-    let inherited = guard._process.try_clone().unwrap();
-    assert!(second.try_lock().is_err());
-    drop(guard);
-    assert!(second.try_lock().is_ok());
-    drop(inherited);
-}
-
 pub(super) fn fixture() -> (
     tempfile::TempDir,
     PathBuf,

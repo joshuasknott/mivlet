@@ -9,7 +9,6 @@
 //! All multi-record writes run inside a [`Store::transaction`].
 
 use std::path::Path;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
 use rusqlite::{Connection, OptionalExtension};
@@ -37,10 +36,9 @@ use backup::{
 };
 pub use backup::{LocalBackupReceipt, LocalDataDeletionReceipt, LocalRestorePreparation};
 use documents::scoped_document_location;
-pub(crate) use documents::write_private_document_in_transaction;
 pub(crate) use documents::{
     private_document_key_prefix, private_document_location, read_document_in_transaction,
-    read_private_document_in_transaction, write_document_in_transaction,
+    write_document_in_transaction,
 };
 pub use documents::{
     read_document, read_private_workspace_document, read_workspace_document, try_global,
@@ -115,7 +113,6 @@ pub struct Store {
     #[cfg(test)]
     account_check: Option<Box<dyn Fn() -> Result<()> + Send + Sync>>,
     conn: Mutex<Connection>,
-    restart_pending: AtomicBool,
     vault: Vault,
 }
 
@@ -127,9 +124,6 @@ impl Store {
     /// On any failure (corruption, failed migration), returns an error and the
     /// caller must surface recovery guidance (see [`recovery`]).
     pub fn open(path: &Path, vault: Vault) -> Result<Self> {
-        // Do not let a local link retarget the encrypted store before SQLite
-        // opens it.  Account roots are link-free, but the database itself may
-        // have been replaced between launches.
         if std::fs::symlink_metadata(path)
             .map(|metadata| metadata.file_type().is_symlink())
             .unwrap_or(false)
@@ -149,7 +143,6 @@ impl Store {
             #[cfg(test)]
             account_check: None,
             conn: Mutex::new(conn),
-            restart_pending: AtomicBool::new(false),
             vault,
         };
         // The v6 connector-cache `search_text` column is backfilled lazily here
@@ -181,7 +174,6 @@ impl Store {
             account_owned: false,
             account_check: None,
             conn: Mutex::new(conn),
-            restart_pending: AtomicBool::new(false),
             vault,
         };
         store.backfill_connector_cache_search_text()?;
@@ -375,22 +367,12 @@ impl Store {
     /// Run `f` against the raw connection under the lock (for integrity checks,
     /// pragmas, and ad-hoc reads).
     fn check_account(&self) -> Result<()> {
-        self.check_restart_pending()?;
         if self.account_owned {
             #[cfg(test)]
             if let Some(check) = &self.account_check {
                 return check();
             }
             crate::account_session::ensure_current().map_err(StoreError::Invalid)?;
-        }
-        Ok(())
-    }
-
-    fn check_restart_pending(&self) -> Result<()> {
-        if self.restart_pending.load(Ordering::Acquire) {
-            return Err(StoreError::Invalid(
-                "Mivlet must restart to load the imported workspace.".into(),
-            ));
         }
         Ok(())
     }
@@ -409,25 +391,6 @@ impl Store {
         &self,
         f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<R>,
     ) -> Result<R> {
-        self.transaction_inner(false, f)
-    }
-
-    /// Commit a portable import, then freeze this process's store before
-    /// releasing the connection lock. Queued renderer autosaves cannot replace
-    /// imported documents with the pre-import snapshot. Only account teardown
-    /// may write until a fresh process opens the store.
-    pub(crate) fn import_transaction<R>(
-        &self,
-        f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<R>,
-    ) -> Result<R> {
-        self.transaction_inner(true, f)
-    }
-
-    fn transaction_inner<R>(
-        &self,
-        freeze_after_commit: bool,
-        f: impl FnOnce(&rusqlite::Transaction<'_>) -> Result<R>,
-    ) -> Result<R> {
         let mut conn = self.conn.lock().expect("store connection mutex poisoned");
         self.check_account()?;
         // The desktop and background owner have separate connections. Reserve
@@ -439,9 +402,6 @@ impl Store {
         let out = f(&tx)?;
         self.check_account()?;
         tx.commit().map_err(StoreError::from)?;
-        if freeze_after_commit {
-            self.restart_pending.store(true, Ordering::Release);
-        }
         Ok(out)
     }
 
@@ -456,7 +416,6 @@ impl Store {
     ) -> Result<R> {
         fence.with_current(|| Ok(())).map_err(StoreError::Invalid)?;
         let mut conn = self.conn.lock().expect("store connection mutex poisoned");
-        self.check_restart_pending()?;
         let tx = conn.transaction()?;
         let out = f(&tx)?;
         fence
@@ -514,8 +473,6 @@ impl Store {
             .conn
             .lock()
             .map_err(|_| "Mivlet's local database is unavailable.".to_string())?;
-        self.check_restart_pending()
-            .map_err(|error| error.to_string())?;
         let _identity_guard = acquire_identity()?;
         ensure_current(expected)?;
         let tx = conn.transaction().map_err(|error| error.to_string())?;

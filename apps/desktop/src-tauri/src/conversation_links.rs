@@ -44,16 +44,8 @@ pub fn open_conversation_link(window: tauri::WebviewWindow, url: String) -> Resu
     }
     #[cfg(not(windows))]
     {
-        // `xdg-open` receives one validated argument directly; no shell,
-        // environment-provided command or arbitrary URI scheme is allowed.
-        std::process::Command::new("xdg-open")
-            .arg(url.as_str())
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .spawn()
-            .map(|_| ())
-            .map_err(|_| "Linux could not open this link. Check that xdg-open and a default browser or email app are installed.".into())
+        let _ = url;
+        Err("Opening conversation links is currently supported on Windows.".into())
     }
 }
 

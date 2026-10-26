@@ -32,9 +32,8 @@ export interface LocalComputerSnapshot extends LocalComputerTarget {
   plugins?: BuiltinPlugins;
   computerId: string;
   locality: "local";
-  /** The Windows driver is unavailable on other desktop platforms. */
-  backend: "cua-driver" | "platform-unavailable";
-  isolation: "windows-session" | "none";
+  backend: "cua-driver";
+  isolation: "windows-session";
   lifecycle: LocalComputerLifecycle;
   controller: LocalComputerController;
   generation: number;
