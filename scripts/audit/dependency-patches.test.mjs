@@ -207,13 +207,23 @@ test("patch verification rejects missing/tampered sources and expired review", (
     }
     const modulesFile = join(fixture, "node_modules/.modules.yaml");
     const modules = readFileSync(modulesFile, "utf8");
-    for (const contents of ["virtualStoreDirMaxLength: 60\n", JSON.stringify({ virtualStoreDirMaxLength: 60 })]) {
+    for (const contents of [
+      "virtualStoreDirMaxLength: 60\n",
+      JSON.stringify({ virtualStoreDirMaxLength: 60 }),
+    ]) {
       writeFileSync(modulesFile, contents);
       assert.doesNotThrow(() => verifyDependencyPatches(fixture));
     }
-    for (const contents of ["virtualStoreDirMaxLength: nope\n", "{}", '{"virtualStoreDirMaxLength":"60"}']) {
+    for (const contents of [
+      "virtualStoreDirMaxLength: nope\n",
+      "{}",
+      '{"virtualStoreDirMaxLength":"60"}',
+    ]) {
       writeFileSync(modulesFile, contents);
-      assert.throws(() => verifyDependencyPatches(fixture), /Missing or invalid/);
+      assert.throws(
+        () => verifyDependencyPatches(fixture),
+        /Missing or invalid/,
+      );
     }
     writeFileSync(modulesFile, modules);
     const file = join(
@@ -236,7 +246,10 @@ test("patch verification rejects missing/tampered sources and expired review", (
 });
 
 test("audit permits only exact patched advisories and versions", () => {
-  const advisories = patches.filter((patch) => patch.advisory !== null).map((patch) => ({
+  // Exercise active-advisory handling even when the real policies only retain
+  // hardening for withdrawn reports and grant no registry exemptions.
+  const activePatches = [{ ...patches[0], advisory: "GHSA-reviewed-fixture" }];
+  const advisories = activePatches.map((patch) => ({
     github_advisory_id: patch.advisory,
     module_name: patch.package,
     findings: [{ version: patch.version }],
@@ -246,28 +259,28 @@ test("audit permits only exact patched advisories and versions", () => {
     metadata: { vulnerabilities: {} },
     muted: [],
   };
-  assert.equal(classifyAdvisories(report, patches).unreviewed.length, 0);
+  assert.equal(classifyAdvisories(report, activePatches).unreviewed.length, 0);
   report.advisories.withdrawn = {
     github_advisory_id: "GHSA-vfj7-8cjw-p6xm",
     module_name: "braces",
     findings: [{ version: "3.0.3" }],
   };
-  assert.equal(classifyAdvisories(report, patches).unreviewed.length, 1);
+  assert.equal(classifyAdvisories(report, activePatches).unreviewed.length, 1);
   delete report.advisories.withdrawn;
   report.advisories.new = {
     github_advisory_id: "GHSA-new-finding",
     module_name: "braces",
     findings: [{ version: "3.0.3" }],
   };
-  assert.equal(classifyAdvisories(report, patches).unreviewed.length, 1);
+  assert.equal(classifyAdvisories(report, activePatches).unreviewed.length, 1);
   report.advisories.new = {
     ...advisories[0],
     findings: [{ version: "0.0.0" }],
   };
-  assert.equal(classifyAdvisories(report, patches).unreviewed.length, 1);
+  assert.equal(classifyAdvisories(report, activePatches).unreviewed.length, 1);
   delete report.advisories[0];
   assert.throws(
-    () => classifyAdvisories(report, patches),
+    () => classifyAdvisories(report, activePatches),
     /no longer reported/,
   );
   assert.throws(() => classifyAdvisories({}, patches), /invalid/);
@@ -275,4 +288,32 @@ test("audit permits only exact patched advisories and versions", () => {
     () => classifyAdvisories({ ...report, muted: [{}] }, patches),
     /muted/,
   );
+});
+
+test("retained hardening for withdrawn advisories grants no audit exemptions", () => {
+  const report = {
+    advisories: {},
+    metadata: { vulnerabilities: {} },
+    muted: [],
+  };
+  assert.deepEqual(classifyAdvisories(report, patches), {
+    reviewed: [],
+    unreviewed: [],
+  });
+  for (const [packageName, version, advisory] of [
+    ["braces", "3.0.3", "GHSA-vfj7-8cjw-p6xm"],
+    ["http-cache-semantics", "4.2.0", "GHSA-ch52-4w7c-c8xp"],
+  ]) {
+    const finding = {
+      github_advisory_id: advisory,
+      module_name: packageName,
+      findings: [{ version }],
+    };
+    const result = classifyAdvisories(
+      { ...report, advisories: { finding } },
+      patches,
+    );
+    assert.deepEqual(result.reviewed, []);
+    assert.deepEqual(result.unreviewed, [finding]);
+  }
 });
