@@ -1,6 +1,6 @@
 {
-  "version": 9,
-  "recordedAt": "2026-10-03",
+  "version": 10,
+  "recordedAt": "2026-10-29",
   "recordedBaseline": {
     "totalJsCss": {
       "rawBytes": 955189,
@@ -77,8 +77,8 @@
       }
     },
     "commonJsCss": {
-      "marginNote": "October 9 recovery integration measured 1307435 raw / 380994 gzip across repository controls, provider usage/continuation, secret requests, event automations, PR review, background ownership and MCP access. Allow 10 KiB raw / 4 KiB gzip additional headroom; startup remains independently capped.",
-      "gzipBytes": 385090,
+      "marginNote": "October 9 recovery integration measured 1307435 raw / 380994 gzip; retain its 10 KiB raw / 4 KiB gzip headroom. October 29 attributes 7606 additional common gzip bytes to the required Zod 4.6.6 security update shared by OpenUI and MCP. Allow 8 KiB for that dependency change only; raw, startup, feature and aggregate ceilings remain unchanged.",
+      "gzipBytes": 393282,
       "rawBytes": 1317675
     },
     "conversationUpgrade": {
@@ -138,5 +138,18 @@
     "rawBytes": 72518,
     "commit": "e3dc8f6439ca724de929fc6fbb84ed868dea261a",
     "note": "Previously budgeted OpenUI 0.3.2 engine. Aggregate comparisons subtract only the incremental optional UI graph above this contribution; the entire new graph is independently capped."
+  },
+  "securityDependencyBaseline": {
+    "recordedAt": "2026-10-29",
+    "commit": "76d4aaa413b626d151f3e11a4dacf9bda84b772a",
+    "failingRun": "https://github.com/joshuasknott/mivlet/actions/runs/40667023423",
+    "previousPassingRun": "https://github.com/joshuasknott/mivlet/actions/runs/39882187904",
+    "dependency": "zod@4.6.6",
+    "commonGzipBefore": 385034,
+    "commonGzipAfter": 392640,
+    "schemaReportedRawKBBefore": 67.51,
+    "schemaReportedRawKBAfter": 87.93,
+    "allowanceGzipBytes": 8192,
+    "note": "CI comparison isolates the increase to interface-schema. The existing entry and vendor raw sizes are identical. A same-lockfile local profile reproduced the common gzip failure (392646 bytes); six bytes of hash/zlib variation do not change the attribution. Keep the security override and common accounting."
   }
 }
