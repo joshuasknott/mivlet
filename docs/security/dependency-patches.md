@@ -1,32 +1,35 @@
 # Production dependency patches
 
 `pnpm audit:pnpm` runs regression tests, verifies the installed patched sources,
-and evaluates the complete production audit report. All new findings fail the
-gate. Two advisory/version pairs are accepted only when every installed copy
-matches the checked source hashes in `scripts/audit/pnpm-patches.json`.
+and evaluates the complete production audit report. Every reported advisory fails
+the gate. Both retained local patches are source-verified against
+`scripts/audit/pnpm-patches.json` and grant no registry advisory exemptions.
 The review expires on 31 October 2026. Missing patches, different versions,
 expired review, audit errors and muted reports fail closed. If an advisory
 disappears, remove or revise the patch policy rather than retaining stale acceptance.
 
-## Local patches awaiting upstream releases
+## Retained local hardening
 
-Neither advisory has a published patched version as of 3 October 2026.
-Registry audits inspect package versions, so raw `pnpm audit --prod` continues
-to report them even after pnpm applies the local source patches.
-The checked audit gate prints these findings as locally patched; it does not
-claim a clean upstream dependency graph or suppress unrelated vulnerabilities.
+GitHub withdrew the braces advisory on 23 October 2026 and the cache advisory on
+28 October 2026. Their policy entries retain the existing hardening, regression
+tests and source hashes, with `advisory: null`. If either advisory reappears,
+the gate rejects it for review rather than automatically exempting it.
 
 | Dependency                   | Advisory                                                                 | Local correction                                                                                                                                                                                                                                                                                                    |
 | ---------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `braces@3.0.3`               | [GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) | Bound brace and parenthesis nesting to 100 levels in the parser, and bound all three recursive AST walkers, including caller-provided ASTs. Excessive nesting raises a deliberate `SyntaxError`; ordinary patterns and escapes retain their behavior.                                                               |
-| `http-cache-semantics@4.2.0` | [GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp) | Require synchronous revalidation for non-storable, no-cache, wildcard-vary, shared proxy-revalidate and shared cookie entries without the upstream public/immutable opt-in. Client max-stale and stale-while-revalidate cannot bypass these restrictions. Ordinary fresh entries and stale opt-in remain supported. |
+| `braces@3.0.3`               | [Withdrawn GHSA-vfj7-8cjw-p6xm](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm) | Bound brace and parenthesis nesting to 100 levels in the parser, and bound all three recursive AST walkers, including caller-provided ASTs. Excessive nesting raises a deliberate `SyntaxError`; ordinary patterns and escapes retain their behavior.                                                               |
+| `http-cache-semantics@4.2.0` | [Withdrawn GHSA-ch52-4w7c-c8xp](https://github.com/advisories/GHSA-ch52-4w7c-c8xp) | Require synchronous revalidation for non-storable, no-cache, wildcard-vary, shared proxy-revalidate and shared cookie entries without the upstream public/immutable opt-in. Client max-stale and stale-while-revalidate cannot bypass these restrictions. Ordinary fresh entries and stale opt-in remain supported. |
 
-These are runtime fixes, not assumptions that the dependency paths are unreachable.
-They address the upstream reports in
+These patches retain conservative runtime hardening based on the upstream reports in
 [braces #70](https://github.com/micromatch/braces/issues/70) and
 [http-cache-semantics #56](https://github.com/kornelski/http-cache-semantics/issues/56).
-The regression tests cover the reported attacks and normal behavior. Patch hashes
-prevent the audit gate from accepting an unpatched or unexpectedly modified install.
+The regression tests cover the reported cases and normal behavior. Patch hashes
+reject an unpatched or unexpectedly modified install.
+
+The October 29 registry review also requires transitive `@hono/node-server`
+2.1.3 for [GHSA-rmxm-3fg6-px4f](https://github.com/advisories/GHSA-rmxm-3fg6-px4f)
+and `qs` 6.16.1 for [GHSA-6pq8-jhm2-2vcw](https://github.com/advisories/GHSA-6pq8-jhm2-2vcw).
+Bounded overrides in `pnpm-workspace.yaml` replace only affected versions.
 
 ## Updating or retiring a patch
 

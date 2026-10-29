@@ -144,6 +144,17 @@ assistant-ui graph and separates the generated-interface schema engine from
 eager vendor code. The schema chunk still counts against the common budget.
 Budget ceilings and asset accounting remain unchanged.
 
+The October 28 scheduled full run failed only the common gzip budget after the
+required Zod 4.6.6 security update. Compared with the October 23 passing full run,
+`interface-schema` grew from approximately 67.5 to 87.9 kB raw; common gzip grew from
+385,034 to 392,640 bytes. Entry and vendor raw sizes were unchanged. The
+October 29 same-lockfile local profile reproduced 392,646 common gzip bytes.
+Budget version 10's `securityDependencyBaseline` records both CI runs
+and an explicit 8 KiB common gzip allowance for this dependency change. The
+patched dependency, common accounting, raw/startup/feature/aggregate ceilings
+and deferred-loading checks remain intact. This allowance leaves about 0.6 KiB
+common gzip headroom; further growth still requires attribution and review.
+
 The assistant-ui build transform converts the pinned package's generated
 primitive getter barrels into native ESM namespace imports. This removes unused
 controls while preserving the used implementations and live bindings; package

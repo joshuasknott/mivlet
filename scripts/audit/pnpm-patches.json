@@ -17,7 +17,8 @@
     {
       "package": "http-cache-semantics",
       "version": "4.2.0",
-      "advisory": "GHSA-ch52-4w7c-c8xp",
+      "advisory": null,
+      "reason": "Retain conservative cache revalidation hardening after GHSA-ch52-4w7c-c8xp was withdrawn on 2026-10-28; this patch exempts no registry advisory.",
       "expiresOn": "2026-10-31",
       "sha256": {
         "index.js": "1dc9afb94c7bbbd8c9dee5e96d5732b1a90a01c33eaa272a01c8f358ad461137"
