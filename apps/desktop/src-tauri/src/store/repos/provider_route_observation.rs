@@ -14,7 +14,7 @@ use crate::store::repos::{open_json, seal_json};
 use crate::store::vault::Sealed;
 use crate::store::{Result, Store, StoreError};
 
-const MAX_OBSERVATIONS_PER_ROUTE: usize = 50;
+const MAX_OBSERVATIONS_PER_ROUTE: u16 = 50;
 const MAX_LATENCY_MS: u64 = 24 * 60 * 60 * 1_000;
 const MAX_TOKENS: i64 = 1_000_000_000;
 
@@ -447,6 +447,9 @@ mod tests {
         let summary = store
             .with_conn(|tx| summaries(tx, &store, "user-a"))
             .unwrap();
-        assert_eq!(summary["route-a"].sample_count, MAX_OBSERVATIONS_PER_ROUTE);
+        assert_eq!(
+            summary["route-a"].sample_count,
+            usize::from(MAX_OBSERVATIONS_PER_ROUTE)
+        );
     }
 }

@@ -15,7 +15,7 @@ use crate::store::repos::{open_json, seal_json};
 use crate::store::vault::Sealed;
 use crate::store::{Result, Store, StoreError};
 
-const MAX_OBSERVATIONS_PER_ROUTE_POLICY: usize = 50;
+const MAX_OBSERVATIONS_PER_ROUTE_POLICY: u16 = 50;
 const MAX_CRITERIA: usize = 64;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]

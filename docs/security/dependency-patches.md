@@ -4,7 +4,7 @@
 and evaluates the complete production audit report. Every reported advisory fails
 the gate. Both retained local patches are source-verified against
 `scripts/audit/pnpm-patches.json` and grant no registry advisory exemptions.
-The review expires on 31 October 2026. Missing patches, different versions,
+The 10 November 2026 review expires on 8 February 2027. Missing patches, different versions,
 expired review, audit errors and muted reports fail closed. If an advisory
 disappears, remove or revise the patch policy rather than retaining stale acceptance.
 
@@ -25,6 +25,20 @@ These patches retain conservative runtime hardening based on the upstream report
 [http-cache-semantics #56](https://github.com/kornelski/http-cache-semantics/issues/56).
 The regression tests cover the reported cases and normal behavior. Patch hashes
 reject an unpatched or unexpectedly modified install.
+
+On 10 November, both advisories remained withdrawn. The latest published
+`braces` was still 3.0.3, and the 4.3.0 release of `http-cache-semantics`
+still checked only `must-revalidate` at the early revalidation gate. Keep the
+existing locked, source-verified hardening and review again in 90 days.
+
+The November review also updated vulnerable transitive `glob` and `minimatch`
+versions to 14.0.4 and 11.0.6 for
+[GHSA-3g3m-2fjr-6pw4](https://github.com/advisories/GHSA-3g3m-2fjr-6pw4)
+and [GHSA-g3hv-75wg-m249](https://github.com/advisories/GHSA-g3hv-75wg-m249).
+
+The same review upgraded the desktop's bundled SQLite through `rusqlite` 0.41.1
+and `libsqlite3-sys` 0.39.1 for
+[RUSTSEC-2026-0459](https://rustsec.org/advisories/RUSTSEC-2026-0459.html).
 
 The October 29 registry review also requires transitive `@hono/node-server`
 2.1.3 for [GHSA-rmxm-3fg6-px4f](https://github.com/advisories/GHSA-rmxm-3fg6-px4f)

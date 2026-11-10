@@ -9,6 +9,8 @@ overrides:
   '@opentelemetry/core@<2.8.0': 2.8.0
   brace-expansion@>=2.0.0 <2.1.7: 2.1.7
   brace-expansion@>=4.0.0 <5.0.12: 5.0.12
+  glob@>=9.0.0 <=14.0.1: 14.0.4
+  minimatch@>=7.0.0 <11.0.1: 11.0.6
   fast-uri@>=3.0.0 <3.1.9: 3.1.9
   zod@>=4.0.0 <4.6.6: 4.6.6
   # OpenUI imports EventType only; AG-UI 1 supports the patched Zod 4 peer.

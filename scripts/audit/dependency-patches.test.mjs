@@ -226,6 +226,12 @@ test("patch verification rejects missing/tampered sources and expired review", (
       );
     }
     writeFileSync(modulesFile, modules);
+    const afterReview =
+      Date.parse(`${patches[0].expiresOn}T00:00:00Z`) + 86_400_000;
+    assert.throws(
+      () => verifyDependencyPatches(fixture, afterReview),
+      /expired/,
+    );
     const file = join(
       fixture,
       `node_modules/.pnpm/${basename(dirname(dirname(patches[0].directories[0])))}/node_modules/braces/lib/parse.js`,
@@ -234,11 +240,6 @@ test("patch verification rejects missing/tampered sources and expired review", (
     assert.throws(
       () => verifyDependencyPatches(fixture),
       /Missing or changed patch/,
-    );
-    assert.throws(
-      () =>
-        verifyDependencyPatches(fixture, Date.parse("2026-11-01T00:00:00Z")),
-      /expired/,
     );
   } finally {
     rmSync(fixture, { recursive: true, force: true });
