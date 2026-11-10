@@ -1,0 +1,44 @@
+name: Full Windows validation
+description: Install the pinned dependencies and run all release checks on the checked-out commit.
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@v4
+      with:
+        version: 10.34.7
+        run_install: false
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 24
+        cache: pnpm
+    - uses: dtolnay/rust-toolchain@stable
+    - uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: apps/desktop/src-tauri
+        shared-key: mivlet-windows
+    - uses: actions/cache@v4
+      id: audit
+      with:
+        path: ~/.cargo/bin/cargo-audit.exe
+        key: ${{ runner.os }}-cargo-audit-0.22.2
+    - if: steps.audit.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: cargo install cargo-audit --version 0.22.2 --locked
+    - shell: pwsh
+      run: pnpm install --frozen-lockfile
+    - shell: pwsh
+      run: pnpm check
+    - shell: pwsh
+      run: cargo fmt --manifest-path packages/windows-executor/Cargo.toml --check
+    - shell: pwsh
+      run: cargo test --manifest-path packages/windows-executor/Cargo.toml --locked
+    - shell: pwsh
+      run: cargo clippy --manifest-path packages/windows-executor/Cargo.toml --all-targets -- -D warnings
+    - shell: pwsh
+      run: cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
+    - shell: pwsh
+      run: cargo test --manifest-path vendor/webview2-com/Cargo.toml --lib --locked --target-dir apps/desktop/src-tauri/target
+    - shell: pwsh
+      run: cargo clippy --manifest-path apps/desktop/src-tauri/Cargo.toml --all-targets --all-features -- -D warnings
+    - shell: pwsh
+      run: cargo fmt --manifest-path apps/desktop/src-tauri/Cargo.toml --check

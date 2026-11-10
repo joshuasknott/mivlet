@@ -17,10 +17,14 @@ The generator rejects `public`. Every manifest says `signed: false`,
 
 ## Build and evidence
 
-The manually dispatched `Windows private artifacts` workflow:
+Before tagging or publishing a source release, run **Full validation** on the
+candidate commit and verify that the successful run shows that commit SHA.
+Repeat validation if the candidate changes.
+
+The manually dispatched **Windows preview artifacts** workflow:
 
 1. checks out one exact commit with the lockfile;
-2. runs the complete repository and native gates;
+2. runs the same full Windows validation used by the weekly workflow;
 3. builds unsigned MSI and NSIS installers with Tauri on Windows;
 4. stages exactly one installer of each kind;
 5. writes SHA-256 checksums, the source commit, commit timestamp, version,

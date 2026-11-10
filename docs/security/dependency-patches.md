@@ -61,7 +61,6 @@ pnpm check:pr
 git diff --check
 ```
 
-Dependency changes also require the Windows CI host and Rust checks. Full
-validation remains manual or nightly. The nightly workflow can fail on unchanged
-code because the upstream advisory database is live: a frozen lockfile freezes
-dependency versions, not future discoveries about those versions.
+Dependency changes also require the Windows CI host and Rust checks. The production pnpm
+and Cargo audits also run daily. The live advisory databases and patch review
+deadlines can change the result even when the lockfiles are unchanged.

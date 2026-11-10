@@ -108,9 +108,12 @@ The Windows Bun dependency is optional on other operating systems; Windows host
 builds still fail if it is absent. Linux daily loops use `pnpm test:pr`. Host
 executable tests remain `pnpm test:host` on Windows. These tests never substitute a Linux host.
 
-Full validation (`pnpm check`, Rust tests, Clippy and formatting) runs manually or
-nightly at 03:17 UTC. Installer generation remains manual in the Windows
-preview artifact workflow. Its artifacts are accessible to repository readers;
+Dependency audits run daily at 02:17 UTC. Separate Linux jobs check the production
+pnpm graph and the desktop Cargo lockfile against current advisories.
+
+Full validation (`pnpm check`, Rust tests, Clippy and formatting) runs on Sundays
+at 03:17 UTC and on manual dispatch. The Windows preview artifact workflow runs
+the same checks on the release commit before building installers. Its artifacts are accessible to repository readers;
 the channel label does not make an artifact private. Cargo and cargo-audit are cached.
 
 For a bundle-only investigation, dispatch Full validation with `bundle_profile`
