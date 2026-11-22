@@ -287,16 +287,12 @@ pub(crate) fn is_supported_response_type(content_type: &str) -> bool {
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
-    if t.starts_with("image/")
+    !(t.starts_with("image/")
         || t.starts_with("audio/")
         || t.starts_with("video/")
         || t == "application/octet-stream"
         || t == "application/pdf"
-        || t == "application/zip"
-    {
-        return false;
-    }
-    true
+        || t == "application/zip")
 }
 
 fn redact_for_error(raw: &str) -> String {
