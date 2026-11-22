@@ -285,7 +285,7 @@ impl Driver {
         }
         running
     }
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub(super) fn dispatched(&self) -> u64 {
         self.dispatched.load(Ordering::Acquire)
     }

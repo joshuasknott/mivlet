@@ -70,13 +70,14 @@ pub(crate) struct SupervisedChild {
 
 impl SupervisedChild {
     pub(crate) fn spawn(mut command: Command) -> Result<Self, String> {
-        let mut child = command
+        let child = command
             .spawn()
             .map_err(|_| "Mivlet could not start the provider runtime.".to_string())?;
         #[cfg(windows)]
         let job = match WindowsProcessJob::assign(&child) {
             Ok(job) => Some(job),
             Err(message) => {
+                let mut child = child;
                 let _ = child.kill();
                 let _ = child.wait();
                 return Err(message);

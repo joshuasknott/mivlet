@@ -1,7 +1,10 @@
 //! Explicitly opted-in live native-boundary acceptance against the disposable
 //! WinForms fixture. No account, personal app or saved computer is used here.
+#[cfg(windows)]
 use super::super::desktop_tools;
 use super::*;
+#[cfg(windows)]
+use serde_json::json;
 
 struct BrowserStopFixture(std::sync::Arc<std::sync::atomic::AtomicUsize>);
 
@@ -193,11 +196,11 @@ fn browser_launch_reservation_is_exclusive_generation_fenced_and_stale_cleanup_s
     drop(current);
     assert!(!control.active());
 }
-use serde_json::json;
-
+#[cfg(windows)]
 fn selected(state: &LocalComputerState, agent: &str, pid: u32) -> ControlSnapshot {
     selected_title(state, agent, pid, "Mivlet disposable computer test")
 }
+#[cfg(windows)]
 fn selected_title(
     state: &LocalComputerState,
     agent: &str,
@@ -206,6 +209,7 @@ fn selected_title(
 ) -> ControlSnapshot {
     selected_mode(state, agent, pid, title, DeliveryMode::Foreground)
 }
+#[cfg(windows)]
 fn selected_mode(
     state: &LocalComputerState,
     agent: &str,
@@ -265,12 +269,14 @@ fn selected_mode(
     .is_err());
     selected
 }
+#[cfg(windows)]
 fn read(state: &LocalComputerState, generation: u64) -> Value {
     serde_json::from_str(
         &desktop_tools::observe_app(state, "native-test", "agent-a", generation).unwrap(),
     )
     .unwrap()
 }
+#[cfg(windows)]
 fn action(state: &LocalComputerState, generation: u64, value: Value) {
     desktop_tools::act(
         state,
@@ -281,6 +287,7 @@ fn action(state: &LocalComputerState, generation: u64, value: Value) {
     )
     .unwrap();
 }
+#[cfg(windows)]
 fn reference(observed: &Value, name: &str) -> String {
     observed["controls"]
         .as_array()
@@ -635,6 +642,7 @@ fn live_background_actions_stop_and_refusals() {
     eprintln!("LIVE background: covered UIA read/append/click/scroll preserved focus; covering text unchanged; image/key/pixel refusal sent zero input; user-target callback/minimise revoked; real in-progress input Stop <500ms, queue fenced, driver killed, window restored, fresh generation recovered without replay");
 }
 
+#[cfg(windows)]
 #[test]
 #[ignore = "requires MIVLET_NATIVE_LIVE_FIXTURE_PID for the disposable acceptance app in an interactive Windows session"]
 fn live_named_shortcut_replaces_text_and_rejects_replay() {
@@ -731,6 +739,7 @@ fn live_named_shortcut_replaces_text_and_rejects_replay() {
     eprintln!("LIVE shortcut: real foreground select-all/type replaced full field; stale replay and non-browser address shortcut dispatched zero input");
 }
 
+#[cfg(windows)]
 #[test]
 #[ignore = "requires MIVLET_NATIVE_LIVE_FIXTURE_PID for the disposable acceptance app in an interactive Windows session"]
 fn live_actions_stop_queue_and_reconnect() {

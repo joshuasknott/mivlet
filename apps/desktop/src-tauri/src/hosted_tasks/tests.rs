@@ -64,9 +64,15 @@ fn receipt_requires_exact_binding_checksum_budget_and_monotonic_native_sequence(
     assert!(validate_result(&b, Some(&result.snapshot), &changed).is_err());
     let mut changed = result.clone();
     changed.snapshot.usage = Some(
-        json!({"inputTokens":1,"outputTokens":4097,"costUsd":0,"costEstimated":true,"costUnknown":true}),
+        json!({"inputTokens":1,"outputTokens":b.budget.max_output_tokens,"costUsd":0,"costEstimated":true,"costUnknown":true}),
     );
-    assert!(validate_result(&b, None, &changed).is_err());
+    validate_result(&b, None, &changed).unwrap();
+    changed.snapshot.usage.as_mut().unwrap()["outputTokens"] =
+        json!(b.budget.max_output_tokens + 1);
+    assert_eq!(
+        validate_result(&b, None, &changed).unwrap_err(),
+        "Invalid cloud usage receipt."
+    );
     let mut changed = result.clone();
     changed.snapshot.status = "running".into();
     assert!(validate_result(&b, None, &changed).is_err());

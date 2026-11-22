@@ -1309,7 +1309,7 @@ mod tests {
         assert_eq!(first.mime_type, "text/csv");
         assert_eq!(first.size_bytes, 21);
         assert_eq!(
-            std::fs::read(workspace.join(first.relative_path.replace('/', "\\"))).unwrap(),
+            std::fs::read(workspace.join(&first.relative_path)).unwrap(),
             b"name,value\r\nalpha,6\r\n"
         );
     }
