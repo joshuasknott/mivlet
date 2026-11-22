@@ -98,31 +98,28 @@ pub(super) fn parse_cursor(cursor: Option<&str>) -> Result<SearchCursor> {
 }
 
 pub(super) fn tokenize(query: &str) -> Vec<String> {
-    let mut tokens: Vec<String> = Vec::new();
-    let mut current = String::new();
-    for character in query.to_ascii_lowercase().chars() {
-        if character.is_ascii_alphanumeric() {
-            current.push(character);
-        } else if current.len() > 1 {
-            if !tokens.contains(&current) {
-                tokens.push(current.clone());
-            }
-            current.clear();
-        } else {
-            current.clear();
+    let mut tokens = Vec::new();
+    for word in query.split(|character: char| !character.is_alphanumeric()) {
+        if word.is_ascii() && word.len() < 2 {
+            continue;
+        }
+        let token = lowercase(word);
+        if !tokens.contains(&token) {
+            tokens.push(token);
         }
     }
-    if current.len() > 1 && !tokens.contains(&current) {
-        tokens.push(current);
-    }
     tokens
+}
+
+fn lowercase(text: &str) -> String {
+    text.chars().flat_map(char::to_lowercase).collect()
 }
 
 pub(super) fn weight(text: &str, tokens: &[String], weight: f64) -> f64 {
     if tokens.is_empty() || text.is_empty() {
         return 0.0;
     }
-    let normalized = text.to_ascii_lowercase();
+    let normalized = lowercase(text);
     tokens
         .iter()
         .map(|token| normalized.matches(token.as_str()).count() as f64)
@@ -130,17 +127,26 @@ pub(super) fn weight(text: &str, tokens: &[String], weight: f64) -> f64 {
         * weight
 }
 
-pub(super) fn first_match(normalized: &str, tokens: &[String]) -> Option<usize> {
-    tokens
+fn first_match(text: &str, tokens: &[String]) -> Option<usize> {
+    let normalized = lowercase(text);
+    let mut remaining = tokens
         .iter()
         .filter_map(|token| normalized.find(token))
-        .min()
+        .min()?;
+
+    for (offset, character) in text.char_indices() {
+        let lowercase_len = character.to_lowercase().map(char::len_utf8).sum();
+        if remaining < lowercase_len {
+            return Some(offset);
+        }
+        remaining -= lowercase_len;
+    }
+    None
 }
 
 pub(super) fn match_snippet(text: &str, tokens: &[String]) -> String {
     let collapsed = collapse(text);
-    let normalized = collapsed.to_ascii_lowercase();
-    let Some(index) = first_match(&normalized, tokens) else {
+    let Some(index) = first_match(&collapsed, tokens) else {
         return truncate(&collapsed, SNIPPET_CHARACTERS);
     };
     let start_target = index.saturating_sub(SNIPPET_CHARACTERS / 3);
@@ -212,5 +218,40 @@ pub(super) fn collect_text_into(value: &Value, out: &mut String, truncated: &mut
             }
         }
         _ => {}
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn japanese_title_matches_exact_and_partial_queries() {
+        for query in ["東京会議", "会議", "京"] {
+            assert_eq!(weight("東京会議", &tokenize(query), 4.0), 4.0, "{query}");
+        }
+    }
+
+    #[test]
+    fn cyrillic_title_matches_a_case_insensitive_query() {
+        assert_eq!(weight("Отчёт", &tokenize("ОТЧЁТ"), 4.0), 4.0);
+    }
+
+    #[test]
+    fn arabic_title_matches_an_exact_query() {
+        let title = "تقرير العمل";
+        assert_eq!(weight(title, &tokenize(title), 4.0), 8.0);
+    }
+
+    #[test]
+    fn unicode_snippet_centers_on_match_after_lowercase_expansion() {
+        let text = format!("{} Отчёт {}", "İ".repeat(220), "tail ".repeat(60));
+        let snippet = match_snippet(&text, &tokenize("ОТЧЁТ"));
+        assert!(snippet.contains("Отчёт"), "{snippet}");
+    }
+
+    #[test]
+    fn ascii_tokens_still_ignore_single_characters_and_deduplicate() {
+        assert_eq!(tokenize("A TF, tf _17_7"), ["tf", "17"]);
     }
 }
