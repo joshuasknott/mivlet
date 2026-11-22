@@ -5,6 +5,7 @@
 use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 use std::time::Instant;
+#[cfg(windows)]
 use tauri::Manager;
 
 pub(crate) fn record(stage: &'static str) {
@@ -186,10 +187,10 @@ pub(crate) fn create_main_window(app: &tauri::App) -> bool {
     #[cfg(windows)]
     drop(deadline);
     match result {
-        Ok(window) => {
+        Ok(_window) => {
             record("window_created");
             #[cfg(windows)]
-            observe_process_failure(&window);
+            observe_process_failure(&_window);
             true
         }
         Err(_) => {

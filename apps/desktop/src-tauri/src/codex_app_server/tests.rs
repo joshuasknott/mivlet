@@ -145,9 +145,9 @@ fn server_tool_request_ids_do_not_collide_with_client_responses() {
     }
 }
 use super::{
-    build_additional_context, chatgpt_login_details, codex_candidates_from, find_codex_executable,
-    model_fast_mode, thread_start_request, turn_start_request, validated_codex_auth_url,
-    CodexCliStatus, CodexServiceTier, CodexTurnStartRequest,
+    build_additional_context, chatgpt_login_details, find_codex_executable, model_fast_mode,
+    thread_start_request, turn_start_request, validated_codex_auth_url, CodexCliStatus,
+    CodexServiceTier, CodexTurnStartRequest,
 };
 use serde_json::json;
 use std::collections::VecDeque;
@@ -455,7 +455,8 @@ fn desktop_install_is_discovered_without_path_inheritance() {
         .expect("create desktop bin directory");
     std::fs::write(&binary, b"test binary").expect("write desktop binary");
 
-    let candidates = codex_candidates_from(None, None, Some(directory.path().to_path_buf()));
+    let candidates =
+        super::discovery::codex_candidates_from(None, None, Some(directory.path().to_path_buf()));
     assert!(candidates.contains(&binary));
 }
 

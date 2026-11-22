@@ -33,8 +33,6 @@ mod login;
 mod steering;
 #[path = "codex_app_server/turns.rs"]
 mod turns;
-#[cfg(test)]
-use discovery::codex_candidates_from;
 use discovery::{codex_command, find_codex_executable, missing_codex_runtime_message};
 #[cfg(test)]
 use login::{chatgpt_login_details, validated_codex_auth_url};
@@ -327,12 +325,14 @@ pub(crate) fn usage_probe() -> Result<(Value, Value), String> {
 }
 
 fn codex_executable_command(path: &PathBuf) -> Command {
-    let mut command = Command::new(path);
+    let command = Command::new(path);
     #[cfg(windows)]
-    {
+    let command = {
         use std::os::windows::process::CommandExt;
+        let mut command = command;
         command.creation_flags(0x0800_0000);
-    }
+        command
+    };
     command
 }
 
