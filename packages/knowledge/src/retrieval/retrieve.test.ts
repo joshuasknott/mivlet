@@ -3,6 +3,7 @@ import type { KnowledgeSource, ExecutionContextAudience, SourceChunk } from "@mi
 import { GLOBAL_SCOPE } from "@mivlet/protocol";
 import { filterRetrievable, retrieve, type RetrievalSource } from "./retrieve";
 import { cosineSimilarity, type EmbeddingProvider } from "./semantic";
+import { ingestCandidate } from "../ingestion/ingest";
 
 function makeSource(overrides: Partial<KnowledgeSource> = {}): KnowledgeSource {
   return {
@@ -150,6 +151,27 @@ describe("retrieve — citations integrity", () => {
 });
 
 describe("retrieve — context budget + dedup", () => {
+  it("retrieves both distinct scalar-array JSON results after ingestion", async () => {
+    const content = '["launch apples","launch bananas"]';
+    const outcome = ingestCandidate({
+      externalId: "launch.json",
+      title: "launch.json",
+      mimeType: "application/json",
+      content,
+      sizeBytes: content.length,
+      fetchedAt: "2026-06-28T00:00:00.000Z"
+    }, { connectorId: "local-files" });
+    if (outcome.kind !== "created") throw new Error("expected created");
+
+    const result = await retrieve([src(outcome.source, outcome.chunks)], { query: "launch" });
+
+    expect(result.citations).toHaveLength(2);
+    expect(result.citations.map((citation) => citation.snippet).sort()).toEqual([
+      '"launch apples"',
+      '"launch bananas"'
+    ]);
+  });
+
   it("respects the limit", async () => {
     const sources = [
       src(makeSource({ id: "plan", title: "Launch plan connector" }), [

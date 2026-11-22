@@ -240,6 +240,44 @@ describe("chunk: YAML structural boundaries", () => {
 });
 
 describe("chunk: JSON offsets", () => {
+  it.each<[string, string[]]>([
+    ['[\n  1,\n  false,\n  null\n]', ["1", "false", "null"]],
+    ['[\n  "a,b",\n  "escaped\\\"quote",\n  "last"\n]', ['"a,b"', '"escaped\\\"quote"', '"last"']],
+    ['[ 1, {"nested":[2,3]}, "last" ]', ["1", '{"nested":[2,3]}', '"last"']]
+  ])("gives each scalar-array item its exact source span (%#)", (text, expected) => {
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "json" });
+    expect(chunks.map((c) => text.slice(c.charStart, c.charEnd))).toEqual(expected);
+    expect(chunks.map((c) => c.text)).toEqual(expected);
+  });
+
+  it.each<[string, string[]]>([
+    ['{ "name": "42", "42": "answer", "1": "first" }', ['"1": "first"', '"42": "answer"', '"name": "42"']],
+    ['{ "nested": {"1":"decoy"}, "1": "actual", "42": [1,2] }', ['"1": "actual"', '"42": [1,2]', '"nested": {"1":"decoy"}']],
+    ['{ "\\u0034\\u0032": "answer", "name": "other", "1": "first" }', ['"1": "first"', '"\\u0034\\u0032": "answer"', '"name": "other"']]
+  ])("matches integer-like keys to their own source spans (%#)", (text, expected) => {
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "json" });
+    expect(chunks.map((c) => text.slice(c.charStart, c.charEnd))).toEqual(expected);
+    expect(chunks.map((c) => JSON.parse(c.text))).toEqual(expected.map((entry) => JSON.parse(`{${entry}}`)));
+  });
+
+  it("uses the last source occurrence of a duplicate object key", () => {
+    const text = '{"1":"old","name":"other","1":"new"}';
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "json" });
+    expect(chunks.map((c) => text.slice(c.charStart, c.charEnd))).toEqual(['"1":"new"', '"name":"other"']);
+  });
+
+  it.each(["[]", "{}", "  "])("returns no JSON chunks for empty input %s", (text) => {
+    expect(chunkSourceText(text, { sourceId: "s", type: "json" })).toEqual([]);
+  });
+
+  it("falls back to source windows for malformed JSON", () => {
+    const text = '[1, {"42":';
+    const chunks = chunkSourceText(text, { sourceId: "s", type: "json" });
+    expect(chunks).toHaveLength(1);
+    expect(chunks[0].text).toBe(text);
+    expect(text.slice(chunks[0].charStart, chunks[0].charEnd)).toBe(text);
+  });
+
   it("array element chunks carry real charStart/charEnd into the source text", () => {
     const text = '[{"a":1},{"b":2}]';
     const chunks = chunkSourceText(text, { sourceId: "s", type: "json" });
