@@ -11,12 +11,15 @@ export function AccountMenu({ name, onUsage, onSettings, onSignOut }: {
   onSignOut: () => void;
 }) {
   const [open, setOpen] = useState(false);
+  const openingDirection = useRef<"first" | "last">("first");
   const rootRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
-    menuRef.current?.querySelector<HTMLButtonElement>("button")?.focus();
+    const buttons = menuRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
+    (openingDirection.current === "last" ? buttons?.[buttons.length - 1] : buttons?.[0])?.focus();
+    openingDirection.current = "first";
     const dismiss = (event: PointerEvent) => {
       if (!rootRef.current?.contains(event.target as Node)) setOpen(false);
     };
@@ -47,7 +50,15 @@ export function AccountMenu({ name, onUsage, onSettings, onSignOut }: {
     }}>
       <button ref={triggerRef} className="agent-sidebar__profile" type="button"
         aria-label={`Account for ${name}`}
-        aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+        aria-haspopup="menu" aria-expanded={open}
+        onClick={() => { openingDirection.current = "first"; setOpen(!open); }} onKeyDown={(event) => {
+          if (["ArrowDown", "ArrowUp"].includes(event.key)) {
+            event.preventDefault();
+            event.stopPropagation();
+            openingDirection.current = event.key === "ArrowUp" ? "last" : "first";
+            setOpen(true);
+          }
+        }}>
         <span className="agent-sidebar__profile-avatar">{name.trim().slice(0, 1).toUpperCase() || "F"}</span>
         <span>{name}</span><CaretDown size={14} aria-hidden="true" />
       </button>
