@@ -77,6 +77,11 @@ pub struct Sealed {
     pub ciphertext: Vec<u8>,
 }
 
+#[cfg(test)]
+thread_local! {
+    pub(super) static OPEN_COUNT: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
+}
+
 impl Vault {
     /// Build a vault from a master key.
     pub fn new(key: &MasterKey) -> Result<Self, VaultError> {
@@ -112,6 +117,8 @@ impl Vault {
     /// [`VaultError::Decrypt`]; the caller must fail closed and never surface
     /// partially decrypted data.
     pub fn open(&self, sealed: &Sealed, aad: &[u8]) -> Result<Vec<u8>, VaultError> {
+        #[cfg(test)]
+        OPEN_COUNT.with(|count| count.set(count.get() + 1));
         if sealed.nonce.len() != NONCE_LEN {
             return Err(VaultError::Decrypt);
         }
