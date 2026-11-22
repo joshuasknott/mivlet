@@ -1,13 +1,15 @@
 # Native agent runtime
 
-Mivlet owns the conversation and tool loop. TypeScript assembles bounded model
-requests and interprets responses; Rust owns credentials, endpoint policy,
+Mivlet owns canonical conversations and tool authority. Direct API text/tool
+turns use the bundled OpenCode host's model/tool loop, except Gemini and
+user-image turns, which retain Mivlet's local wire loop. Provider-owned account
+runtimes use their own agent loops. Rust owns credentials, endpoint policy,
 network egress, streaming, timeout/retry behavior, cancellation, encrypted
 checkpoints, and final tool dispatch.
 
 ## Provider connections
 
-The native HTTP boundary implements OpenAI-compatible and Anthropic Messages
+The native HTTP boundary implements OpenAI-compatible, Anthropic Messages and Gemini
 wire formats. Provider-owned agent processes use separate adapters: Codex
 app-server for ChatGPT; Google's Antigravity, Cursor, and Grok agents over ACP;
 Claude's bidirectional Agent SDK protocol; and an authenticated OpenCode server
@@ -30,9 +32,9 @@ Connection methods are explicit:
   runtime may continue.
 - Claude uses its installed official CLI with the bidirectional streaming JSON
   protocol and a Mivlet-account-scoped profile. Ambient settings and MCP servers
-  are excluded. Built-in tool requests cross Claude's documented stdio
-  permission protocol and must receive a matching, single-use Mivlet approval
-  before Claude may continue.
+  are excluded, and built-in tools are disabled. Mivlet tools cross the SDK
+  MCP bridge and must receive a matching, single-use Mivlet approval before
+  native execution.
 - OpenCode runs as a Mivlet-owned, password-protected loopback server in pure
   mode, inside its Mivlet-owned workspace, with sharing disabled. Mivlet creates
   a session with explicit ask rules, subscribes to its event stream, and sends
@@ -51,7 +53,9 @@ no compatible model-list endpoint; they are not entitlement evidence.
 
 The reachable catalogue contains Codex browser sign-in, Antigravity ACP,
 Cursor ACP, Grok ACP, Claude Agent, OpenCode server, OpenAI API, Anthropic API,
-xAI API, and a custom OpenAI-compatible endpoint. A route is not runnable until
+Gemini API, xAI API, DeepSeek, Alibaba/Qwen, Moonshot/Kimi, Z.ai/GLM, Groq,
+Together, Fireworks, Cerebras, Mistral, OpenRouter, NVIDIA, SiliconFlow, Cohere,
+and a custom OpenAI-compatible endpoint. A route is not runnable until
 the native boundary verifies its executable and account state. No consumer
 subscription is treated as a general API credential.
 

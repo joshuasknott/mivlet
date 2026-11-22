@@ -29,6 +29,7 @@ The catalogue includes provider-owned account runtimes and metered direct APIs:
 | Claude     | Claude account via official runtime| Claude Agent SDK stdio, mediated tools |
 | OpenAI     | API key                            | Embedded OpenCode host, native keys    |
 | Anthropic  | API key                            | Embedded OpenCode host, native keys    |
+| Gemini     | API key                            | Local Gemini wire loop, native keys   |
 | Antigravity| Official Google browser sign-in    | Google Antigravity ACP agent           |
 | Cursor     | Official Cursor browser sign-in    | Cursor ACP agent                       |
 | Grok       | Official Grok browser sign-in      | Grok ACP agent                         |
@@ -53,16 +54,17 @@ Mivlet-owned tool bridges are Codex, Claude SDK and direct APIs. Other runtimes
 fail closed for Mivlet tool execution until their authority and response bridges
 are verified; account sign-in alone does not establish these capabilities.
 Direct API text and tool turns run on the embedded
-OpenCode host bundled with the desktop app; user-image turns keep the audited
-native adapter. API credentials stay in the operating-system credential store
+OpenCode host bundled with the desktop app, except Gemini, which uses the local
+wire loop; user-image turns keep the audited native adapter.
+API credentials stay in the operating-system credential store
 and enter outbound requests only inside Rust. Mivlet does not accept browser
 cookies or private session tokens. A consumer subscription is not treated as an
 API key.
 
 Custom endpoints must use HTTPS except for loopback development. URLs with
 user info, query strings, or fragments are rejected. Every connection is
-verified before an agent can run. Signed-in users can enter the workspace before
-provider setup. The managed Antigravity installer is
+verified before an agent can run. Signed-in users must connect a usable provider
+before entering the workspace. The managed Antigravity installer is
 currently available on Windows x64; other platforms fail closed. The other
 provider-owned runtimes are detected from their official local installations
 and fail closed when missing, signed out, or unconfigured; Codex additionally
@@ -354,7 +356,7 @@ bounded real read through the native executor for each connected native adapter.
 Add `--chat --model <connected-model-id>` to verify actual Codex tool requests,
 execution, result delivery, and completion across connected apps. Build a **debug**
 native binary first (`cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml`
-or one `pnpm tauri:dev` session) so `apps/desktop/src-tauri/target/debug/fable-desktop.exe`
+or one `pnpm tauri:dev` session) so `apps/desktop/src-tauri/target/debug/mivlet-desktop.exe`
 exists, and build the connectors package. The report contains statuses and response sizes,
 not credentials or returned source content. Configured but unsigned-in apps are
 reported separately. This debug-only command does not exist in release builds.

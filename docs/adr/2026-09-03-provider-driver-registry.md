@@ -115,7 +115,7 @@ OpenCode's native provider modules cover the adopted routes. The custom Vercel
 AI SDK package-hook reproducer failed before model execution, so Mivlet does not
 add a second Vercel agent loop or claim its approval/middleware controls are active.
 Vercel compatibility packages remain SDK implementation dependencies where used.
-The official MCP TypeScript SDK `1.30.0` replaces the custom client negotiation,
+The official MCP TypeScript SDK `1.32.1` replaces the custom client negotiation,
 request correlation and timeout plumbing inside the bundled native host. The
 renderer only forwards discovery frames through the existing transport; SDK
 tool execution is not exposed. Native transport ownership, OAuth,

@@ -319,12 +319,14 @@ their separate trust boundaries.
 ```text
 apps/desktop        React UI, Convex functions, and the Tauri Rust boundary
 apps/accounts       Mivlet-themed browser authentication and OAuth consent
+apps/marketing      independent marketing workspace and deployment build
 apps/hosted-runner  deployment-gated Cloudflare computer/browser worker
 apps/broker         narrow confidential connector OAuth broker
 packages/protocol   shared product and authority contracts
 packages/connectors provider, connector, tool, voice, and MCP adapters
 packages/agent-host native-only embedded OpenCode execution and fixture tests
 packages/knowledge  local ingestion and retrieval engine
+packages/windows-executor restricted native Windows command execution
 docs                maintained architecture, security, and operations notes
 ```
 
