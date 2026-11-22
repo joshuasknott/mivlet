@@ -21,12 +21,18 @@ afterEach(() => {
 
 it("keeps one subscription without reattaching on same-query rerenders", () => {
   const { media, add, remove } = mockMediaQuery();
-  vi.stubGlobal("matchMedia", vi.fn(() => media));
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn(() => media),
+  );
   const { rerender, unmount } = renderHook(() => useMediaQuery(narrowQuery));
 
   for (let i = 0; i < 10; i++) rerender();
 
-  expect({ adds: add.mock.calls.length, removes: remove.mock.calls.length }).toEqual({
+  expect({
+    adds: add.mock.calls.length,
+    removes: remove.mock.calls.length,
+  }).toEqual({
     adds: 1,
     removes: 0,
   });
@@ -37,10 +43,18 @@ it("keeps one subscription without reattaching on same-query rerenders", () => {
 it("updates when the media changes and switches listeners when the query changes", () => {
   const narrow = mockMediaQuery();
   const phone = mockMediaQuery();
-  vi.stubGlobal("matchMedia", vi.fn((query: string) => query === narrowQuery ? narrow.media : phone.media));
-  const { result, rerender, unmount } = renderHook(({ query }) => useMediaQuery(query), {
-    initialProps: { query: narrowQuery },
-  });
+  vi.stubGlobal(
+    "matchMedia",
+    vi.fn((query: string) =>
+      query === narrowQuery ? narrow.media : phone.media,
+    ),
+  );
+  const { result, rerender, unmount } = renderHook(
+    ({ query }) => useMediaQuery(query),
+    {
+      initialProps: { query: narrowQuery },
+    },
+  );
 
   expect(result.current).toBe(false);
   act(() => {
