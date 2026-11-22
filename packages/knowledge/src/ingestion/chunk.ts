@@ -358,13 +358,13 @@ function chunkJson(
   if (value !== null && typeof value === "object") {
     const entries = Object.entries(value as Record<string, unknown>);
     if (entries.length === 0) return [];
-    const spans = locateJsonSpans(text, value, "object");
+    const spans = new Map(locateJsonSpans(text, value, "object").map((span) => [span.key, span]));
     const chunks: SourceChunk[] = [];
     for (let i = 0; i < entries.length; i++) {
       const [key, val] = entries[i];
       const serialized = JSON.stringify({ [key]: val });
       if (serialized.length === 0) continue;
-      const span = spans[i] ?? { start: 0, end: text.length };
+      const span = spans.get(key) ?? { start: 0, end: text.length };
       chunks.push(makeChunk(sourceId, chunks.length, serialized, span.start, span.end));
     }
     return normalizeChunkList(chunks, sourceId, maxChars, overlapChars);
@@ -375,7 +375,8 @@ function chunkJson(
 
 /**
  * Locate the `[start,end)` char spans of each top-level array element or
- * object entry within the raw JSON `text`. Returns spans in entry order.
+ * object entry within the raw JSON `text`. Returns spans in source order,
+ * with decoded keys for matching object entries independently of JS key order.
  *
  * Approach: a single forward scan that tracks depth (`[`/`{` vs `]`/`}`),
  * string state (with escapes), and records the span of each depth-1 item
@@ -385,8 +386,8 @@ function locateJsonSpans(
   text: string,
   value: unknown,
   shape: "array" | "object"
-): { start: number; end: number }[] {
-  const spans: { start: number; end: number }[] = [];
+): { start: number; end: number; key?: string }[] {
+  const spans: { start: number; end: number; key?: string }[] = [];
   let depth = 0;
   let itemStart = -1;
   let inString = false;
@@ -398,6 +399,12 @@ function locateJsonSpans(
   let keyStart = -1;
   let keyEnd = -1;
 
+  function recordSpan(end: number): void {
+    while (end > itemStart && /\s/.test(text[end - 1])) end--;
+    const key = shape === "object" ? (JSON.parse(text.slice(keyStart, keyEnd + 1)) as string) : undefined;
+    spans.push({ start: itemStart, end, key });
+  }
+
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
 
@@ -408,7 +415,7 @@ function locateJsonSpans(
         escape = true;
       } else if (ch === '"') {
         inString = false;
-        if (shape === "object" && awaitingKey && depth === 1 && keyStart >= 0) {
+        if (shape === "object" && awaitingKey && depth === 1 && keyStart >= 0 && keyEnd < 0) {
           keyEnd = i;
         }
       }
@@ -417,6 +424,9 @@ function locateJsonSpans(
 
     if (ch === '"') {
       inString = true;
+      if (shape === "array" && depth === 1 && itemStart < 0) {
+        itemStart = i;
+      }
       if (shape === "object" && awaitingKey && depth === 1 && keyStart < 0) {
         keyStart = i;
       }
@@ -439,7 +449,7 @@ function locateJsonSpans(
       if (depth === 0) {
         topLevelEnd = i;
       } else if (depth === 1 && itemStart >= 0) {
-        spans.push({ start: itemStart, end: i + 1 });
+        recordSpan(i + 1);
         itemStart = -1;
         if (shape === "object") {
           awaitingKey = true;
@@ -457,7 +467,7 @@ function locateJsonSpans(
           itemStart = i;
         }
         if (itemStart >= 0 && ch === ",") {
-          spans.push({ start: itemStart, end: i });
+          recordSpan(i);
           itemStart = -1;
         }
       } else {
@@ -466,7 +476,7 @@ function locateJsonSpans(
           // value begins after this colon at the next non-space char.
           itemStart = keyStart;
         } else if (itemStart >= 0 && ch === ",") {
-          spans.push({ start: itemStart, end: i });
+          recordSpan(i);
           itemStart = -1;
           awaitingKey = true;
           keyStart = -1;
@@ -477,17 +487,16 @@ function locateJsonSpans(
   }
 
   // Flush a trailing item (no comma after the last element).
-  if (depth === 1 && itemStart >= 0) {
+  if (topLevelEnd >= 0 && itemStart >= 0) {
     // Find the end: last non-whitespace before the closing brace/bracket.
-    let end = topLevelEnd >= 0 ? topLevelEnd : text.length;
-    while (end > itemStart && /\s/.test(text[end - 1])) end--;
-    spans.push({ start: itemStart, end });
+    recordSpan(topLevelEnd);
   }
 
   // Guard: span count must match the value's entry count, else discard
   // (caller falls back to full-document span per element).
   const expected = shape === "array" ? (value as unknown[]).length : Object.keys(value as object).length;
-  if (spans.length !== expected) return [];
+  const actual = shape === "array" ? spans.length : new Set(spans.map((span) => span.key)).size;
+  if (actual !== expected) return [];
   return spans;
 }
 
