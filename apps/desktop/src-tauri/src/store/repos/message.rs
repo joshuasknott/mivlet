@@ -10,6 +10,13 @@ use crate::store::{Result, Store, StoreError};
 use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
+
+const CURRENT_MESSAGE_SELECT: &str = "
+    SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.parent_message_id,
+           m.current_revision_id,m.current_revision_number,m.current_revision_state,
+           m.created_at,r.payload,r.payload_nonce
+    FROM message m JOIN message_revision r ON r.id=m.current_revision_id";
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageRow {
@@ -182,18 +189,74 @@ pub fn edit_parent(
     thread_id: &str,
     source: &str,
 ) -> Result<Option<String>> {
-    let row = list(tx, store, scope, thread_id)?
-        .into_iter()
-        .find(|row| row.id == source)
-        .ok_or_else(|| {
-            StoreError::Invalid("The edited message is unavailable in this conversation.".into())
-        })?;
+    let row = get_current(tx, store, scope, thread_id, source)?.ok_or_else(|| {
+        StoreError::Invalid("The edited message is unavailable in this conversation.".into())
+    })?;
     if row.kind != "user" || row.current_revision_state != "terminal" {
         return Err(StoreError::Invalid(
             "Only a saved user message can start an alternative.".into(),
         ));
     }
     Ok(row.parent_message_id)
+}
+
+fn decode_current(row: &rusqlite::Row<'_>, store: &Store, scope: &DataScope) -> Result<MessageRow> {
+    let revision_id: String = row.get(7)?;
+    let sealed = crate::store::vault::Sealed {
+        ciphertext: row.get(11)?,
+        nonce: row.get(12)?,
+    };
+    let detail: String = row.get(5)?;
+    let content = open_json(store, &sealed, &raad(scope.workspace_id(), &revision_id))?;
+    Ok(MessageRow {
+        id: row.get(0)?,
+        thread_id: row.get(1)?,
+        sequence: row.get(2)?,
+        kind: row.get(3)?,
+        run_id: row.get(4)?,
+        detail: serde_json::from_str(&detail).unwrap_or(Value::Null),
+        parent_message_id: row.get(6)?,
+        current_revision_id: revision_id,
+        current_revision_number: row.get(8)?,
+        current_revision_state: row.get(9)?,
+        created_at: row.get(10)?,
+        content,
+    })
+}
+
+fn get_current(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+    message_id: &str,
+) -> Result<Option<MessageRow>> {
+    let mut statement = tx.prepare(&format!(
+        "{CURRENT_MESSAGE_SELECT}
+         JOIN thread t ON t.id=m.thread_id AND t.workspace_id=m.workspace_id
+         WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.id=?3
+           AND m.deleted_at IS NULL AND t.deleted_at IS NULL
+           AND r.workspace_id=m.workspace_id AND r.thread_id=m.thread_id AND r.message_id=m.id"
+    ))?;
+    let mut rows = statement.query(rusqlite::params![
+        scope.workspace_id(),
+        thread_id,
+        message_id
+    ])?;
+    rows.next()?
+        .map(|row| decode_current(row, store, scope))
+        .transpose()
+}
+
+fn saved_message(
+    tx: &Connection,
+    store: &Store,
+    scope: &DataScope,
+    thread_id: &str,
+    message_id: &str,
+) -> Result<MessageRow> {
+    get_current(tx, store, scope, thread_id, message_id)?
+        .ok_or_else(|| StoreError::Invalid("Message is unavailable in this conversation.".into()))
 }
 
 pub fn list_limited(
@@ -220,48 +283,16 @@ pub fn list_page(
             "Thread does not belong to this workspace.".into(),
         ));
     };
-    let mut s=tx.prepare("SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.parent_message_id,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL ORDER BY m.seq LIMIT ?3 OFFSET ?4")?;
-    let rows = s.query_map(
+    let mut statement = tx.prepare(&format!(
+        "{CURRENT_MESSAGE_SELECT}
+         WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL
+         ORDER BY m.seq LIMIT ?3 OFFSET ?4"
+    ))?;
+    let rows = statement.query_and_then(
         rusqlite::params![scope.workspace_id(), thread_id, limit.max(0), offset.max(0)],
-        |r| {
-            Ok((
-                r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, i64>(2)?,
-                r.get::<_, String>(3)?,
-                r.get::<_, Option<String>>(4)?,
-                r.get::<_, String>(5)?,
-                r.get::<_, Option<String>>(6)?,
-                r.get::<_, String>(7)?,
-                r.get::<_, i64>(8)?,
-                r.get::<_, String>(9)?,
-                r.get::<_, String>(10)?,
-                crate::store::vault::Sealed {
-                    ciphertext: r.get(11)?,
-                    nonce: r.get(12)?,
-                },
-            ))
-        },
+        |row| decode_current(row, store, scope),
     )?;
-    rows.map(|x| {
-        let (a, b, c, d, run_id, e, parent, f, g, h, i, sealed) = x?;
-        let content = open_json(store, &sealed, &raad(scope.workspace_id(), &f))?;
-        Ok(MessageRow {
-            id: a,
-            thread_id: b,
-            sequence: c,
-            parent_message_id: parent,
-            kind: d,
-            run_id,
-            detail: serde_json::from_str(&e).unwrap_or(Value::Null),
-            current_revision_id: f,
-            current_revision_number: g,
-            current_revision_state: h,
-            content,
-            created_at: i,
-        })
-    })
-    .collect()
+    rows.collect()
 }
 
 /// Return the newest bounded window before an optional sequence cursor. The
@@ -285,69 +316,21 @@ pub fn list_before(
             "Thread does not belong to this workspace.".into(),
         ));
     }
-    let mut statement = tx.prepare(
-        "SELECT m.id,m.thread_id,m.seq,m.kind,m.run_id,m.detail_kind,m.parent_message_id,m.current_revision_id,m.current_revision_number,m.current_revision_state,m.created_at,r.payload,r.payload_nonce FROM message m JOIN message_revision r ON r.id=m.current_revision_id WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL AND (?3 IS NULL OR m.seq < ?3) ORDER BY m.seq DESC LIMIT ?4",
-    )?;
-    let rows = statement.query_map(
+    let mut statement = tx.prepare(&format!(
+        "{CURRENT_MESSAGE_SELECT}
+         WHERE m.workspace_id=?1 AND m.thread_id=?2 AND m.deleted_at IS NULL AND (?3 IS NULL OR m.seq < ?3)
+         ORDER BY m.seq DESC LIMIT ?4"
+    ))?;
+    let rows = statement.query_and_then(
         rusqlite::params![
             scope.workspace_id(),
             thread_id,
             before_sequence,
             limit.max(1),
         ],
-        |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, i64>(2)?,
-                row.get::<_, String>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
-                row.get::<_, Option<String>>(6)?,
-                row.get::<_, String>(7)?,
-                row.get::<_, i64>(8)?,
-                row.get::<_, String>(9)?,
-                row.get::<_, String>(10)?,
-                crate::store::vault::Sealed {
-                    ciphertext: row.get(11)?,
-                    nonce: row.get(12)?,
-                },
-            ))
-        },
+        |row| decode_current(row, store, scope),
     )?;
-    let mut decoded = rows
-        .map(|row| {
-            let (
-                id,
-                thread_id,
-                sequence,
-                kind,
-                run_id,
-                detail,
-                parent,
-                revision_id,
-                revision_number,
-                revision_state,
-                created_at,
-                sealed,
-            ) = row?;
-            let content = open_json(store, &sealed, &raad(scope.workspace_id(), &revision_id))?;
-            Ok(MessageRow {
-                id,
-                thread_id,
-                sequence,
-                parent_message_id: parent,
-                kind,
-                run_id,
-                detail: serde_json::from_str(&detail).unwrap_or(Value::Null),
-                current_revision_id: revision_id,
-                current_revision_number: revision_number,
-                current_revision_state: revision_state,
-                content,
-                created_at,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
+    let mut decoded = rows.collect::<Result<Vec<_>>>()?;
     decoded.reverse();
     Ok(decoded)
 }
@@ -492,8 +475,7 @@ pub fn append_with_parent(
         .optional()?
     {
         if existing == id {
-            return list(tx, store, scope, thread_id)
-                .map(|v| v.into_iter().find(|m| m.id == id).unwrap());
+            return saved_message(tx, store, scope, thread_id, &id);
         };
         return Err(StoreError::Invalid(
             "Conflicting idempotent message replay.".into(),
@@ -526,7 +508,7 @@ pub fn append_with_parent(
     tx.execute("INSERT INTO message (id,workspace_id,thread_id,kind,run_id,detail_kind,seq,previous_message_id,parent_message_id,idempotency_key,current_revision_id,current_revision_number,current_revision_state,created_at,payload,payload_nonce) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,1,?12,?13,?14,?15)",rusqlite::params![id,scope.workspace_id(),thread_id,kind,run_id,detail_text,sequence,previous,parent,idempotency,revision_id,state,checkpointed_at,m.ciphertext,m.nonce])?;
     tx.execute("INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,state,reason,idempotency_key,checkpointed_at,created_at,run_id,payload,payload_nonce) VALUES (?1,?2,?3,?4,1,0,?5,?6,?7,?8,?8,?9,?10,?11)",rusqlite::params![revision_id,scope.workspace_id(),thread_id,id,state,reason,idempotency,checkpointed_at,run_id,r.ciphertext,r.nonce])?;
     tx.execute("UPDATE thread SET last_sequence=?1,last_message_id=?2,selected_head_id=?2,updated_at=?3 WHERE workspace_id=?4 AND id=?5",rusqlite::params![sequence,id,checkpointed_at,scope.workspace_id(),thread_id])?;
-    list(tx, store, scope, thread_id).map(|v| v.into_iter().find(|m| m.id == id).unwrap())
+    saved_message(tx, store, scope, thread_id, &id)
 }
 pub fn revise(
     tx: &Connection,
@@ -559,8 +541,7 @@ pub fn revise(
         .optional()?
     {
         if existing == revision_id {
-            return list(tx, store, scope, thread_id)
-                .map(|v| v.into_iter().find(|m| m.id == message_id).unwrap());
+            return saved_message(tx, store, scope, thread_id, message_id);
         };
         return Err(StoreError::Invalid(
             "Conflicting idempotent revision replay.".into(),
@@ -579,7 +560,7 @@ pub fn revise(
     let next = num + 1;
     tx.execute("INSERT INTO message_revision (id,workspace_id,thread_id,message_id,revision_number,base_revision_number,previous_revision_id,state,reason,idempotency_key,checkpointed_at,created_at,run_id,payload,payload_nonce) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?11,?12,?13,?14)",rusqlite::params![revision_id,scope.workspace_id(),thread_id,message_id,next,base,previous,state,reason,idempotency,at,run_id,sealed.ciphertext,sealed.nonce])?;
     tx.execute("UPDATE message SET current_revision_id=?1,current_revision_number=?2,current_revision_state=?3,revision=revision+1 WHERE workspace_id=?4 AND thread_id=?5 AND id=?6",rusqlite::params![revision_id,next,state,scope.workspace_id(),thread_id,message_id])?;
-    list(tx, store, scope, thread_id).map(|v| v.into_iter().find(|m| m.id == message_id).unwrap())
+    saved_message(tx, store, scope, thread_id, message_id)
 }
 
 #[cfg(test)]
@@ -912,5 +893,213 @@ mod tests {
         assert_eq!(replay.content, first.content);
         assert_eq!(replay.content, content);
         assert_eq!(replay.current_revision_id, first.current_revision_id);
+    }
+
+    fn revise_row(
+        store: &Store,
+        scope: &DataScope,
+        base: &MessageRow,
+        content: &Value,
+    ) -> Result<MessageRow> {
+        let revision_id = format!("{}-rev-{}", base.id, base.current_revision_number + 1);
+        store.transaction(|tx| {
+            revise(
+                tx,
+                store,
+                scope,
+                &base.thread_id,
+                &base.id,
+                &revision_id,
+                base.current_revision_number,
+                Some(&base.current_revision_id),
+                &revision_id,
+                "terminal",
+                "test",
+                content,
+                None,
+                TIME,
+            )
+        })
+    }
+
+    #[test]
+    fn saves_authenticate_only_the_message_they_return() {
+        let store = store();
+        let scope = seed_thread(&store, "alpha", "thread-one");
+        let detail = serde_json::json!({"kind": "text"});
+        let content = serde_json::json!("original content");
+        let append = |id, sequence, previous| {
+            append_row(
+                &store,
+                &scope,
+                "thread-one",
+                id,
+                "user",
+                &detail,
+                sequence,
+                sequence - 1,
+                previous,
+                &content,
+            )
+        };
+        append("first", 1, None).unwrap();
+        let second = append("second", 2, Some("first")).unwrap();
+        store
+            .with_conn(|tx| {
+                tx.execute(
+                    "UPDATE message_revision SET (payload, payload_nonce)=(
+                    SELECT payload, payload_nonce FROM message_revision WHERE id='revision-second'
+                 ) WHERE id='revision-first'",
+                    [],
+                )?;
+                Ok(())
+            })
+            .unwrap();
+
+        let third = append("third", 3, Some("second")).unwrap();
+        assert_eq!(third.parent_message_id.as_deref(), Some("second"));
+        assert_eq!(append("second", 2, Some("first")).unwrap().content, content);
+        assert_eq!(
+            store
+                .with_conn(|tx| edit_parent(tx, &store, &scope, "thread-one", "second"))
+                .unwrap(),
+            Some("first".into()),
+        );
+        let revised_content = serde_json::json!({"text": "revision"});
+        let revised = revise_row(&store, &scope, &second, &revised_content).unwrap();
+        let latest = revise_row(&store, &scope, &revised, &content).unwrap();
+        let replay = revise_row(&store, &scope, &second, &Value::Null).unwrap();
+        let listed = store
+            .with_conn(|tx| list_page(tx, &store, &scope, "thread-one", 1, 1))
+            .unwrap();
+        let expected = serde_json::to_value(&latest).unwrap();
+        assert_eq!(serde_json::to_value(&replay).unwrap(), expected);
+        assert_eq!(serde_json::to_value(&listed[0]).unwrap(), expected);
+        assert_eq!(latest.current_revision_number, 3);
+        assert_eq!(latest.content, content);
+        assert!(matches!(append("first", 1, None), Err(StoreError::Vault)));
+        assert!(matches!(
+            store.with_conn(|tx| list(tx, &store, &scope, "thread-one")),
+            Err(StoreError::Vault)
+        ));
+    }
+
+    #[test]
+    fn current_message_lookup_requires_a_live_message_in_a_live_scoped_thread() {
+        let store = store();
+        let scope = seed_thread(&store, "alpha", "thread-one");
+        let other = seed_thread(&store, "beta", "thread-two");
+        append_row(
+            &store,
+            &scope,
+            "thread-one",
+            "message-1",
+            "user",
+            &Value::Null,
+            1,
+            0,
+            None,
+            &Value::Null,
+        )
+        .unwrap();
+        store
+            .transaction(|tx| {
+                assert!(get_current(tx, &store, &other, "thread-one", "message-1")?.is_none());
+                assert!(get_current(tx, &store, &scope, "thread-two", "message-1")?.is_none());
+                tx.execute(
+                    "UPDATE thread SET deleted_at=?1 WHERE id='thread-one'",
+                    [TIME],
+                )?;
+                assert!(get_current(tx, &store, &scope, "thread-one", "message-1")?.is_none());
+                tx.execute(
+                    "UPDATE thread SET deleted_at=NULL WHERE id='thread-one'",
+                    [],
+                )?;
+                tx.execute(
+                    "UPDATE message SET deleted_at=?1 WHERE id='message-1'",
+                    [TIME],
+                )?;
+                assert!(get_current(tx, &store, &scope, "thread-one", "message-1")?.is_none());
+                Ok(())
+            })
+            .unwrap();
+    }
+
+    #[test]
+    #[ignore = "manual encrypted-store benchmark"]
+    fn message_save_benchmark() {
+        use crate::store::vault::OPEN_COUNT;
+        use std::time::{Duration, Instant};
+
+        fn measure<T>(
+            samples: &mut Vec<(Duration, usize)>,
+            operation: impl FnOnce() -> Result<T>,
+        ) -> T {
+            let before = OPEN_COUNT.with(|count| count.get());
+            let start = Instant::now();
+            let result = operation().unwrap();
+            samples.push((
+                start.elapsed(),
+                OPEN_COUNT.with(|count| count.get()) - before,
+            ));
+            result
+        }
+
+        const EXISTING: i64 = 2_048;
+        const SAMPLES: i64 = 51;
+        let store = store();
+        let scope = seed_thread(&store, "alpha", "thread-one");
+        let content = Value::String("Ordinary message text. ".repeat(45));
+        let append = |sequence, previous: Option<&str>| {
+            append_row(
+                &store,
+                &scope,
+                "thread-one",
+                &format!("message-{sequence}"),
+                "assistant",
+                &Value::Null,
+                sequence,
+                sequence - 1,
+                previous,
+                &content,
+            )
+        };
+        let mut head = None;
+        for sequence in 1..=EXISTING {
+            head = Some(append(sequence, head.as_deref()).unwrap().id);
+        }
+
+        let (mut appends, mut revisions, mut pages) = (Vec::new(), Vec::new(), Vec::new());
+        for sequence in EXISTING + 1..=EXISTING + SAMPLES {
+            let row = measure(&mut appends, || append(sequence, head.as_deref()));
+            let revised = measure(&mut revisions, || {
+                revise_row(&store, &scope, &row, &content)
+            });
+            assert_eq!(revised.content, content);
+            let page = measure(&mut pages, || {
+                store.with_conn(|tx| list_before(tx, &store, &scope, "thread-one", 80, None))
+            });
+            assert_eq!(page.len(), 80);
+            assert_eq!(
+                page.last().unwrap().current_revision_id,
+                revised.current_revision_id
+            );
+            head = Some(row.id);
+        }
+        for (label, samples) in [
+            ("append", appends),
+            ("revise", revisions),
+            ("latest 80", pages),
+        ] {
+            let mut times = samples.iter().map(|sample| sample.0).collect::<Vec<_>>();
+            let mut opens = samples.iter().map(|sample| sample.1).collect::<Vec<_>>();
+            times.sort_unstable();
+            opens.sort_unstable();
+            println!(
+                "{label}: median {:.3} ms, {} vault opens",
+                times[times.len() / 2].as_secs_f64() * 1_000.0,
+                opens[opens.len() / 2],
+            );
+        }
     }
 }
