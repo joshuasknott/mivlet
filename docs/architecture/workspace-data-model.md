@@ -1,8 +1,9 @@
 # Workspace data model
 
 The durable local ownership root is a workspace inside the validated account's
-native store. Signed-in users open that local workspace directly; provider setup
-gates execution. Future synchronization must not replace local authority implicitly.
+native store. Signed-in users must connect a usable AI provider before entering
+that local workspace; returning users with a usable provider open directly.
+Future synchronization must not replace local authority implicitly.
 
 ## Current relationships
 

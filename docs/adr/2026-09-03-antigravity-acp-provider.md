@@ -6,10 +6,11 @@ Status: Accepted
 
 ## Decision
 
-Mivlet's supported Google model route is Google Antigravity over the Agent
+Mivlet's Google account route is Google Antigravity over the Agent
 Client Protocol (ACP), using Antigravity's `oauth-personal` browser sign-in.
-The previous Google AI API-key route is no longer in the reachable provider
-catalogue or native egress allow-list.
+A separate direct Gemini API-key route is also in the provider catalogue and
+native egress allow-list; it uses Mivlet's local wire loop, not ACP or the
+embedded host. See [Direct Gemini provider](../architecture/gemini-provider.md).
 
 Mivlet downloads the official Windows x64 Antigravity ACP release into app data.
 The release version, archive size, SHA-256 digest, executable names, and

@@ -49,7 +49,7 @@ documented `offset`/`limit` parameters and bounds the result (1,000 models,
 - Non-generation marker ids (embedding, moderation, TTS, image, audio, realtime)
   are excluded by the existing generation-model filter.
 
-Per-model capabilities are derived only from the model's own metadata
+Per-model discovery capabilities are derived only from the model's own metadata
 ([models schema](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties)):
 
 | Mivlet capability | Source |
@@ -67,6 +67,10 @@ reasoning levels, because Mivlet would otherwise reject valid levels it does
 not know. Capabilities always reflect the selected model id and the supported
 route; a newly discovered model is never marked tool/vision/reasoning capable
 by inheritance.
+
+Discovery metadata does not enable reasoning controls or structured output on
+the current OpenRouter execution route. Native egress rejects reasoning options;
+the registered routes currently support text and tools.
 
 ## Routing and privacy
 
@@ -101,15 +105,16 @@ OpenRouter itself performs downstream routing for that id
   [Provider Logging](https://openrouter.ai/docs/guides/privacy/provider-logging),
   [Zero Data Retention](https://openrouter.ai/docs/guides/features/zdr)).
 
-Because the request body is carried verbatim between Mivlet's shaper and the
-OpenRouter endpoint, any routing/privacy fields a future Mivlet integration
-adds to the body would reach OpenRouter unchanged.
+Native egress replaces the `provider` routing object with
+`{ "require_parameters": true }`, requiring upstream support for the requested
+parameters. Future routing/privacy fields need an explicit native policy change;
+they are not passed through unchanged.
 
 ### Implemented routing settings
 
-- Explicit model-id routing, including `:free`/`:floor`/`:extended` variants
-  and `openrouter/auto`, surfaced through model discovery and preserved
-  verbatim on egress.
+- Explicit model-id routing for the registered `openai/gpt-4.1` and
+  `anthropic/claude-sonnet-4.6` routes. Discovered variants and `openrouter/auto`
+  do not acquire native execution authority.
 - No identifying headers; no silent fallback; exact one-model-per-turn
   selection; truthful failure states.
 
@@ -126,8 +131,9 @@ adds to the body would reach OpenRouter unchanged.
   deferred pending route-specific verification; vision metadata is parsed but
   never advertised.
 - OpenRouter-specific price accounting (`pricing` fields in the model list)
-  is not wired into usage cost: Mivlet reports OpenRouter usage with
-  `costUnknown: true` until exact source-attributed pricing exists.
+  is not wired into usage cost. A finite, nonnegative `usage.cost` in the
+  response is recorded as provider-reported cost; without it, cost remains
+  unknown rather than inferred from model-list prices.
 
 ## Sources
 

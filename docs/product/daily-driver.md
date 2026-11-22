@@ -8,14 +8,14 @@ assessment and the linked architecture decisions.
 
 ## Current product and boundaries
 
-Signed-out users authenticate. Validated accounts open their own local workspace
-without mandatory provider onboarding. Agent execution still requires a verified
-provider. Account-owned encrypted stores, provider credentials and workspace data
+Signed-out users authenticate. Validated accounts must connect a usable AI
+provider before entering their own local workspace. Returning accounts with a
+usable provider open directly. Account-owned encrypted stores, provider credentials and workspace data
 remain separate; remote sync is deployment-gated.
 
-The entry page only signs in or retries an unavailable account workspace. The
-superseded provider/app onboarding stages and their duplicate setup code are
-removed; Settings and Plugins retain the functioning setup routes.
+Account entry signs in or retries an unavailable account workspace. Required
+provider setup follows, then first-agent name, icon and colour selection for a
+new workspace. Settings and Plugins retain provider and optional app setup routes.
 
 Computer Use is a built-in plugin for existing Windows applications, using bundled
 Cua Driver 0.25.0. Enabling it does not grant permission. Mivlet owns exact

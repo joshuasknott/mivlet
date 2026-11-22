@@ -20,9 +20,9 @@ then required provider setup and the account's local workspace. Google and
 email authentication are available in the browser. Provider setup cannot be
 skipped; optional app connections remain available inside the workspace.
 
-Mivlet creates the default Chief of Staff in local state before first run, but
-does not mention or configure that teammate during onboarding. The teammate
-appears when the person enters the conversation workspace after sign-in.
+Mivlet creates the default Chief of Staff in local state before first run.
+After provider setup, a new workspace asks the person to choose the first
+agent's name, icon and colour before entering the conversation workspace.
 
 ## Connection hierarchy
 
